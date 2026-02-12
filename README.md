@@ -5,9 +5,33 @@
 <h1 align="center">claude-devtools</h1>
 
 <p align="center">
-  <strong><code>Read 3 files</code> told you nothing. This shows you everything.</strong>
+  <strong><code>Terminal tells you nothing. This shows you everything.</code></strong>
   <br />
   A desktop app that reconstructs exactly what Claude Code did — every file path, every tool call, every token — from the raw session logs already on your machine.
+</p>
+
+
+<p align="center">
+  <a href="https://github.com/matt1398/claude-devtools/releases/latest"><img src="https://img.shields.io/github/v/release/matt1398/claude-devtools?style=flat-square&label=version&color=blue" alt="Latest Release" /></a>&nbsp;
+  <a href="https://github.com/matt1398/claude-devtools/actions/workflows/ci.yml"><img src="https://github.com/matt1398/claude-devtools/actions/workflows/ci.yml/badge.svg" alt="CI Status" /></a>&nbsp;
+  <a href="https://github.com/matt1398/claude-devtools/releases"><img src="https://img.shields.io/github/downloads/matt1398/claude-devtools/total?style=flat-square&color=green" alt="Downloads" /></a>&nbsp;
+  <a href="https://github.com/matt1398/claude-devtools/blob/main/LICENSE"><img src="https://img.shields.io/github/license/matt1398/claude-devtools?style=flat-square" alt="License" /></a>&nbsp;
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform" />
+</p>
+
+<br />
+
+<p align="center">
+  <a href="https://github.com/matt1398/claude-devtools/releases/latest">
+    <img src="https://img.shields.io/badge/macOS-Download-black?logo=apple&logoColor=white&style=flat" alt="Download for macOS" height="30" />
+  </a>&nbsp;&nbsp;
+  <a href="https://github.com/matt1398/claude-devtools/releases/latest">
+    <img src="https://img.shields.io/badge/Windows-Download-0078D4?logo=windows&logoColor=white&style=flat" alt="Download for Windows" height="30" />
+  </a>
+</p>
+
+<p align="center">
+  <sub>No API keys. No configuration. Just download, open, and see everything Claude Code did.</sub>
 </p>
 
 <br />
@@ -17,6 +41,18 @@
     Your browser does not support the video tag.
   </video>
 </p>
+
+---
+
+## Installation
+
+| Platform | Download | Notes |
+|----------|----------|-------|
+| **macOS** (Apple Silicon) | [`.dmg`](https://github.com/matt1398/claude-devtools/releases/latest) | Drag to Applications. On first launch: right-click → Open (unsigned) |
+| **macOS** (Apple Silicon) | [`.zip`](https://github.com/matt1398/claude-devtools/releases/latest) | Extract and run |
+| **Windows** | [`.exe`](https://github.com/matt1398/claude-devtools/releases/latest) | Standard installer. May trigger SmartScreen — click "More info" → "Run anyway" |
+
+The app reads session logs from `~/.claude/` — the data is already on your machine. No setup, no API keys, no login.
 
 ---
 
@@ -109,15 +145,14 @@ Open multiple sessions side-by-side. Drag-and-drop tabs between panes, split vie
 
 ---
 
-## Getting Started
+## Development
 
-### Prerequisites
+<details>
+<summary><strong>Build from source</strong></summary>
 
-- **Node.js** 20+
-- **pnpm** 10+
-- macOS or Windows
+<br />
 
-### Install & Run
+**Prerequisites:** Node.js 20+, pnpm 10+
 
 ```bash
 git clone https://github.com/matt1398/claude-devtools.git
@@ -126,9 +161,9 @@ pnpm install
 pnpm dev
 ```
 
-That's it. The app auto-discovers your Claude Code projects from `~/.claude/`.
+The app auto-discovers your Claude Code projects from `~/.claude/`.
 
-### Build for Distribution
+#### Build for Distribution
 
 ```bash
 pnpm dist:mac     # macOS (.dmg)
@@ -136,9 +171,7 @@ pnpm dist:win     # Windows (.exe)
 pnpm dist         # Both platforms
 ```
 
----
-
-## Scripts
+#### Scripts
 
 | Command | Description |
 |---------|-------------|
@@ -150,6 +183,8 @@ pnpm dist         # Both platforms
 | `pnpm test:watch` | Watch mode |
 | `pnpm test:coverage` | Coverage report |
 | `pnpm check` | Full quality gate (types + lint + test + build) |
+
+</details>
 
 ---
 

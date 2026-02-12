@@ -57,9 +57,11 @@ export class UpdaterService {
 
   /**
    * Quit the app and install the downloaded update.
+   * On Windows (NSIS): isSilent=true runs the installer with /S (no wizard);
+   * isForceRunAfter=true launches the app after install. Other platforms ignore these.
    */
   quitAndInstall(): void {
-    autoUpdater.quitAndInstall();
+    autoUpdater.quitAndInstall(true, true);
   }
 
   private sendStatus(status: UpdaterStatus): void {

@@ -195,6 +195,9 @@ const ProjectDropdownItem = ({
 };
 
 export const SidebarHeader = (): React.JSX.Element => {
+  const isMacElectron =
+    isElectronMode() && window.navigator.userAgent.toLowerCase().includes('mac');
+
   const {
     repositoryGroups,
     selectedRepositoryId,
@@ -330,10 +333,10 @@ export const SidebarHeader = (): React.JSX.Element => {
         style={
           {
             height: `${HEADER_ROW1_HEIGHT}px`,
-            paddingLeft: isElectronMode()
+            paddingLeft: isMacElectron
               ? 'var(--macos-traffic-light-padding-left, 72px)'
               : '16px',
-            WebkitAppRegion: isElectronMode() ? 'drag' : undefined,
+            WebkitAppRegion: isMacElectron ? 'drag' : undefined,
           } as React.CSSProperties
         }
       >

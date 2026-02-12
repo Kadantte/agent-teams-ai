@@ -21,47 +21,60 @@ export const UpdateBanner = (): React.JSX.Element | null => {
 
   const isDownloading = updateStatus === 'downloading';
   const percent = Math.round(downloadProgress);
+  const clampedPercent = Math.max(0, Math.min(percent, 100));
 
   return (
     <div
-      className="relative flex items-center gap-3 border-b px-4 py-2 text-sm"
+      className="relative border-b px-4 py-2.5"
       style={{
-        backgroundColor: 'var(--color-surface-raised)',
+        backgroundColor: 'var(--color-surface)',
         borderColor: 'var(--color-border)',
       }}
     >
       {isDownloading ? (
-        <>
-          <Loader2 className="size-4 shrink-0 animate-spin text-blue-400" />
-          <span style={{ color: 'var(--color-text-secondary)' }}>
-            Downloading update... {percent}%
-          </span>
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+        <div className="pr-8">
+          <div className="mb-1.5 flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-blue-400" />
+            <span>Updating app</span>
+            <span className="tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
+              {clampedPercent}%
+            </span>
+          </div>
+          <div className="h-1 w-full overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-border)' }}>
             <div
-              className="h-full rounded-full bg-blue-500 transition-all duration-300"
-              style={{ width: `${percent}%` }}
+              className="h-full rounded-full bg-blue-500 transition-all duration-300 ease-out"
+              style={{ width: `${clampedPercent}%` }}
             />
           </div>
-        </>
+        </div>
       ) : (
-        <>
+        <div className="flex items-center gap-2 pr-8">
           <CheckCircle className="size-4 shrink-0 text-green-400" />
-          <span style={{ color: 'var(--color-text-secondary)' }}>
-            Update ready{availableVersion ? ` (v${availableVersion})` : ''}
+          <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            Update ready
+            {availableVersion ? (
+              <span className="ml-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                v{availableVersion}
+              </span>
+            ) : null}
           </span>
           <button
             onClick={installUpdate}
-            className="ml-auto rounded-md bg-green-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-green-500"
+            className="ml-auto rounded-md border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-white/5"
+            style={{
+              borderColor: 'var(--color-border-emphasis)',
+              color: 'var(--color-text)',
+            }}
           >
-            Restart to Update
+            Restart now
           </button>
-        </>
+        </div>
       )}
 
       {/* Dismiss */}
       <button
         onClick={dismissUpdateBanner}
-        className="shrink-0 rounded p-0.5 transition-colors hover:bg-white/10"
+        className="absolute right-3 top-1/2 -translate-y-1/2 shrink-0 rounded p-0.5 transition-colors hover:bg-white/10"
         style={{ color: 'var(--color-text-muted)' }}
       >
         <X className="size-3.5" />
