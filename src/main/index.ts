@@ -23,13 +23,19 @@ import { join } from 'path';
 
 import { initializeIpcHandlers, removeIpcHandlers } from './ipc/handlers';
 
-// Icon path - works for both dev and production
-const getIconPath = (): string => {
+// Window icon path for non-mac platforms.
+const getWindowIconPath = (): string | undefined => {
   const isDev = process.env.NODE_ENV === 'development';
-  if (isDev) {
-    return join(process.cwd(), 'resources/icon.png');
+  const candidates = isDev
+    ? [join(process.cwd(), 'resources/icon.png')]
+    : [join(process.resourcesPath, 'resources/icon.png'), join(__dirname, '../../resources/icon.png')];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
   }
-  return join(__dirname, '../../resources/icon.png');
+  return undefined;
 };
 
 const logger = createLogger('App');
@@ -39,6 +45,14 @@ const CONTEXT_CHANGED = 'context:changed';
 const HTTP_SERVER_START = 'httpServer:start';
 const HTTP_SERVER_STOP = 'httpServer:stop';
 const HTTP_SERVER_GET_STATUS = 'httpServer:getStatus';
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection in main process:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception in main process:', error);
+});
 
 import { HttpServer } from './services/infrastructure/HttpServer';
 import {
@@ -349,10 +363,11 @@ function syncTrafficLightPosition(win: BrowserWindow): void {
  */
 function createWindow(): void {
   const isMac = process.platform === 'darwin';
+  const iconPath = isMac ? undefined : getWindowIconPath();
   mainWindow = new BrowserWindow({
     width: DEFAULT_WINDOW_WIDTH,
     height: DEFAULT_WINDOW_HEIGHT,
-    icon: getIconPath(),
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -382,6 +397,18 @@ function createWindow(): void {
       setTimeout(() => updaterService.checkForUpdates(), 3000);
     }
   });
+
+  // Log top-level renderer load failures (helps diagnose blank/black window issues in packaged apps)
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (isMainFrame) {
+        logger.error(
+          `Failed to load renderer (code=${errorCode}): ${errorDescription} - ${validatedURL}`
+        );
+      }
+    }
+  );
 
   // Sync traffic light position when zoom changes (Cmd+/-, Cmd+0)
   // zoom-changed event doesn't fire in Electron 40, so we detect zoom keys directly.
@@ -467,8 +494,8 @@ void app.whenReady().then(() => {
     if (!config.general.showDockIcon) {
       app.dock?.hide();
     }
-    // Set dock icon
-    app.dock?.setIcon(getIconPath());
+    // macOS app icon is already provided by the signed bundle (.icns)
+    // so we avoid runtime setIcon calls that can fail and block startup.
   }
 
   // Then create window

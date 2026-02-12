@@ -83,6 +83,15 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/v}"
           pnpm pkg set version="$VERSION"
 
+      - name: Build app (macOS)
+        run: pnpm build
+
+      - name: Verify packaged inputs (macOS)
+        run: |
+          test -f dist-electron/main/index.cjs
+          test -f dist-electron/preload/index.js
+          test -f out/renderer/index.html
+
       - name: Package & Release (macOS)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -129,6 +138,16 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           pnpm pkg set version="$VERSION"
+
+      - name: Build app (Windows)
+        run: pnpm build
+
+      - name: Verify packaged inputs (Windows)
+        shell: bash
+        run: |
+          test -f dist-electron/main/index.cjs
+          test -f dist-electron/preload/index.js
+          test -f out/renderer/index.html
 
       - name: Package & Release (Windows)
         env:
