@@ -477,37 +477,43 @@ function createWindow(): void {
  */
 void app.whenReady().then(() => {
   logger.info('App ready, initializing...');
+  try {
+    // Initialize services first
+    initializeServices();
 
-  // Initialize services first
-  initializeServices();
+    // Apply configuration settings
+    const config = configManager.getConfig();
 
-  // Apply configuration settings
-  const config = configManager.getConfig();
+    // Apply launch at login setting
+    app.setLoginItemSettings({
+      openAtLogin: config.general.launchAtLogin,
+    });
 
-  // Apply launch at login setting
-  app.setLoginItemSettings({
-    openAtLogin: config.general.launchAtLogin,
-  });
-
-  // Apply dock visibility and icon (macOS)
-  if (process.platform === 'darwin') {
-    if (!config.general.showDockIcon) {
-      app.dock?.hide();
+    // Apply dock visibility and icon (macOS)
+    if (process.platform === 'darwin') {
+      if (!config.general.showDockIcon) {
+        app.dock?.hide();
+      }
+      // macOS app icon is already provided by the signed bundle (.icns)
+      // so we avoid runtime setIcon calls that can fail and block startup.
     }
-    // macOS app icon is already provided by the signed bundle (.icns)
-    // so we avoid runtime setIcon calls that can fail and block startup.
+
+    // Then create window
+    createWindow();
+
+    // Listen for notification click events
+    notificationManager.on('notification-clicked', (_error) => {
+      if (mainWindow) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+  } catch (error) {
+    logger.error('Startup initialization failed:', error);
+    if (!mainWindow) {
+      createWindow();
+    }
   }
-
-  // Then create window
-  createWindow();
-
-  // Listen for notification click events
-  notificationManager.on('notification-clicked', (_error) => {
-    if (mainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
