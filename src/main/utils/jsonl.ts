@@ -500,7 +500,10 @@ export async function analyzeSessionFileMetadata(
 
     // Context consumption: track main-thread assistant input tokens
     if (parsed.type === 'assistant' && !parsed.isSidechain && parsed.model !== '<synthetic>') {
-      const inputTokens = parsed.usage?.input_tokens ?? 0;
+      const inputTokens =
+        (parsed.usage?.input_tokens ?? 0) +
+        (parsed.usage?.cache_read_input_tokens ?? 0) +
+        (parsed.usage?.cache_creation_input_tokens ?? 0);
       if (inputTokens > 0) {
         if (awaitingPostCompaction && compactionPhases.length > 0) {
           compactionPhases[compactionPhases.length - 1].post = inputTokens;

@@ -1,16 +1,18 @@
 /**
- * RankedInjectionList - Flat list of all context injections sorted by token size descending.
- * Provides a unified view across all categories, ranked by largest token consumers.
+ * RankedInjectionList - All context injections sorted by token size descending.
+ * Injections are shown as grouped rows (e.g., "Tool output in Turn N").
+ * Tool-output rows are expandable to reveal individual tool breakdowns sorted desc.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 
 import { COLOR_TEXT_MUTED, COLOR_TEXT_SECONDARY } from '@renderer/constants/cssVariables';
+import { ChevronRight } from 'lucide-react';
 
 import { formatTokens } from '../utils/formatting';
 import { parseTurnIndex } from '../utils/pathParsing';
 
-import type { ContextInjection } from '@renderer/types/contextInjection';
+import type { ContextInjection, ToolOutputInjection } from '@renderer/types/contextInjection';
 
 // =============================================================================
 // Constants
@@ -70,6 +72,113 @@ function getInjectionTurnIndex(injection: ContextInjection): number {
 }
 
 // =============================================================================
+// Sub-components
+// =============================================================================
+
+/** Expandable tool-output row with breakdown sorted by token count desc. */
+const ToolOutputRankedItem = ({
+  injection,
+  onNavigateToTurn,
+}: Readonly<{
+  injection: ToolOutputInjection;
+  onNavigateToTurn?: (turnIndex: number) => void;
+}>): React.ReactElement => {
+  const [expanded, setExpanded] = useState(false);
+  const hasBreakdown = injection.toolBreakdown.length > 0;
+  const categoryInfo = CATEGORY_COLORS['tool-output'];
+
+  const sortedBreakdown = useMemo(
+    () => [...injection.toolBreakdown].sort((a, b) => b.tokenCount - a.tokenCount),
+    [injection.toolBreakdown]
+  );
+
+  return (
+    <div>
+      <button
+        onClick={() => {
+          if (hasBreakdown) {
+            setExpanded(!expanded);
+          } else if (onNavigateToTurn) {
+            const turnIndex = getInjectionTurnIndex(injection);
+            if (turnIndex >= 0) onNavigateToTurn(turnIndex);
+          }
+        }}
+        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-white/5"
+      >
+        {/* Expand chevron */}
+        {hasBreakdown && (
+          <ChevronRight
+            className={`size-3 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+            style={{ color: COLOR_TEXT_MUTED }}
+          />
+        )}
+        {/* Category pill */}
+        <span
+          className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium"
+          style={{ backgroundColor: categoryInfo.bg, color: categoryInfo.text }}
+        >
+          {categoryInfo.label}
+        </span>
+        {/* Description */}
+        <span className="min-w-0 flex-1 truncate text-xs" style={{ color: COLOR_TEXT_SECONDARY }}>
+          {getInjectionDescription(injection)}
+        </span>
+        {/* Token count */}
+        <span
+          className="shrink-0 text-xs font-medium tabular-nums"
+          style={{ color: COLOR_TEXT_MUTED }}
+        >
+          {formatTokens(injection.estimatedTokens)}
+        </span>
+      </button>
+
+      {/* Expanded tool breakdown */}
+      {expanded && hasBreakdown && (
+        <div className="ml-7 space-y-0.5 pb-1">
+          {sortedBreakdown.map((tool, idx) => (
+            <button
+              key={`${tool.toolName}-${idx}`}
+              onClick={() => {
+                if (onNavigateToTurn) {
+                  onNavigateToTurn(injection.turnIndex);
+                }
+              }}
+              className="flex w-full items-center gap-2 rounded px-2 py-0.5 text-left text-xs transition-colors hover:bg-white/5"
+            >
+              <span
+                className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium"
+                style={{ backgroundColor: categoryInfo.bg, color: categoryInfo.text }}
+              >
+                {tool.toolName}
+              </span>
+              <span className="flex-1" />
+              <span
+                className="shrink-0 tabular-nums"
+                style={{ color: COLOR_TEXT_MUTED, opacity: 0.8 }}
+              >
+                {formatTokens(tool.tokenCount)}
+              </span>
+              {tool.isError && (
+                <span
+                  className="shrink-0 rounded px-1 py-0.5"
+                  style={{
+                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                    color: '#ef4444',
+                    fontSize: '10px',
+                  }}
+                >
+                  error
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// =============================================================================
 // Component
 // =============================================================================
 
@@ -82,37 +191,42 @@ export const RankedInjectionList = ({
     [injections]
   );
 
-  const handleNavigate = (injection: ContextInjection): void => {
-    if (!onNavigateToTurn) return;
-    const turnIndex = getInjectionTurnIndex(injection);
-    if (turnIndex >= 0) {
-      onNavigateToTurn(turnIndex);
-    }
-  };
-
   return (
-    <div className="space-y-1">
+    <div className="space-y-0.5">
       {sortedInjections.map((inj) => {
+        // Tool-output: expandable row
+        if (inj.category === 'tool-output') {
+          return (
+            <ToolOutputRankedItem
+              key={inj.id}
+              injection={inj}
+              onNavigateToTurn={onNavigateToTurn}
+            />
+          );
+        }
+
+        // All other categories: simple row
         const categoryInfo = CATEGORY_COLORS[inj.category] ?? {
           bg: 'rgba(161, 161, 170, 0.15)',
           text: '#a1a1aa',
           label: inj.category,
         };
-        const description = getInjectionDescription(inj);
 
         return (
           <button
             key={inj.id}
-            onClick={() => handleNavigate(inj)}
+            onClick={() => {
+              if (onNavigateToTurn) {
+                const turnIndex = getInjectionTurnIndex(inj);
+                if (turnIndex >= 0) onNavigateToTurn(turnIndex);
+              }
+            }}
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-white/5"
           >
             {/* Category pill */}
             <span
               className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium"
-              style={{
-                backgroundColor: categoryInfo.bg,
-                color: categoryInfo.text,
-              }}
+              style={{ backgroundColor: categoryInfo.bg, color: categoryInfo.text }}
             >
               {categoryInfo.label}
             </span>
@@ -121,7 +235,7 @@ export const RankedInjectionList = ({
               className="min-w-0 flex-1 truncate text-xs"
               style={{ color: COLOR_TEXT_SECONDARY }}
             >
-              {description}
+              {getInjectionDescription(inj)}
             </span>
             {/* Token count */}
             <span

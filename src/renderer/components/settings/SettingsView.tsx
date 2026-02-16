@@ -3,8 +3,9 @@
  * Provides UI for managing notifications, display settings, and advanced options.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
+import { useStore } from '@renderer/store';
 import { Loader2 } from 'lucide-react';
 
 import { useSettingsConfig, useSettingsHandlers } from './hooks';
@@ -19,6 +20,15 @@ import { type SettingsSection, SettingsTabs } from './SettingsTabs';
 
 export const SettingsView = (): React.JSX.Element | null => {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
+  const pendingSettingsSection = useStore((s) => s.pendingSettingsSection);
+  const clearPendingSettingsSection = useStore((s) => s.clearPendingSettingsSection);
+
+  useEffect(() => {
+    if (pendingSettingsSection) {
+      setActiveSection(pendingSettingsSection as SettingsSection);
+      clearPendingSettingsSection();
+    }
+  }, [pendingSettingsSection, clearPendingSettingsSection]);
 
   const {
     config,

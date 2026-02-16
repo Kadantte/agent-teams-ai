@@ -61,45 +61,66 @@ const ConsumptionBadge = ({
   const badgeRef = useRef<HTMLSpanElement>(null);
   const isHigh = contextConsumption > 150_000;
 
+  // Calculate popover position relative to viewport for portal rendering
+  const popoverPosition =
+    showPopover && badgeRef.current
+      ? (() => {
+          const rect = badgeRef.current.getBoundingClientRect();
+          return {
+            top: rect.top - 6,
+            left: rect.left + rect.width / 2,
+          };
+        })()
+      : null;
+
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- tooltip trigger via hover, not interactive
     <span
       ref={badgeRef}
-      className="relative tabular-nums"
+      className="tabular-nums"
       style={{ color: isHigh ? 'rgb(251, 191, 36)' : undefined }}
       onMouseEnter={() => setShowPopover(true)}
       onMouseLeave={() => setShowPopover(false)}
     >
       {formatTokensCompact(contextConsumption)}
-      {showPopover && phaseBreakdown && phaseBreakdown.length > 0 && (
-        <div
-          className="absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg px-3 py-2 text-[10px] shadow-xl"
-          style={{
-            backgroundColor: 'var(--color-surface-overlay)',
-            border: '1px solid var(--color-border-emphasis)',
-            color: 'var(--color-text-secondary)',
-          }}
-        >
-          <div className="mb-1 font-medium" style={{ color: 'var(--color-text)' }}>
-            Total Context: {formatTokensCompact(contextConsumption)} tokens
-          </div>
-          {phaseBreakdown.length === 1 ? (
-            <div>Context: {formatTokensCompact(phaseBreakdown[0].peakTokens)}</div>
-          ) : (
-            phaseBreakdown.map((phase) => (
-              <div key={phase.phaseNumber} className="flex items-center gap-1">
-                <span style={{ color: 'var(--color-text-muted)' }}>Phase {phase.phaseNumber}:</span>
-                <span className="tabular-nums">{formatTokensCompact(phase.contribution)}</span>
-                {phase.postCompaction != null && (
+      {showPopover &&
+        popoverPosition &&
+        phaseBreakdown &&
+        phaseBreakdown.length > 0 &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg px-3 py-2 text-[10px] shadow-xl"
+            style={{
+              top: popoverPosition.top,
+              left: popoverPosition.left,
+              backgroundColor: 'var(--color-surface-overlay)',
+              border: '1px solid var(--color-border-emphasis)',
+              color: 'var(--color-text-secondary)',
+            }}
+          >
+            <div className="mb-1 font-medium" style={{ color: 'var(--color-text)' }}>
+              Total Context: {formatTokensCompact(contextConsumption)} tokens
+            </div>
+            {phaseBreakdown.length === 1 ? (
+              <div>Context: {formatTokensCompact(phaseBreakdown[0].peakTokens)}</div>
+            ) : (
+              phaseBreakdown.map((phase) => (
+                <div key={phase.phaseNumber} className="flex items-center gap-1">
                   <span style={{ color: 'var(--color-text-muted)' }}>
-                    (compacted → {formatTokensCompact(phase.postCompaction)})
+                    Phase {phase.phaseNumber}:
                   </span>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      )}
+                  <span className="tabular-nums">{formatTokensCompact(phase.contribution)}</span>
+                  {phase.postCompaction != null && (
+                    <span style={{ color: 'var(--color-text-muted)' }}>
+                      (compacted → {formatTokensCompact(phase.postCompaction)})
+                    </span>
+                  )}
+                </div>
+              ))
+            )}
+          </div>,
+          document.body
+        )}
     </span>
   );
 };
