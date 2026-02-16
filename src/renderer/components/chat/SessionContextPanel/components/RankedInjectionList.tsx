@@ -272,7 +272,7 @@ export const RankedInjectionList = ({
             </button>
             {/* Copy path button for CLAUDE.md and File items */}
             {copyPath && (
-              <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
+              <span className="shrink-0">
                 <CopyButton text={copyPath} inline />
               </span>
             )}

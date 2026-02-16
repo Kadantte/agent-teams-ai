@@ -73,6 +73,7 @@ export class HttpServer {
       await this.app.register(cors, { origin: origins, credentials: true });
     } else {
       // Default: allow all localhost origins
+      // eslint-disable-next-line security/detect-unsafe-regex -- anchored, no backtracking risk
       const localhostPattern = /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/;
       await this.app.register(cors, {
         origin: (origin, cb) => {

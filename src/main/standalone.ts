@@ -20,11 +20,7 @@ import {
   getTodosBasePath,
   setClaudeBasePathOverride,
 } from './utils/pathDecoder';
-import {
-  LocalFileSystemProvider,
-  NotificationManager,
-  ServiceContext,
-} from './services';
+import { LocalFileSystemProvider, NotificationManager, ServiceContext } from './services';
 
 import type { HttpServices } from './http';
 import type { SshConnectionManager } from './services/infrastructure/SshConnectionManager';
@@ -59,7 +55,12 @@ const updaterServiceStub = {
 
 /** No-op SshConnectionManager stub — SSH is managed per-user in the Electron app. */
 const sshConnectionManagerStub = {
-  getStatus: () => ({ state: 'disconnected' as const, host: null, error: null, remoteProjectsPath: null }),
+  getStatus: () => ({
+    state: 'disconnected' as const,
+    host: null,
+    error: null,
+    remoteProjectsPath: null,
+  }),
   getProvider: () => new LocalFileSystemProvider(),
   isRemote: () => false,
   connect: async () => {},
@@ -148,7 +149,7 @@ async function start(): Promise<void> {
   };
 
   // No-op mode switch handler (no SSH in standalone)
-  const modeSwitchHandler = async () => {};
+  const modeSwitchHandler = async (): Promise<void> => {};
 
   // Start the server
   const port = await httpServer.start(services, modeSwitchHandler, PORT, HOST);

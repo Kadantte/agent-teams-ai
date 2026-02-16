@@ -61,21 +61,14 @@ const ConsumptionBadge = ({
   contextConsumption: number;
   phaseBreakdown?: PhaseTokenBreakdown[];
 }>): React.JSX.Element => {
-  const [showPopover, setShowPopover] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
   const badgeRef = useRef<HTMLSpanElement>(null);
   const isHigh = contextConsumption > 150_000;
 
-  // Calculate popover position relative to viewport for portal rendering
-  const popoverPosition =
-    showPopover && badgeRef.current
-      ? (() => {
-          const rect = badgeRef.current.getBoundingClientRect();
-          return {
-            top: rect.top - 6,
-            left: rect.left + rect.width / 2,
-          };
-        })()
-      : null;
+  const showPopover = popoverPosition !== null;
 
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- tooltip trigger via hover, not interactive
@@ -83,8 +76,16 @@ const ConsumptionBadge = ({
       ref={badgeRef}
       className="tabular-nums"
       style={{ color: isHigh ? 'rgb(251, 191, 36)' : undefined }}
-      onMouseEnter={() => setShowPopover(true)}
-      onMouseLeave={() => setShowPopover(false)}
+      onMouseEnter={() => {
+        const rect = badgeRef.current?.getBoundingClientRect();
+        if (rect) {
+          setPopoverPosition({
+            top: rect.top - 6,
+            left: rect.left + rect.width / 2,
+          });
+        }
+      }}
+      onMouseLeave={() => setPopoverPosition(null)}
     >
       {formatTokensCompact(contextConsumption)}
       {showPopover &&
