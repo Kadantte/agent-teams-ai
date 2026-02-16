@@ -387,7 +387,7 @@ export const TabBar = ({ paneId }: TabBarProps): React.JSX.Element => {
         {/* Settings gear icon (Electron only - browser can't access native settings) */}
         {isElectronMode() && (
           <button
-            onClick={openSettingsTab}
+            onClick={() => openSettingsTab()}
             onMouseEnter={() => setSettingsHover(true)}
             onMouseLeave={() => setSettingsHover(false)}
             className="rounded-md p-2 transition-colors"
