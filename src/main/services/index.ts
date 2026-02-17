@@ -14,3 +14,4 @@ export * from './discovery';
 export * from './error';
 export * from './infrastructure';
 export * from './parsing';
+export * from './team';

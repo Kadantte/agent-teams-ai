@@ -171,3 +171,10 @@ export const WINDOW_CLOSE = 'window:close';
 
 /** Whether the window is currently maximized */
 export const WINDOW_IS_MAXIMIZED = 'window:isMaximized';
+
+// =============================================================================
+// Team API Channels
+// =============================================================================
+
+/** List all teams */
+export const TEAM_LIST = 'team:list';

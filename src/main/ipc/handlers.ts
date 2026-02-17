@@ -42,6 +42,7 @@ import {
   registerSubagentHandlers,
   removeSubagentHandlers,
 } from './subagents';
+import { initializeTeamHandlers, registerTeamHandlers, removeTeamHandlers } from './teams';
 import {
   initializeUpdaterHandlers,
   registerUpdaterHandlers,
@@ -55,6 +56,7 @@ import type {
   ServiceContext,
   ServiceContextRegistry,
   SshConnectionManager,
+  TeamDataService,
   UpdaterService,
 } from '../services';
 
@@ -65,6 +67,7 @@ export function initializeIpcHandlers(
   registry: ServiceContextRegistry,
   updater: UpdaterService,
   sshManager: SshConnectionManager,
+  teamDataService: TeamDataService,
   contextCallbacks: {
     rewire: (context: ServiceContext) => void;
     full: (context: ServiceContext) => void;
@@ -79,6 +82,7 @@ export function initializeIpcHandlers(
   initializeUpdaterHandlers(updater);
   initializeSshHandlers(sshManager, registry, contextCallbacks.rewire);
   initializeContextHandlers(registry, contextCallbacks.rewire);
+  initializeTeamHandlers(teamDataService);
   initializeConfigHandlers({
     onClaudeRootPathUpdated: contextCallbacks.onClaudeRootPathUpdated,
   });
@@ -95,6 +99,7 @@ export function initializeIpcHandlers(
   registerUpdaterHandlers(ipcMain);
   registerSshHandlers(ipcMain);
   registerContextHandlers(ipcMain);
+  registerTeamHandlers(ipcMain);
   registerWindowHandlers(ipcMain);
 
   logger.info('All handlers registered');
@@ -116,6 +121,7 @@ export function removeIpcHandlers(): void {
   removeUpdaterHandlers(ipcMain);
   removeSshHandlers(ipcMain);
   removeContextHandlers(ipcMain);
+  removeTeamHandlers(ipcMain);
   removeWindowHandlers(ipcMain);
 
   logger.info('All handlers removed');

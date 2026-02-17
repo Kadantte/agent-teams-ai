@@ -43,6 +43,7 @@ import type { TriggerColor } from '@shared/constants/triggerColors';
 import type {
   ClaudeRootFolderSelection,
   ClaudeRootInfo,
+  IpcResult,
   WslClaudeRootCandidate,
 } from '@shared/types';
 
@@ -53,15 +54,6 @@ const execFileAsync = promisify(execFile);
 const configManager = ConfigManager.getInstance();
 let onClaudeRootPathUpdated: ((claudeRootPath: string | null) => Promise<void> | void) | null =
   null;
-
-/**
- * Response type for config operations
- */
-interface ConfigResult<T = void> {
-  success: boolean;
-  data?: T;
-  error?: string;
-}
 
 /**
  * Initializes config handlers with callbacks that require app-level services.
@@ -133,7 +125,7 @@ export function registerConfigHandlers(ipcMain: IpcMain): void {
  * Handler for 'config:get' IPC call.
  * Returns the full app configuration.
  */
-async function handleGetConfig(_event: IpcMainInvokeEvent): Promise<ConfigResult<AppConfig>> {
+async function handleGetConfig(_event: IpcMainInvokeEvent): Promise<IpcResult<AppConfig>> {
   try {
     const config = configManager.getConfig();
     return { success: true, data: config };
@@ -152,7 +144,7 @@ async function handleUpdateConfig(
   _event: IpcMainInvokeEvent,
   section: unknown,
   data: unknown
-): Promise<ConfigResult<AppConfig>> {
+): Promise<IpcResult<AppConfig>> {
   try {
     const validation = validateConfigUpdatePayload(section, data);
     if (!validation.valid) {
@@ -190,7 +182,7 @@ async function handleUpdateConfig(
 async function handleAddIgnoreRegex(
   _event: IpcMainInvokeEvent,
   pattern: string
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!pattern || typeof pattern !== 'string') {
       return { success: false, error: 'Pattern is required and must be a string' };
@@ -218,7 +210,7 @@ async function handleAddIgnoreRegex(
 async function handleRemoveIgnoreRegex(
   _event: IpcMainInvokeEvent,
   pattern: string
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!pattern || typeof pattern !== 'string') {
       return { success: false, error: 'Pattern is required and must be a string' };
@@ -239,7 +231,7 @@ async function handleRemoveIgnoreRegex(
 async function handleAddIgnoreRepository(
   _event: IpcMainInvokeEvent,
   repositoryId: string
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!repositoryId || typeof repositoryId !== 'string') {
       return { success: false, error: 'Repository ID is required and must be a string' };
@@ -260,7 +252,7 @@ async function handleAddIgnoreRepository(
 async function handleRemoveIgnoreRepository(
   _event: IpcMainInvokeEvent,
   repositoryId: string
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!repositoryId || typeof repositoryId !== 'string') {
       return { success: false, error: 'Repository ID is required and must be a string' };
@@ -278,7 +270,7 @@ async function handleRemoveIgnoreRepository(
  * Handler for 'config:snooze' IPC call.
  * Sets the snooze timer for notifications.
  */
-async function handleSnooze(_event: IpcMainInvokeEvent, minutes: number): Promise<ConfigResult> {
+async function handleSnooze(_event: IpcMainInvokeEvent, minutes: number): Promise<IpcResult> {
   try {
     if (typeof minutes !== 'number' || minutes <= 0 || minutes > 24 * 60) {
       return { success: false, error: 'Minutes must be a positive number' };
@@ -296,7 +288,7 @@ async function handleSnooze(_event: IpcMainInvokeEvent, minutes: number): Promis
  * Handler for 'config:clearSnooze' IPC call.
  * Clears the snooze timer.
  */
-async function handleClearSnooze(_event: IpcMainInvokeEvent): Promise<ConfigResult> {
+async function handleClearSnooze(_event: IpcMainInvokeEvent): Promise<IpcResult> {
   try {
     configManager.clearSnooze();
     return { success: true };
@@ -327,7 +319,7 @@ async function handleAddTrigger(
     repositoryIds?: string[];
     color?: string;
   }
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!trigger.id || !trigger.name || !trigger.contentType) {
       return {
@@ -385,7 +377,7 @@ async function handleUpdateTrigger(
     repositoryIds: string[];
     color: string;
   }>
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     const validatedTriggerId = validateTriggerId(triggerId);
     if (!validatedTriggerId.valid) {
@@ -413,7 +405,7 @@ async function handleUpdateTrigger(
 async function handleRemoveTrigger(
   _event: IpcMainInvokeEvent,
   triggerId: string
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     const validatedTriggerId = validateTriggerId(triggerId);
     if (!validatedTriggerId.valid) {
@@ -440,7 +432,7 @@ async function handleRemoveTrigger(
  */
 async function handleGetTriggers(
   _event: IpcMainInvokeEvent
-): Promise<ConfigResult<NotificationTrigger[]>> {
+): Promise<IpcResult<NotificationTrigger[]>> {
   try {
     const triggers = configManager.getTriggers();
 
@@ -467,7 +459,7 @@ async function handleTestTrigger(
   _event: IpcMainInvokeEvent,
   trigger: NotificationTrigger
 ): Promise<
-  ConfigResult<{
+  IpcResult<{
     totalCount: number;
     errors: {
       id: string;
@@ -524,7 +516,7 @@ async function handlePinSession(
   _event: IpcMainInvokeEvent,
   projectId: string,
   sessionId: string
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!projectId || typeof projectId !== 'string') {
       return { success: false, error: 'Project ID is required and must be a string' };
@@ -548,7 +540,7 @@ async function handleUnpinSession(
   _event: IpcMainInvokeEvent,
   projectId: string,
   sessionId: string
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!projectId || typeof projectId !== 'string') {
       return { success: false, error: 'Project ID is required and must be a string' };
@@ -569,7 +561,7 @@ async function handleUnpinSession(
  * Handler for 'config:openInEditor' - Opens the config JSON file in an external editor.
  * Tries editors in order: $VISUAL, $EDITOR, cursor, code, then falls back to system open.
  */
-async function handleOpenInEditor(_event: IpcMainInvokeEvent): Promise<ConfigResult> {
+async function handleOpenInEditor(_event: IpcMainInvokeEvent): Promise<IpcResult> {
   try {
     const configPath = configManager.getConfigPath();
 
@@ -615,7 +607,7 @@ async function handleOpenInEditor(_event: IpcMainInvokeEvent): Promise<ConfigRes
  * Handler for 'config:selectFolders' - Opens native folder selection dialog.
  * Allows users to select one or more folders for trigger project scope.
  */
-async function handleSelectFolders(_event: IpcMainInvokeEvent): Promise<ConfigResult<string[]>> {
+async function handleSelectFolders(_event: IpcMainInvokeEvent): Promise<IpcResult<string[]>> {
   try {
     // Get the focused window for proper dialog parenting
     const focusedWindow = BrowserWindow.getFocusedWindow();
@@ -650,7 +642,7 @@ async function handleSelectFolders(_event: IpcMainInvokeEvent): Promise<ConfigRe
  */
 async function handleSelectClaudeRootFolder(
   _event: IpcMainInvokeEvent
-): Promise<ConfigResult<ClaudeRootFolderSelection | null>> {
+): Promise<IpcResult<ClaudeRootFolderSelection | null>> {
   try {
     const focusedWindow = BrowserWindow.getFocusedWindow();
     const currentRootPath = getClaudeBasePath();
@@ -702,7 +694,7 @@ async function handleSelectClaudeRootFolder(
  */
 async function handleGetClaudeRootInfo(
   _event: IpcMainInvokeEvent
-): Promise<ConfigResult<ClaudeRootInfo>> {
+): Promise<IpcResult<ClaudeRootInfo>> {
   try {
     const customPath = configManager.getConfig().general.claudeRootPath;
     const defaultPath = getAutoDetectedClaudeBasePath();
@@ -896,7 +888,7 @@ async function resolveWslHome(distro: string): Promise<string | null> {
  */
 async function handleFindWslClaudeRoots(
   _event: IpcMainInvokeEvent
-): Promise<ConfigResult<WslClaudeRootCandidate[]>> {
+): Promise<IpcResult<WslClaudeRootCandidate[]>> {
   try {
     if (process.platform !== 'win32') {
       return { success: true, data: [] };
@@ -961,7 +953,7 @@ async function handleHideSession(
   _event: IpcMainInvokeEvent,
   projectId: string,
   sessionId: string
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!projectId || typeof projectId !== 'string') {
       return { success: false, error: 'Project ID is required and must be a string' };
@@ -985,7 +977,7 @@ async function handleUnhideSession(
   _event: IpcMainInvokeEvent,
   projectId: string,
   sessionId: string
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!projectId || typeof projectId !== 'string') {
       return { success: false, error: 'Project ID is required and must be a string' };
@@ -1009,7 +1001,7 @@ async function handleHideSessions(
   _event: IpcMainInvokeEvent,
   projectId: string,
   sessionIds: string[]
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!projectId || typeof projectId !== 'string') {
       return { success: false, error: 'Project ID is required and must be a string' };
@@ -1033,7 +1025,7 @@ async function handleUnhideSessions(
   _event: IpcMainInvokeEvent,
   projectId: string,
   sessionIds: string[]
-): Promise<ConfigResult> {
+): Promise<IpcResult> {
   try {
     if (!projectId || typeof projectId !== 'string') {
       return { success: false, error: 'Project ID is required and must be a string' };

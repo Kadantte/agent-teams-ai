@@ -13,6 +13,7 @@ import type {
   NotificationTrigger,
   TriggerTestResult,
 } from './notifications';
+import type { TeamSummary } from './team';
 import type { WaterfallData } from './visualization';
 import type {
   ConversationGroup,
@@ -306,6 +307,14 @@ export interface HttpServerAPI {
 }
 
 // =============================================================================
+// Teams API
+// =============================================================================
+
+export interface TeamsAPI {
+  list: () => Promise<TeamSummary[]>;
+}
+
+// =============================================================================
 // Main Electron API
 // =============================================================================
 
@@ -413,6 +422,9 @@ export interface ElectronAPI {
 
   // HTTP Server API
   httpServer: HttpServerAPI;
+
+  // Team management API
+  teams: TeamsAPI;
 }
 
 // =============================================================================

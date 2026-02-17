@@ -16,6 +16,7 @@ import { createRepositorySlice } from './slices/repositorySlice';
 import { createSessionDetailSlice } from './slices/sessionDetailSlice';
 import { createSessionSlice } from './slices/sessionSlice';
 import { createSubagentSlice } from './slices/subagentSlice';
+import { createTeamSlice } from './slices/teamSlice';
 import { createTabSlice } from './slices/tabSlice';
 import { createTabUISlice } from './slices/tabUISlice';
 import { createUISlice } from './slices/uiSlice';
@@ -35,6 +36,7 @@ export const useStore = create<AppState>()((...args) => ({
   ...createSessionSlice(...args),
   ...createSessionDetailSlice(...args),
   ...createSubagentSlice(...args),
+  ...createTeamSlice(...args),
   ...createConversationSlice(...args),
   ...createTabSlice(...args),
   ...createTabUISlice(...args),

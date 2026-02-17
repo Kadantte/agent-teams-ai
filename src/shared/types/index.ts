@@ -20,3 +20,9 @@ export type * from './visualization';
 
 // Re-export API types (ElectronAPI, ConfigAPI, etc.)
 export type * from './api';
+
+// Re-export shared IPC result shape
+export type * from './ipc';
+
+// Re-export Team Management types
+export type * from './team';

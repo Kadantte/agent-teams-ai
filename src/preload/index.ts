@@ -18,6 +18,7 @@ import {
   SSH_SAVE_LAST_CONNECTION,
   SSH_STATUS,
   SSH_TEST,
+  TEAM_LIST,
   UPDATER_CHECK,
   UPDATER_DOWNLOAD,
   UPDATER_INSTALL,
@@ -68,23 +69,15 @@ import type {
   SshConnectionConfig,
   SshConnectionStatus,
   SshLastConnection,
+  TeamSummary,
   TriggerTestResult,
+  IpcResult,
   WslClaudeRootCandidate,
 } from '@shared/types';
 
 // =============================================================================
 // IPC Result Types and Helpers
 // =============================================================================
-
-/**
- * Standard IPC result structure returned by main process handlers.
- * All config-related IPC calls return this shape.
- */
-interface IpcResult<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
-}
 
 interface IpcFileChangePayload {
   type: 'add' | 'change' | 'unlink';
@@ -456,6 +449,12 @@ const electronAPI: ElectronAPI = {
     },
     getStatus: async (): Promise<HttpServerStatus> => {
       return invokeIpcWithResult<HttpServerStatus>(HTTP_SERVER_GET_STATUS);
+    },
+  },
+
+  teams: {
+    list: async () => {
+      return invokeIpcWithResult<TeamSummary[]>(TEAM_LIST);
     },
   },
 };

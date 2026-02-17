@@ -66,6 +66,7 @@ import {
   ServiceContext,
   ServiceContextRegistry,
   SshConnectionManager,
+  TeamDataService,
   UpdaterService,
 } from './services';
 
@@ -80,6 +81,7 @@ let contextRegistry: ServiceContextRegistry;
 let notificationManager: NotificationManager;
 let updaterService: UpdaterService;
 let sshConnectionManager: SshConnectionManager;
+let teamDataService: TeamDataService;
 let httpServer: HttpServer;
 
 // File watcher event cleanup functions
@@ -264,10 +266,11 @@ function initializeServices(): void {
 
   // Initialize updater service
   updaterService = new UpdaterService();
+  teamDataService = new TeamDataService();
   httpServer = new HttpServer();
 
   // Initialize IPC handlers with registry
-  initializeIpcHandlers(contextRegistry, updaterService, sshConnectionManager, {
+  initializeIpcHandlers(contextRegistry, updaterService, sshConnectionManager, teamDataService, {
     rewire: rewireContextEvents,
     full: onContextSwitched,
     onClaudeRootPathUpdated: (_claudeRootPath: string | null) => {

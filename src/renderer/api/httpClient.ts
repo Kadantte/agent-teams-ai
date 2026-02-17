@@ -36,6 +36,8 @@ import type {
   SshConnectionStatus,
   SshLastConnection,
   SubagentDetail,
+  TeamSummary,
+  TeamsAPI,
   TriggerTestResult,
   UpdaterAPI,
   WaterfallData,
@@ -583,5 +585,12 @@ export class HttpAPIClient implements ElectronAPI {
     },
     getStatus: (): Promise<HttpServerStatus> =>
       Promise.resolve({ running: true, port: parseInt(new URL(this.baseUrl).port, 10) }),
+  };
+
+  teams: TeamsAPI = {
+    list: async (): Promise<TeamSummary[]> => {
+      console.warn('[HttpAPIClient] teams API is not available in browser mode');
+      return [];
+    },
   };
 }
