@@ -1,63 +1,33 @@
+import { assessmentColor, assessmentLabel, severityColor } from '@renderer/utils/reportAssessments';
 import { BarChart3 } from 'lucide-react';
 
 import { ReportSection } from '../ReportSection';
 
 import type {
+  ReportFileReadRedundancy,
   ReportPromptQuality,
   ReportStartupOverhead,
   ReportTestProgression,
 } from '@renderer/types/sessionReport';
 
-const assessmentColor = (assessment: ReportPromptQuality['assessment']): string => {
-  switch (assessment) {
-    case 'well_specified':
-      return '#4ade80';
-    case 'moderate_friction':
-      return '#fbbf24';
-    case 'underspecified':
-      return '#f87171';
-    case 'verbose_but_unclear':
-      return '#f87171';
-    default:
-      return '#a1a1aa';
-  }
-};
-
-const assessmentLabel = (assessment: ReportPromptQuality['assessment']): string => {
-  switch (assessment) {
-    case 'well_specified':
-      return 'Well Specified';
-    case 'moderate_friction':
-      return 'Moderate Friction';
-    case 'underspecified':
-      return 'Underspecified';
-    case 'verbose_but_unclear':
-      return 'Verbose but Unclear';
-    default:
-      return assessment;
-  }
-};
-
-const trajectoryColor = (trajectory: ReportTestProgression['trajectory']): string => {
-  switch (trajectory) {
-    case 'improving':
-      return '#4ade80';
-    case 'regressing':
-      return '#f87171';
-    case 'stable':
-      return '#fbbf24';
-    default:
-      return '#a1a1aa';
-  }
-};
-
 interface QualitySectionProps {
   prompt: ReportPromptQuality;
   startup: ReportStartupOverhead;
   testProgression: ReportTestProgression;
+  fileReadRedundancy: ReportFileReadRedundancy;
 }
 
-export const QualitySection = ({ prompt, startup, testProgression }: QualitySectionProps) => {
+export const QualitySection = ({
+  prompt,
+  startup,
+  testProgression,
+  fileReadRedundancy,
+}: QualitySectionProps) => {
+  const promptColor = assessmentColor(prompt.assessment);
+  const trajectoryColor = assessmentColor(testProgression.trajectory);
+  const overheadColor = assessmentColor(startup.overheadAssessment);
+  const redundancyColor = assessmentColor(fileReadRedundancy.redundancyAssessment);
+
   return (
     <ReportSection title="Quality Signals" icon={BarChart3}>
       {/* Prompt quality */}
@@ -66,10 +36,7 @@ export const QualitySection = ({ prompt, startup, testProgression }: QualitySect
         <div className="mb-2 flex items-center gap-2">
           <span
             className="rounded px-2 py-0.5 text-xs font-medium"
-            style={{
-              backgroundColor: `${assessmentColor(prompt.assessment)}20`,
-              color: assessmentColor(prompt.assessment),
-            }}
+            style={{ backgroundColor: `${promptColor}20`, color: promptColor }}
           >
             {assessmentLabel(prompt.assessment)}
           </span>
@@ -101,7 +68,15 @@ export const QualitySection = ({ prompt, startup, testProgression }: QualitySect
 
       {/* Startup overhead */}
       <div className="mb-4">
-        <div className="mb-2 text-xs font-medium text-text-muted">Startup Overhead</div>
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-xs font-medium text-text-muted">Startup Overhead</span>
+          <span
+            className="rounded px-2 py-0.5 text-xs font-medium"
+            style={{ backgroundColor: `${overheadColor}20`, color: overheadColor }}
+          >
+            {assessmentLabel(startup.overheadAssessment)}
+          </span>
+        </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div>
             <div className="text-xs text-text-muted">Messages Before Work</div>
@@ -120,21 +95,44 @@ export const QualitySection = ({ prompt, startup, testProgression }: QualitySect
         </div>
       </div>
 
+      {/* File read redundancy */}
+      <div className="mb-4">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-xs font-medium text-text-muted">File Read Redundancy</span>
+          <span
+            className="rounded px-2 py-0.5 text-xs font-medium"
+            style={{ backgroundColor: `${redundancyColor}20`, color: redundancyColor }}
+          >
+            {assessmentLabel(fileReadRedundancy.redundancyAssessment)}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div>
+            <div className="text-xs text-text-muted">Total Reads</div>
+            <div className="text-sm font-medium text-text">{fileReadRedundancy.totalReads}</div>
+          </div>
+          <div>
+            <div className="text-xs text-text-muted">Unique Files</div>
+            <div className="text-sm font-medium text-text">{fileReadRedundancy.uniqueFiles}</div>
+          </div>
+          <div>
+            <div className="text-xs text-text-muted">Reads/Unique File</div>
+            <div className="text-sm font-medium text-text">
+              {fileReadRedundancy.readsPerUniqueFile}x
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Test progression */}
       <div>
         <div className="mb-2 text-xs font-medium text-text-muted">Test Progression</div>
         <div className="mb-2 flex items-center gap-2">
           <span
             className="rounded px-2 py-0.5 text-xs font-medium"
-            style={{
-              backgroundColor: `${trajectoryColor(testProgression.trajectory)}20`,
-              color: trajectoryColor(testProgression.trajectory),
-            }}
+            style={{ backgroundColor: `${trajectoryColor}20`, color: trajectoryColor }}
           >
-            {testProgression.trajectory === 'insufficient_data'
-              ? 'Insufficient Data'
-              : testProgression.trajectory.charAt(0).toUpperCase() +
-                testProgression.trajectory.slice(1)}
+            {assessmentLabel(testProgression.trajectory)}
           </span>
           <span className="text-xs text-text-muted">
             {testProgression.snapshotCount} snapshot{testProgression.snapshotCount !== 1 ? 's' : ''}
@@ -145,11 +143,11 @@ export const QualitySection = ({ prompt, startup, testProgression }: QualitySect
             <div>
               <div className="text-xs text-text-muted">First Run</div>
               <div className="text-sm text-text">
-                <span style={{ color: '#4ade80' }}>
+                <span style={{ color: severityColor('good') }}>
                   {testProgression.firstSnapshot.passed} passed
                 </span>
                 {' / '}
-                <span style={{ color: '#f87171' }}>
+                <span style={{ color: severityColor('danger') }}>
                   {testProgression.firstSnapshot.failed} failed
                 </span>
               </div>
@@ -157,11 +155,11 @@ export const QualitySection = ({ prompt, startup, testProgression }: QualitySect
             <div>
               <div className="text-xs text-text-muted">Last Run</div>
               <div className="text-sm text-text">
-                <span style={{ color: '#4ade80' }}>
+                <span style={{ color: severityColor('good') }}>
                   {testProgression.lastSnapshot.passed} passed
                 </span>
                 {' / '}
-                <span style={{ color: '#f87171' }}>
+                <span style={{ color: severityColor('danger') }}>
                   {testProgression.lastSnapshot.failed} failed
                 </span>
               </div>

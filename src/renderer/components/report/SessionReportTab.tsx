@@ -63,6 +63,7 @@ export const SessionReportTab = ({ tab }: SessionReportTabProps) => {
           prompt={report.promptQuality}
           startup={report.startupOverhead}
           testProgression={report.testProgression}
+          fileReadRedundancy={report.fileReadRedundancy}
         />
         <InsightsSection
           skills={report.skillsInvoked}

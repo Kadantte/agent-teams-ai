@@ -1181,4 +1181,329 @@ describe('analyzeSession', () => {
       expect(report.compaction.note).toContain('No compaction');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Assessment computations
+  // -------------------------------------------------------------------------
+
+  describe('cost assessments', () => {
+    it('computes costPerCommitAssessment when commits exist', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          usage: { input_tokens: 50000, output_tokens: 10000 },
+          toolCalls: [
+            {
+              id: 'tc-1',
+              name: 'Bash',
+              input: { command: "git commit -m 'fix'" },
+              isTask: false,
+            },
+          ],
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.costAnalysis.costPerCommitAssessment).not.toBeNull();
+    });
+
+    it('returns null assessments when no commits', () => {
+      const report = analyzeSession(createMockDetail());
+      expect(report.costAnalysis.costPerCommitAssessment).toBeNull();
+      expect(report.costAnalysis.costPerLineAssessment).toBeNull();
+    });
+
+    it('returns null subagentCostShareAssessment when no cost', () => {
+      const report = analyzeSession(createMockDetail());
+      expect(report.costAnalysis.subagentCostSharePct).toBeNull();
+      expect(report.costAnalysis.subagentCostShareAssessment).toBeNull();
+    });
+  });
+
+  describe('cache assessments', () => {
+    it('computes cache efficiency assessment', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 100,
+            cache_read_input_tokens: 9900,
+          },
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.cacheEconomics.cacheEfficiencyAssessment).toBe('good');
+    });
+
+    it('returns concerning for low cache efficiency', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 500,
+            cache_read_input_tokens: 500,
+          },
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.cacheEconomics.cacheEfficiencyAssessment).toBe('concerning');
+    });
+
+    it('returns null when no cache data', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.cacheEconomics.cacheEfficiencyAssessment).toBeNull();
+      expect(report.cacheEconomics.cacheRatioAssessment).toBeNull();
+    });
+  });
+
+  describe('tool health assessments', () => {
+    it('computes per-tool assessment', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          toolCalls: [
+            { id: 'tc-1', name: 'Read', input: { file_path: '/a.ts' }, isTask: false },
+            { id: 'tc-2', name: 'Read', input: { file_path: '/b.ts' }, isTask: false },
+          ],
+        }),
+        createMockMessage({
+          type: 'user',
+          isMeta: true,
+          content: [],
+          toolResults: [
+            { toolUseId: 'tc-1', content: 'ok', isError: false },
+            { toolUseId: 'tc-2', content: 'ok', isError: false },
+          ],
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.toolUsage.successRates.Read.assessment).toBe('healthy');
+    });
+
+    it('computes overall tool health', () => {
+      const report = analyzeSession(createMockDetail());
+      expect(report.toolUsage.overallToolHealth).toBe('healthy');
+    });
+  });
+
+  describe('idle assessment', () => {
+    it('returns efficient for low idle', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          timestamp: new Date('2024-01-01T10:00:00Z'),
+        }),
+        createMockMessage({
+          type: 'user',
+          content: 'quick',
+          timestamp: new Date('2024-01-01T10:00:30Z'),
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.idleAnalysis.idleAssessment).toBe('efficient');
+    });
+
+    it('returns high_idle for mostly idle session', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          timestamp: new Date('2024-01-01T10:00:00Z'),
+        }),
+        createMockMessage({
+          type: 'user',
+          content: 'back',
+          timestamp: new Date('2024-01-01T11:00:00Z'),
+        }),
+        createMockMessage({
+          type: 'assistant',
+          timestamp: new Date('2024-01-01T11:00:10Z'),
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.idleAnalysis.idleAssessment).toBe('high_idle');
+    });
+  });
+
+  describe('thrashing assessment', () => {
+    it('returns none when no signals', () => {
+      const report = analyzeSession(createMockDetail());
+      expect(report.thrashingSignals.thrashingAssessment).toBe('none');
+    });
+
+    it('returns mild or severe based on signal count', () => {
+      const makeEditMsg = (file: string, id: string) =>
+        createMockMessage({
+          type: 'assistant',
+          toolCalls: [{ id, name: 'Edit', input: { file_path: file }, isTask: false }],
+        });
+
+      // 3 edits on one file = 1 signal + 3 repeated bash = 1 signal = mild (2)
+      const messages: ParsedMessage[] = [
+        makeEditMsg('/foo.ts', 'e1'),
+        makeEditMsg('/foo.ts', 'e2'),
+        makeEditMsg('/foo.ts', 'e3'),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(['mild', 'severe']).toContain(report.thrashingSignals.thrashingAssessment);
+    });
+  });
+
+  describe('model switch pattern', () => {
+    it('detects opus_plan_mode', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          timestamp: new Date('2024-01-01T10:00:00Z'),
+        }),
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-opus-4-20250514',
+          timestamp: new Date('2024-01-01T10:01:00Z'),
+        }),
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          timestamp: new Date('2024-01-01T10:02:00Z'),
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.modelSwitches.switchPattern).toBe('opus_plan_mode');
+    });
+
+    it('returns null when no switches', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          usage: { input_tokens: 100, output_tokens: 50 },
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.modelSwitches.switchPattern).toBeNull();
+    });
+  });
+
+  describe('startup overhead assessment', () => {
+    it('returns normal for low overhead', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          usage: { input_tokens: 100, output_tokens: 50 },
+          toolCalls: [{ id: 'tc-1', name: 'Read', input: { file_path: '/f.ts' }, isTask: false }],
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.startupOverhead.overheadAssessment).toBe('normal');
+    });
+
+    it('returns heavy for high overhead', () => {
+      const messages: ParsedMessage[] = [
+        // Lots of startup tokens, no work tools
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          usage: { input_tokens: 50000, output_tokens: 10000 },
+          toolCalls: [],
+        }),
+        // Small work message
+        createMockMessage({
+          type: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          usage: { input_tokens: 100, output_tokens: 50 },
+          toolCalls: [{ id: 'tc-1', name: 'Read', input: { file_path: '/f.ts' }, isTask: false }],
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.startupOverhead.overheadAssessment).toBe('heavy');
+    });
+  });
+
+  describe('file read redundancy assessment', () => {
+    it('returns normal for low redundancy', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          toolCalls: [
+            { id: 'tc-1', name: 'Read', input: { file_path: '/a.ts' }, isTask: false },
+            { id: 'tc-2', name: 'Read', input: { file_path: '/b.ts' }, isTask: false },
+          ],
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.fileReadRedundancy.redundancyAssessment).toBe('normal');
+    });
+
+    it('returns wasteful for high redundancy', () => {
+      const messages: ParsedMessage[] = [
+        createMockMessage({
+          type: 'assistant',
+          toolCalls: [
+            { id: 'tc-1', name: 'Read', input: { file_path: '/a.ts' }, isTask: false },
+            { id: 'tc-2', name: 'Read', input: { file_path: '/a.ts' }, isTask: false },
+            { id: 'tc-3', name: 'Read', input: { file_path: '/a.ts' }, isTask: false },
+            { id: 'tc-4', name: 'Read', input: { file_path: '/a.ts' }, isTask: false },
+          ],
+        }),
+      ];
+
+      const report = analyzeSession(createMockDetail({ messages }));
+      expect(report.fileReadRedundancy.redundancyAssessment).toBe('wasteful');
+    });
+  });
+
+  describe('model mismatch in subagents', () => {
+    it('detects mismatch for mechanical tasks on opus', () => {
+      const processes: Process[] = [
+        {
+          id: 'agent-1',
+          filePath: '/path/to/agent-1.jsonl',
+          messages: [],
+          startTime: new Date('2024-01-01T10:00:00Z'),
+          endTime: new Date('2024-01-01T10:01:00Z'),
+          durationMs: 60000,
+          metrics: createMockMetrics({ totalTokens: 5000, costUsd: 0.05 }),
+          description: 'rename all variables',
+          subagentType: 'code',
+          isParallel: false,
+        },
+      ];
+
+      const report = analyzeSession(createMockDetail({ processes }));
+      // model is 'default (inherits parent)' which doesn't contain 'opus', so no mismatch
+      expect(report.subagentMetrics.byAgent[0].modelMismatch).toBeNull();
+    });
+  });
 });

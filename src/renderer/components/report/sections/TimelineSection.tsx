@@ -1,3 +1,4 @@
+import { assessmentColor, assessmentLabel } from '@renderer/utils/reportAssessments';
 import { Clock } from 'lucide-react';
 
 import { ReportSection } from '../ReportSection';
@@ -15,11 +16,21 @@ interface TimelineSectionProps {
 }
 
 export const TimelineSection = ({ idle, modelSwitches, keyEvents }: TimelineSectionProps) => {
+  const idleColor = assessmentColor(idle.idleAssessment);
+
   return (
     <ReportSection title="Timeline & Activity" icon={Clock}>
       {/* Idle stats */}
       <div className="mb-4">
-        <div className="mb-2 text-xs font-medium text-text-muted">Idle Analysis</div>
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-xs font-medium text-text-muted">Idle Analysis</span>
+          <span
+            className="rounded px-2 py-0.5 text-xs font-medium"
+            style={{ backgroundColor: `${idleColor}20`, color: idleColor }}
+          >
+            {assessmentLabel(idle.idleAssessment)}
+          </span>
+        </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div>
             <div className="text-xs text-text-muted">Idle Gaps</div>
@@ -35,10 +46,7 @@ export const TimelineSection = ({ idle, modelSwitches, keyEvents }: TimelineSect
           </div>
           <div>
             <div className="text-xs text-text-muted">Idle %</div>
-            <div
-              className="text-sm font-medium"
-              style={{ color: idle.idlePct > 50 ? '#fbbf24' : '#4ade80' }}
-            >
+            <div className="text-sm font-medium" style={{ color: idleColor }}>
               {idle.idlePct}%
             </div>
           </div>
@@ -48,8 +56,21 @@ export const TimelineSection = ({ idle, modelSwitches, keyEvents }: TimelineSect
       {/* Model switches */}
       {modelSwitches.count > 0 && (
         <div className="mb-4">
-          <div className="mb-2 text-xs font-medium text-text-muted">
-            Model Switches ({modelSwitches.count})
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-xs font-medium text-text-muted">
+              Model Switches ({modelSwitches.count})
+            </span>
+            {modelSwitches.switchPattern && (
+              <span
+                className="rounded px-2 py-0.5 text-xs font-medium"
+                style={{
+                  backgroundColor: `${assessmentColor(modelSwitches.switchPattern)}20`,
+                  color: assessmentColor(modelSwitches.switchPattern),
+                }}
+              >
+                {assessmentLabel(modelSwitches.switchPattern)}
+              </span>
+            )}
           </div>
           <div className="flex flex-col gap-1">
             {modelSwitches.switches.map((sw, idx) => (

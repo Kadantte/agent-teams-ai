@@ -1,3 +1,4 @@
+import { assessmentColor, assessmentLabel } from '@renderer/utils/reportAssessments';
 import { DollarSign } from 'lucide-react';
 
 import { ReportSection } from '../ReportSection';
@@ -28,17 +29,61 @@ export const CostSection = ({ data }: CostSectionProps) => {
         </div>
         <div>
           <div className="text-xs text-text-muted">Per Commit</div>
-          <div className="text-sm font-medium text-text">
-            {data.costPerCommit != null ? fmt(data.costPerCommit) : 'N/A'}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-text">
+              {data.costPerCommit != null ? fmt(data.costPerCommit) : 'N/A'}
+            </span>
+            {data.costPerCommitAssessment && (
+              <span
+                className="rounded px-2 py-0.5 text-xs font-medium"
+                style={{
+                  backgroundColor: `${assessmentColor(data.costPerCommitAssessment)}20`,
+                  color: assessmentColor(data.costPerCommitAssessment),
+                }}
+              >
+                {assessmentLabel(data.costPerCommitAssessment)}
+              </span>
+            )}
           </div>
         </div>
         <div>
           <div className="text-xs text-text-muted">Per Line Changed</div>
-          <div className="text-sm font-medium text-text">
-            {data.costPerLineChanged != null ? `$${data.costPerLineChanged.toFixed(6)}` : 'N/A'}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-text">
+              {data.costPerLineChanged != null ? `$${data.costPerLineChanged.toFixed(6)}` : 'N/A'}
+            </span>
+            {data.costPerLineAssessment && (
+              <span
+                className="rounded px-2 py-0.5 text-xs font-medium"
+                style={{
+                  backgroundColor: `${assessmentColor(data.costPerLineAssessment)}20`,
+                  color: assessmentColor(data.costPerLineAssessment),
+                }}
+              >
+                {assessmentLabel(data.costPerLineAssessment)}
+              </span>
+            )}
           </div>
         </div>
       </div>
+
+      {data.subagentCostSharePct != null && (
+        <div className="mb-4 flex items-center gap-2">
+          <span className="text-xs text-text-muted">Subagent Cost Share:</span>
+          <span className="text-sm font-medium text-text">{data.subagentCostSharePct}%</span>
+          {data.subagentCostShareAssessment && (
+            <span
+              className="rounded px-2 py-0.5 text-xs font-medium"
+              style={{
+                backgroundColor: `${assessmentColor(data.subagentCostShareAssessment)}20`,
+                color: assessmentColor(data.subagentCostShareAssessment),
+              }}
+            >
+              {assessmentLabel(data.subagentCostShareAssessment)}
+            </span>
+          )}
+        </div>
+      )}
 
       {modelEntries.length > 0 && (
         <table className="w-full text-xs">

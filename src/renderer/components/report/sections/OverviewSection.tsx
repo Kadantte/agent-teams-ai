@@ -1,23 +1,9 @@
+import { assessmentColor } from '@renderer/utils/reportAssessments';
 import { Activity } from 'lucide-react';
 
 import { ReportSection } from '../ReportSection';
 
 import type { ReportOverview } from '@renderer/types/sessionReport';
-
-const assessmentColor = (assessment: ReportOverview['contextAssessment']): string => {
-  switch (assessment) {
-    case 'healthy':
-      return '#4ade80';
-    case 'moderate':
-      return '#fbbf24';
-    case 'high':
-      return '#f87171';
-    case 'critical':
-      return '#f87171';
-    default:
-      return '#a1a1aa';
-  }
-};
 
 interface OverviewSectionProps {
   data: ReportOverview;

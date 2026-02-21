@@ -1,14 +1,9 @@
+import { assessmentColor, assessmentLabel } from '@renderer/utils/reportAssessments';
 import { MessageSquareWarning } from 'lucide-react';
 
 import { ReportSection } from '../ReportSection';
 
 import type { ReportFrictionSignals, ReportThrashingSignals } from '@renderer/types/sessionReport';
-
-const frictionColor = (rate: number): string => {
-  if (rate <= 0.1) return '#4ade80';
-  if (rate <= 0.25) return '#fbbf24';
-  return '#f87171';
-};
 
 interface FrictionSectionProps {
   data: ReportFrictionSignals;
@@ -16,14 +11,18 @@ interface FrictionSectionProps {
 }
 
 export const FrictionSection = ({ data, thrashing }: FrictionSectionProps) => {
+  const frictionColor =
+    data.frictionRate <= 0.1 ? '#4ade80' : data.frictionRate <= 0.25 ? '#fbbf24' : '#f87171';
+  const thrashColor = assessmentColor(thrashing.thrashingAssessment);
+
   return (
     <ReportSection title="Friction Signals" icon={MessageSquareWarning}>
       <div className="mb-4 flex items-center gap-3">
         <span
           className="rounded px-2 py-0.5 text-xs font-medium"
           style={{
-            backgroundColor: `${frictionColor(data.frictionRate)}20`,
-            color: frictionColor(data.frictionRate),
+            backgroundColor: `${frictionColor}20`,
+            color: frictionColor,
           }}
         >
           Friction Rate: {(data.frictionRate * 100).toFixed(1)}%
@@ -54,7 +53,15 @@ export const FrictionSection = ({ data, thrashing }: FrictionSectionProps) => {
 
       {(thrashing.bashNearDuplicates.length > 0 || thrashing.editReworkFiles.length > 0) && (
         <div>
-          <div className="mb-2 text-xs font-medium text-text-muted">Thrashing Signals</div>
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-xs font-medium text-text-muted">Thrashing Signals</span>
+            <span
+              className="rounded px-2 py-0.5 text-xs font-medium"
+              style={{ backgroundColor: `${thrashColor}20`, color: thrashColor }}
+            >
+              {assessmentLabel(thrashing.thrashingAssessment)}
+            </span>
+          </div>
 
           {thrashing.bashNearDuplicates.length > 0 && (
             <div className="mb-2">

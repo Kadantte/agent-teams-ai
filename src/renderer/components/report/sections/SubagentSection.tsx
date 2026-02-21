@@ -1,3 +1,4 @@
+import { severityColor } from '@renderer/utils/reportAssessments';
 import { Users } from 'lucide-react';
 
 import { ReportSection } from '../ReportSection';
@@ -53,8 +54,19 @@ export const SubagentSection = ({ data }: SubagentSectionProps) => {
             <tbody>
               {data.byAgent.map((agent, idx) => (
                 <tr key={idx} className="border-border/50 border-b">
-                  <td className="max-w-48 truncate py-1.5 pr-4 text-text" title={agent.description}>
-                    {agent.description}
+                  <td className="max-w-48 py-1.5 pr-4 text-text">
+                    <div className="truncate" title={agent.description}>
+                      {agent.description}
+                    </div>
+                    {agent.modelMismatch && (
+                      <div
+                        className="mt-0.5 truncate text-[10px]"
+                        style={{ color: severityColor('warning') }}
+                        title={agent.modelMismatch.recommendation}
+                      >
+                        {agent.modelMismatch.recommendation}
+                      </div>
+                    )}
                   </td>
                   <td className="py-1.5 pr-4 text-text-secondary">{agent.subagentType}</td>
                   <td className="py-1.5 pr-4 text-right text-text">

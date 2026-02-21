@@ -8,6 +8,21 @@
  * Runs entirely in the renderer process — no IPC needed.
  */
 
+import {
+  computeCacheEfficiencyAssessment,
+  computeCacheRatioAssessment,
+  computeCostPerCommitAssessment,
+  computeCostPerLineAssessment,
+  computeIdleAssessment,
+  computeOverheadAssessment,
+  computeRedundancyAssessment,
+  computeSubagentCostShareAssessment,
+  computeThrashingAssessment,
+  computeToolHealthAssessment,
+  detectModelMismatch,
+  detectSwitchPattern,
+} from '@renderer/utils/reportAssessments';
+
 import type {
   AgentTreeNode,
   FrictionCorrection,
@@ -25,6 +40,7 @@ import type {
   TestSnapshot,
   ThinkingBlockAnalysis,
   ToolError,
+  ToolSuccessRate,
   UserQuestion,
 } from '@renderer/types/sessionReport';
 import type {
@@ -283,8 +299,6 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
   };
 
   // Cache economics
-  const cacheCreation5m = 0;
-  const cacheCreation1h = 0;
   let totalCacheCreation = 0;
   let totalCacheRead = 0;
   let coldStartDetected = false;
@@ -356,7 +370,7 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
   const testSnapshots: TestSnapshot[] = [];
 
   // Cost tracking
-  let totalSessionCost = 0;
+  let parentCost = 0;
 
   // Git activity
   const gitCommits: GitCommit[] = [];
@@ -457,7 +471,7 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
 
       const callCost = costUsd(model, inpTok, outTok, cr, cc);
       stats.costUsd += callCost;
-      totalSessionCost += callCost;
+      parentCost += callCost;
 
       totalCacheCreation += cc;
       totalCacheRead += cr;
@@ -868,18 +882,23 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
   const linesChanged = linesAddedTotal + linesRemovedTotal;
 
   // --- Subagent metrics from detail.processes ---
-  const subagentEntries: SubagentEntry[] = detail.processes.map((proc: Process) => ({
-    description: proc.description ?? 'unknown',
-    subagentType: proc.subagentType ?? 'unknown',
-    model: 'default (inherits parent)',
-    totalTokens: proc.metrics.totalTokens,
-    totalDurationMs: proc.durationMs,
-    totalToolUseCount: proc.messages.reduce(
-      (sum: number, pm: ParsedMessage) => sum + pm.toolCalls.length,
-      0
-    ),
-    costUsd: proc.metrics.costUsd ?? 0,
-  }));
+  const subagentEntries: SubagentEntry[] = detail.processes.map((proc: Process) => {
+    const desc = proc.description ?? 'unknown';
+    const model = 'default (inherits parent)';
+    return {
+      description: desc,
+      subagentType: proc.subagentType ?? 'unknown',
+      model,
+      totalTokens: proc.metrics.totalTokens,
+      totalDurationMs: proc.durationMs,
+      totalToolUseCount: proc.messages.reduce(
+        (sum: number, pm: ParsedMessage) => sum + pm.toolCalls.length,
+        0
+      ),
+      costUsd: proc.metrics.costUsd ?? 0,
+      modelMismatch: detectModelMismatch(desc, model),
+    };
+  });
 
   const saFromProcesses = {
     count: subagentEntries.length,
@@ -892,21 +911,31 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
   };
 
   // --- Tool usage with success rates ---
-  const toolSuccessRates: Record<
-    string,
-    { totalCalls: number; errors: number; successRatePct: number }
-  > = {};
+  const toolSuccessRates: Record<string, ToolSuccessRate> = {};
   const sortedToolCounts = [...toolCounts.entries()].sort((a, b) => b[1] - a[1]);
   const countsRecord: Record<string, number> = {};
   for (const [tool, count] of sortedToolCounts) {
     countsRecord[tool] = count;
     const errCount = errorsByTool.get(tool) ?? 0;
+    const successPct = count ? Math.round(((count - errCount) / count) * 1000) / 10 : 0;
     toolSuccessRates[tool] = {
       totalCalls: count,
       errors: errCount,
-      successRatePct: count ? Math.round(((count - errCount) / count) * 1000) / 10 : 0,
+      successRatePct: successPct,
+      assessment: computeToolHealthAssessment(successPct),
     };
   }
+
+  // Overall tool health: worst assessment among tools with >5 calls
+  const significantTools = Object.values(toolSuccessRates).filter((t) => t.totalCalls > 5);
+  type THAssessment = 'healthy' | 'degraded' | 'unreliable';
+  const overallToolHealth: THAssessment =
+    significantTools.length > 0
+      ? significantTools.reduce<THAssessment>((worst, t) => {
+          const order = { healthy: 0, degraded: 1, unreliable: 2 } as const;
+          return order[t.assessment] > order[worst] ? t.assessment : worst;
+        }, 'healthy')
+      : computeToolHealthAssessment(100);
 
   // --- Key events timing ---
   for (let j = 1; j < keyEvents.length; j++) {
@@ -967,14 +996,19 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
 
   // --- Conversation tree analysis ---
   const depthMemo = new Map<string, number>();
-  function getDepth(uuid: string): number {
+  function getDepth(uuid: string, visited = new Set<string>()): number {
     if (depthMemo.has(uuid)) return depthMemo.get(uuid)!;
+    if (visited.has(uuid)) {
+      depthMemo.set(uuid, 0);
+      return 0;
+    }
+    visited.add(uuid);
     const parent = parentMap.get(uuid);
     if (!parent) {
       depthMemo.set(uuid, 0);
       return 0;
     }
-    const depth = 1 + getDepth(parent);
+    const depth = 1 + getDepth(parent, visited);
     depthMemo.set(uuid, depth);
     return depth;
   }
@@ -1071,6 +1105,20 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
 
   // --- Subagent cost from processes ---
   const processSubagentCost = subagentEntries.reduce((sum, a) => sum + a.costUsd, 0);
+  const totalCost = parentCost + processSubagentCost;
+
+  // --- Assessment computations ---
+  const costPerCommitVal =
+    commitCount > 0 ? Math.round((totalCost / commitCount) * 10000) / 10000 : null;
+  const costPerLineVal =
+    linesChanged > 0 ? Math.round((totalCost / linesChanged) * 1000000) / 1000000 : null;
+  const subagentCostSharePct =
+    totalCost > 0 ? Math.round((processSubagentCost / totalCost) * 10000) / 100 : null;
+
+  const readsPerUniqueFile = uniqueFiles ? Math.round((totalReads / uniqueFiles) * 100) / 100 : 0;
+  const startupPctOfTotal = grandTotal ? Math.round((startupTokens / grandTotal) * 10000) / 100 : 0;
+  const idlePct = wallClock > 0 ? Math.round((totalIdle / wallClock) * 1000) / 10 : 0;
+  const thrashingSignalCount = bashNearDuplicates.length + editReworkFiles.length;
 
   // ===================================================================
   // BUILD REPORT
@@ -1111,39 +1159,44 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
     },
 
     costAnalysis: {
-      parentCostUsd: Math.round(totalSessionCost * 10000) / 10000,
+      parentCostUsd: Math.round(parentCost * 10000) / 10000,
       subagentCostUsd: Math.round(processSubagentCost * 10000) / 10000,
-      totalSessionCostUsd: Math.round((totalSessionCost + processSubagentCost) * 10000) / 10000,
+      totalSessionCostUsd: Math.round(totalCost * 10000) / 10000,
       costByModel: Object.fromEntries(
         [...modelStats.entries()].map(([model, stats]) => [
           model,
           Math.round(stats.costUsd * 10000) / 10000,
         ])
       ),
-      costPerCommit:
-        commitCount > 0
-          ? Math.round(((totalSessionCost + processSubagentCost) / commitCount) * 10000) / 10000
-          : null,
-      costPerLineChanged:
-        linesChanged > 0
-          ? Math.round(((totalSessionCost + processSubagentCost) / linesChanged) * 1000000) /
-            1000000
+      costPerCommit: costPerCommitVal,
+      costPerLineChanged: costPerLineVal,
+      costPerCommitAssessment:
+        costPerCommitVal != null ? computeCostPerCommitAssessment(costPerCommitVal) : null,
+      costPerLineAssessment:
+        costPerLineVal != null ? computeCostPerLineAssessment(costPerLineVal) : null,
+      subagentCostSharePct,
+      subagentCostShareAssessment:
+        subagentCostSharePct != null
+          ? computeSubagentCostShareAssessment(subagentCostSharePct)
           : null,
     },
 
     cacheEconomics: {
-      cacheCreation5m,
-      cacheCreation1h,
       cacheRead: totalCacheRead,
       cacheEfficiencyPct: cacheEfficiency,
       coldStartDetected,
       cacheReadToWriteRatio: cacheRwRatio,
+      cacheEfficiencyAssessment:
+        cacheTotalCreationAndRead > 0 ? computeCacheEfficiencyAssessment(cacheEfficiency) : null,
+      cacheRatioAssessment:
+        totalCacheCreation > 0 ? computeCacheRatioAssessment(cacheRwRatio) : null,
     },
 
     toolUsage: {
       counts: countsRecord,
       totalCalls: [...toolCounts.values()].reduce((sum, c) => sum + c, 0),
       successRates: toolSuccessRates,
+      overallToolHealth,
     },
 
     subagentMetrics: saFromProcesses,
@@ -1178,6 +1231,7 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
     thrashingSignals: {
       bashNearDuplicates,
       editReworkFiles,
+      thrashingAssessment: computeThrashingAssessment(thrashingSignalCount),
     },
 
     conversationTree: {
@@ -1196,14 +1250,16 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
       wallClockSeconds: Math.round(wallClock * 10) / 10,
       activeWorkingSeconds: Math.round(Math.max(activeTime, 0) * 10) / 10,
       activeWorkingHuman: formatDuration(Math.floor(Math.max(activeTime, 0))),
-      idlePct: wallClock > 0 ? Math.round((totalIdle / wallClock) * 1000) / 10 : 0,
+      idlePct,
       longestGaps: [...idleGaps].sort((a, b) => b.gapSeconds - a.gapSeconds).slice(0, 5),
+      idleAssessment: computeIdleAssessment(idlePct),
     },
 
     modelSwitches: {
       count: modelSwitches.length,
       switches: modelSwitches,
       modelsUsed,
+      switchPattern: detectSwitchPattern(modelSwitches),
     },
 
     workingDirectories: {
@@ -1225,7 +1281,8 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
     startupOverhead: {
       messagesBeforeFirstWork: startupMessages,
       tokensBeforeFirstWork: startupTokens,
-      pctOfTotal: grandTotal ? Math.round((startupTokens / grandTotal) * 10000) / 100 : 0,
+      pctOfTotal: startupPctOfTotal,
+      overheadAssessment: computeOverheadAssessment(startupPctOfTotal),
     },
 
     tokenDensityTimeline: { quartiles },
@@ -1253,8 +1310,9 @@ export function analyzeSession(detail: SessionDetail): SessionReport {
     fileReadRedundancy: {
       totalReads,
       uniqueFiles,
-      readsPerUniqueFile: uniqueFiles ? Math.round((totalReads / uniqueFiles) * 100) / 100 : 0,
+      readsPerUniqueFile,
       redundantFiles,
+      redundancyAssessment: computeRedundancyAssessment(readsPerUniqueFile),
     },
 
     compaction: {

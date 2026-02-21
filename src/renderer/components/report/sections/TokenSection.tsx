@@ -1,3 +1,4 @@
+import { assessmentColor, assessmentLabel } from '@renderer/utils/reportAssessments';
 import { Coins } from 'lucide-react';
 
 import { ReportSection } from '../ReportSection';
@@ -65,12 +66,40 @@ export const TokenSection = ({ data, cacheEconomics }: TokenSectionProps) => {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div>
           <div className="text-xs text-text-muted">Cache Efficiency</div>
-          <div className="text-sm font-medium text-text">{cacheEconomics.cacheEfficiencyPct}%</div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-text">
+              {cacheEconomics.cacheEfficiencyPct}%
+            </span>
+            {cacheEconomics.cacheEfficiencyAssessment && (
+              <span
+                className="rounded px-2 py-0.5 text-xs font-medium"
+                style={{
+                  backgroundColor: `${assessmentColor(cacheEconomics.cacheEfficiencyAssessment)}20`,
+                  color: assessmentColor(cacheEconomics.cacheEfficiencyAssessment),
+                }}
+              >
+                {assessmentLabel(cacheEconomics.cacheEfficiencyAssessment)}
+              </span>
+            )}
+          </div>
         </div>
         <div>
           <div className="text-xs text-text-muted">R/W Ratio</div>
-          <div className="text-sm font-medium text-text">
-            {cacheEconomics.cacheReadToWriteRatio}x
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-text">
+              {cacheEconomics.cacheReadToWriteRatio}x
+            </span>
+            {cacheEconomics.cacheRatioAssessment && (
+              <span
+                className="rounded px-2 py-0.5 text-xs font-medium"
+                style={{
+                  backgroundColor: `${assessmentColor(cacheEconomics.cacheRatioAssessment)}20`,
+                  color: assessmentColor(cacheEconomics.cacheRatioAssessment),
+                }}
+              >
+                {assessmentLabel(cacheEconomics.cacheRatioAssessment)}
+              </span>
+            )}
           </div>
         </div>
         <div>

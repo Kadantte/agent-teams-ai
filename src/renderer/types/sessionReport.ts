@@ -3,6 +3,19 @@
  * Output of analyzeSession() — one interface per report section.
  */
 
+import type {
+  CacheAssessment,
+  CostAssessment,
+  IdleAssessment,
+  ModelMismatch,
+  OverheadAssessment,
+  RedundancyAssessment,
+  SubagentCostShareAssessment,
+  SwitchPattern,
+  ThrashingAssessment,
+  ToolHealthAssessment,
+} from '@renderer/utils/reportAssessments';
+
 // =============================================================================
 // Pricing
 // =============================================================================
@@ -67,27 +80,33 @@ export interface ReportCostAnalysis {
   costByModel: Record<string, number>;
   costPerCommit: number | null;
   costPerLineChanged: number | null;
+  costPerCommitAssessment: CostAssessment | null;
+  costPerLineAssessment: CostAssessment | null;
+  subagentCostSharePct: number | null;
+  subagentCostShareAssessment: SubagentCostShareAssessment | null;
 }
 
 export interface ReportCacheEconomics {
-  cacheCreation5m: number;
-  cacheCreation1h: number;
   cacheRead: number;
   cacheEfficiencyPct: number;
   coldStartDetected: boolean;
   cacheReadToWriteRatio: number;
+  cacheEfficiencyAssessment: CacheAssessment | null;
+  cacheRatioAssessment: CacheAssessment | null;
 }
 
 export interface ToolSuccessRate {
   totalCalls: number;
   errors: number;
   successRatePct: number;
+  assessment: ToolHealthAssessment;
 }
 
 export interface ReportToolUsage {
   counts: Record<string, number>;
   totalCalls: number;
   successRates: Record<string, ToolSuccessRate>;
+  overallToolHealth: ToolHealthAssessment;
 }
 
 export interface SubagentEntry {
@@ -99,6 +118,7 @@ export interface SubagentEntry {
   totalToolUseCount: number;
   costUsd: number;
   costNote?: string;
+  modelMismatch: ModelMismatch | null;
 }
 
 export interface ReportSubagentMetrics {
@@ -157,6 +177,7 @@ export interface ReportFrictionSignals {
 export interface ReportThrashingSignals {
   bashNearDuplicates: { prefix: string; count: number }[];
   editReworkFiles: { filePath: string; editIndices: number[] }[];
+  thrashingAssessment: ThrashingAssessment;
 }
 
 export interface ReportConversationTree {
@@ -187,6 +208,7 @@ export interface ReportIdleAnalysis {
   activeWorkingHuman: string;
   idlePct: number;
   longestGaps: IdleGap[];
+  idleAssessment: IdleAssessment;
 }
 
 export interface ModelSwitch {
@@ -200,6 +222,7 @@ export interface ReportModelSwitches {
   count: number;
   switches: ModelSwitch[];
   modelsUsed: string[];
+  switchPattern: SwitchPattern | null;
 }
 
 export interface ReportWorkingDirectories {
@@ -230,6 +253,7 @@ export interface ReportStartupOverhead {
   messagesBeforeFirstWork: number;
   tokensBeforeFirstWork: number;
   pctOfTotal: number;
+  overheadAssessment: OverheadAssessment;
 }
 
 export interface ReportTokenDensityTimeline {
@@ -271,6 +295,7 @@ export interface ReportFileReadRedundancy {
   uniqueFiles: number;
   readsPerUniqueFile: number;
   redundantFiles: Record<string, number>;
+  redundancyAssessment: RedundancyAssessment;
 }
 
 // =============================================================================
