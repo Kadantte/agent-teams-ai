@@ -327,6 +327,7 @@ export interface ElectronAPI {
     query: string,
     maxResults?: number
   ) => Promise<SearchSessionsResult>;
+  searchAllProjects: (query: string, maxResults?: number) => Promise<SearchSessionsResult>;
   getSessionDetail: (projectId: string, sessionId: string) => Promise<SessionDetail | null>;
   getSessionMetrics: (projectId: string, sessionId: string) => Promise<SessionMetrics | null>;
   getWaterfallData: (projectId: string, sessionId: string) => Promise<WaterfallData | null>;
