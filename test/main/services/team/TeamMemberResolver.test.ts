@@ -1,0 +1,43 @@
+import { describe, expect, it } from 'vitest';
+
+import { TeamMemberResolver } from '../../../../src/main/services/team/TeamMemberResolver';
+
+import type { InboxMessage, TeamConfig, TeamTask } from '../../../../src/shared/types/team';
+
+describe('TeamMemberResolver', () => {
+  it('builds roster from config + meta + inbox only', () => {
+    const resolver = new TeamMemberResolver();
+    const config: TeamConfig = {
+      name: 'My Team',
+      members: [{ name: 'team-lead', agentType: 'team-lead', role: 'lead' }],
+    };
+    const metaMembers: TeamConfig['members'] = [
+      { name: 'alice', role: 'developer', agentType: 'general-purpose', color: 'blue' },
+    ];
+    const inboxNames = ['bob'];
+    const tasks: TeamTask[] = [
+      { id: '1', subject: 'Visible task', status: 'pending', owner: 'alice' },
+      { id: '2', subject: 'Ghost task', status: 'pending', owner: 'stranger' },
+    ];
+    const now = new Date().toISOString();
+    const messages: InboxMessage[] = [
+      { from: 'bob', text: 'ready', timestamp: now, read: false, color: 'green' },
+      { from: 'user', text: 'system note', timestamp: now, read: false },
+    ];
+
+    const members = resolver.resolveMembers(config, metaMembers, inboxNames, tasks, messages);
+    const names = members.map((member) => member.name);
+
+    expect(names).toEqual(['alice', 'bob', 'team-lead']);
+    expect(names).not.toContain('stranger');
+    expect(names).not.toContain('user');
+
+    const alice = members.find((member) => member.name === 'alice');
+    expect(alice?.role).toBe('developer');
+    expect(alice?.color).toBe('blue');
+
+    const lead = members.find((member) => member.name === 'team-lead');
+    expect(lead?.role).toBe('lead');
+    expect(lead?.agentType).toBe('team-lead');
+  });
+});

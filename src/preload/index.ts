@@ -22,9 +22,14 @@ import {
   TEAM_CANCEL_PROVISIONING,
   TEAM_CHANGE,
   TEAM_CREATE,
+  TEAM_CREATE_CONFIG,
   TEAM_CREATE_TASK,
   TEAM_DELETE_TEAM,
+  TEAM_GET_ALL_TASKS,
   TEAM_GET_DATA,
+  TEAM_GET_MEMBER_LOGS,
+  TEAM_GET_MEMBER_STATS,
+  TEAM_LAUNCH,
   TEAM_LIST,
   TEAM_PREPARE_PROVISIONING,
   TEAM_PROCESS_ALIVE,
@@ -33,6 +38,7 @@ import {
   TEAM_PROVISIONING_STATUS,
   TEAM_REQUEST_REVIEW,
   TEAM_SEND_MESSAGE,
+  TEAM_UPDATE_CONFIG,
   TEAM_UPDATE_KANBAN,
   TEAM_UPDATE_TASK_STATUS,
   UPDATER_CHECK,
@@ -78,8 +84,11 @@ import type {
   ContextInfo,
   CreateTaskRequest,
   ElectronAPI,
+  GlobalTask,
   HttpServerStatus,
   IpcResult,
+  MemberFullStats,
+  MemberLogSummary,
   NotificationTrigger,
   SendMessageRequest,
   SendMessageResult,
@@ -90,14 +99,19 @@ import type {
   SshConnectionStatus,
   SshLastConnection,
   TeamChangeEvent,
+  TeamConfig,
+  TeamCreateConfigRequest,
   TeamCreateRequest,
   TeamCreateResponse,
   TeamData,
+  TeamLaunchRequest,
+  TeamLaunchResponse,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
+  TeamUpdateConfigRequest,
   TriggerTestResult,
   UpdateKanbanPatch,
   WslClaudeRootCandidate,
@@ -502,6 +516,9 @@ const electronAPI: ElectronAPI = {
     createTeam: async (request: TeamCreateRequest) => {
       return invokeIpcWithResult<TeamCreateResponse>(TEAM_CREATE, request);
     },
+    launchTeam: async (request: TeamLaunchRequest) => {
+      return invokeIpcWithResult<TeamLaunchResponse>(TEAM_LAUNCH, request);
+    },
     getProvisioningStatus: async (runId: string) => {
       return invokeIpcWithResult<TeamProvisioningProgress>(TEAM_PROVISIONING_STATUS, runId);
     },
@@ -531,6 +548,21 @@ const electronAPI: ElectronAPI = {
     },
     aliveList: async () => {
       return invokeIpcWithResult<string[]>(TEAM_ALIVE_LIST);
+    },
+    createConfig: async (request: TeamCreateConfigRequest) => {
+      return invokeIpcWithResult<void>(TEAM_CREATE_CONFIG, request);
+    },
+    getMemberLogs: async (teamName: string, memberName: string) => {
+      return invokeIpcWithResult<MemberLogSummary[]>(TEAM_GET_MEMBER_LOGS, teamName, memberName);
+    },
+    getMemberStats: async (teamName: string, memberName: string) => {
+      return invokeIpcWithResult<MemberFullStats>(TEAM_GET_MEMBER_STATS, teamName, memberName);
+    },
+    getAllTasks: async () => {
+      return invokeIpcWithResult<GlobalTask[]>(TEAM_GET_ALL_TASKS);
+    },
+    updateConfig: async (teamName: string, updates: TeamUpdateConfigRequest) => {
+      return invokeIpcWithResult<TeamConfig>(TEAM_UPDATE_CONFIG, teamName, updates);
     },
     onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void): (() => void) => {
       ipcRenderer.on(

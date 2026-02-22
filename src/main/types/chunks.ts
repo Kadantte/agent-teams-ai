@@ -1,5 +1,5 @@
 /**
- * Chunk and visualization types for claude-devtools.
+ * Chunk and visualization types for Claude Agent Teams UI.
  *
  * This module contains:
  * - Chunk types (UserChunk, AIChunk, SystemChunk, CompactChunk)

@@ -28,6 +28,7 @@ export class TeamTaskWriter {
       description: task.description ?? '',
       blocks: task.blocks ?? [],
       blockedBy: task.blockedBy ?? [],
+      createdAt: task.createdAt ?? new Date().toISOString(),
     };
 
     await atomicWriteAsync(taskPath, JSON.stringify(cliCompatibleTask, null, 2));

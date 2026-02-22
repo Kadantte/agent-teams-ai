@@ -30,8 +30,15 @@ interface CreateTaskDialogProps {
   tasks: TeamTask[];
   defaultSubject?: string;
   defaultDescription?: string;
+  defaultOwner?: string;
   onClose: () => void;
-  onSubmit: (subject: string, description: string, owner?: string, blockedBy?: string[]) => void;
+  onSubmit: (
+    subject: string,
+    description: string,
+    owner?: string,
+    blockedBy?: string[],
+    prompt?: string
+  ) => void;
   submitting?: boolean;
 }
 
@@ -41,14 +48,28 @@ export const CreateTaskDialog = ({
   tasks,
   defaultSubject = '',
   defaultDescription = '',
+  defaultOwner = '',
   onClose,
   onSubmit,
   submitting = false,
 }: CreateTaskDialogProps): React.JSX.Element => {
   const [subject, setSubject] = useState(defaultSubject);
   const [description, setDescription] = useState(defaultDescription);
-  const [owner, setOwner] = useState<string>('');
+  const [owner, setOwner] = useState<string>(defaultOwner);
   const [blockedBy, setBlockedBy] = useState<string[]>([]);
+  const [prompt, setPrompt] = useState('');
+  const [prevOpen, setPrevOpen] = useState(false);
+
+  if (open && !prevOpen) {
+    setSubject(defaultSubject);
+    setDescription(defaultDescription);
+    setOwner(defaultOwner);
+    setBlockedBy([]);
+    setPrompt('');
+  }
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+  }
 
   const canSubmit = subject.trim().length > 0 && !submitting;
 
@@ -67,12 +88,9 @@ export const CreateTaskDialog = ({
       subject.trim(),
       description.trim(),
       owner || undefined,
-      blockedBy.length > 0 ? blockedBy : undefined
+      blockedBy.length > 0 ? blockedBy : undefined,
+      prompt.trim() || undefined
     );
-    setSubject('');
-    setDescription('');
-    setOwner('');
-    setBlockedBy([]);
   };
 
   const handleOpenChange = (nextOpen: boolean): void => {
@@ -85,18 +103,19 @@ export const CreateTaskDialog = ({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>Создать задачу</DialogTitle>
+          <DialogTitle>Create Task</DialogTitle>
           <DialogDescription>
-            Задача будет создана в директории tasks/ команды и появится на Kanban-доске.
+            The task will be created in the team&apos;s tasks/ directory and appear on the Kanban
+            board.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
-            <Label htmlFor="task-subject">Название</Label>
+            <Label htmlFor="task-subject">Subject</Label>
             <Input
               id="task-subject"
-              placeholder="Что нужно сделать?"
+              placeholder="What needs to be done?"
               value={subject}
               autoFocus
               onChange={(e) => setSubject(e.target.value)}
@@ -107,10 +126,10 @@ export const CreateTaskDialog = ({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="task-description">Описание (опционально)</Label>
+            <Label htmlFor="task-description">Description (optional)</Label>
             <Textarea
               id="task-description"
-              placeholder="Детали задачи..."
+              placeholder="Task details..."
               value={description}
               rows={3}
               onChange={(e) => setDescription(e.target.value)}
@@ -118,12 +137,27 @@ export const CreateTaskDialog = ({
           </div>
 
           <div className="grid gap-2">
-            <Label>Исполнитель (опционально)</Label>
-            <Select value={owner} onValueChange={setOwner}>
+            <Label htmlFor="task-prompt">Prompt for assignee (optional)</Label>
+            <Textarea
+              id="task-prompt"
+              placeholder="Custom instructions for the team member..."
+              value={prompt}
+              rows={3}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Assignee (optional)</Label>
+            <Select
+              value={owner || '__unassigned__'}
+              onValueChange={(v) => setOwner(v === '__unassigned__' ? '' : v)}
+            >
               <SelectTrigger>
-                <SelectValue placeholder="Не назначен" />
+                <SelectValue placeholder="Unassigned" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="__unassigned__">Unassigned</SelectItem>
                 {members.map((m) => {
                   const role = formatAgentRole(m.agentType);
                   return (
@@ -139,7 +173,7 @@ export const CreateTaskDialog = ({
 
           {availableTasks.length > 0 ? (
             <div className="grid gap-2">
-              <Label>Заблокирована задачами (опционально)</Label>
+              <Label>Blocked by tasks (optional)</Label>
               <div className="max-h-32 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
                 {availableTasks.map((t) => {
                   const isSelected = blockedBy.includes(t.id);
@@ -176,7 +210,7 @@ export const CreateTaskDialog = ({
               </div>
               {blockedBy.length > 0 ? (
                 <p className="text-[11px] text-yellow-300">
-                  Задача будет заблокирована: {blockedBy.map((id) => `#${id}`).join(', ')}
+                  Task will be blocked by: {blockedBy.map((id) => `#${id}`).join(', ')}
                 </p>
               ) : null}
             </div>
@@ -185,10 +219,10 @@ export const CreateTaskDialog = ({
 
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>
-            Отмена
+            Cancel
           </Button>
           <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
-            {submitting ? 'Создание...' : 'Создать'}
+            {submitting ? 'Creating...' : 'Create'}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -25,33 +25,39 @@ export const TaskList = ({ tasks }: TaskListProps): React.JSX.Element => {
     });
   }, [tasks, ownerFilter, statusFilter]);
 
+  const showStatusFilter = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const task of tasks) {
+      counts.set(task.status, (counts.get(task.status) ?? 0) + 1);
+    }
+    return Array.from(counts.values()).some((count) => count > 10);
+  }, [tasks]);
+
   if (tasks.length === 0) {
     return (
       <div className="rounded-md border border-[var(--color-border)] p-4 text-sm text-[var(--color-text-muted)]">
-        Нет задач в этой команде
+        No tasks in this team
       </div>
     );
   }
 
-  const showFilters = tasks.length > 200;
-
   return (
     <div className="overflow-hidden rounded-md border border-[var(--color-border)]">
-      {showFilters ? (
-        <div className="flex flex-wrap gap-2 border-b border-[var(--color-border)] p-2">
-          <select
-            className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)]"
-            value={ownerFilter}
-            aria-label="Filter tasks by owner"
-            onChange={(event) => setOwnerFilter(event.target.value)}
-          >
-            <option value="all">All owners</option>
-            {ownerOptions.map((owner) => (
-              <option key={owner} value={owner}>
-                {owner}
-              </option>
-            ))}
-          </select>
+      <div className="flex flex-wrap gap-2 border-b border-[var(--color-border)] p-2">
+        <select
+          className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)]"
+          value={ownerFilter}
+          aria-label="Filter tasks by owner"
+          onChange={(event) => setOwnerFilter(event.target.value)}
+        >
+          <option value="all">All owners</option>
+          {ownerOptions.map((owner) => (
+            <option key={owner} value={owner}>
+              {owner}
+            </option>
+          ))}
+        </select>
+        {showStatusFilter ? (
           <select
             className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)]"
             value={statusFilter}
@@ -64,11 +70,13 @@ export const TaskList = ({ tasks }: TaskListProps): React.JSX.Element => {
             <option value="completed">completed</option>
             <option value="deleted">deleted</option>
           </select>
+        ) : null}
+        {ownerFilter !== 'all' || statusFilter !== 'all' ? (
           <p className="self-center text-[11px] text-[var(--color-text-muted)]">
             Showing {filteredTasks.length} of {tasks.length}
           </p>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
       <table className="min-w-full table-fixed">
         <thead className="bg-[var(--color-surface-raised)]">
           <tr>

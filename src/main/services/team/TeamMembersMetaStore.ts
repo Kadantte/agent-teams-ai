@@ -1,0 +1,94 @@
+import { getTeamsBasePath } from '@main/utils/pathDecoder';
+import * as fs from 'fs';
+import * as path from 'path';
+
+import { atomicWriteAsync } from './atomicWrite';
+
+import type { TeamMember } from '@shared/types';
+
+interface TeamMembersMetaFile {
+  version: 1;
+  members: TeamMember[];
+}
+
+function normalizeMember(member: TeamMember): TeamMember | null {
+  const trimmedName = member.name?.trim();
+  if (!trimmedName) {
+    return null;
+  }
+  return {
+    name: trimmedName,
+    role: typeof member.role === 'string' ? member.role.trim() || undefined : undefined,
+    agentType:
+      typeof member.agentType === 'string' ? member.agentType.trim() || undefined : undefined,
+    color: typeof member.color === 'string' ? member.color.trim() || undefined : undefined,
+    joinedAt: typeof member.joinedAt === 'number' ? member.joinedAt : undefined,
+    agentId: typeof member.agentId === 'string' ? member.agentId : undefined,
+  };
+}
+
+export class TeamMembersMetaStore {
+  private getMetaPath(teamName: string): string {
+    return path.join(getTeamsBasePath(), teamName, 'members.meta.json');
+  }
+
+  async getMembers(teamName: string): Promise<TeamMember[]> {
+    const metaPath = this.getMetaPath(teamName);
+    let raw: string;
+    try {
+      raw = await fs.promises.readFile(metaPath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return [];
+      }
+      throw error;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw) as unknown;
+    } catch {
+      return [];
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      return [];
+    }
+
+    const file = parsed as Partial<TeamMembersMetaFile>;
+    if (!Array.isArray(file.members)) {
+      return [];
+    }
+
+    const deduped = new Map<string, TeamMember>();
+    for (const item of file.members) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const normalized = normalizeMember(item);
+      if (!normalized) {
+        continue;
+      }
+      deduped.set(normalized.name, normalized);
+    }
+
+    return Array.from(deduped.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async writeMembers(teamName: string, members: TeamMember[]): Promise<void> {
+    const deduped = new Map<string, TeamMember>();
+    for (const member of members) {
+      const normalized = normalizeMember(member);
+      if (!normalized) {
+        continue;
+      }
+      deduped.set(normalized.name, normalized);
+    }
+
+    const payload: TeamMembersMetaFile = {
+      version: 1,
+      members: Array.from(deduped.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    };
+
+    await atomicWriteAsync(this.getMetaPath(teamName), JSON.stringify(payload, null, 2));
+  }
+}

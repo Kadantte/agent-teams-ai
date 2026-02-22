@@ -77,8 +77,23 @@ export class TeamTaskReader {
             : typeof parsed.title === 'string'
               ? parsed.title
               : '';
+        // Resolve createdAt: prefer JSON field, fallback to fs.stat
+        let createdAt: string | undefined;
+        if (typeof parsed.createdAt === 'string') {
+          createdAt = parsed.createdAt;
+        } else {
+          try {
+            const stat = await fs.promises.stat(taskPath);
+            const bt = stat.birthtime.getTime();
+            createdAt = (bt > 0 ? stat.birthtime : stat.mtime).toISOString();
+          } catch {
+            /* leave undefined */
+          }
+        }
+
         const task: TeamTask = {
-          id: typeof parsed.id === 'string' || typeof parsed.id === 'number' ? String(parsed.id) : '',
+          id:
+            typeof parsed.id === 'string' || typeof parsed.id === 'number' ? String(parsed.id) : '',
           subject,
           description: typeof parsed.description === 'string' ? parsed.description : undefined,
           activeForm: typeof parsed.activeForm === 'string' ? parsed.activeForm : undefined,
@@ -90,6 +105,8 @@ export class TeamTaskReader {
             : 'pending',
           blocks: Array.isArray(parsed.blocks) ? (parsed.blocks as string[]) : undefined,
           blockedBy: Array.isArray(parsed.blockedBy) ? (parsed.blockedBy as string[]) : undefined,
+          createdAt,
+          projectPath: typeof parsed.projectPath === 'string' ? parsed.projectPath : undefined,
         };
         if (task.status === 'deleted') {
           continue;
@@ -101,5 +118,34 @@ export class TeamTaskReader {
     }
 
     return tasks;
+  }
+
+  async getAllTasks(): Promise<(TeamTask & { teamName: string })[]> {
+    const tasksBase = getTasksBasePath();
+
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(tasksBase, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return [];
+      }
+      throw error;
+    }
+
+    const result: (TeamTask & { teamName: string })[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      try {
+        const tasks = await this.getTasks(entry.name);
+        for (const task of tasks) {
+          result.push({ ...task, teamName: entry.name });
+        }
+      } catch {
+        logger.debug(`Skipping tasks dir: ${entry.name}`);
+      }
+    }
+
+    return result;
   }
 }

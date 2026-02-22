@@ -6,6 +6,7 @@ import { useTabUI } from '@renderer/hooks/useTabUI';
 import { useVisibleAIGroup } from '@renderer/hooks/useVisibleAIGroup';
 import { useStore } from '@renderer/store';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { ChevronRight, Users } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { SessionContextPanel } from './SessionContextPanel/index';
@@ -57,6 +58,8 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
     syncSearchMatchesWithRendered,
     selectSearchMatch,
     setTabVisibleAIGroup,
+    teams,
+    openTeamTab,
   } = useStore(
     useShallow((s) => ({
       searchQuery: s.searchQuery,
@@ -69,6 +72,8 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
       syncSearchMatchesWithRendered: s.syncSearchMatchesWithRendered,
       selectSearchMatch: s.selectSearchMatch,
       setTabVisibleAIGroup: s.setTabVisibleAIGroup,
+      teams: s.teams,
+      openTeamTab: s.openTeamTab,
     }))
   );
 
@@ -104,6 +109,13 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
   // Get THIS tab's pending navigation request
   const thisTab = effectiveTabId ? openTabs.find((t) => t.id === effectiveTabId) : null;
   const pendingNavigation = thisTab?.pendingNavigation;
+
+  // Look up whether this session belongs to a team
+  const sessionTeam = useMemo(() => {
+    if (!sessionDetail?.session?.id) return null;
+    const sid = sessionDetail.session.id;
+    return teams.find((t) => t.leadSessionId === sid || t.sessionHistory?.includes(sid)) ?? null;
+  }, [teams, sessionDetail?.session?.id]);
 
   // Compute all accumulated context injections (phase-aware)
   const { allContextInjections, lastAiGroupTotalTokens } = useMemo(() => {
@@ -748,9 +760,29 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
               </button>
             </div>
           )}
+          {sessionTeam && (
+            <div
+              className="mx-auto max-w-5xl px-6 pt-4"
+              style={{ marginTop: allContextInjections.length > 0 ? '-1.5rem' : 0 }}
+            >
+              <button
+                onClick={() => openTeamTab(sessionTeam.teamName, sessionTeam.projectPath)}
+                className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs transition-colors hover:brightness-110"
+                style={{
+                  backgroundColor: 'var(--color-surface-raised)',
+                  color: 'var(--color-text-secondary)',
+                  border: '1px solid var(--color-border)',
+                }}
+              >
+                <Users className="size-3.5" />
+                <span>{sessionTeam.displayName}</span>
+                <ChevronRight className="size-3 opacity-50" />
+              </button>
+            </div>
+          )}
           <div
             className="mx-auto max-w-5xl px-6 py-8"
-            style={{ marginTop: allContextInjections.length > 0 ? '-2rem' : 0 }}
+            style={{ marginTop: allContextInjections.length > 0 && !sessionTeam ? '-2rem' : 0 }}
           >
             <div className="space-y-8">
               {shouldVirtualize ? (

@@ -78,4 +78,47 @@ describe('TeamDataService', () => {
     expect(garbageCollect).not.toHaveBeenCalled();
     expect(result.warnings).toContain('Tasks failed to load');
   });
+
+  it('includes projectPath from config when creating a task', async () => {
+    const createTaskMock = vi.fn(async () => undefined);
+
+    const service = new TeamDataService(
+      {
+        listTeams: vi.fn(),
+        getConfig: vi.fn(async () => ({
+          name: 'My team',
+          members: [],
+          projectPath: '/Users/dev/my-project',
+        })),
+      } as never,
+      {
+        getNextTaskId: vi.fn(async () => '1'),
+        getTasks: vi.fn(async () => []),
+      } as never,
+      {
+        listInboxNames: vi.fn(async () => []),
+        getMessages: vi.fn(async () => []),
+      } as never,
+      {} as never,
+      {
+        createTask: createTaskMock,
+        addBlocksEntry: vi.fn(async () => undefined),
+      } as never,
+      {
+        resolveMembers: vi.fn(() => []),
+      } as never,
+      {
+        getState: vi.fn(async () => ({ teamName: 'my-team', reviewers: [], tasks: {} })),
+        garbageCollect: vi.fn(async () => undefined),
+      } as never
+    );
+
+    const result = await service.createTask('my-team', { subject: 'Test' });
+
+    expect(result.projectPath).toBe('/Users/dev/my-project');
+    expect(createTaskMock).toHaveBeenCalledWith(
+      'my-team',
+      expect.objectContaining({ projectPath: '/Users/dev/my-project' })
+    );
+  });
 });

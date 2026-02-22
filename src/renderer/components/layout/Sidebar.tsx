@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '@renderer/store';
 import { useShallow } from 'zustand/react/shallow';
 
-import { DateGroupedSessions } from '../sidebar/DateGroupedSessions';
+import { GlobalTaskList } from '../sidebar/GlobalTaskList';
 
 import { SidebarHeader } from './SidebarHeader';
 
@@ -101,9 +101,9 @@ export const Sidebar = (): React.JSX.Element | null => {
       {/* Sidebar header with project dropdown */}
       <SidebarHeader />
 
-      {/* Date-grouped session list */}
+      {/* Global task list */}
       <div className="flex-1 overflow-hidden">
-        <DateGroupedSessions />
+        <GlobalTaskList />
       </div>
 
       {/* Resize handle */}

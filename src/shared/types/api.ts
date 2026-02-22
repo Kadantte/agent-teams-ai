@@ -15,17 +15,25 @@ import type {
 } from './notifications';
 import type {
   CreateTaskRequest,
+  GlobalTask,
+  MemberFullStats,
+  MemberLogSummary,
   SendMessageRequest,
   SendMessageResult,
   TeamChangeEvent,
+  TeamConfig,
+  TeamCreateConfigRequest,
   TeamCreateRequest,
   TeamCreateResponse,
   TeamData,
+  TeamLaunchRequest,
+  TeamLaunchResponse,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
+  TeamUpdateConfigRequest,
   UpdateKanbanPatch,
 } from './team';
 import type { WaterfallData } from './visualization';
@@ -349,6 +357,12 @@ export interface TeamsAPI {
   processSend: (teamName: string, message: string) => Promise<void>;
   processAlive: (teamName: string) => Promise<boolean>;
   aliveList: () => Promise<string[]>;
+  createConfig: (request: TeamCreateConfigRequest) => Promise<void>;
+  getMemberLogs: (teamName: string, memberName: string) => Promise<MemberLogSummary[]>;
+  getMemberStats: (teamName: string, memberName: string) => Promise<MemberFullStats>;
+  launchTeam: (request: TeamLaunchRequest) => Promise<TeamLaunchResponse>;
+  getAllTasks: () => Promise<GlobalTask[]>;
+  updateConfig: (teamName: string, updates: TeamUpdateConfigRequest) => Promise<TeamConfig>;
   onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void) => () => void;
   onProvisioningProgress: (
     callback: (event: unknown, data: TeamProvisioningProgress) => void

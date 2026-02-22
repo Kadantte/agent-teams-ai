@@ -16,7 +16,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 const logger = createLogger('Component:DashboardView');
 import { formatDistanceToNow } from 'date-fns';
-import { Command, FolderGit2, FolderOpen, GitBranch, Search, Settings } from 'lucide-react';
+import { Command, FolderGit2, FolderOpen, GitBranch, Search, Settings, Users } from 'lucide-react';
 
 import type { RepositoryGroup } from '@renderer/types/data';
 
@@ -52,7 +52,7 @@ const CommandSearch = ({ value, onChange }: Readonly<CommandSearchProps>): React
   }, [openCommandPalette]);
 
   return (
-    <div className="relative mx-auto w-full max-w-xl">
+    <div className="relative w-full">
       {/* Search container with glow effect on focus */}
       <div
         className={`relative flex items-center gap-3 rounded-sm border bg-surface-raised px-4 py-3 transition-all duration-200 ${
@@ -394,7 +394,12 @@ const ProjectsGrid = ({
 
 export const DashboardView = (): React.JSX.Element => {
   const [searchQuery, setSearchQuery] = useState('');
-  const openSettingsTab = useStore((s) => s.openSettingsTab);
+  const { openSettingsTab, openTeamsTab } = useStore(
+    useShallow((s) => ({
+      openSettingsTab: s.openSettingsTab,
+      openTeamsTab: s.openTeamsTab,
+    }))
+  );
 
   return (
     <div className="relative flex-1 overflow-auto bg-surface">
@@ -406,9 +411,19 @@ export const DashboardView = (): React.JSX.Element => {
 
       {/* Content */}
       <div className="relative mx-auto max-w-5xl px-8 py-12">
-        {/* Command Search */}
-        <div className="mb-12">
-          <CommandSearch value={searchQuery} onChange={setSearchQuery} />
+        {/* Team select + Search */}
+        <div className="mb-12 flex items-center justify-center gap-3">
+          <button
+            onClick={openTeamsTab}
+            className="flex shrink-0 items-center gap-2 rounded-sm border border-border bg-surface-raised px-4 py-3 text-sm text-text-secondary transition-all duration-200 hover:border-zinc-500 hover:text-text"
+          >
+            <Users className="size-4" />
+            Select Team
+          </button>
+          <span className="shrink-0 text-xs text-text-muted">or</span>
+          <div className="flex-1">
+            <CommandSearch value={searchQuery} onChange={setSearchQuery} />
+          </div>
         </div>
 
         {/* Section header */}

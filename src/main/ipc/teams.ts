@@ -2,9 +2,14 @@ import {
   TEAM_ALIVE_LIST,
   TEAM_CANCEL_PROVISIONING,
   TEAM_CREATE,
+  TEAM_CREATE_CONFIG,
   TEAM_CREATE_TASK,
   TEAM_DELETE_TEAM,
+  TEAM_GET_ALL_TASKS,
   TEAM_GET_DATA,
+  TEAM_GET_MEMBER_LOGS,
+  TEAM_GET_MEMBER_STATS,
+  TEAM_LAUNCH,
   TEAM_LIST,
   TEAM_PREPARE_PROVISIONING,
   TEAM_PROCESS_ALIVE,
@@ -13,6 +18,7 @@ import {
   TEAM_PROVISIONING_STATUS,
   TEAM_REQUEST_REVIEW,
   TEAM_SEND_MESSAGE,
+  TEAM_UPDATE_CONFIG,
   TEAM_UPDATE_KANBAN,
   TEAM_UPDATE_TASK_STATUS,
   // eslint-disable-next-line boundaries/element-types -- IPC channel constants are shared between main and preload by design
@@ -24,20 +30,33 @@ import * as path from 'path';
 
 import { validateFromField, validateMemberName, validateTaskId, validateTeamName } from './guards';
 
-import type { TeamDataService, TeamProvisioningService } from '../services';
+import type {
+  MemberStatsComputer,
+  TeamDataService,
+  TeamMemberLogsFinder,
+  TeamProvisioningService,
+} from '../services';
 import type {
   CreateTaskRequest,
+  GlobalTask,
   IpcResult,
+  MemberFullStats,
+  MemberLogSummary,
   SendMessageRequest,
   SendMessageResult,
+  TeamConfig,
+  TeamCreateConfigRequest,
   TeamCreateRequest,
   TeamCreateResponse,
   TeamData,
+  TeamLaunchRequest,
+  TeamLaunchResponse,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
+  TeamUpdateConfigRequest,
   UpdateKanbanPatch,
 } from '@shared/types';
 
@@ -45,13 +64,19 @@ const logger = createLogger('IPC:teams');
 
 let teamDataService: TeamDataService | null = null;
 let teamProvisioningService: TeamProvisioningService | null = null;
+let teamMemberLogsFinder: TeamMemberLogsFinder | null = null;
+let memberStatsComputer: MemberStatsComputer | null = null;
 
 export function initializeTeamHandlers(
   service: TeamDataService,
-  provisioningService: TeamProvisioningService
+  provisioningService: TeamProvisioningService,
+  logsFinder?: TeamMemberLogsFinder,
+  statsComputer?: MemberStatsComputer
 ): void {
   teamDataService = service;
   teamProvisioningService = provisioningService;
+  teamMemberLogsFinder = logsFinder ?? null;
+  memberStatsComputer = statsComputer ?? null;
 }
 
 export function registerTeamHandlers(ipcMain: IpcMain): void {
@@ -59,6 +84,7 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_GET_DATA, handleGetData);
   ipcMain.handle(TEAM_PREPARE_PROVISIONING, handlePrepareProvisioning);
   ipcMain.handle(TEAM_CREATE, handleCreateTeam);
+  ipcMain.handle(TEAM_LAUNCH, handleLaunchTeam);
   ipcMain.handle(TEAM_PROVISIONING_STATUS, handleProvisioningStatus);
   ipcMain.handle(TEAM_CANCEL_PROVISIONING, handleCancelProvisioning);
   ipcMain.handle(TEAM_SEND_MESSAGE, handleSendMessage);
@@ -70,6 +96,11 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_PROCESS_SEND, handleProcessSend);
   ipcMain.handle(TEAM_PROCESS_ALIVE, handleProcessAlive);
   ipcMain.handle(TEAM_ALIVE_LIST, handleAliveList);
+  ipcMain.handle(TEAM_CREATE_CONFIG, handleCreateConfig);
+  ipcMain.handle(TEAM_GET_MEMBER_LOGS, handleGetMemberLogs);
+  ipcMain.handle(TEAM_GET_MEMBER_STATS, handleGetMemberStats);
+  ipcMain.handle(TEAM_UPDATE_CONFIG, handleUpdateConfig);
+  ipcMain.handle(TEAM_GET_ALL_TASKS, handleGetAllTasks);
   logger.info('Team handlers registered');
 }
 
@@ -78,6 +109,7 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_GET_DATA);
   ipcMain.removeHandler(TEAM_PREPARE_PROVISIONING);
   ipcMain.removeHandler(TEAM_CREATE);
+  ipcMain.removeHandler(TEAM_LAUNCH);
   ipcMain.removeHandler(TEAM_PROVISIONING_STATUS);
   ipcMain.removeHandler(TEAM_CANCEL_PROVISIONING);
   ipcMain.removeHandler(TEAM_SEND_MESSAGE);
@@ -89,6 +121,11 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_PROCESS_SEND);
   ipcMain.removeHandler(TEAM_PROCESS_ALIVE);
   ipcMain.removeHandler(TEAM_ALIVE_LIST);
+  ipcMain.removeHandler(TEAM_CREATE_CONFIG);
+  ipcMain.removeHandler(TEAM_GET_MEMBER_LOGS);
+  ipcMain.removeHandler(TEAM_GET_MEMBER_STATS);
+  ipcMain.removeHandler(TEAM_UPDATE_CONFIG);
+  ipcMain.removeHandler(TEAM_GET_ALL_TASKS);
 }
 
 function getTeamDataService(): TeamDataService {
@@ -131,7 +168,11 @@ async function handleGetData(
   if (!validated.valid) {
     return { success: false, error: validated.error ?? 'Invalid teamName' };
   }
-  return wrapTeamHandler('getData', () => getTeamDataService().getTeamData(validated.value!));
+  return wrapTeamHandler('getData', async () => {
+    const data = await getTeamDataService().getTeamData(validated.value!);
+    const isAlive = getTeamProvisioningService().isTeamAlive(validated.value!);
+    return { ...data, isAlive };
+  });
 }
 
 async function handleDeleteTeam(
@@ -143,6 +184,32 @@ async function handleDeleteTeam(
     return { success: false, error: validated.error ?? 'Invalid teamName' };
   }
   return wrapTeamHandler('deleteTeam', () => getTeamDataService().deleteTeam(validated.value!));
+}
+
+async function handleUpdateConfig(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  updates: unknown
+): Promise<IpcResult<TeamConfig>> {
+  const validated = validateTeamName(teamName);
+  if (!validated.valid) {
+    return { success: false, error: validated.error ?? 'Invalid teamName' };
+  }
+  if (!updates || typeof updates !== 'object') {
+    return { success: false, error: 'Invalid updates object' };
+  }
+  const { name, description, color } = updates as TeamUpdateConfigRequest;
+  return wrapTeamHandler('updateConfig', async () => {
+    const result = await getTeamDataService().updateConfig(validated.value!, {
+      name,
+      description,
+      color,
+    });
+    if (!result) {
+      throw new Error('Team config not found');
+    }
+    return result;
+  });
 }
 
 function isProvisioningTeamName(teamName: string): boolean {
@@ -223,14 +290,20 @@ async function validateProvisioningRequest(
     return { valid: false, error: 'cwd must be a directory' };
   }
 
+  if (payload.prompt !== undefined && typeof payload.prompt !== 'string') {
+    return { valid: false, error: 'prompt must be a string' };
+  }
+
   return {
     valid: true,
     value: {
       teamName,
       displayName: payload.displayName?.trim() || undefined,
       description: payload.description?.trim() || undefined,
+      color: typeof payload.color === 'string' ? payload.color.trim() || undefined : undefined,
       members,
       cwd,
+      prompt: typeof payload.prompt === 'string' ? payload.prompt.trim() || undefined : undefined,
     },
   };
 }
@@ -253,6 +326,60 @@ async function handleCreateTeam(
         logger.warn(`Failed to emit provisioning progress: ${message}`);
       }
     })
+  );
+}
+
+async function handleLaunchTeam(
+  event: IpcMainInvokeEvent,
+  request: unknown
+): Promise<IpcResult<TeamLaunchResponse>> {
+  if (!request || typeof request !== 'object') {
+    return { success: false, error: 'Invalid team launch request' };
+  }
+
+  const payload = request as Partial<TeamLaunchRequest>;
+  const validatedTeamName = validateTeamName(payload.teamName);
+  if (!validatedTeamName.valid) {
+    return { success: false, error: validatedTeamName.error ?? 'Invalid teamName' };
+  }
+
+  if (typeof payload.cwd !== 'string' || payload.cwd.trim().length === 0) {
+    return { success: false, error: 'cwd is required' };
+  }
+  const cwd = payload.cwd.trim();
+  if (!path.isAbsolute(cwd)) {
+    return { success: false, error: 'cwd must be an absolute path' };
+  }
+
+  try {
+    const stat = await fs.promises.stat(cwd);
+    if (!stat.isDirectory()) {
+      return { success: false, error: 'cwd must be a directory' };
+    }
+  } catch {
+    return { success: false, error: 'cwd does not exist' };
+  }
+
+  if (payload.prompt !== undefined && typeof payload.prompt !== 'string') {
+    return { success: false, error: 'prompt must be a string' };
+  }
+
+  return wrapTeamHandler('launch', () =>
+    getTeamProvisioningService().launchTeam(
+      {
+        teamName: validatedTeamName.value!,
+        cwd,
+        prompt: typeof payload.prompt === 'string' ? payload.prompt.trim() || undefined : undefined,
+      },
+      (progress) => {
+        try {
+          event.sender.send(TEAM_PROVISIONING_PROGRESS, progress);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.warn(`Failed to emit launch provisioning progress: ${message}`);
+        }
+      }
+    )
   );
 }
 
@@ -396,6 +523,14 @@ async function handleCreateTask(
       return { success: false, error: 'blockedBy must be an array of task ID strings' };
     }
   }
+  if (payload.prompt !== undefined) {
+    if (typeof payload.prompt !== 'string') {
+      return { success: false, error: 'prompt must be a string' };
+    }
+    if (payload.prompt.length > 5000) {
+      return { success: false, error: 'prompt exceeds max length (5000)' };
+    }
+  }
 
   return wrapTeamHandler('createTask', () =>
     getTeamDataService().createTask(validatedTeamName.value!, {
@@ -403,6 +538,7 @@ async function handleCreateTask(
       description: payload.description?.trim(),
       owner: payload.owner?.trim() || undefined,
       blockedBy: payload.blockedBy,
+      prompt: payload.prompt?.trim() || undefined,
     })
   );
 }
@@ -517,6 +653,115 @@ async function handleProcessAlive(
   );
 }
 
+async function handleCreateConfig(
+  _event: IpcMainInvokeEvent,
+  request: unknown
+): Promise<IpcResult<void>> {
+  if (!request || typeof request !== 'object') {
+    return { success: false, error: 'Invalid create config request' };
+  }
+
+  const payload = request as Partial<TeamCreateConfigRequest>;
+  if (typeof payload.teamName !== 'string' || payload.teamName.trim().length === 0) {
+    return { success: false, error: 'teamName is required' };
+  }
+  const teamName = payload.teamName.trim();
+  if (!isProvisioningTeamName(teamName)) {
+    return { success: false, error: 'teamName must be kebab-case [a-z0-9-], max 64 chars' };
+  }
+
+  if (!Array.isArray(payload.members) || payload.members.length === 0) {
+    return { success: false, error: 'members must contain at least one member' };
+  }
+
+  const seenNames = new Set<string>();
+  const members: TeamCreateConfigRequest['members'] = [];
+  for (const member of payload.members) {
+    if (!member || typeof member !== 'object') {
+      return { success: false, error: 'member must be object' };
+    }
+    const nameValidation = validateMemberName((member as { name?: unknown }).name);
+    if (!nameValidation.valid) {
+      return { success: false, error: nameValidation.error ?? 'Invalid member name' };
+    }
+    const memberName = nameValidation.value!;
+    if (seenNames.has(memberName)) {
+      return { success: false, error: 'member names must be unique' };
+    }
+    seenNames.add(memberName);
+
+    const role = (member as { role?: unknown }).role;
+    if (role !== undefined && typeof role !== 'string') {
+      return { success: false, error: 'member role must be string' };
+    }
+    members.push({ name: memberName, role: typeof role === 'string' ? role.trim() : undefined });
+  }
+
+  return wrapTeamHandler('createConfig', () =>
+    getTeamDataService().createTeamConfig({
+      teamName,
+      displayName: payload.displayName?.trim() || undefined,
+      description: payload.description?.trim() || undefined,
+      color: typeof payload.color === 'string' ? payload.color.trim() || undefined : undefined,
+      members,
+    })
+  );
+}
+
+function getTeamMemberLogsFinder(): TeamMemberLogsFinder {
+  if (!teamMemberLogsFinder) {
+    throw new Error('Team member logs finder is not initialized');
+  }
+  return teamMemberLogsFinder;
+}
+
+async function handleGetMemberLogs(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  memberName: unknown
+): Promise<IpcResult<MemberLogSummary[]>> {
+  const vTeam = validateTeamName(teamName);
+  if (!vTeam.valid) {
+    return { success: false, error: vTeam.error ?? 'Invalid teamName' };
+  }
+  const vMember = validateMemberName(memberName);
+  if (!vMember.valid) {
+    return { success: false, error: vMember.error ?? 'Invalid memberName' };
+  }
+  return wrapTeamHandler('getMemberLogs', () =>
+    getTeamMemberLogsFinder().findMemberLogs(vTeam.value!, vMember.value!)
+  );
+}
+
+function getMemberStatsComputer(): MemberStatsComputer {
+  if (!memberStatsComputer) {
+    throw new Error('Member stats computer is not initialized');
+  }
+  return memberStatsComputer;
+}
+
+async function handleGetMemberStats(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  memberName: unknown
+): Promise<IpcResult<MemberFullStats>> {
+  const vTeam = validateTeamName(teamName);
+  if (!vTeam.valid) {
+    return { success: false, error: vTeam.error ?? 'Invalid teamName' };
+  }
+  const vMember = validateMemberName(memberName);
+  if (!vMember.valid) {
+    return { success: false, error: vMember.error ?? 'Invalid memberName' };
+  }
+  return wrapTeamHandler('getMemberStats', () =>
+    getMemberStatsComputer().getStats(vTeam.value!, vMember.value!)
+  );
+}
+
 async function handleAliveList(_event: IpcMainInvokeEvent): Promise<IpcResult<string[]>> {
   return wrapTeamHandler('aliveList', async () => getTeamProvisioningService().getAliveTeams());
+}
+
+async function handleGetAllTasks(_event: IpcMainInvokeEvent): Promise<IpcResult<GlobalTask[]>> {
+  return wrapTeamHandler('getAllTasks', () => getTeamDataService().getAllTasks());
 }

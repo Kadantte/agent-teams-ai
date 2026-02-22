@@ -3,11 +3,17 @@ import { createLogger } from '@shared/utils/logger';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { TeamMembersMetaStore } from './TeamMembersMetaStore';
+
 import type { TeamConfig, TeamSummary } from '@shared/types';
 
 const logger = createLogger('Service:TeamConfigReader');
 
 export class TeamConfigReader {
+  constructor(
+    private readonly membersMetaStore: TeamMembersMetaStore = new TeamMembersMetaStore()
+  ) {}
+
   async listTeams(): Promise<TeamSummary[]> {
     const teamsDir = getTeamsBasePath();
 
@@ -34,14 +40,66 @@ export class TeamConfigReader {
           continue;
         }
 
-        const memberCount = Array.isArray(config.members) ? config.members.length : 0;
+        const memberNames = new Set<string>();
+        if (Array.isArray(config.members)) {
+          for (const member of config.members) {
+            if (typeof member?.name === 'string' && member.name.trim().length > 0) {
+              memberNames.add(member.name.trim());
+            }
+          }
+        }
+
+        try {
+          const metaMembers = await this.membersMetaStore.getMembers(entry.name);
+          for (const member of metaMembers) {
+            if (member.name.trim().length > 0) {
+              memberNames.add(member.name.trim());
+            }
+          }
+        } catch {
+          logger.debug(`Failed to read members.meta.json for team: ${entry.name}`);
+        }
+
+        const inboxDir = path.join(teamsDir, entry.name, 'inboxes');
+        try {
+          const inboxEntries = await fs.promises.readdir(inboxDir);
+          for (const inbox of inboxEntries) {
+            if (!inbox.endsWith('.json') || inbox.startsWith('.')) {
+              continue;
+            }
+            const inboxName = inbox.slice(0, -'.json'.length).trim();
+            if (inboxName.length > 0) {
+              memberNames.add(inboxName);
+            }
+          }
+        } catch {
+          // Inbox folder may not exist yet.
+        }
+
+        const memberCount = memberNames.size;
         summaries.push({
           teamName: entry.name,
           displayName: config.name,
           description: typeof config.description === 'string' ? config.description : '',
+          color:
+            typeof config.color === 'string' && config.color.trim().length > 0
+              ? config.color
+              : undefined,
           memberCount,
           taskCount: 0,
           lastActivity: null,
+          projectPath:
+            typeof config.projectPath === 'string' && config.projectPath.trim().length > 0
+              ? config.projectPath
+              : undefined,
+          leadSessionId:
+            typeof config.leadSessionId === 'string' && config.leadSessionId.trim().length > 0
+              ? config.leadSessionId
+              : undefined,
+          projectPathHistory: Array.isArray(config.projectPathHistory)
+            ? config.projectPathHistory
+            : undefined,
+          sessionHistory: Array.isArray(config.sessionHistory) ? config.sessionHistory : undefined,
         });
       } catch {
         logger.debug(`Skipping team dir without valid config: ${entry.name}`);
@@ -63,5 +121,27 @@ export class TeamConfigReader {
     } catch {
       return null;
     }
+  }
+
+  async updateConfig(
+    teamName: string,
+    updates: { name?: string; description?: string; color?: string }
+  ): Promise<TeamConfig | null> {
+    const config = await this.getConfig(teamName);
+    if (!config) {
+      return null;
+    }
+    if (updates.name !== undefined && updates.name.trim() !== '') {
+      config.name = updates.name.trim();
+    }
+    if (updates.description !== undefined) {
+      config.description = updates.description.trim() || undefined;
+    }
+    if (updates.color !== undefined) {
+      config.color = updates.color.trim() || undefined;
+    }
+    const configPath = path.join(getTeamsBasePath(), teamName, 'config.json');
+    await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
+    return config;
   }
 }

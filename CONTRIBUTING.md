@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to claude-devtools.
+Thanks for contributing to Claude Agent Teams UI.
 
 ## Prerequisites
 - Node.js 20+

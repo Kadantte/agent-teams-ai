@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 
 import { isElectronMode } from '@renderer/api';
+import { AppLogo } from '@renderer/components/common/AppLogo';
 import { Minus, Square, X } from 'lucide-react';
 
 const TITLE_BAR_HEIGHT = 32;
@@ -50,12 +51,13 @@ export const WindowsTitleBar = (): React.JSX.Element | null => {
   return (
     <div className="flex shrink-0 select-none items-stretch" style={titleBarStyle}>
       {/* Draggable area — app title optional */}
-      <div className="flex flex-1 items-center pl-4" style={{ minWidth: 0 }}>
+      <div className="flex flex-1 items-center gap-2 pl-3" style={{ minWidth: 0 }}>
+        <AppLogo size={18} className="shrink-0" />
         <span
           className="truncate text-sm font-semibold"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          claude-devtools
+          Claude Agent Teams UI
         </span>
       </div>
 

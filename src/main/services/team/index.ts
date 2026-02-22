@@ -1,11 +1,14 @@
 export { ClaudeBinaryResolver } from './ClaudeBinaryResolver';
+export { MemberStatsComputer } from './MemberStatsComputer';
 export { TeamAgentToolsInstaller } from './TeamAgentToolsInstaller';
 export { TeamConfigReader } from './TeamConfigReader';
 export { TeamDataService } from './TeamDataService';
 export { TeamInboxReader } from './TeamInboxReader';
 export { TeamInboxWriter } from './TeamInboxWriter';
 export { TeamKanbanManager } from './TeamKanbanManager';
+export { TeamMemberLogsFinder } from './TeamMemberLogsFinder';
 export { TeamMemberResolver } from './TeamMemberResolver';
+export { TeamMembersMetaStore } from './TeamMembersMetaStore';
 export { TeamProvisioningService } from './TeamProvisioningService';
 export { TeamTaskReader } from './TeamTaskReader';
 export { TeamTaskWriter } from './TeamTaskWriter';

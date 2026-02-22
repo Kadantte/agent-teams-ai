@@ -1,9 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
-import { highlightLine } from '@renderer/components/chat/viewers/syntaxHighlighter';
-import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
+import { Checkbox } from '@renderer/components/ui/checkbox';
 import { Combobox } from '@renderer/components/ui/combobox';
 import {
   Dialog,
@@ -23,29 +22,44 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { Textarea } from '@renderer/components/ui/textarea';
+import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { cn } from '@renderer/lib/utils';
 import { Check, CheckCircle2, Loader2 } from 'lucide-react';
 
-import { STEP_LABELS, STEP_ORDER } from '../provisioningSteps';
+const TEAM_COLOR_NAMES = [
+  'blue',
+  'green',
+  'red',
+  'yellow',
+  'purple',
+  'cyan',
+  'orange',
+  'pink',
+] as const;
 
-import type { ProvisioningStep } from '../provisioningSteps';
 import type {
   Project,
   TeamCreateRequest,
+  TeamProvisioningMemberInput,
   TeamProvisioningPrepareResult,
-  TeamProvisioningProgress,
 } from '@shared/types';
+
+export interface TeamCopyData {
+  teamName: string;
+  description?: string;
+  color?: string;
+  members: TeamProvisioningMemberInput[];
+}
 
 interface CreateTeamDialogProps {
   open: boolean;
   canCreate: boolean;
   provisioningError: string | null;
-  progress: TeamProvisioningProgress | null;
   existingTeamNames: string[];
+  initialData?: TeamCopyData;
   onClose: () => void;
   onCreate: (request: TeamCreateRequest) => Promise<void>;
-  onCancelProvisioning: (runId: string) => Promise<void>;
-  onOpenTeam: (teamName: string) => void;
+  onOpenTeam: (teamName: string, projectPath?: string) => void;
 }
 
 interface ValidationResult {
@@ -75,7 +89,7 @@ interface MemberDraft {
 const DEV_DEFAULT_MEMBERS: Pick<MemberDraft, 'name' | 'roleSelection'>[] = [
   { name: 'alice', roleSelection: 'reviewer' },
   { name: 'bob', roleSelection: 'developer' },
-  { name: 'carol', roleSelection: 'lead' },
+  { name: 'carol', roleSelection: 'developer' },
 ];
 
 function newDraftId(): string {
@@ -148,46 +162,11 @@ function buildMembers(members: MemberDraft[]): TeamCreateRequest['members'] {
     .filter((member): member is NonNullable<typeof member> => member !== null);
 }
 
-function renderCliLogLine(line: string, index: number): React.JSX.Element {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return (
-      <div key={index} className="h-2">
-        {'\n'}
-      </div>
-    );
-  }
-
-  let jsonLines: string[] | null = null;
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (typeof parsed === 'object' && parsed !== null) {
-      jsonLines = JSON.stringify(parsed, null, 2).split('\n');
-    }
-  } catch {
-    // Not JSON, render as plain text
-  }
-
-  if (jsonLines) {
-    return (
-      <div key={index}>
-        {jsonLines.map((jsonLine, lineIdx) => (
-          <div key={lineIdx} className="whitespace-pre font-mono">
-            {highlightLine(jsonLine, 'json')}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div key={index} className="whitespace-pre-wrap break-all font-mono [overflow-wrap:anywhere]">
-      {trimmed}
-    </div>
-  );
-}
-
-function validateRequest(request: TeamCreateRequest): ValidationResult {
+function validateRequest(
+  request: TeamCreateRequest,
+  options?: { requireCwd?: boolean }
+): ValidationResult {
+  const requireCwd = options?.requireCwd ?? true;
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(request.teamName) || request.teamName.length > 64) {
     return {
       valid: false,
@@ -196,7 +175,7 @@ function validateRequest(request: TeamCreateRequest): ValidationResult {
       },
     };
   }
-  if (!request.cwd.trim()) {
+  if (requireCwd && !request.cwd.trim()) {
     return {
       valid: false,
       errors: {
@@ -220,6 +199,15 @@ function validateRequest(request: TeamCreateRequest): ValidationResult {
       },
     };
   }
+  const memberNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+  if (request.members.some((member) => !memberNamePattern.test(member.name.trim()))) {
+    return {
+      valid: false,
+      errors: {
+        members: 'Member name must start with alphanumeric, use only [a-zA-Z0-9._-], max 128 chars',
+      },
+    };
+  }
   const uniqueNames = new Set(request.members.map((member) => member.name.trim().toLowerCase()));
   if (uniqueNames.size !== request.members.length) {
     return {
@@ -236,17 +224,17 @@ export const CreateTeamDialog = ({
   open,
   canCreate,
   provisioningError,
-  progress,
   existingTeamNames,
+  initialData,
   onClose,
   onCreate,
-  onCancelProvisioning,
   onOpenTeam,
 }: CreateTeamDialogProps): React.JSX.Element => {
   const isDev = process.env.NODE_ENV !== 'production';
 
   const [teamName, setTeamName] = useState('');
   const [description, setDescription] = useState('');
+  const [prompt, setPrompt] = useState('');
   const [members, setMembers] = useState<MemberDraft[]>([]);
   const [cwdMode, setCwdMode] = useState<'project' | 'custom'>('project');
   const [selectedProjectPath, setSelectedProjectPath] = useState('');
@@ -264,20 +252,29 @@ export const CreateTeamDialog = ({
     cwd?: string;
   }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const autoOpenedRef = useRef(false);
+  const [launchTeam, setLaunchTeam] = useState(true);
+  const [teamColor, setTeamColor] = useState('');
 
   const resetFormState = (): void => {
+    setTeamName('');
+    setDescription('');
+    setPrompt('');
+    setMembers([]);
+    setTeamColor('');
+    setCwdMode('project');
+    setSelectedProjectPath('');
+    setCustomCwd('');
     setLocalError(null);
     setFieldErrors({});
     setIsSubmitting(false);
     setPrepareState('idle');
     setPrepareMessage(null);
     setPrepareWarnings([]);
-    autoOpenedRef.current = false;
+    setLaunchTeam(true);
   };
 
   useEffect(() => {
-    if (!open || !canCreate) {
+    if (!open || !canCreate || !launchTeam) {
       return;
     }
 
@@ -319,7 +316,7 @@ export const CreateTeamDialog = ({
     return () => {
       cancelled = true;
     };
-  }, [open, canCreate]);
+  }, [open, canCreate, launchTeam]);
 
   useEffect(() => {
     if (!open) {
@@ -356,7 +353,30 @@ export const CreateTeamDialog = ({
   }, [open]);
 
   useEffect(() => {
-    if (!open || members.length > 0) {
+    if (!open) {
+      return;
+    }
+
+    if (initialData) {
+      setTeamName(initialData.teamName);
+      setDescription(initialData.description ?? '');
+      setTeamColor(initialData.color ?? '');
+      setMembers(
+        initialData.members.map((m) => {
+          const presetRoles: readonly string[] = PRESET_ROLES;
+          const isPreset = m.role != null && presetRoles.includes(m.role);
+          const isCustom = m.role != null && m.role.length > 0 && !isPreset;
+          return createMemberDraft({
+            name: m.name,
+            roleSelection: isCustom ? CUSTOM_ROLE : (m.role ?? ''),
+            customRole: isCustom ? m.role : '',
+          });
+        })
+      );
+      return;
+    }
+
+    if (members.length > 0) {
       return;
     }
 
@@ -373,10 +393,11 @@ export const CreateTeamDialog = ({
     }
 
     setMembers([createMemberDraft()]);
-  }, [isDev, members.length, open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialData is checked once on open
+  }, [open]);
 
   useEffect(() => {
-    if (!open || !isDev) {
+    if (!open || !isDev || initialData) {
       return;
     }
     if (teamName.trim().length === 0) {
@@ -385,7 +406,7 @@ export const CreateTeamDialog = ({
     if (description.trim().length === 0) {
       setDescription(DEV_DEFAULT_TEAM.description);
     }
-  }, [open, isDev, teamName, description]);
+  }, [open, isDev, teamName, description, initialData]);
 
   useEffect(() => {
     if (cwdMode !== 'project') {
@@ -403,71 +424,17 @@ export const CreateTeamDialog = ({
     () => ({
       teamName: teamName.trim(),
       description: description.trim() || undefined,
+      color: teamColor || undefined,
       members: buildMembers(members),
       cwd: effectiveCwd,
+      prompt: prompt.trim() || undefined,
     }),
-    [teamName, description, members, effectiveCwd]
+    [teamName, description, teamColor, members, effectiveCwd, prompt]
   );
 
   const activeError = localError ?? provisioningError;
-  const isReady = progress?.state === 'ready' || progress?.state === 'disconnected';
-  const isFailed = progress?.state === 'failed';
-
-  // Navigate as soon as team actually appears in the teams list (FileWatcher detected config.json)
-  const provisioningTeamName = progress?.teamName;
-  const teamExistsInList =
-    provisioningTeamName != null && existingTeamNames.includes(provisioningTeamName);
-
-  useEffect(() => {
-    if (!teamExistsInList || !provisioningTeamName) {
-      return;
-    }
-    if (autoOpenedRef.current) {
-      return;
-    }
-    autoOpenedRef.current = true;
-    onOpenTeam(provisioningTeamName);
-    onClose();
-  }, [teamExistsInList, provisioningTeamName, onOpenTeam, onClose]);
-
-  const canCancel =
-    progress?.state === 'spawning' ||
-    progress?.state === 'monitoring' ||
-    progress?.state === 'verifying';
   const canOpenExistingTeam =
     activeError?.includes('Team already exists') === true && request.teamName.length > 0;
-  const progressStepIndex = progress ? STEP_ORDER.indexOf(progress.state as ProvisioningStep) : -1;
-  const failedStepIndex =
-    progress?.state === 'failed'
-      ? Math.max(
-          0,
-          STEP_ORDER.findIndex((step) => progress.message.toLowerCase().includes(step))
-        )
-      : -1;
-
-  const cliLogsText = (() => {
-    const tail = progress?.cliLogsTail?.trim();
-    if (tail) {
-      return tail;
-    }
-    if (!progress) {
-      return '';
-    }
-    if (progress.state === 'ready' || progress.state === 'disconnected') {
-      const timedOut =
-        progress.warnings?.some((w) => w.toLowerCase().includes('timed out')) ?? false;
-      return timedOut
-        ? 'No CLI output captured before timeout. The team appears ready based on created files.'
-        : 'No CLI output captured.';
-    }
-    if (progress.state === 'failed') {
-      return 'No CLI output captured.';
-    }
-    if (progress.state === 'cancelled') {
-      return 'Cancelled.';
-    }
-    return 'Waiting for CLI output...';
-  })();
 
   const updateMemberName = (memberId: string, name: string): void => {
     setMembers((prev) =>
@@ -503,7 +470,12 @@ export const CreateTeamDialog = ({
   };
 
   const handleSubmit = (): void => {
-    const validation = validateRequest(request);
+    if (existingTeamNames.includes(request.teamName)) {
+      setFieldErrors({ teamName: 'Team name already exists' });
+      setLocalError('Check form fields');
+      return;
+    }
+    const validation = validateRequest(request, { requireCwd: launchTeam });
     if (!validation.valid) {
       setFieldErrors(validation.errors ?? {});
       setLocalError('Check form fields');
@@ -512,9 +484,37 @@ export const CreateTeamDialog = ({
     setFieldErrors({});
     setLocalError(null);
     setIsSubmitting(true);
+
+    if (!launchTeam) {
+      void (async () => {
+        try {
+          await api.teams.createConfig({
+            teamName: request.teamName,
+            displayName: request.displayName,
+            description: request.description,
+            color: request.color,
+            members: request.members,
+          });
+          onOpenTeam(request.teamName, effectiveCwd || undefined);
+          resetFormState();
+          onClose();
+        } catch (error) {
+          setLocalError(error instanceof Error ? error.message : 'Failed to create team config');
+        } finally {
+          setIsSubmitting(false);
+        }
+      })();
+      return;
+    }
+
     void (async () => {
       try {
         await onCreate(request);
+        onOpenTeam(request.teamName, effectiveCwd || undefined);
+        resetFormState();
+        onClose();
+      } catch {
+        // error is shown via provisioningError prop
       } finally {
         setIsSubmitting(false);
       }
@@ -533,13 +533,15 @@ export const CreateTeamDialog = ({
     >
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-sm">Create Team</DialogTitle>
+          <DialogTitle className="text-sm">{initialData ? 'Copy Team' : 'Create Team'}</DialogTitle>
           <DialogDescription className="text-xs">
-            Team provisioning via local Claude CLI.
+            {initialData
+              ? 'Create a new team based on an existing one.'
+              : 'Team provisioning via local Claude CLI.'}
           </DialogDescription>
         </DialogHeader>
 
-        {canCreate && prepareState === 'failed' ? (
+        {canCreate && launchTeam && prepareState === 'failed' ? (
           <div className="rounded border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-300">
             <p>{prepareMessage ?? 'Failed to prepare environment'}</p>
             {prepareWarnings.length > 0 ? (
@@ -572,7 +574,9 @@ export const CreateTeamDialog = ({
               onChange={(event) => setTeamName(event.target.value)}
               placeholder="team-alpha"
             />
-            {fieldErrors.teamName ? (
+            {existingTeamNames.includes(teamName.trim()) ? (
+              <p className="text-[11px] text-red-300">Team name already exists</p>
+            ) : fieldErrors.teamName ? (
               <p className="text-[11px] text-red-300">{fieldErrors.teamName}</p>
             ) : null}
           </div>
@@ -589,6 +593,37 @@ export const CreateTeamDialog = ({
               onChange={(event) => setDescription(event.target.value)}
               placeholder="Brief description of the team purpose"
             />
+          </div>
+
+          <div className="space-y-1.5 md:col-span-2">
+            <Label className="text-xs text-[var(--color-text-muted)]">color (optional)</Label>
+            <div className="flex flex-wrap gap-2">
+              {TEAM_COLOR_NAMES.map((colorName) => {
+                const colorSet = getTeamColorSet(colorName);
+                const isSelected = teamColor === colorName;
+                return (
+                  <button
+                    key={colorName}
+                    type="button"
+                    className={cn(
+                      'flex size-7 items-center justify-center rounded-full border-2 transition-all',
+                      isSelected ? 'scale-110' : 'opacity-70 hover:opacity-100'
+                    )}
+                    style={{
+                      backgroundColor: colorSet.badge,
+                      borderColor: isSelected ? colorSet.border : 'transparent',
+                    }}
+                    title={colorName}
+                    onClick={() => setTeamColor(isSelected ? '' : colorName)}
+                  >
+                    <span
+                      className="size-3.5 rounded-full"
+                      style={{ backgroundColor: colorSet.border }}
+                    />
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="space-y-1.5 md:col-span-2">
@@ -662,174 +697,145 @@ export const CreateTeamDialog = ({
             ) : null}
           </div>
 
-          <div className="space-y-1.5 md:col-span-2">
-            <Label className="text-xs text-[var(--color-text-muted)]">cwd</Label>
-            <div className="space-y-2">
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant={cwdMode === 'project' ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => setCwdMode('project')}
-                >
-                  From project list
-                </Button>
-                <Button
-                  type="button"
-                  variant={cwdMode === 'custom' ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => setCwdMode('custom')}
-                >
-                  Custom path
-                </Button>
-              </div>
-
-              {cwdMode === 'project' ? (
-                <div className="space-y-1.5">
-                  <Combobox
-                    options={projects.map((project) => ({
-                      value: project.path,
-                      label: project.name,
-                      description: project.path,
-                    }))}
-                    value={selectedProjectPath}
-                    onValueChange={setSelectedProjectPath}
-                    placeholder={projectsLoading ? 'Loading projects...' : 'Select a project...'}
-                    searchPlaceholder="Search project by name or path"
-                    emptyMessage="Nothing found"
-                    disabled={projectsLoading || projects.length === 0}
-                    renderOption={(option, isSelected, query) => (
-                      <>
-                        <Check
-                          className={cn(
-                            'mr-2 size-3.5 shrink-0',
-                            isSelected ? 'opacity-100' : 'opacity-0'
-                          )}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium text-[var(--color-text)]">
-                            {renderHighlightedText(option.label, query)}
-                          </p>
-                          <p className="truncate text-[var(--color-text-muted)]">
-                            {renderHighlightedText(option.description ?? '', query)}
-                          </p>
-                        </div>
-                      </>
-                    )}
-                  />
-                  {!selectedProjectPath ? (
-                    <p className="text-[11px] text-[var(--color-text-muted)]">
-                      Select a project from the list
-                    </p>
-                  ) : null}
-                  {projectsError ? (
-                    <p className="text-[11px] text-red-300">{projectsError}</p>
-                  ) : null}
-                  {!projectsLoading && projects.length === 0 ? (
-                    <p className="text-[11px] text-amber-300">
-                      No projects found, switch to custom path.
-                    </p>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <div className="flex gap-2">
-                    <Input
-                      className="h-8 text-xs"
-                      value={customCwd}
-                      aria-label="Custom working directory"
-                      onChange={(event) => setCustomCwd(event.target.value)}
-                      placeholder="/absolute/path/to/project"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        void (async () => {
-                          const paths = await api.config.selectFolders();
-                          if (paths.length > 0) {
-                            setCustomCwd(paths[0]);
-                          }
-                        })();
-                      }}
-                    >
-                      Browse
-                    </Button>
-                  </div>
-                  <p className="text-[11px] text-[var(--color-text-muted)]">
-                    If the directory does not exist, it will be created automatically.
-                  </p>
-                </div>
-              )}
-            </div>
-            {fieldErrors.cwd ? <p className="text-[11px] text-red-300">{fieldErrors.cwd}</p> : null}
+          <div className="flex items-center gap-2 md:col-span-2">
+            <Checkbox
+              id="launch-team"
+              checked={launchTeam}
+              onCheckedChange={(checked) => setLaunchTeam(checked === true)}
+            />
+            <Label
+              htmlFor="launch-team"
+              className="cursor-pointer text-xs text-[var(--color-text)]"
+            >
+              Launch team
+            </Label>
           </div>
-        </div>
 
-        {progress ? (
-          <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3">
-            <p className="text-xs font-medium text-[var(--color-text)]">Provisioning Progress</p>
-            <p className="mt-1 text-xs text-[var(--color-text-muted)]">{progress.message}</p>
-            <div className="mt-2 flex items-center gap-1 overflow-x-auto pb-1">
-              {STEP_ORDER.map((step, index) => {
-                const isFailedStep = progress.state === 'failed' && index === failedStepIndex;
-                const isDone =
-                  progress.state === 'ready' ||
-                  (progressStepIndex >= 0 && index < progressStepIndex) ||
-                  (progress.state === 'failed' && index < failedStepIndex);
-                const isActive =
-                  (progressStepIndex >= 0 && index === progressStepIndex) || isFailedStep;
+          {launchTeam ? (
+            <div className="space-y-1.5 md:col-span-2">
+              <Label htmlFor="team-prompt" className="text-xs text-[var(--color-text-muted)]">
+                Prompt for team lead (optional)
+              </Label>
+              <Textarea
+                id="team-prompt"
+                className="min-h-[40px] resize-none text-xs"
+                rows={3}
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="Instructions for the team lead during provisioning..."
+              />
+            </div>
+          ) : null}
 
-                return (
-                  <div key={step} className="flex items-center gap-1">
-                    <Badge
-                      variant="secondary"
-                      className={cn(
-                        'whitespace-nowrap px-2 py-0.5 text-[11px] font-normal',
-                        isFailedStep && 'border-red-400/60 bg-red-500/10 text-red-300',
-                        !isFailedStep &&
-                          isDone &&
-                          'border-emerald-400/60 bg-emerald-500/10 text-emerald-200',
+          {launchTeam ? (
+            <div className="space-y-1.5 md:col-span-2">
+              <Label className="text-xs text-[var(--color-text-muted)]">cwd</Label>
+              <div className="space-y-2">
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant={cwdMode === 'project' ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setCwdMode('project')}
+                  >
+                    From project list
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={cwdMode === 'custom' ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setCwdMode('custom')}
+                  >
+                    Custom path
+                  </Button>
+                </div>
 
-                        !isFailedStep &&
-                          !isDone &&
-                          isActive &&
-                          'border-[var(--color-accent)]/70 bg-[var(--color-accent)]/15 text-[var(--color-text)]'
+                {cwdMode === 'project' ? (
+                  <div className="space-y-1.5">
+                    <Combobox
+                      options={projects.map((project) => ({
+                        value: project.path,
+                        label: project.name,
+                        description: project.path,
+                      }))}
+                      value={selectedProjectPath}
+                      onValueChange={setSelectedProjectPath}
+                      placeholder={projectsLoading ? 'Loading projects...' : 'Select a project...'}
+                      searchPlaceholder="Search project by name or path"
+                      emptyMessage="Nothing found"
+                      disabled={projectsLoading || projects.length === 0}
+                      renderOption={(option, isSelected, query) => (
+                        <>
+                          <Check
+                            className={cn(
+                              'mr-2 size-3.5 shrink-0',
+                              isSelected ? 'opacity-100' : 'opacity-0'
+                            )}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium text-[var(--color-text)]">
+                              {renderHighlightedText(option.label, query)}
+                            </p>
+                            <p className="truncate text-[var(--color-text-muted)]">
+                              {renderHighlightedText(option.description ?? '', query)}
+                            </p>
+                          </div>
+                        </>
                       )}
-                    >
-                      <span className="mr-1 inline-flex size-4 items-center justify-center rounded-full border border-current text-[10px]">
-                        {index + 1}
-                      </span>
-                      {STEP_LABELS[step]}
-                    </Badge>
-                    {index < STEP_ORDER.length - 1 ? (
-                      <span className="text-[var(--color-text-muted)]">&rarr;</span>
+                    />
+                    {!selectedProjectPath ? (
+                      <p className="text-[11px] text-[var(--color-text-muted)]">
+                        Select a project from the list
+                      </p>
+                    ) : null}
+                    {projectsError ? (
+                      <p className="text-[11px] text-red-300">{projectsError}</p>
+                    ) : null}
+                    {!projectsLoading && projects.length === 0 ? (
+                      <p className="text-[11px] text-amber-300">
+                        No projects found, switch to custom path.
+                      </p>
                     ) : null}
                   </div>
-                );
-              })}
-            </div>
-            {progress.warnings?.length ? (
-              <div className="mt-2 space-y-1">
-                {progress.warnings.map((warning) => (
-                  <p key={warning} className="text-[11px] text-amber-300">
-                    {warning}
-                  </p>
-                ))}
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="flex gap-2">
+                      <Input
+                        className="h-8 text-xs"
+                        value={customCwd}
+                        aria-label="Custom working directory"
+                        onChange={(event) => setCustomCwd(event.target.value)}
+                        placeholder="/absolute/path/to/project"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void (async () => {
+                            const paths = await api.config.selectFolders();
+                            if (paths.length > 0) {
+                              setCustomCwd(paths[0]);
+                            }
+                          })();
+                        }}
+                      >
+                        Browse
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-[var(--color-text-muted)]">
+                      If the directory does not exist, it will be created automatically.
+                    </p>
+                  </div>
+                )}
               </div>
-            ) : null}
-            <div className="mt-2">
-              <p className="mb-1 text-[11px] font-medium text-[var(--color-text)]">
-                Claude CLI logs
-              </p>
-              <div className="max-h-44 min-w-0 overflow-auto rounded border border-[var(--color-border)] bg-black/25 p-2 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                {cliLogsText.split('\n').map((line, index) => renderCliLogLine(line, index))}
-              </div>
+              {fieldErrors.cwd ? (
+                <p className="text-[11px] text-red-300">{fieldErrors.cwd}</p>
+              ) : null}
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
 
         {activeError ? (
           <p className="rounded border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-300">
@@ -837,7 +843,7 @@ export const CreateTeamDialog = ({
           </p>
         ) : null}
 
-        {canCreate && (prepareState === 'idle' || prepareState === 'loading') ? (
+        {canCreate && launchTeam && (prepareState === 'idle' || prepareState === 'loading') ? (
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
             <span className="inline-block size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
             <span>
@@ -851,7 +857,7 @@ export const CreateTeamDialog = ({
           </div>
         ) : null}
 
-        {canCreate && prepareState === 'ready' ? (
+        {canCreate && launchTeam && prepareState === 'ready' ? (
           <div className="flex items-center gap-2 text-xs text-emerald-400">
             <CheckCircle2 className="size-3.5 shrink-0" />
             <span>CLI environment ready</span>
@@ -859,30 +865,6 @@ export const CreateTeamDialog = ({
         ) : null}
 
         <DialogFooter className="gap-2 sm:gap-0">
-          {canCancel ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-red-500/40 text-red-300 hover:bg-red-500/10 hover:text-red-200"
-              onClick={() => {
-                void onCancelProvisioning(progress.runId);
-              }}
-            >
-              Cancel
-            </Button>
-          ) : null}
-          {isReady ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                onOpenTeam(progress.teamName);
-                onClose();
-              }}
-            >
-              Open Team
-            </Button>
-          ) : null}
           {canOpenExistingTeam ? (
             <Button
               variant="outline"
@@ -900,16 +882,14 @@ export const CreateTeamDialog = ({
           </Button>
           <Button
             size="sm"
-            disabled={!canCreate || isSubmitting || prepareState !== 'ready' || !!progress}
+            disabled={!canCreate || isSubmitting || (launchTeam && prepareState !== 'ready')}
             onClick={handleSubmit}
           >
-            {isSubmitting || progress ? (
+            {isSubmitting ? (
               <>
                 <Loader2 className="mr-1.5 size-3.5 animate-spin" />
                 Creating...
               </>
-            ) : isFailed ? (
-              'Retry'
             ) : (
               'Create'
             )}

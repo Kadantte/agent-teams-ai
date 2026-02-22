@@ -75,11 +75,17 @@ export class ChunkBuilder {
    *
    * All chunk types are INDEPENDENT - no pairing between User and AI.
    */
-  buildChunks(messages: ParsedMessage[], subagents: Process[] = []): EnhancedChunk[] {
+  buildChunks(
+    messages: ParsedMessage[],
+    subagents: Process[] = [],
+    options?: { includeSidechain?: boolean }
+  ): EnhancedChunk[] {
     const chunks: EnhancedChunk[] = [];
 
     // Filter to main thread messages (non-sidechain)
-    const mainMessages = messages.filter((m) => !m.isSidechain);
+    const mainMessages = options?.includeSidechain
+      ? messages
+      : messages.filter((m) => !m.isSidechain);
     logger.debug(`Total messages: ${messages.length}, Main thread: ${mainMessages.length}`);
 
     // Classify each message into categories using MessageClassifier
@@ -440,7 +446,7 @@ export class ChunkBuilder {
       subagentId,
       sessionParser,
       subagentResolver,
-      (messages, subagents) => this.buildChunks(messages, subagents),
+      (messages, subagents) => this.buildChunks(messages, subagents, { includeSidechain: true }),
       fsProvider,
       projectsDir
     );

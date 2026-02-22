@@ -1,38 +1,40 @@
 import { Badge } from '@renderer/components/ui/badge';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
+import { agentAvatarUrl, getMemberDotClass, getPresenceLabel } from '@renderer/utils/memberHelpers';
 
 import type { ResolvedTeamMember } from '@shared/types';
 
 interface MemberCardProps {
   member: ResolvedTeamMember;
+  isTeamAlive?: boolean;
+  onClick?: () => void;
 }
 
-const statusDotColor: Record<string, string> = {
-  active: 'bg-emerald-400',
-  idle: 'bg-emerald-400/50',
-  terminated: 'bg-zinc-500',
-  unknown: 'bg-zinc-600',
-};
-
-export const MemberCard = ({ member }: MemberCardProps): React.JSX.Element => {
-  const dotClass =
-    member.status === 'terminated'
-      ? statusDotColor.terminated
-      : member.currentTaskId
-        ? statusDotColor.active
-        : statusDotColor.idle;
-  const avatarUrl = `https://robohash.org/${encodeURIComponent(member.name)}?size=64x64`;
-  const presenceLabel =
-    member.status === 'terminated' ? 'terminated' : member.currentTaskId ? 'working' : 'idle';
+export const MemberCard = ({
+  member,
+  isTeamAlive,
+  onClick,
+}: MemberCardProps): React.JSX.Element => {
+  const dotClass = getMemberDotClass(member, isTeamAlive);
+  const presenceLabel = getPresenceLabel(member, isTeamAlive);
 
   return (
     <div
-      className="group flex items-center gap-2.5 rounded px-2 py-1.5 hover:bg-[var(--color-surface-raised)]"
-      title={member.currentTaskId ? `Текущая задача: ${member.currentTaskId}` : undefined}
+      className="group flex cursor-pointer items-center gap-2.5 rounded px-2 py-1.5 hover:bg-[var(--color-surface-raised)]"
+      title={member.currentTaskId ? `Current task: ${member.currentTaskId}` : undefined}
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick?.();
+        }
+      }}
     >
       <div className="relative shrink-0">
         <img
-          src={avatarUrl}
+          src={agentAvatarUrl(member.name)}
           alt={member.name}
           className="size-7 rounded-full bg-[var(--color-surface-raised)]"
           loading="lazy"
@@ -45,15 +47,18 @@ export const MemberCard = ({ member }: MemberCardProps): React.JSX.Element => {
       <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-text)]">
         {member.name}
       </span>
-      {formatAgentRole(member.agentType) && (
-        <span className="hidden shrink-0 text-xs text-[var(--color-text-muted)] sm:inline">
-          {formatAgentRole(member.agentType)}
-        </span>
-      )}
+      {(() => {
+        const roleLabel = formatAgentRole(member.role) ?? formatAgentRole(member.agentType);
+        return roleLabel ? (
+          <span className="hidden shrink-0 text-xs text-[var(--color-text-muted)] sm:inline">
+            {roleLabel}
+          </span>
+        ) : null;
+      })()}
       <Badge
         variant="secondary"
         className="shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--color-text-muted)]"
-        title={member.currentTaskId ? `Текущая задача: ${member.currentTaskId}` : undefined}
+        title={member.currentTaskId ? `Current task: ${member.currentTaskId}` : undefined}
       >
         {presenceLabel}
       </Badge>

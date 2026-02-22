@@ -67,15 +67,18 @@ export function initializeNotificationListeners(): () => void {
   cleanupFns.push(() => {
     useStore.getState().unsubscribeProvisioningProgress();
   });
+  void useStore.getState().fetchTeams();
   const pendingSessionRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingProjectRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let teamRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   let teamListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let globalTasksRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   const SESSION_REFRESH_DEBOUNCE_MS = 150;
   const PROJECT_REFRESH_DEBOUNCE_MS = 300;
   const TEAM_REFRESH_THROTTLE_MS = 800;
   const TEAM_LIST_REFRESH_THROTTLE_MS = 2000;
+  const GLOBAL_TASKS_REFRESH_THROTTLE_MS = 500;
   const getBaseProjectId = (projectId: string | null | undefined): string | null => {
     if (!projectId) return null;
     const separatorIndex = projectId.indexOf('::');
@@ -299,6 +302,14 @@ export function initializeNotificationListeners(): () => void {
         }, TEAM_LIST_REFRESH_THROTTLE_MS);
       }
 
+      // Throttled refresh of global tasks list for sidebar.
+      if (!globalTasksRefreshTimer) {
+        globalTasksRefreshTimer = setTimeout(() => {
+          globalTasksRefreshTimer = null;
+          void useStore.getState().fetchAllTasks();
+        }, GLOBAL_TASKS_REFRESH_THROTTLE_MS);
+      }
+
       if (!event?.teamName || !isTeamVisibleInAnyPane(event.teamName)) {
         return;
       }
@@ -326,6 +337,10 @@ export function initializeNotificationListeners(): () => void {
         if (teamListRefreshTimer) {
           clearTimeout(teamListRefreshTimer);
           teamListRefreshTimer = null;
+        }
+        if (globalTasksRefreshTimer) {
+          clearTimeout(globalTasksRefreshTimer);
+          globalTasksRefreshTimer = null;
         }
       });
     }

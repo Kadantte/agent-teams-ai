@@ -1,11 +1,11 @@
-import { getTeamsBasePath } from '@main/utils/pathDecoder';
+import { getToolsBasePath } from '@main/utils/pathDecoder';
 import * as fs from 'fs';
 import * as path from 'path';
 
 import { atomicWriteAsync } from './atomicWrite';
 
 const TOOL_FILE_NAME = 'teamctl.js';
-const TOOL_VERSION = 2;
+const TOOL_VERSION = 3;
 
 function buildTeamCtlScript(): string {
   const script = String.raw`#!/usr/bin/env node
@@ -100,23 +100,15 @@ function getClaudeDir(flags) {
 }
 
 function inferClaudeDirFromScriptPath() {
-  // Expected: <claudeDir>/teams/<teamName>/tools/teamctl.js
+  // Expected: <claudeDir>/tools/teamctl.js
   const toolsDir = path.dirname(__filename);
-  const teamDir = path.dirname(toolsDir);
-  const teamsDir = path.dirname(teamDir);
-  if (path.basename(teamsDir) !== 'teams') return null;
-  const claudeDir = path.dirname(teamsDir);
-  return claudeDir || null;
+  if (path.basename(toolsDir) !== 'tools') return null;
+  return path.dirname(toolsDir) || null;
 }
 
 function inferTeamNameFromScriptPath() {
-  // Expected: ~/.claude/teams/<teamName>/tools/teamctl.js
-  const toolsDir = path.dirname(__filename);
-  const teamDir = path.dirname(toolsDir);
-  const parent = path.basename(path.dirname(teamDir));
-  if (parent !== 'teams') return null;
-  const teamName = path.basename(teamDir);
-  return teamName || null;
+  // From ~/.claude/tools/ the team name cannot be inferred — --team is required
+  return null;
 }
 
 function getTeamName(flags) {
@@ -467,14 +459,14 @@ async function main() {
           ' "' +
           String(task.subject) +
           '".\n\n' +
-          'When you start: node "$HOME/.claude/teams/' +
+          'When you start: node "$HOME/.claude/tools/${TOOL_FILE_NAME}" --team ' +
           String(teamName) +
-          '/tools/${TOOL_FILE_NAME}" task start ' +
+          ' task start ' +
           String(task.id) +
           '\n' +
-          'When done: node "$HOME/.claude/teams/' +
+          'When done: node "$HOME/.claude/tools/${TOOL_FILE_NAME}" --team ' +
           String(teamName) +
-          '/tools/${TOOL_FILE_NAME}" task complete ' +
+          ' task complete ' +
           String(task.id) +
           '\n';
         sendInboxMessage(paths, teamName, {
@@ -589,8 +581,8 @@ main().catch((err) => {
 }
 
 export class TeamAgentToolsInstaller {
-  async ensureInstalled(teamName: string): Promise<string> {
-    const toolsDir = path.join(getTeamsBasePath(), teamName, 'tools');
+  async ensureInstalled(): Promise<string> {
+    const toolsDir = getToolsBasePath();
     const toolPath = path.join(toolsDir, TOOL_FILE_NAME);
     await fs.promises.mkdir(toolsDir, { recursive: true });
 
@@ -604,7 +596,7 @@ export class TeamAgentToolsInstaller {
       }
     }
 
-    if (current && current.includes(`TOOL_VERSION = ${TOOL_VERSION}`)) {
+    if (current?.includes(`TOOL_VERSION = ${TOOL_VERSION}`)) {
       return toolPath;
     }
 

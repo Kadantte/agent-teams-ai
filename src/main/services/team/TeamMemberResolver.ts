@@ -9,6 +9,7 @@ import type {
 export class TeamMemberResolver {
   resolveMembers(
     config: TeamConfig,
+    metaMembers: TeamConfig['members'],
     inboxNames: string[],
     tasks: TeamTask[],
     messages: InboxMessage[]
@@ -23,29 +24,45 @@ export class TeamMemberResolver {
       }
     }
 
+    if (Array.isArray(metaMembers)) {
+      for (const member of metaMembers) {
+        if (typeof member?.name === 'string' && member.name.trim() !== '') {
+          names.add(member.name.trim());
+        }
+      }
+    }
+
     for (const inboxName of inboxNames) {
       if (typeof inboxName === 'string' && inboxName.trim() !== '') {
         names.add(inboxName.trim());
       }
     }
 
-    for (const task of tasks) {
-      if (typeof task.owner === 'string' && task.owner.trim() !== '') {
-        names.add(task.owner.trim());
-      }
-    }
-
-    for (const message of messages) {
-      if (typeof message.from === 'string' && message.from.trim() !== '') {
-        names.add(message.from.trim());
-      }
-    }
-
-    const configMemberMap = new Map<string, { agentType?: string }>();
+    const configMemberMap = new Map<
+      string,
+      { agentType?: string; role?: string; color?: string }
+    >();
     if (Array.isArray(config.members)) {
       for (const m of config.members) {
         if (typeof m?.name === 'string' && m.name.trim() !== '') {
-          configMemberMap.set(m.name.trim(), { agentType: m.agentType });
+          configMemberMap.set(m.name.trim(), {
+            agentType: m.agentType,
+            role: m.role,
+            color: m.color,
+          });
+        }
+      }
+    }
+
+    const metaMemberMap = new Map<string, { agentType?: string; role?: string; color?: string }>();
+    if (Array.isArray(metaMembers)) {
+      for (const member of metaMembers) {
+        if (typeof member?.name === 'string' && member.name.trim() !== '') {
+          metaMemberMap.set(member.name.trim(), {
+            agentType: member.agentType,
+            role: member.role,
+            color: member.color,
+          });
         }
       }
     }
@@ -58,6 +75,7 @@ export class TeamMemberResolver {
       const latestMessage = memberMessages[0] ?? null;
       const status = this.resolveStatus(latestMessage);
       const configMember = configMemberMap.get(name);
+      const metaMember = metaMemberMap.get(name);
       members.push({
         name,
         status,
@@ -65,8 +83,9 @@ export class TeamMemberResolver {
         taskCount: ownedTasks.length,
         messageCount: memberMessages.length,
         lastActiveAt: latestMessage?.timestamp ?? null,
-        color: latestMessage?.color,
-        agentType: configMember?.agentType,
+        color: latestMessage?.color ?? configMember?.color ?? metaMember?.color,
+        agentType: configMember?.agentType ?? metaMember?.agentType,
+        role: configMember?.role ?? metaMember?.role,
       });
     }
 

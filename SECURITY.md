@@ -2,7 +2,7 @@
 
 ## Network Activity
 
-claude-devtools makes **zero** outbound network calls to third-party servers. There is no telemetry, analytics, tracking, or data exfiltration of any kind.
+Claude Agent Teams UI makes **zero** outbound network calls to third-party servers. There is no telemetry, analytics, tracking, or data exfiltration of any kind.
 
 | Network activity | When | Mode | User-initiated |
 |---|---|---|---|
@@ -26,8 +26,8 @@ In standalone mode (Docker or `node dist-standalone/index.cjs`), the auto-update
 For maximum trust, run the Docker container with `--network none`:
 
 ```bash
-docker build -t claude-devtools .
-docker run --network none -p 3456:3456 -v ~/.claude:/data/.claude:ro claude-devtools
+docker build -t claude-agent-teams-ui .
+docker run --network none -p 3456:3456 -v ~/.claude:/data/.claude:ro claude-agent-teams-ui
 ```
 
 Or with Docker Compose, uncomment `network_mode: "none"` in `docker-compose.yml`.

@@ -1,4 +1,4 @@
-# claude-devtools
+# Claude Agent Teams UI
 
 Electron app that visualizes Claude Code session execution
 

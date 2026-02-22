@@ -1,5 +1,5 @@
 # =============================================================================
-# claude-devtools — Docker Compose
+# Claude Agent Teams UI — Docker Compose
 #
 # Quick start:
 #   docker compose up
@@ -13,7 +13,7 @@
 # =============================================================================
 
 services:
-  claude-devtools:
+  claude-agent-teams-ui:
     build: .
     ports:
       - "3456:3456"

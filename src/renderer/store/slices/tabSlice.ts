@@ -355,6 +355,46 @@ export const createTabSlice: StateCreator<AppState, [], [], TabSlice> = (set, ge
         return;
       }
     }
+
+    // For team tabs, re-select the team so global selectedTeamData matches this tab.
+    // Without this, switching between team A and team B tabs leaves stale data
+    // because each TeamDetailView is kept mounted (CSS display-toggle) and its
+    // useEffect(teamName) only fires once on mount.
+    if (tab.type === 'team' && tab.teamName) {
+      if (state.selectedTeamName !== tab.teamName) {
+        // Different team -- full reload (also auto-selects project via selectTeam)
+        void state.selectTeam(tab.teamName);
+      } else {
+        // Same team already loaded -- just sync sidebar project if team has a projectPath.
+        // This covers the case where the user switched to a session tab (changing the
+        // sidebar project) and then switches back to the team tab.
+        const teamData = state.selectedTeamData;
+        const projectPath = teamData?.config.projectPath;
+        if (projectPath) {
+          const normalizedTeamPath = projectPath.endsWith('/')
+            ? projectPath.slice(0, -1)
+            : projectPath;
+          const normalizePath = (p: string): string => (p.endsWith('/') ? p.slice(0, -1) : p);
+          const matchingProject = state.projects.find(
+            (p) => normalizePath(p.path) === normalizedTeamPath
+          );
+          if (matchingProject && state.selectedProjectId !== matchingProject.id) {
+            state.selectProject(matchingProject.id);
+          } else if (!matchingProject) {
+            for (const repo of state.repositoryGroups) {
+              const matchingWorktree = repo.worktrees.find(
+                (wt) => normalizePath(wt.path) === normalizedTeamPath
+              );
+              if (matchingWorktree && state.selectedWorktreeId !== matchingWorktree.id) {
+                state.selectRepository(repo.id);
+                state.selectWorktree(matchingWorktree.id);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
   },
 
   // Open a new dashboard tab in the focused pane

@@ -6,6 +6,8 @@ vi.mock('@preload/constants/ipcChannels', () => ({
   TEAM_DELETE_TEAM: 'team:deleteTeam',
   TEAM_PREPARE_PROVISIONING: 'team:prepareProvisioning',
   TEAM_CREATE: 'team:create',
+  TEAM_LAUNCH: 'team:launch',
+  TEAM_CREATE_CONFIG: 'team:createConfig',
   TEAM_CREATE_TASK: 'team:createTask',
   TEAM_PROVISIONING_STATUS: 'team:provisioningStatus',
   TEAM_CANCEL_PROVISIONING: 'team:cancelProvisioning',
@@ -17,15 +19,21 @@ vi.mock('@preload/constants/ipcChannels', () => ({
   TEAM_PROCESS_SEND: 'team:processSend',
   TEAM_PROCESS_ALIVE: 'team:processAlive',
   TEAM_ALIVE_LIST: 'team:aliveList',
+  TEAM_GET_MEMBER_LOGS: 'team:getMemberLogs',
+  TEAM_GET_MEMBER_STATS: 'team:getMemberStats',
+  TEAM_UPDATE_CONFIG: 'team:updateConfig',
+  TEAM_GET_ALL_TASKS: 'team:getAllTasks',
 }));
 
 import {
   TEAM_ALIVE_LIST,
   TEAM_CANCEL_PROVISIONING,
   TEAM_CREATE,
+  TEAM_CREATE_CONFIG,
   TEAM_CREATE_TASK,
   TEAM_DELETE_TEAM,
   TEAM_GET_DATA,
+  TEAM_LAUNCH,
   TEAM_LIST,
   TEAM_PREPARE_PROVISIONING,
   TEAM_PROCESS_ALIVE,
@@ -33,6 +41,8 @@ import {
   TEAM_PROVISIONING_STATUS,
   TEAM_REQUEST_REVIEW,
   TEAM_SEND_MESSAGE,
+  TEAM_GET_MEMBER_LOGS,
+  TEAM_UPDATE_CONFIG,
   TEAM_UPDATE_KANBAN,
   TEAM_UPDATE_TASK_STATUS,
 } from '../../../src/preload/constants/ipcChannels';
@@ -78,6 +88,7 @@ describe('ipc teams handlers', () => {
       updatedAt: new Date().toISOString(),
     })),
     cancelProvisioning: vi.fn(async () => undefined),
+    launchTeam: vi.fn(async () => ({ runId: 'run-2' })),
     sendMessageToTeam: vi.fn(async () => undefined),
     isTeamAlive: vi.fn(() => true),
     getAliveTeams: vi.fn(() => ['my-team']),
@@ -96,6 +107,7 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_DELETE_TEAM)).toBe(true);
     expect(handlers.has(TEAM_PREPARE_PROVISIONING)).toBe(true);
     expect(handlers.has(TEAM_CREATE)).toBe(true);
+    expect(handlers.has(TEAM_LAUNCH)).toBe(true);
     expect(handlers.has(TEAM_CREATE_TASK)).toBe(true);
     expect(handlers.has(TEAM_PROVISIONING_STATUS)).toBe(true);
     expect(handlers.has(TEAM_CANCEL_PROVISIONING)).toBe(true);
@@ -106,6 +118,9 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_PROCESS_SEND)).toBe(true);
     expect(handlers.has(TEAM_PROCESS_ALIVE)).toBe(true);
     expect(handlers.has(TEAM_ALIVE_LIST)).toBe(true);
+    expect(handlers.has(TEAM_CREATE_CONFIG)).toBe(true);
+    expect(handlers.has(TEAM_GET_MEMBER_LOGS)).toBe(true);
+    expect(handlers.has(TEAM_UPDATE_CONFIG)).toBe(true);
   });
 
   it('returns success false on invalid sendMessage args', async () => {
@@ -167,6 +182,86 @@ describe('ipc teams handlers', () => {
     });
   });
 
+  describe('createTask prompt validation', () => {
+    it('accepts valid prompt string', async () => {
+      const handler = handlers.get(TEAM_CREATE_TASK)!;
+      const result = (await handler({} as never, 'my-team', {
+        subject: 'Do something',
+        prompt: 'Custom instructions here',
+      })) as { success: boolean };
+      expect(result.success).toBe(true);
+      expect(service.createTask).toHaveBeenCalledWith('my-team', {
+        subject: 'Do something',
+        description: undefined,
+        owner: undefined,
+        blockedBy: undefined,
+        prompt: 'Custom instructions here',
+      });
+    });
+
+    it('rejects non-string prompt', async () => {
+      const handler = handlers.get(TEAM_CREATE_TASK)!;
+      const result = (await handler({} as never, 'my-team', {
+        subject: 'Do something',
+        prompt: 42,
+      })) as { success: boolean; error: string };
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('prompt must be a string');
+    });
+
+    it('rejects prompt exceeding max length', async () => {
+      const handler = handlers.get(TEAM_CREATE_TASK)!;
+      const result = (await handler({} as never, 'my-team', {
+        subject: 'Do something',
+        prompt: 'x'.repeat(5001),
+      })) as { success: boolean; error: string };
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('prompt exceeds max length');
+    });
+
+    it('passes undefined prompt when not provided', async () => {
+      const handler = handlers.get(TEAM_CREATE_TASK)!;
+      const result = (await handler({} as never, 'my-team', {
+        subject: 'Do something',
+      })) as { success: boolean };
+      expect(result.success).toBe(true);
+      expect(service.createTask).toHaveBeenCalledWith('my-team', {
+        subject: 'Do something',
+        description: undefined,
+        owner: undefined,
+        blockedBy: undefined,
+        prompt: undefined,
+      });
+    });
+  });
+
+  describe('createTeam prompt validation', () => {
+    it('accepts valid prompt in team create request', async () => {
+      const handler = handlers.get(TEAM_CREATE)!;
+      const result = (await handler({ sender: { send: vi.fn() } } as never, {
+        teamName: 'test-team',
+        members: [{ name: 'alice' }],
+        cwd: '/',
+        prompt: 'Build a web app',
+      })) as { success: boolean };
+      expect(result.success).toBe(true);
+      const callArg = provisioningService.createTeam.mock.calls[0][0];
+      expect(callArg.prompt).toBe('Build a web app');
+    });
+
+    it('rejects non-string prompt in team create request', async () => {
+      const handler = handlers.get(TEAM_CREATE)!;
+      const result = (await handler({ sender: { send: vi.fn() } } as never, {
+        teamName: 'test-team',
+        members: [{ name: 'alice' }],
+        cwd: '/',
+        prompt: 123,
+      })) as { success: boolean; error: string };
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('prompt must be a string');
+    });
+  });
+
   it('removes handlers', () => {
     removeTeamHandlers(ipcMain as never);
     expect(handlers.has(TEAM_LIST)).toBe(false);
@@ -174,6 +269,7 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_DELETE_TEAM)).toBe(false);
     expect(handlers.has(TEAM_PREPARE_PROVISIONING)).toBe(false);
     expect(handlers.has(TEAM_CREATE)).toBe(false);
+    expect(handlers.has(TEAM_LAUNCH)).toBe(false);
     expect(handlers.has(TEAM_CREATE_TASK)).toBe(false);
     expect(handlers.has(TEAM_PROVISIONING_STATUS)).toBe(false);
     expect(handlers.has(TEAM_CANCEL_PROVISIONING)).toBe(false);
@@ -184,5 +280,6 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_PROCESS_SEND)).toBe(false);
     expect(handlers.has(TEAM_PROCESS_ALIVE)).toBe(false);
     expect(handlers.has(TEAM_ALIVE_LIST)).toBe(false);
+    expect(handlers.has(TEAM_CREATE_CONFIG)).toBe(false);
   });
 });

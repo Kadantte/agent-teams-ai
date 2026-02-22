@@ -14,6 +14,7 @@ import {
   type SemanticStepGroup,
   type SubagentDetail,
 } from '@main/types';
+import { extractBaseDir } from '@main/utils/pathDecoder';
 import { countTokens } from '@main/utils/tokenizer';
 import { createLogger } from '@shared/utils/logger';
 import * as path from 'path';
@@ -30,8 +31,8 @@ import type { SessionParser } from '../parsing/SessionParser';
  * Build detailed information for a specific subagent.
  * Used for drill-down modal to show subagent's internal execution.
  *
- * @param projectId - Project ID
- * @param _sessionId - Parent session ID (currently unused, kept for API consistency)
+ * @param projectId - Project ID (may contain :: for composite IDs)
+ * @param sessionId - Parent session ID (used in subagent path construction)
  * @param subagentId - Subagent ID to load
  * @param sessionParser - SessionParser instance for parsing subagent file
  * @param subagentResolver - SubagentResolver instance for nested subagents
@@ -42,7 +43,7 @@ import type { SessionParser } from '../parsing/SessionParser';
  */
 export async function buildSubagentDetail(
   projectId: string,
-  _sessionId: string, // Unused but kept for API consistency
+  sessionId: string,
   subagentId: string,
   sessionParser: SessionParser,
   subagentResolver: SubagentResolver,
@@ -52,9 +53,12 @@ export async function buildSubagentDetail(
 ): Promise<SubagentDetail | null> {
   try {
     // Construct path to subagent JSONL file
+    // projectId may be composite (e.g. "baseDir::suffix"), extract base dir
+    const baseDir = extractBaseDir(projectId);
     const subagentPath = path.join(
       projectsDir,
-      projectId,
+      baseDir,
+      sessionId,
       'subagents',
       `agent-${subagentId}.jsonl`
     );

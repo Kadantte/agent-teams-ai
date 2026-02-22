@@ -2,10 +2,12 @@
  * NotificationsSection - Notification settings including triggers and ignored repositories.
  */
 
+import { api } from '@renderer/api';
 import {
   RepositoryDropdown,
   SelectedRepositoryItem,
 } from '@renderer/components/common/RepositoryDropdown';
+import { ExternalLink } from 'lucide-react';
 
 import { SettingRow, SettingsSectionHeader, SettingsSelect, SettingsToggle } from '../components';
 import { NotificationTriggerSettings } from '../NotificationTriggerSettings';
@@ -128,6 +130,33 @@ export const NotificationsSection = ({
           )}
         </div>
       </SettingRow>
+
+      <SettingsSectionHeader title="Task Completion Notifications" />
+      <div
+        className="mb-4 rounded-lg border p-4"
+        style={{
+          borderColor: 'var(--color-border)',
+          backgroundColor: 'var(--color-surface-raised)',
+        }}
+      >
+        <p className="mb-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          Get native OS notifications when Claude finishes tasks — sounds, banners, and Dock/taskbar
+          badges. Works on macOS, Linux, and Windows.
+        </p>
+        <button
+          onClick={() =>
+            void api.openExternal('https://github.com/777genius/claude-notifications-go')
+          }
+          className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:brightness-125"
+          style={{
+            backgroundColor: 'var(--color-border-emphasis)',
+            color: 'var(--color-text)',
+          }}
+        >
+          <ExternalLink className="size-3.5" />
+          Install claude-notifications-go plugin
+        </button>
+      </div>
 
       <SettingsSectionHeader title="Ignored Repositories" />
       <p className="mb-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>

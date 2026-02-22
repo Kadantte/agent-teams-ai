@@ -46,8 +46,12 @@ async function resolveFromPathEnv(binaryName: string): Promise<string | null> {
   return null;
 }
 
+let cachedPath: string | null | undefined;
+
 export class ClaudeBinaryResolver {
   static async resolve(): Promise<string | null> {
+    if (cachedPath !== undefined) return cachedPath;
+
     const platformBinaryName = process.platform === 'win32' ? 'claude.cmd' : 'claude';
     const fromPath = await resolveFromPathEnv(platformBinaryName);
     if (fromPath) {
@@ -66,10 +70,12 @@ export class ClaudeBinaryResolver {
     const nvmCandidates = process.platform === 'win32' ? [] : await collectNvmCandidates();
     for (const candidate of [...candidates, ...nvmCandidates]) {
       if (await isExecutable(candidate)) {
-        return candidate;
+        cachedPath = candidate;
+        return cachedPath;
       }
     }
 
+    // Don't cache null — CLI may be installed later without app restart
     return null;
   }
 }

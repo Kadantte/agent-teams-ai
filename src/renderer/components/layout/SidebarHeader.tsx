@@ -20,6 +20,7 @@ import { truncateMiddle } from '@renderer/utils/stringUtils';
 import { Check, ChevronDown, GitBranch, PanelLeft } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
+import { AppLogo } from '../common/AppLogo';
 import { WorktreeBadge } from '../common/WorktreeBadge';
 
 import type { Worktree, WorktreeSource } from '@renderer/types/data';
@@ -338,7 +339,8 @@ export const SidebarHeader = (): React.JSX.Element => {
           } as React.CSSProperties
         }
       >
-        {/* Project name dropdown button */}
+        {/* App logo + Project name dropdown button */}
+        <AppLogo size={22} className="shrink-0" />
         <button
           onClick={() => setIsProjectDropdownOpen(!isProjectDropdownOpen)}
           className="flex min-w-0 items-center gap-2 transition-opacity hover:opacity-80"

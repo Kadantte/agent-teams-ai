@@ -1,6 +1,6 @@
 # Team Management Feature
 
-Интерфейс для управления командами тиммейтов Claude Code внутри claude-devtools (Electron).
+Интерфейс для управления командами тиммейтов Claude Code внутри Claude Agent Teams UI (Electron).
 
 ## Что делает
 
@@ -25,6 +25,11 @@
 
 ### 1. Messaging: Inbox-файлы
 Единственный способ общаться с **запущенными** тиммейтами. SDK и CLI создают новые сессии, а не подключаются к существующим. Подробности: [research-messaging.md](./research-messaging.md)
+
+### 1.1 Roster source: members.meta.json + inboxes
+- `config.json` не используется как полный реестр участников (он может содержать только team-lead и служебные поля CLI).
+- Источник метаданных участников (role/color/agentType): `members.meta.json`.
+- Источник runtime-состава и адресации сообщений: `inboxes/{member}.json`.
 
 ### 2. Kanban Storage: Собственный файл
 Kanban-позиция (REVIEW, APPROVED) хранится в `kanban-state.json`, а не в task metadata. Причина: metadata может быть перезаписан агентом при TaskUpdate. Подробности: [kanban-design.md](./kanban-design.md)
@@ -89,7 +94,8 @@ Kanban-позиция (REVIEW, APPROVED) хранится в `kanban-state.json`
 ```
 ~/.claude/
 ├── teams/{teamName}/
-│   ├── config.json              # Конфиг команды (members НЕПОЛНЫЙ!)
+│   ├── config.json              # Конфиг команды (lead + служебные поля)
+│   ├── members.meta.json        # Роли/цвета/типы участников (teammates)
 │   └── inboxes/{memberName}.json  # Inbox каждого участника
 └── tasks/{teamName}/
     ├── {id}.json                # Файл задачи
@@ -97,4 +103,6 @@ Kanban-позиция (REVIEW, APPROVED) хранится в `kanban-state.json`
     └── .highwatermark           # Последний ID задачи
 ```
 
-**ВАЖНО**: config.json members содержит только team-lead. Полный список участников реконструируем из inbox-файлов.
+**ВАЖНО**:
+- `config.json` не является source-of-truth для полного roster.
+- Полный roster для UI формируется как `members.meta.json + inbox filenames (+ lead из config)`.

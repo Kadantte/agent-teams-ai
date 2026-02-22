@@ -17,6 +17,7 @@ import type {
   CreateTaskRequest,
   ElectronAPI,
   FileChangeEvent,
+  GlobalTask,
   HttpServerAPI,
   HttpServerStatus,
   NotificationsAPI,
@@ -43,6 +44,8 @@ import type {
   TeamCreateRequest,
   TeamCreateResponse,
   TeamData,
+  TeamLaunchRequest,
+  TeamLaunchResponse,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
   TeamsAPI,
@@ -630,6 +633,9 @@ export class HttpAPIClient implements ElectronAPI {
     createTeam: async (_request: TeamCreateRequest): Promise<TeamCreateResponse> => {
       throw new Error('Team provisioning is not available in browser mode');
     },
+    launchTeam: async (_request: TeamLaunchRequest): Promise<TeamLaunchResponse> => {
+      throw new Error('Team launch is not available in browser mode');
+    },
     getProvisioningStatus: async (_runId: string): Promise<TeamProvisioningProgress> => {
       throw new Error('Team provisioning is not available in browser mode');
     },
@@ -670,6 +676,38 @@ export class HttpAPIClient implements ElectronAPI {
     },
     aliveList: async (): Promise<string[]> => {
       return [];
+    },
+    createConfig: async (): Promise<void> => {
+      throw new Error('Team config creation is not available in browser mode');
+    },
+    getMemberLogs: async () => {
+      console.warn('[HttpAPIClient] getMemberLogs is not available in browser mode');
+      return [];
+    },
+    getMemberStats: async () => {
+      console.warn('[HttpAPIClient] getMemberStats is not available in browser mode');
+      return {
+        linesAdded: 0,
+        linesRemoved: 0,
+        filesTouched: [],
+        toolUsage: {},
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        costUsd: 0,
+        tasksCompleted: 0,
+        messageCount: 0,
+        totalDurationMs: 0,
+        sessionCount: 0,
+        computedAt: new Date().toISOString(),
+      };
+    },
+    getAllTasks: async (): Promise<GlobalTask[]> => {
+      console.warn('[HttpAPIClient] getAllTasks is not available in browser mode');
+      return [];
+    },
+    updateConfig: async () => {
+      throw new Error('Team config update is not available in browser mode');
     },
     onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void): (() => void) => {
       return this.addEventListener('team-change', (data: unknown) =>

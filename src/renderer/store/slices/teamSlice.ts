@@ -4,10 +4,12 @@ import { IpcError, unwrapIpc } from '@renderer/utils/unwrapIpc';
 import type { AppState } from '../types';
 import type {
   CreateTaskRequest,
+  GlobalTask,
   SendMessageRequest,
   SendMessageResult,
   TeamCreateRequest,
   TeamData,
+  TeamLaunchRequest,
   TeamProvisioningProgress,
   TeamSummary,
   TeamTask,
@@ -38,6 +40,9 @@ export interface TeamSlice {
   teams: TeamSummary[];
   teamsLoading: boolean;
   teamsError: string | null;
+  globalTasks: GlobalTask[];
+  globalTasksLoading: boolean;
+  globalTasksError: string | null;
   selectedTeamName: string | null;
   selectedTeamData: TeamData | null;
   selectedTeamLoading: boolean;
@@ -49,10 +54,13 @@ export interface TeamSlice {
   provisioningRuns: Record<string, TeamProvisioningProgress>;
   activeProvisioningRunId: string | null;
   provisioningError: string | null;
+  kanbanFilterQuery: string | null;
   provisioningProgressUnsubscribe: (() => void) | null;
   fetchTeams: () => Promise<void>;
+  fetchAllTasks: () => Promise<void>;
   openTeamsTab: () => void;
-  openTeamTab: (teamName: string) => void;
+  openTeamTab: (teamName: string, projectPath?: string, taskId?: string) => void;
+  clearKanbanFilter: () => void;
   selectTeam: (teamName: string) => Promise<void>;
   refreshTeamData: (teamName: string) => Promise<void>;
   sendTeamMessage: (teamName: string, request: SendMessageRequest) => Promise<void>;
@@ -62,6 +70,7 @@ export interface TeamSlice {
   updateTaskStatus: (teamName: string, taskId: string, status: TeamTaskStatus) => Promise<void>;
   deleteTeam: (teamName: string) => Promise<void>;
   createTeam: (request: TeamCreateRequest) => Promise<string>;
+  launchTeam: (request: TeamLaunchRequest) => Promise<string>;
   cancelProvisioning: (runId: string) => Promise<void>;
   getProvisioningStatus: (runId: string) => Promise<void>;
   onProvisioningProgress: (progress: TeamProvisioningProgress) => void;
@@ -73,6 +82,9 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   teams: [],
   teamsLoading: false,
   teamsError: null,
+  globalTasks: [],
+  globalTasksLoading: false,
+  globalTasksError: null,
   selectedTeamName: null,
   selectedTeamData: null,
   selectedTeamLoading: false,
@@ -84,6 +96,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   provisioningRuns: {},
   activeProvisioningRunId: null,
   provisioningError: null,
+  kanbanFilterQuery: null,
   provisioningProgressUnsubscribe: null,
 
   fetchTeams: async () => {
@@ -104,6 +117,24 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     }
   },
 
+  fetchAllTasks: async () => {
+    set({ globalTasksLoading: true, globalTasksError: null });
+    try {
+      const tasks = await unwrapIpc('team:getAllTasks', () => api.teams.getAllTasks());
+      set({ globalTasks: tasks, globalTasksLoading: false, globalTasksError: null });
+    } catch (error) {
+      set({
+        globalTasksLoading: false,
+        globalTasksError:
+          error instanceof IpcError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : 'Failed to fetch tasks',
+      });
+    }
+  },
+
   openTeamsTab: () => {
     const state = get();
     const focusedPane = state.paneLayout.panes.find((p) => p.id === state.paneLayout.focusedPaneId);
@@ -119,9 +150,21 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     });
   },
 
-  openTeamTab: (teamName: string) => {
+  openTeamTab: (teamName: string, projectPath?: string, taskId?: string) => {
     if (!teamName.trim()) {
       return;
+    }
+
+    // If projectPath is provided, immediately select the matching project in the sidebar.
+    // This avoids a race condition where config.json hasn't been updated with projectPath yet.
+    if (projectPath) {
+      const state = get();
+      const normalizePath = (p: string): string => (p.endsWith('/') ? p.slice(0, -1) : p);
+      const normalizedPath = normalizePath(projectPath);
+      const matchingProject = state.projects.find((p) => normalizePath(p.path) === normalizedPath);
+      if (matchingProject && state.selectedProjectId !== matchingProject.id) {
+        state.selectProject(matchingProject.id);
+      }
     }
 
     const state = get();
@@ -129,14 +172,21 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     const existing = allTabs.find((tab) => tab.type === 'team' && tab.teamName === teamName);
     if (existing) {
       state.setActiveTab(existing.id);
-      return;
+    } else {
+      state.openTab({
+        type: 'team',
+        label: teamName,
+        teamName,
+      });
     }
 
-    state.openTab({
-      type: 'team',
-      label: teamName,
-      teamName,
-    });
+    if (taskId) {
+      set({ kanbanFilterQuery: `#${taskId}` });
+    }
+  },
+
+  clearKanbanFilter: () => {
+    set({ kanbanFilterQuery: null });
   },
 
   selectTeam: async (teamName: string) => {
@@ -149,12 +199,51 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
     try {
       const data = await unwrapIpc('team:getData', () => api.teams.getData(teamName));
+      // Stale check: user may have switched to another team during the async call
+      if (get().selectedTeamName !== teamName) {
+        return;
+      }
       set({
         selectedTeamName: teamName,
         selectedTeamData: data,
         selectedTeamLoading: false,
         selectedTeamError: null,
       });
+
+      // Auto-select the project associated with this team's cwd/projectPath.
+      // Must search both flat projects and grouped repositoryGroups/worktrees
+      // because the default viewMode is 'grouped' and flat projects may be empty.
+      const projectPath = data.config.projectPath;
+      if (projectPath) {
+        const state = get();
+        const normalizedTeamPath = projectPath.endsWith('/')
+          ? projectPath.slice(0, -1)
+          : projectPath;
+
+        const normalizePath = (p: string): string => (p.endsWith('/') ? p.slice(0, -1) : p);
+
+        // 1. Try flat projects list
+        const matchingProject = state.projects.find(
+          (p) => normalizePath(p.path) === normalizedTeamPath
+        );
+        if (matchingProject && state.selectedProjectId !== matchingProject.id) {
+          state.selectProject(matchingProject.id);
+        } else if (!matchingProject) {
+          // 2. Try grouped view: search worktrees across all repository groups
+          for (const repo of state.repositoryGroups) {
+            const matchingWorktree = repo.worktrees.find(
+              (wt) => normalizePath(wt.path) === normalizedTeamPath
+            );
+            if (matchingWorktree) {
+              if (state.selectedWorktreeId !== matchingWorktree.id) {
+                state.selectRepository(repo.id);
+                state.selectWorktree(matchingWorktree.id);
+              }
+              break;
+            }
+          }
+        }
+      }
     } catch (error) {
       set({
         selectedTeamLoading: false,
@@ -293,6 +382,29 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
             : error instanceof Error
               ? error.message
               : 'Failed to create team',
+      });
+      throw error;
+    }
+  },
+
+  launchTeam: async (request: TeamLaunchRequest) => {
+    set({ provisioningError: null });
+    try {
+      const response = await unwrapIpc('team:launch', () => api.teams.launchTeam(request));
+      set({
+        activeProvisioningRunId: response.runId,
+        provisioningError: null,
+      });
+      await get().getProvisioningStatus(response.runId);
+      return response.runId;
+    } catch (error) {
+      set({
+        provisioningError:
+          error instanceof IpcError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : 'Failed to launch team',
       });
       throw error;
     }

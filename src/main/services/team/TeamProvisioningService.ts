@@ -13,12 +13,17 @@ import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 
+import { atomicWriteAsync } from './atomicWrite';
 import { ClaudeBinaryResolver } from './ClaudeBinaryResolver';
 import { TeamConfigReader } from './TeamConfigReader';
+import { TeamInboxReader } from './TeamInboxReader';
+import { TeamMembersMetaStore } from './TeamMembersMetaStore';
 
 import type {
   TeamCreateRequest,
   TeamCreateResponse,
+  TeamLaunchRequest,
+  TeamLaunchResponse,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
   TeamProvisioningState,
@@ -97,6 +102,7 @@ interface ProvisioningRun {
   fsPhase: 'waiting_config' | 'waiting_members' | 'waiting_tasks' | 'all_files_found';
   waitingTasksSince: number | null;
   provisioningComplete: boolean;
+  isLaunch: boolean;
 }
 
 type ProvisioningAuthSource =
@@ -229,15 +235,32 @@ function buildMembersPrompt(members: TeamCreateRequest['members']): string {
     .join('\n');
 }
 
+function buildTaskStatusProtocol(teamName: string): string {
+  return `MANDATORY TASK STATUS PROTOCOL — you MUST follow this for EVERY task:
+1. Use this command to mark task started:
+   node \\"$HOME/.claude/tools/teamctl.js\\" --team \\"${teamName}\\" task start <taskId>
+2. Use this command to mark task completed BEFORE sending your final reply:
+   node \\"$HOME/.claude/tools/teamctl.js\\" --team \\"${teamName}\\" task complete <taskId>
+3. If you are asked to review and task is accepted, move it to APPROVED (not DONE):
+   node \\"$HOME/.claude/tools/teamctl.js\\" --team \\"${teamName}\\" review approve <taskId>
+4. If review fails and changes are needed:
+   node \\"$HOME/.claude/tools/teamctl.js\\" --team \\"${teamName}\\" review request-changes <taskId> --comment \\"<what to fix>\\"
+5. NEVER skip status updates. A task is NOT done until completed status is written.
+Failure to follow this protocol means the task board will show incorrect status.`;
+}
+
 function buildProvisioningPrompt(request: TeamCreateRequest): string {
   const displayName = request.displayName?.trim() || request.teamName;
   const description = request.description?.trim() || 'No description';
   const members = buildMembersPrompt(request.members);
+  const taskProtocol = buildTaskStatusProtocol(request.teamName);
+  const userPromptBlock = request.prompt?.trim()
+    ? `\nAdditional instructions from the user:\n${request.prompt.trim()}\n`
+    : '';
 
   return `You are running in a non-interactive CLI session. Do not ask questions. Do everything in a single turn.
-Output must be in English.
 
-Goal: Provision a Claude Code agent team with live teammates and an initial task.
+Goal: Provision a Claude Code agent team with live teammates.
 
 Constraints:
 - Do NOT call TeamDelete under any circumstances.
@@ -255,33 +278,56 @@ Steps (execute in this exact order):
    - team_name: "${request.teamName}"
    - name: the member's name
    - subagent_type: "general-purpose"
-   - prompt: "You are {name}, a {role} on team \\"${displayName}\\" (${request.teamName}). Wait for messages from the team lead and respond accordingly.
+   - prompt: "You are {name}, a {role} on team \\"${displayName}\\" (${request.teamName}). Send ONE message to the team lead: 'Hello! My name is {name} ({role}). I'm ready.' Then wait for task assignments.
 
-MANDATORY TASK STATUS PROTOCOL — you MUST follow this for EVERY task:
-1. Use this command to mark task started:
-   node \\"$HOME/.claude/teams/${request.teamName}/tools/teamctl.js\\" task start <taskId>
-2. Use this command to mark task completed BEFORE sending your final reply:
-   node \\"$HOME/.claude/teams/${request.teamName}/tools/teamctl.js\\" task complete <taskId>
-3. If you are asked to review and task is accepted, move it to APPROVED (not DONE):
-   node \\"$HOME/.claude/teams/${request.teamName}/tools/teamctl.js\\" review approve <taskId>
-4. If review fails and changes are needed:
-   node \\"$HOME/.claude/teams/${request.teamName}/tools/teamctl.js\\" review request-changes <taskId> --comment \\"<what to fix>\\"
-5. NEVER skip status updates. A task is NOT done until completed status is written.
-Failure to follow this protocol means the task board will show incorrect status."
+${taskProtocol}"
 
-3) TaskCreate — create 1 initial task:
-   - subject: "Bootstrap check"
-   - description: "Confirm team provisioning succeeded. Each member replied OK."
-
-4) SendMessage to each teammate:
-   - type: "message"
-   - summary: "Bootstrap"
-   - content: "Team \\"${displayName}\\" is ready. Your role: {role}. Reply with 'OK' when you are available."
-
-5) Wait for all teammates to reply OK, then output a short summary.
-
+3) After spawning all members, output a short summary.
+${userPromptBlock}
 Members:
 ${members}
+`;
+}
+
+function buildLaunchPrompt(
+  request: TeamLaunchRequest,
+  members: TeamCreateRequest['members']
+): string {
+  const membersBlock = buildMembersPrompt(members);
+  const userPromptBlock = request.prompt?.trim()
+    ? `\nAdditional instructions from the user:\n${request.prompt.trim()}\n`
+    : '';
+  const taskProtocol = buildTaskStatusProtocol(request.teamName);
+
+  return `You are running in a non-interactive CLI session. Do not ask questions. Do everything in a single turn.
+
+Goal: Reconnect with existing team "${request.teamName}".
+
+Constraints:
+- Do NOT call TeamDelete under any circumstances.
+- Do NOT use TodoWrite — use TaskCreate for tasks.
+- Do NOT send shutdown_request messages (SendMessage type: "shutdown_request" is FORBIDDEN).
+- Do NOT shut down, terminate, or clean up the team or its members.
+- Keep assistant text minimal.
+
+Steps (execute in this exact order):
+
+1) Read team config at ~/.claude/teams/${request.teamName}/config.json — understand current team state.
+
+2) Read the task list via TaskList — understand pending work.
+
+3) Spawn each existing member as a live teammate using the Task tool:
+   - team_name: "${request.teamName}"
+   - name: the member's name
+   - subagent_type: "general-purpose"
+   - prompt: "You are {name}, a {role} on team \\"${request.teamName}\\". The team has been reconnected. Send ONE message to the team lead: 'Hello! My name is {name} ({role}). I'm ready.' Then check TaskList for pending work and resume.
+
+${taskProtocol}"
+
+4) After spawning all members, output a short summary.
+${userPromptBlock}
+Members:
+${membersBlock}
 `;
 }
 
@@ -357,13 +403,52 @@ function buildCliExitError(code: number | null, stdoutText: string, stderrText: 
   return `Claude CLI exited with code ${code ?? 'unknown'}`;
 }
 
+interface CachedProbeResult {
+  claudePath: string;
+  env: NodeJS.ProcessEnv;
+  authSource: ProvisioningAuthSource;
+  warning?: string;
+}
+
+let cachedProbeResult: CachedProbeResult | null = null;
+
 export class TeamProvisioningService {
   private readonly runs = new Map<string, ProvisioningRun>();
   private readonly activeByTeam = new Map<string, string>();
 
-  constructor(private readonly configReader: TeamConfigReader = new TeamConfigReader()) {}
+  constructor(
+    private readonly configReader: TeamConfigReader = new TeamConfigReader(),
+    private readonly inboxReader: TeamInboxReader = new TeamInboxReader(),
+    private readonly membersMetaStore: TeamMembersMetaStore = new TeamMembersMetaStore()
+  ) {}
+
+  async warmup(): Promise<void> {
+    try {
+      const claudePath = await ClaudeBinaryResolver.resolve();
+      if (!claudePath) return;
+      const { env, authSource } = await this.buildProvisioningEnv();
+      const cwd = process.cwd();
+      const probe = await this.probeClaudeRuntime(claudePath, cwd, env);
+      cachedProbeResult = { claudePath, env, authSource, warning: probe.warning };
+      logger.info('CLI warmup completed');
+    } catch (error) {
+      logger.warn(`CLI warmup failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   async prepareForProvisioning(cwd?: string): Promise<TeamProvisioningPrepareResult> {
+    if (cachedProbeResult) {
+      const { warning, authSource } = cachedProbeResult;
+      const warnings: string[] = [];
+      if (warning) warnings.push(warning);
+      const isAuthFailure = warning ? this.isAuthFailureWarning(warning) : false;
+      return {
+        ready: !warning || authSource !== 'none' || !isAuthFailure,
+        message: 'CLI is warmed up and ready to launch',
+        warnings: warnings.length > 0 ? warnings : undefined,
+      };
+    }
+
     const claudePath = await ClaudeBinaryResolver.resolve();
     if (!claudePath) {
       throw new Error('Claude CLI not found; install it or provide a valid path');
@@ -408,15 +493,16 @@ export class TeamProvisioningService {
     const probe = await this.probeClaudeRuntime(claudePath, targetCwd, executionEnv);
 
     if (probe.warning) {
-      if (authSource === 'none') {
-        // Preflight also failed — auth is truly missing
+      const isAuthFailure = this.isAuthFailureWarning(probe.warning);
+      if (authSource === 'none' && isAuthFailure) {
+        // No auth source + preflight indicates auth failure — block to avoid a confusing hang later.
         return {
           ready: false,
           message: probe.warning,
           warnings: warnings.length > 0 ? warnings : undefined,
         };
       }
-      // We had an auth source but preflight still complained — warn but allow
+      // Preflight warnings (including timeouts) should not block provisioning.
       warnings.push(probe.warning);
     }
 
@@ -425,6 +511,17 @@ export class TeamProvisioningService {
       message: 'CLI is warmed up and ready to launch',
       warnings: warnings.length > 0 ? warnings : undefined,
     };
+  }
+
+  private isAuthFailureWarning(text: string): boolean {
+    const lower = text.toLowerCase();
+    return (
+      lower.includes('not authenticated') ||
+      lower.includes('not logged in') ||
+      lower.includes('please run /login') ||
+      lower.includes('missing api key') ||
+      lower.includes('invalid api key')
+    );
   }
 
   async createTeam(
@@ -472,6 +569,7 @@ export class TeamProvisioningService {
       lastLogProgressAt: 0,
       waitingTasksSince: null,
       provisioningComplete: false,
+      isLaunch: false,
       fsPhase: 'waiting_config',
       progress: {
         runId,
@@ -632,6 +730,235 @@ export class TeamProvisioningService {
     return { runId };
   }
 
+  async launchTeam(
+    request: TeamLaunchRequest,
+    onProgress: (progress: TeamProvisioningProgress) => void
+  ): Promise<TeamLaunchResponse> {
+    if (this.activeByTeam.has(request.teamName)) {
+      throw new Error('Team is already running');
+    }
+
+    // Verify config.json exists — team must already be provisioned
+    const configPath = path.join(getTeamsBasePath(), request.teamName, 'config.json');
+    let configRaw: string;
+    try {
+      configRaw = await fs.promises.readFile(configPath, 'utf8');
+    } catch {
+      throw new Error(`Team "${request.teamName}" not found — config.json does not exist`);
+    }
+
+    const {
+      members: expectedMemberSpecs,
+      source,
+      warning,
+    } = await this.resolveLaunchExpectedMembers(request.teamName, configRaw);
+    const expectedMembers = expectedMemberSpecs.map((m) => m.name);
+
+    // IMPORTANT: The CLI auto-suffixes teammate names when they already exist in config.json.
+    // Normalize config.json to keep only the team-lead before spawning the CLI, so we get stable names.
+    await this.normalizeTeamConfigForLaunch(request.teamName, configRaw);
+
+    await ensureCwdExists(request.cwd);
+
+    const claudePath = await ClaudeBinaryResolver.resolve();
+    if (!claudePath) {
+      throw new Error('Claude CLI not found; install it or provide a valid path');
+    }
+
+    const teamsBasePathsToProbe = getTeamsBasePathsToProbe();
+    const runId = randomUUID();
+    const startedAt = nowIso();
+
+    // Build a synthetic TeamCreateRequest for reuse by shared infrastructure
+    const syntheticRequest: TeamCreateRequest = {
+      teamName: request.teamName,
+      members: expectedMemberSpecs,
+      cwd: request.cwd,
+    };
+
+    const run: ProvisioningRun = {
+      runId,
+      teamName: request.teamName,
+      startedAt,
+      stdoutBuffer: '',
+      stderrBuffer: '',
+      processKilled: false,
+      finalizingByTimeout: false,
+      cancelRequested: false,
+      teamsBasePathsToProbe,
+      child: null,
+      timeoutHandle: null,
+      fsMonitorHandle: null,
+      onProgress,
+      expectedMembers,
+      request: syntheticRequest,
+      lastLogProgressAt: 0,
+      waitingTasksSince: null,
+      provisioningComplete: false,
+      isLaunch: true,
+      fsPhase: 'waiting_members',
+      progress: {
+        runId,
+        teamName: request.teamName,
+        state: 'validating',
+        message:
+          source === 'members-meta'
+            ? 'Validating team launch request (members from members.meta.json)'
+            : source === 'inboxes'
+              ? 'Validating team launch request (members from inboxes)'
+              : 'Validating team launch request (fallback members from config.json)',
+        startedAt,
+        updatedAt: startedAt,
+        warnings: warning ? [warning] : undefined,
+        cliLogsTail: undefined,
+      },
+    };
+
+    this.runs.set(runId, run);
+    this.activeByTeam.set(request.teamName, runId);
+    run.onProgress(run.progress);
+
+    const prompt = buildLaunchPrompt(request, expectedMemberSpecs);
+    let child: ReturnType<typeof spawn>;
+    const { env: shellEnv, authSource } = await this.buildProvisioningEnv();
+    if (authSource === 'none') {
+      logger.warn(
+        'No explicit auth env var found for `-p` mode (launch). ' +
+          'Attempting spawn anyway — CLI may authenticate via apiKeyHelper, SSO, or other mechanism.'
+      );
+    }
+    try {
+      child = spawn(
+        claudePath,
+        [
+          '--input-format',
+          'stream-json',
+          '--output-format',
+          'stream-json',
+          '--verbose',
+          '--setting-sources',
+          'user,project,local',
+          '--disallowedTools',
+          'TeamDelete,TodoWrite',
+        ],
+        {
+          cwd: request.cwd,
+          env: {
+            ...shellEnv,
+          },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }
+      );
+    } catch (error) {
+      this.runs.delete(runId);
+      this.activeByTeam.delete(request.teamName);
+      throw error;
+    }
+
+    updateProgress(run, 'spawning', 'Starting Claude CLI process for team launch', {
+      pid: child.pid ?? undefined,
+    });
+    run.onProgress(run.progress);
+    run.child = child;
+
+    // Send launch prompt
+    if (child.stdin) {
+      const message = JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: prompt }],
+        },
+      });
+      child.stdin.write(message + '\n');
+    }
+
+    if (child.stdout) {
+      let stdoutLineBuf = '';
+      child.stdout.on('data', (chunk: Buffer) => {
+        const text = chunk.toString('utf8');
+        run.stdoutBuffer += text;
+        if (run.stdoutBuffer.length > STDOUT_RING_LIMIT) {
+          run.stdoutBuffer = run.stdoutBuffer.slice(run.stdoutBuffer.length - STDOUT_RING_LIMIT);
+        }
+
+        stdoutLineBuf += text;
+        const lines = stdoutLineBuf.split('\n');
+        stdoutLineBuf = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const msg = JSON.parse(trimmed) as Record<string, unknown>;
+            this.handleStreamJsonMessage(run, msg);
+          } catch {
+            // Not valid JSON
+          }
+        }
+
+        const currentTs = Date.now();
+        if (currentTs - run.lastLogProgressAt >= LOG_PROGRESS_THROTTLE_MS) {
+          run.lastLogProgressAt = currentTs;
+          emitLogsProgress(run);
+        }
+      });
+    }
+
+    if (child.stderr) {
+      child.stderr.on('data', (chunk: Buffer) => {
+        run.stderrBuffer += chunk.toString('utf8');
+        if (run.stderrBuffer.length > STDERR_RING_LIMIT) {
+          run.stderrBuffer = run.stderrBuffer.slice(run.stderrBuffer.length - STDERR_RING_LIMIT);
+        }
+        const currentTs = Date.now();
+        if (currentTs - run.lastLogProgressAt >= LOG_PROGRESS_THROTTLE_MS) {
+          run.lastLogProgressAt = currentTs;
+          emitLogsProgress(run);
+        }
+      });
+    }
+
+    // Filesystem monitor — config already exists, start from 'waiting_members'
+    this.startFilesystemMonitor(run, syntheticRequest);
+
+    run.timeoutHandle = setTimeout(() => {
+      if (!run.processKilled && !run.provisioningComplete) {
+        run.processKilled = true;
+        run.finalizingByTimeout = true;
+        void (async () => {
+          const readyOnTimeout = await this.tryCompleteAfterTimeout(run);
+          run.child?.stdin?.end();
+          run.child?.kill();
+          if (readyOnTimeout) {
+            return;
+          }
+
+          const progress = updateProgress(run, 'failed', 'Timed out waiting for CLI (launch)', {
+            error: 'Timed out waiting for CLI during team launch.',
+            cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+          });
+          run.onProgress(progress);
+          this.cleanupRun(run);
+        })();
+      }
+    }, RUN_TIMEOUT_MS);
+
+    child.once('error', (error) => {
+      const progress = updateProgress(run, 'failed', 'Failed to start Claude CLI (launch)', {
+        error: error.message,
+        cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+      });
+      run.onProgress(progress);
+      this.cleanupRun(run);
+    });
+
+    child.once('exit', (code) => {
+      void this.handleProcessExit(run, code);
+    });
+
+    return { runId };
+  }
+
   async getProvisioningStatus(runId: string): Promise<TeamProvisioningProgress> {
     const run = this.runs.get(runId);
     if (!run) {
@@ -763,6 +1090,18 @@ export class TeamProvisioningService {
     }
     this.stopFilesystemMonitor(run);
 
+    if (run.isLaunch) {
+      await this.ensureProjectPathInConfig(run.teamName, run.request.cwd);
+      await this.appendSessionToHistory(run.teamName);
+      const readyMessage = 'Team launched — process alive and ready';
+      const progress = updateProgress(run, 'ready', readyMessage, {
+        cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+      });
+      run.onProgress(progress);
+      logger.info(`[${run.teamName}] Launch complete. Process alive for subsequent tasks.`);
+      return;
+    }
+
     // Quick verification: config should exist by now
     const configProbe = await this.waitForValidConfig(run, 5000);
     if (!configProbe.ok) {
@@ -788,8 +1127,10 @@ export class TeamProvisioningService {
       return;
     }
 
-    // Patch config with expected members (fallback if CLI didn't register all)
-    await this.patchConfigWithExpectedMembers(run.teamName, run.request);
+    // Persist teammates metadata separately from config.json.
+    await this.persistMembersMeta(run.teamName, run.request);
+    await this.ensureProjectPathInConfig(run.teamName, run.request.cwd);
+    await this.appendSessionToHistory(run.teamName);
 
     const progress = updateProgress(run, 'ready', 'Team provisioned — process alive and ready', {
       cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
@@ -901,15 +1242,12 @@ export class TeamProvisioningService {
 
           if (taskFound || taskFallbackExpired) {
             run.fsPhase = 'all_files_found';
-            const message = taskFound
-              ? `Team provisioned: ${taskCount} task(s). Teammates working...`
-              : 'Team provisioned (no task file yet). Teammates working...';
-            const progress = updateProgress(run, 'monitoring', message);
-            run.onProgress(progress);
-            // No early-kill — let the process run naturally.
-            // The lead will finish when teammates complete their work,
-            // then system-reminder fires, --disallowedTools blocks TeamDelete,
-            // and the process exits on its own.
+            // Mark provisioning complete early — files are on disk,
+            // no need to wait for stream-json result.success.
+            // The process stays alive for subsequent tasks.
+            if (!run.provisioningComplete) {
+              void this.handleProvisioningTurnComplete(run);
+            }
           }
         }
       } catch (error) {
@@ -1006,7 +1344,9 @@ export class TeamProvisioningService {
       if (missingInboxes.length > 0) {
         warnings.push('Some inboxes not created yet');
       }
-      await this.patchConfigWithExpectedMembers(run.teamName, run.request);
+      if (!run.isLaunch) {
+        await this.persistMembersMeta(run.teamName, run.request);
+      }
       // Mark as disconnected since the process is dead
       const progress = updateProgress(
         run,
@@ -1165,7 +1505,9 @@ export class TeamProvisioningService {
       warnings.push('Some inboxes not created yet');
     }
 
-    await this.patchConfigWithExpectedMembers(run.teamName, run.request);
+    if (!run.isLaunch) {
+      await this.persistMembersMeta(run.teamName, run.request);
+    }
     // Process was killed by timeout — mark as disconnected, not ready
     const progress = updateProgress(run, 'disconnected', 'Team provisioned but process timed out', {
       warnings,
@@ -1327,58 +1669,395 @@ export class TeamProvisioningService {
   }
 
   /**
-   * After the CLI creates config.json (with only team-lead), patch in the
-   * expected members from the provisioning request. The simplified prompt
-   * sends bootstrap messages to inboxes but does not spawn actual teammate
-   * processes, so the members array would otherwise only contain the lead.
+   * Append current leadSessionId to sessionHistory array in config.json.
+   * Called after launch/create to track which sessions belong to this team.
    */
-  private async patchConfigWithExpectedMembers(
-    teamName: string,
-    request: TeamCreateRequest
-  ): Promise<void> {
+  private async appendSessionToHistory(teamName: string): Promise<void> {
     const configPath = path.join(getTeamsBasePath(), teamName, 'config.json');
     try {
       const raw = await fs.promises.readFile(configPath, 'utf8');
       const config = JSON.parse(raw) as Record<string, unknown>;
-      const existingMembers = Array.isArray(config.members)
-        ? (config.members as Record<string, unknown>[])
-        : [];
-
-      const existingNames = new Set(
-        existingMembers.filter((m) => typeof m.name === 'string').map((m) => m.name as string)
-      );
-
-      const memberColors = ['blue', 'green', 'yellow', 'cyan', 'magenta', 'red'];
-      let colorIdx = 0;
-
-      for (const member of request.members) {
-        if (existingNames.has(member.name)) {
-          continue;
-        }
-
-        existingMembers.push({
-          agentId: `${member.name}@${teamName}`,
-          name: member.name,
-          agentType: 'general-purpose',
-          role: member.role?.trim() || undefined,
-          color: memberColors[colorIdx % memberColors.length],
-          joinedAt: Date.now(),
-          tmuxPaneId: '',
-          cwd: request.cwd,
-          subscriptions: [],
-        });
-        colorIdx++;
+      const leadSessionId = config.leadSessionId;
+      if (typeof leadSessionId !== 'string' || leadSessionId.trim().length === 0) {
+        return;
       }
-
-      config.members = existingMembers;
+      const history = Array.isArray(config.sessionHistory)
+        ? (config.sessionHistory as string[])
+        : [];
+      if (history.includes(leadSessionId)) {
+        return;
+      }
+      history.push(leadSessionId);
+      config.sessionHistory = history;
       await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
+      logger.info(`[${teamName}] Appended session ${leadSessionId} to sessionHistory`);
+    } catch (error) {
+      logger.warn(
+        `[${teamName}] Failed to append session to history: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private async ensureProjectPathInConfig(teamName: string, projectPath: string): Promise<void> {
+    if (!projectPath.trim()) {
+      return;
+    }
+    const configPath = path.join(getTeamsBasePath(), teamName, 'config.json');
+    try {
+      const raw = await fs.promises.readFile(configPath, 'utf8');
+      const config = JSON.parse(raw) as Record<string, unknown>;
+
+      // Always update projectPath to current cwd
+      config.projectPath = projectPath;
+
+      // Maintain ordered history (no duplicates, most recent last)
+      const history = Array.isArray(config.projectPathHistory)
+        ? (config.projectPathHistory as string[]).filter(
+            (p) => typeof p === 'string' && p !== projectPath
+          )
+        : [];
+      history.push(projectPath);
+      config.projectPathHistory = history;
+
+      await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
+    } catch (error) {
+      logger.warn(
+        `[${teamName}] Failed to ensure projectPath in config.json: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  private async normalizeTeamConfigForLaunch(teamName: string, configRaw: string): Promise<void> {
+    const configPath = path.join(getTeamsBasePath(), teamName, 'config.json');
+    const backupPath = `${configPath}.prelaunch.bak`;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(configRaw) as unknown;
+    } catch {
+      return;
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      return;
+    }
+
+    const config = parsed as Record<string, unknown>;
+    const members = Array.isArray(config.members)
+      ? (config.members as Record<string, unknown>[])
+      : [];
+    if (members.length === 0) {
+      return;
+    }
+
+    // Keep only the lead entry.
+    const leadMembers = members.filter((member) => {
+      const agentType = member.agentType;
+      if (typeof agentType === 'string' && agentType === 'team-lead') {
+        return true;
+      }
+      const leadAgentId = config.leadAgentId;
+      return (
+        typeof leadAgentId === 'string' &&
+        typeof member.agentId === 'string' &&
+        member.agentId === leadAgentId
+      );
+    });
+
+    // If already lead-only, no-op.
+    if (leadMembers.length === members.length) {
+      return;
+    }
+
+    // Try to determine base teammate names for inbox cleanup (prefer meta).
+    const baseNames = new Set<string>();
+    try {
+      const metaMembers = await this.membersMetaStore.getMembers(teamName);
+      for (const member of metaMembers) {
+        const name = member.name.trim();
+        if (name.length > 0) baseNames.add(name);
+      }
+    } catch {
+      // ignore
+    }
+    if (baseNames.size === 0) {
+      for (const member of members) {
+        const name = typeof member.name === 'string' ? member.name.trim() : '';
+        const agentType = typeof member.agentType === 'string' ? member.agentType : '';
+        if (name && agentType && agentType !== 'team-lead' && !/-\d+$/.test(name)) {
+          baseNames.add(name);
+        }
+      }
+    }
+
+    // Backup current config on disk for crash recovery / debugging.
+    try {
+      await atomicWriteAsync(backupPath, configRaw);
+    } catch (error) {
+      logger.warn(
+        `[${teamName}] Failed to write config prelaunch backup: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+
+    // Write normalized config atomically.
+    config.members = leadMembers;
+    try {
+      await atomicWriteAsync(configPath, JSON.stringify(config, null, 2));
       logger.info(
-        `Patched config.json for ${teamName}: added ${request.members.length - (existingNames.size - 1)} members`
+        `[${teamName}] Normalized config.json for launch: kept ${leadMembers.length} lead member(s)`
       );
     } catch (error) {
       logger.warn(
-        `Failed to patch config.json with members: ${error instanceof Error ? error.message : String(error)}`
+        `[${teamName}] Failed to normalize config.json for launch: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
+      return;
+    }
+
+    // Best-effort: merge and remove suffixed inboxes like alice-2.json to avoid UI duplicates.
+    await this.mergeAndRemoveDuplicateInboxes(teamName, baseNames);
+  }
+
+  private async mergeAndRemoveDuplicateInboxes(
+    teamName: string,
+    baseNames: Set<string>
+  ): Promise<void> {
+    if (baseNames.size === 0) return;
+
+    const inboxDir = path.join(getTeamsBasePath(), teamName, 'inboxes');
+    let entries: string[];
+    try {
+      entries = await fs.promises.readdir(inboxDir);
+    } catch {
+      return;
+    }
+
+    const existing = new Set(entries.filter((e) => e.endsWith('.json') && !e.startsWith('.')));
+
+    for (const baseName of baseNames) {
+      const canonicalFile = `${baseName}.json`;
+      if (!existing.has(canonicalFile)) {
+        continue;
+      }
+
+      const duplicates = Array.from(existing)
+        .filter((file) => file.startsWith(`${baseName}-`) && file.endsWith('.json'))
+        .filter((file) => /-\d+\.json$/.test(file));
+
+      if (duplicates.length === 0) {
+        continue;
+      }
+
+      const canonicalPath = path.join(inboxDir, canonicalFile);
+      let canonicalRaw: string;
+      try {
+        canonicalRaw = await fs.promises.readFile(canonicalPath, 'utf8');
+      } catch {
+        // If cannot read, skip cleanup for this base.
+        continue;
+      }
+
+      let canonicalParsed: unknown;
+      try {
+        canonicalParsed = JSON.parse(canonicalRaw) as unknown;
+      } catch {
+        canonicalParsed = [];
+      }
+      const canonicalList = Array.isArray(canonicalParsed) ? (canonicalParsed as unknown[]) : [];
+
+      const merged = [...canonicalList];
+      for (const dupFile of duplicates) {
+        const dupPath = path.join(inboxDir, dupFile);
+        let dupRaw: string;
+        try {
+          dupRaw = await fs.promises.readFile(dupPath, 'utf8');
+        } catch {
+          continue;
+        }
+
+        let dupParsed: unknown;
+        try {
+          dupParsed = JSON.parse(dupRaw) as unknown;
+        } catch {
+          dupParsed = [];
+        }
+        if (Array.isArray(dupParsed)) {
+          const dupList = dupParsed as unknown[];
+          merged.push(...dupList);
+        }
+      }
+
+      // Dedup by messageId when available, then sort by timestamp desc.
+      const dedupById = new Map<string, unknown>();
+      const noId: unknown[] = [];
+      for (const item of merged) {
+        if (!item || typeof item !== 'object') {
+          continue;
+        }
+        const msg = item as { messageId?: unknown };
+        if (typeof msg.messageId === 'string' && msg.messageId.trim().length > 0) {
+          dedupById.set(msg.messageId, item);
+        } else {
+          noId.push(item);
+        }
+      }
+      const mergedDeduped = [...Array.from(dedupById.values()), ...noId];
+      mergedDeduped.sort((a, b) => {
+        const at =
+          a && typeof a === 'object'
+            ? Date.parse((a as { timestamp?: string }).timestamp ?? '')
+            : 0;
+        const bt =
+          b && typeof b === 'object'
+            ? Date.parse((b as { timestamp?: string }).timestamp ?? '')
+            : 0;
+        if (Number.isNaN(at) || Number.isNaN(bt)) return 0;
+        return bt - at;
+      });
+
+      try {
+        await atomicWriteAsync(canonicalPath, JSON.stringify(mergedDeduped, null, 2));
+      } catch {
+        continue;
+      }
+
+      for (const dupFile of duplicates) {
+        try {
+          await fs.promises.unlink(path.join(inboxDir, dupFile));
+          existing.delete(dupFile);
+        } catch {
+          // Best-effort cleanup.
+        }
+      }
+    }
+  }
+
+  private async persistMembersMeta(teamName: string, request: TeamCreateRequest): Promise<void> {
+    const teammateMembers = request.members.filter((member) => member.name.trim().length > 0);
+    if (teammateMembers.length === 0) {
+      return;
+    }
+
+    const memberColors = ['blue', 'green', 'yellow', 'cyan', 'magenta', 'red'] as const;
+    const joinedAt = Date.now();
+
+    try {
+      await this.membersMetaStore.writeMembers(
+        teamName,
+        teammateMembers.map((member, index) => ({
+          name: member.name,
+          role: member.role?.trim() || undefined,
+          agentType: 'general-purpose',
+          color: memberColors[index % memberColors.length],
+          joinedAt,
+        }))
+      );
+    } catch (error) {
+      logger.warn(
+        `[${teamName}] Failed to persist members.meta.json: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  private async resolveLaunchExpectedMembers(
+    teamName: string,
+    configRaw: string
+  ): Promise<{
+    members: TeamCreateRequest['members'];
+    source: 'members-meta' | 'inboxes' | 'config-fallback';
+    warning?: string;
+  }> {
+    try {
+      const metaMembers = await this.membersMetaStore.getMembers(teamName);
+      const byName = new Map<string, TeamCreateRequest['members'][number]>();
+      for (const member of metaMembers) {
+        const name = member.name?.trim();
+        if (!name) continue;
+        const role = typeof member.role === 'string' ? member.role.trim() || undefined : undefined;
+        const prev = byName.get(name);
+        if (!prev) {
+          byName.set(name, { name, role });
+        } else if (!prev.role && role) {
+          byName.set(name, { ...prev, role });
+        }
+      }
+      const members = Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+      if (members.length > 0) {
+        return { members, source: 'members-meta' };
+      }
+    } catch (error) {
+      logger.warn(
+        `[${teamName}] Failed to read members.meta.json: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+
+    try {
+      const inboxNames = Array.from(
+        new Set(
+          (await this.inboxReader.listInboxNames(teamName))
+            .map((name) => name.trim())
+            .filter((name) => name.length > 0)
+        )
+      );
+      if (inboxNames.length > 0) {
+        const members = inboxNames.map((name) => ({ name }));
+        return { members, source: 'inboxes' };
+      }
+    } catch (error) {
+      logger.warn(
+        `[${teamName}] Failed to read inbox member names: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+
+    const configMembers = this.extractTeammateSpecsFromConfig(teamName, configRaw);
+    if (configMembers.length > 0) {
+      return {
+        members: configMembers,
+        source: 'config-fallback',
+        warning:
+          'members.meta.json and inboxes are empty; launch fell back to config.json members. ' +
+          'Run a fresh team bootstrap to persist stable member metadata.',
+      };
+    }
+
+    return {
+      members: [],
+      source: 'config-fallback',
+      warning:
+        'No teammate roster found in members.meta.json, inboxes, or config.json. Launch will continue without explicit teammate names.',
+    };
+  }
+
+  private extractTeammateSpecsFromConfig(
+    teamName: string,
+    configRaw: string
+  ): TeamCreateRequest['members'] {
+    try {
+      const parsed = JSON.parse(configRaw) as { members?: { name?: string; agentType?: string }[] };
+      if (!Array.isArray(parsed.members)) {
+        return [];
+      }
+      const byName = new Map<string, TeamCreateRequest['members'][number]>();
+      for (const member of parsed.members) {
+        if (!member || member.agentType === 'team-lead') continue;
+        const name = typeof member.name === 'string' ? member.name.trim() : '';
+        if (!name) continue;
+        byName.set(name, { name });
+      }
+      return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      logger.warn(`[${teamName}] Failed to parse config.json for launch fallback members`);
+      return [];
     }
   }
 
@@ -1410,13 +2089,23 @@ export class TeamProvisioningService {
     }
 
     // Stage 2: verify `-p` mode auth actually works
-    const pingProbe = await this.spawnProbe(
-      claudePath,
-      ['-p', 'Reply with the single word PONG and nothing else', '--output-format', 'text'],
-      cwd,
-      env,
-      PREFLIGHT_TIMEOUT_MS
-    );
+    let pingProbe: { exitCode: number | null; stdout: string; stderr: string } | null = null;
+    try {
+      pingProbe = await this.spawnProbe(
+        claudePath,
+        ['-p', 'Reply with the single word PONG and nothing else', '--output-format', 'text'],
+        cwd,
+        env,
+        PREFLIGHT_TIMEOUT_MS
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        warning:
+          'Preflight check for `claude -p` did not complete. ' +
+          `Proceeding anyway. Details: ${message}`,
+      };
+    }
 
     const combinedOutput = buildCombinedLogs(pingProbe.stdout, pingProbe.stderr);
     const lowerOutput = combinedOutput.toLowerCase();

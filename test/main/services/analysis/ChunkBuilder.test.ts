@@ -97,6 +97,26 @@ describe('ChunkBuilder', () => {
       expect(isUserChunk(chunks[0])).toBe(true);
     });
 
+    it('should include sidechain messages when requested (subagent files)', () => {
+      const messages = [
+        createMessage({
+          type: 'user',
+          content: 'Subagent input',
+          isSidechain: true,
+        }),
+        createMessage({
+          type: 'assistant',
+          content: [{ type: 'text', text: 'Subagent output' }],
+          isSidechain: true,
+        }),
+      ];
+
+      const chunks = builder.buildChunks(messages, [], { includeSidechain: true });
+      expect(chunks.length).toBeGreaterThan(0);
+      expect(chunks.some((c) => isUserChunk(c))).toBe(true);
+      expect(chunks.some((c) => isAIChunk(c))).toBe(true);
+    });
+
     describe('UserChunk creation', () => {
       it('should create UserChunk from real user message', () => {
         const messages = [

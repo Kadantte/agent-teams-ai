@@ -321,3 +321,10 @@ export function getTeamsBasePath(): string {
 export function getTasksBasePath(): string {
   return path.join(getClaudeBasePath(), 'tasks');
 }
+
+/**
+ * Get the tools directory path (~/.claude/tools).
+ */
+export function getToolsBasePath(): string {
+  return path.join(getClaudeBasePath(), 'tools');
+}

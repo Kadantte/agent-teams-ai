@@ -10,16 +10,32 @@ export interface TeamMember {
 export interface TeamConfig {
   name: string;
   description?: string;
+  color?: string;
   members?: TeamMember[];
+  projectPath?: string;
+  projectPathHistory?: string[];
+  leadSessionId?: string;
+  sessionHistory?: string[];
+}
+
+export interface TeamUpdateConfigRequest {
+  name?: string;
+  description?: string;
+  color?: string;
 }
 
 export interface TeamSummary {
   teamName: string;
   displayName: string;
   description: string;
+  color?: string;
   memberCount: number;
   taskCount: number;
   lastActivity: string | null;
+  projectPath?: string;
+  projectPathHistory?: string[];
+  leadSessionId?: string;
+  sessionHistory?: string[];
 }
 
 export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted';
@@ -33,6 +49,8 @@ export interface TeamTask {
   status: TeamTaskStatus;
   blocks?: string[];
   blockedBy?: string[];
+  createdAt?: string;
+  projectPath?: string;
 }
 
 export interface InboxMessage {
@@ -44,6 +62,7 @@ export interface InboxMessage {
   summary?: string;
   color?: string;
   messageId?: string;
+  source?: 'inbox' | 'lead_session';
 }
 
 export interface SendMessageRequest {
@@ -91,6 +110,7 @@ export interface ResolvedTeamMember {
   messageCount: number;
   color?: string;
   agentType?: string;
+  role?: string;
 }
 
 export interface TeamData {
@@ -101,6 +121,17 @@ export interface TeamData {
   messages: InboxMessage[];
   kanbanState: KanbanState;
   warnings?: string[];
+  isAlive?: boolean;
+}
+
+export interface TeamLaunchRequest {
+  teamName: string;
+  cwd: string;
+  prompt?: string;
+}
+
+export interface TeamLaunchResponse {
+  runId: string;
 }
 
 export interface CreateTaskRequest {
@@ -108,6 +139,7 @@ export interface CreateTaskRequest {
   description?: string;
   owner?: string;
   blockedBy?: string[];
+  prompt?: string;
 }
 
 export interface TeamChangeEvent {
@@ -136,8 +168,18 @@ export interface TeamCreateRequest {
   teamName: string;
   displayName?: string;
   description?: string;
+  color?: string;
   members: TeamProvisioningMemberInput[];
   cwd: string;
+  prompt?: string;
+}
+
+export interface TeamCreateConfigRequest {
+  teamName: string;
+  displayName?: string;
+  description?: string;
+  color?: string;
+  members: TeamProvisioningMemberInput[];
 }
 
 export interface TeamCreateResponse {
@@ -161,4 +203,63 @@ export interface TeamProvisioningProgress {
   error?: string;
   warnings?: string[];
   cliLogsTail?: string;
+}
+
+export interface GlobalTask extends TeamTask {
+  teamName: string;
+  teamDisplayName: string;
+  projectPath?: string;
+}
+
+export interface MemberSubagentSummary {
+  subagentId: string;
+  sessionId: string;
+  projectId: string;
+  description: string;
+  memberName: string | null;
+  startTime: string;
+  durationMs: number;
+  messageCount: number;
+  isOngoing: boolean;
+}
+
+export type MemberLogKind = 'subagent' | 'lead_session';
+
+export interface MemberLogSummaryBase {
+  kind: MemberLogKind;
+  sessionId: string;
+  projectId: string;
+  description: string;
+  memberName: string | null;
+  startTime: string;
+  durationMs: number;
+  messageCount: number;
+  isOngoing: boolean;
+}
+
+export interface MemberSubagentLogSummary extends MemberLogSummaryBase {
+  kind: 'subagent';
+  subagentId: string;
+}
+
+export interface MemberLeadSessionLogSummary extends MemberLogSummaryBase {
+  kind: 'lead_session';
+}
+
+export type MemberLogSummary = MemberSubagentLogSummary | MemberLeadSessionLogSummary;
+
+export interface MemberFullStats {
+  linesAdded: number;
+  linesRemoved: number;
+  filesTouched: string[];
+  toolUsage: Record<string, number>;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  tasksCompleted: number;
+  messageCount: number;
+  totalDurationMs: number;
+  sessionCount: number;
+  computedAt: string;
 }

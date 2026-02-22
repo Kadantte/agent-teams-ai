@@ -4,7 +4,7 @@ import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
-import { X } from 'lucide-react';
+import { CheckCircle2, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { STEP_LABELS, STEP_ORDER } from './provisioningSteps';
@@ -66,10 +66,11 @@ export const TeamProvisioningBanner = ({
     return null;
   }
 
-  if (progress.state === 'ready' || progress.state === 'cancelled') {
+  if (progress.state === 'cancelled') {
     return null;
   }
 
+  const isReady = progress.state === 'ready';
   const isFailed = progress.state === 'failed';
   const isDisconnected = progress.state === 'disconnected';
   const isActive =
@@ -117,6 +118,23 @@ export const TeamProvisioningBanner = ({
     );
   }
 
+  if (isReady) {
+    return (
+      <div className="mb-3 flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2">
+        <CheckCircle2 size={14} className="shrink-0 text-emerald-400" />
+        <p className="flex-1 text-xs text-emerald-200">Team launched — process alive</p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 shrink-0 border-emerald-500/40 px-2 text-xs text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200"
+          onClick={() => setDismissed(true)}
+        >
+          <X size={12} />
+        </Button>
+      </div>
+    );
+  }
+
   if (isActive) {
     return (
       <div className="mb-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-2">
@@ -147,7 +165,7 @@ export const TeamProvisioningBanner = ({
                   className={cn(
                     'whitespace-nowrap px-2 py-0.5 text-[11px] font-normal',
                     isDone && 'border-emerald-400/60 bg-emerald-500/10 text-emerald-200',
-                     
+
                     isCurrent &&
                       'border-[var(--color-accent)]/70 bg-[var(--color-accent)]/15 text-[var(--color-text)]'
                   )}

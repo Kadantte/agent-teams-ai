@@ -197,6 +197,9 @@ export const TEAM_CHANGE = 'team:change';
 /** Create new team by provisioning through CLI */
 export const TEAM_CREATE = 'team:create';
 
+/** Launch existing offline team */
+export const TEAM_LAUNCH = 'team:launch';
+
 /** Warm up provisioning runtime before create */
 export const TEAM_PREPARE_PROVISIONING = 'team:prepareProvisioning';
 
@@ -226,3 +229,18 @@ export const TEAM_DELETE_TEAM = 'team:deleteTeam';
 
 /** Get list of teams with live CLI processes */
 export const TEAM_ALIVE_LIST = 'team:aliveList';
+
+/** Create team config without provisioning CLI */
+export const TEAM_CREATE_CONFIG = 'team:createConfig';
+
+/** Get member subagent logs */
+export const TEAM_GET_MEMBER_LOGS = 'team:getMemberLogs';
+
+/** Update team config (name, description) */
+export const TEAM_UPDATE_CONFIG = 'team:updateConfig';
+
+/** Get aggregated member stats */
+export const TEAM_GET_MEMBER_STATS = 'team:getMemberStats';
+
+/** Get all tasks across all teams */
+export const TEAM_GET_ALL_TASKS = 'team:getAllTasks';

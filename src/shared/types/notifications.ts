@@ -1,5 +1,5 @@
 /**
- * Notification and configuration types for claude-devtools.
+ * Notification and configuration types for Claude Agent Teams UI.
  *
  * These types define:
  * - Detected errors from session files

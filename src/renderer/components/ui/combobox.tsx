@@ -65,6 +65,8 @@ export const Combobox = ({
         className="w-[var(--radix-popover-trigger-width)] p-0"
         align="start"
         sideOffset={4}
+        collisionPadding={8}
+        avoidCollisions
       >
         <CommandPrimitive
           className="flex size-full flex-col overflow-hidden rounded-md bg-[var(--color-surface)]"
@@ -78,7 +80,10 @@ export const Combobox = ({
               className="flex h-8 w-full border-0 bg-transparent py-1 text-xs text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)]"
             />
           </div>
-          <CommandPrimitive.List id={listboxId} className="max-h-52 overflow-auto p-1">
+          <CommandPrimitive.List
+            id={listboxId}
+            className="max-h-72 overflow-y-auto overscroll-contain p-1"
+          >
             <CommandPrimitive.Empty className="px-2 py-4 text-center text-xs text-[var(--color-text-muted)]">
               {emptyMessage}
             </CommandPrimitive.Empty>

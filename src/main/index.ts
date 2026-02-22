@@ -1,5 +1,5 @@
 /**
- * Main process entry point for claude-devtools.
+ * Main process entry point for Claude Agent Teams UI.
  *
  * Responsibilities:
  * - Initialize Electron app and main window
@@ -63,11 +63,14 @@ import { HttpServer } from './services/infrastructure/HttpServer';
 import {
   configManager,
   LocalFileSystemProvider,
+  MemberStatsComputer,
   NotificationManager,
   ServiceContext,
   ServiceContextRegistry,
   SshConnectionManager,
+  TeamAgentToolsInstaller,
   TeamDataService,
+  TeamMemberLogsFinder,
   TeamProvisioningService,
   UpdaterService,
 } from './services';
@@ -286,6 +289,12 @@ function initializeServices(): void {
   updaterService = new UpdaterService();
   teamDataService = new TeamDataService();
   teamProvisioningService = new TeamProvisioningService();
+  const teamMemberLogsFinder = new TeamMemberLogsFinder();
+  const memberStatsComputer = new MemberStatsComputer(teamMemberLogsFinder);
+
+  // Fire-and-forget: warm up CLI and install teamctl.js at startup
+  void teamProvisioningService.warmup();
+  void new TeamAgentToolsInstaller().ensureInstalled();
   httpServer = new HttpServer();
 
   // Initialize IPC handlers with registry
@@ -295,6 +304,8 @@ function initializeServices(): void {
     sshConnectionManager,
     teamDataService,
     teamProvisioningService,
+    teamMemberLogsFinder,
+    memberStatsComputer,
     {
       rewire: rewireContextEvents,
       full: onContextSwitched,
@@ -467,7 +478,7 @@ function createWindow(): void {
     backgroundColor: '#1a1a1a',
     ...(isLinux ? {} : { titleBarStyle: 'hidden' as const }),
     ...(isMac && { trafficLightPosition: getTrafficLightPositionForZoom(1) }),
-    title: 'claude-devtools',
+    title: 'Claude Agent Teams UI',
   });
 
   // Load the renderer

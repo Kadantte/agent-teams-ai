@@ -53,10 +53,12 @@ import { registerValidationHandlers, removeValidationHandlers } from './validati
 import { registerWindowHandlers, removeWindowHandlers } from './window';
 
 import type {
+  MemberStatsComputer,
   ServiceContext,
   ServiceContextRegistry,
   SshConnectionManager,
   TeamDataService,
+  TeamMemberLogsFinder,
   TeamProvisioningService,
   UpdaterService,
 } from '../services';
@@ -70,6 +72,8 @@ export function initializeIpcHandlers(
   sshManager: SshConnectionManager,
   teamDataService: TeamDataService,
   teamProvisioningService: TeamProvisioningService,
+  teamMemberLogsFinder: TeamMemberLogsFinder,
+  memberStatsComputer: MemberStatsComputer,
   contextCallbacks: {
     rewire: (context: ServiceContext) => void;
     full: (context: ServiceContext) => void;
@@ -84,7 +88,12 @@ export function initializeIpcHandlers(
   initializeUpdaterHandlers(updater);
   initializeSshHandlers(sshManager, registry, contextCallbacks.rewire);
   initializeContextHandlers(registry, contextCallbacks.rewire);
-  initializeTeamHandlers(teamDataService, teamProvisioningService);
+  initializeTeamHandlers(
+    teamDataService,
+    teamProvisioningService,
+    teamMemberLogsFinder,
+    memberStatsComputer
+  );
   initializeConfigHandlers({
     onClaudeRootPathUpdated: contextCallbacks.onClaudeRootPathUpdated,
   });

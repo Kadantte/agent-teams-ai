@@ -38,6 +38,7 @@ vi.mock('@renderer/api', () => ({
           };
         }
       ),
+      getAllTasks: vi.fn(async () => []),
     },
   },
 }));
