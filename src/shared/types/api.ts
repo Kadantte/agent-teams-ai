@@ -53,6 +53,15 @@ import type {
 } from '@main/types';
 
 // =============================================================================
+// Agent Config
+// =============================================================================
+
+export interface AgentConfig {
+  name: string;
+  color?: string;
+}
+
+// =============================================================================
 // Notifications API
 // =============================================================================
 
@@ -382,6 +391,7 @@ export interface ElectronAPI {
     query: string,
     maxResults?: number
   ) => Promise<SearchSessionsResult>;
+  searchAllProjects: (query: string, maxResults?: number) => Promise<SearchSessionsResult>;
   getSessionDetail: (projectId: string, sessionId: string) => Promise<SessionDetail | null>;
   getSessionMetrics: (projectId: string, sessionId: string) => Promise<SessionMetrics | null>;
   getWaterfallData: (projectId: string, sessionId: string) => Promise<WaterfallData | null>;
@@ -419,6 +429,9 @@ export interface ElectronAPI {
     projectRoot: string,
     maxTokens?: number
   ) => Promise<ClaudeMdFileInfo | null>;
+
+  // Agent config reading
+  readAgentConfigs: (projectRoot: string) => Promise<Record<string, AgentConfig>>;
 
   // Notifications API
   notifications: NotificationsAPI;

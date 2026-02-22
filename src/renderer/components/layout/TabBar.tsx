@@ -17,6 +17,8 @@ import { useStore } from '@renderer/store';
 import { Bell, PanelLeft, Plus, RefreshCw, Search, Settings, Users } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
+import { ExportDropdown } from '../common/ExportDropdown';
+
 import { SortableTab } from './SortableTab';
 import { TabContextMenu } from './TabContextMenu';
 
@@ -51,6 +53,7 @@ export const TabBar = ({ paneId }: TabBarProps): React.JSX.Element => {
     pinnedSessionIds,
     toggleHideSession,
     hiddenSessionIds,
+    tabSessionData,
   } = useStore(
     useShallow((s) => ({
       pane: s.paneLayout.panes.find((p) => p.id === paneId),
@@ -78,6 +81,7 @@ export const TabBar = ({ paneId }: TabBarProps): React.JSX.Element => {
       pinnedSessionIds: s.pinnedSessionIds,
       toggleHideSession: s.toggleHideSession,
       hiddenSessionIds: s.hiddenSessionIds,
+      tabSessionData: s.tabSessionData,
     }))
   );
 
@@ -90,6 +94,11 @@ export const TabBar = ({ paneId }: TabBarProps): React.JSX.Element => {
 
   // Derive stable tab IDs array for SortableContext
   const tabIds = useMemo(() => openTabs.map((t) => t.id), [openTabs]);
+
+  // Derive session detail for the active tab (used by export dropdown)
+  const activeTabSessionDetail = activeTabId
+    ? (tabSessionData[activeTabId]?.sessionDetail ?? null)
+    : null;
 
   // Hover states for buttons
   const [expandHover, setExpandHover] = useState(false);
@@ -374,6 +383,11 @@ export const TabBar = ({ paneId }: TabBarProps): React.JSX.Element => {
         >
           <Search className="size-4" />
         </button>
+
+        {/* Export dropdown - show only for session tabs with loaded data */}
+        {activeTab?.type === 'session' && activeTabSessionDetail && (
+          <ExportDropdown sessionDetail={activeTabSessionDetail} />
+        )}
 
         {/* Notifications bell icon */}
         <button

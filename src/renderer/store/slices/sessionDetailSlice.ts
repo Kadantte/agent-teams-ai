@@ -25,6 +25,7 @@ const sessionRefreshGeneration = new Map<string, number>();
 const sessionRefreshInFlight = new Set<string>();
 const sessionRefreshQueued = new Set<string>();
 let sessionDetailFetchGeneration = 0;
+let agentConfigsCachedForProject = '';
 
 import { getAllTabs } from '../utils/paneHelpers';
 
@@ -37,6 +38,7 @@ import type {
 } from '@renderer/types/contextInjection';
 import type { ClaudeMdFileInfo, SessionDetail } from '@renderer/types/data';
 import type { AIGroup, SessionConversation } from '@renderer/types/groups';
+import type { AgentConfig } from '@shared/types/api';
 import type { StateCreator } from 'zustand';
 
 // =============================================================================
@@ -92,6 +94,9 @@ export interface SessionDetailSlice {
   // Context phase info (compaction boundaries)
   sessionPhaseInfo: ContextPhaseInfo | null;
 
+  // Agent configs from .claude/agents/ (keyed by agent name)
+  agentConfigs: Record<string, AgentConfig>;
+
   // Visible AI Group
   visibleAIGroupId: string | null;
   selectedAIGroup: AIGroup | null;
@@ -132,6 +137,8 @@ export const createSessionDetailSlice: StateCreator<AppState, [], [], SessionDet
   sessionContextStats: null,
   // Context phase info (compaction boundaries)
   sessionPhaseInfo: null,
+
+  agentConfigs: {},
 
   visibleAIGroupId: null,
   selectedAIGroup: null,
@@ -190,6 +197,21 @@ export const createSessionDetailSlice: StateCreator<AppState, [], [], SessionDet
       let claudeMdStats: Map<string, ClaudeMdStats> | null = null;
       let contextStats: Map<string, ContextStats> | null = null;
       let phaseInfo: ContextPhaseInfo | null = null;
+      // Fetch agent configs from .claude/agents/ (only when project changes).
+      // Fire-and-forget: don't block transcript rendering — color badges update async.
+      if (connectionMode !== 'ssh' && projectRoot && projectRoot !== agentConfigsCachedForProject) {
+        agentConfigsCachedForProject = projectRoot; // Optimistic set to prevent duplicate fetches
+        api
+          .readAgentConfigs(projectRoot)
+          .then((configs) => {
+            set({ agentConfigs: configs });
+          })
+          .catch((err) => {
+            logger.error('Failed to read agent configs:', err);
+            agentConfigsCachedForProject = ''; // Reset so it retries next time
+          });
+      }
+
       if (connectionMode !== 'ssh' && conversation?.items) {
         // Fetch real CLAUDE.md token data
         let claudeMdTokenData: Record<string, ClaudeMdFileInfo> = {};

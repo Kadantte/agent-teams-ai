@@ -689,11 +689,6 @@ export const createTabSlice: StateCreator<AppState, [], [], TabSlice> = (set, ge
   ) => {
     const state = get();
 
-    // If different project, select it first
-    if (state.selectedProjectId !== projectId) {
-      state.selectProject(projectId);
-    }
-
     // Check if session tab is already open in any pane
     const allTabs = getAllTabs(state.paneLayout);
     const existingTab =
@@ -743,6 +738,9 @@ export const createTabSlice: StateCreator<AppState, [], [], TabSlice> = (set, ge
         const newState = get();
         const newTabId = newState.activeTabId;
         if (newTabId) {
+          // Re-focus tab via setActiveTab for proper sidebar sync
+          state.setActiveTab(newTabId);
+
           const searchPayload = {
             query: searchContext.query,
             messageTimestamp: searchContext.messageTimestamp,
@@ -770,11 +768,6 @@ export const createTabSlice: StateCreator<AppState, [], [], TabSlice> = (set, ge
       // Fetch session detail for the new tab (with tabId for per-tab data)
       const newTabIdForFetch = get().activeTabId ?? undefined;
       void state.fetchSessionDetail(projectId, sessionId, newTabIdForFetch);
-    }
-
-    // If opened from search, clear sidebar selection to deselect
-    if (fromSearch) {
-      set({ selectedSessionId: null });
     }
   },
 });
