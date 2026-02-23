@@ -10,13 +10,10 @@ export function useTeamMessagesRead(teamName: string): {
   markRead: (messageKey: string) => void;
 } {
   const [version, setVersion] = useState(0);
-  const readSet = useMemo(
-    () => {
-      if (version < 0) return new Set<string>();
-      return teamName ? getReadSetStorage(teamName) : new Set<string>();
-    },
-    [teamName, version]
-  );
+  const readSet = useMemo(() => {
+    if (version < 0) return new Set<string>();
+    return teamName ? getReadSetStorage(teamName) : new Set<string>();
+  }, [teamName, version]);
 
   const markRead = useCallback(
     (messageKey: string) => {
