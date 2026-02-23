@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 
 import { Button } from '@renderer/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { cn } from '@renderer/lib/utils';
 import { Columns3, LayoutGrid } from 'lucide-react';
 
@@ -138,36 +139,44 @@ export const KanbanBoard = ({
           onFilterChange={onFilterChange}
         />
         <div className="inline-flex rounded-md border border-[var(--color-border)]">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              'h-7 rounded-r-none px-2',
-              viewMode === 'grid'
-                ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)]'
-                : 'text-[var(--color-text-muted)]'
-            )}
-            onClick={() => setViewMode('grid')}
-            aria-label="Grid view"
-            title="Grid"
-          >
-            <LayoutGrid size={14} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              'h-7 rounded-l-none border-l border-[var(--color-border)] px-2',
-              viewMode === 'columns'
-                ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)]'
-                : 'text-[var(--color-text-muted)]'
-            )}
-            onClick={() => setViewMode('columns')}
-            aria-label="Columns view"
-            title="Columns"
-          >
-            <Columns3 size={14} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  'h-7 rounded-r-none px-2',
+                  viewMode === 'grid'
+                    ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)]'
+                )}
+                onClick={() => setViewMode('grid')}
+                aria-label="Grid view"
+              >
+                <LayoutGrid size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Grid view</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  'h-7 rounded-l-none border-l border-[var(--color-border)] px-2',
+                  viewMode === 'columns'
+                    ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)]'
+                )}
+                onClick={() => setViewMode('columns')}
+                aria-label="Columns view"
+              >
+                <Columns3 size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Columns view</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 

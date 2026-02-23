@@ -4,6 +4,12 @@ import { api, isElectronMode } from '@renderer/api';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
 import { Input } from '@renderer/components/ui/input';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@renderer/components/ui/tooltip';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useStore } from '@renderer/store';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
@@ -377,164 +383,177 @@ export const TeamListView = (): React.JSX.Element => {
   }
 
   return (
-    <div className="size-full overflow-auto p-4">
-      {renderHeader()}
+    <TooltipProvider delayDuration={300}>
+      <div className="size-full overflow-auto p-4">
+        {renderHeader()}
 
-      {filteredTeams.length === 0 && searchQuery.trim() ? (
-        <div className="flex items-center justify-center py-12 text-sm text-[var(--color-text-muted)]">
-          No teams matching &quot;{searchQuery.trim()}&quot;
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {filteredTeams.map((team) => {
-            const status = resolveTeamStatus(team.teamName, aliveTeams, provisioningRuns);
-            const teamColorSet = team.color ? getTeamColorSet(team.color) : null;
-            return (
-              <div
-                key={team.teamName}
-                role="button"
-                tabIndex={0}
-                className="group relative cursor-pointer overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:bg-[var(--color-surface-raised)]"
-                style={
-                  teamColorSet
-                    ? { borderLeftWidth: '3px', borderLeftColor: teamColorSet.border }
-                    : undefined
-                }
-                onClick={() => openTeamTab(team.teamName, team.projectPath)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    openTeamTab(team.teamName, team.projectPath);
+        {filteredTeams.length === 0 && searchQuery.trim() ? (
+          <div className="flex items-center justify-center py-12 text-sm text-[var(--color-text-muted)]">
+            No teams matching &quot;{searchQuery.trim()}&quot;
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {filteredTeams.map((team) => {
+              const status = resolveTeamStatus(team.teamName, aliveTeams, provisioningRuns);
+              const teamColorSet = team.color ? getTeamColorSet(team.color) : null;
+              return (
+                <div
+                  key={team.teamName}
+                  role="button"
+                  tabIndex={0}
+                  className="group relative cursor-pointer overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:bg-[var(--color-surface-raised)]"
+                  style={
+                    teamColorSet
+                      ? { borderLeftWidth: '3px', borderLeftColor: teamColorSet.border }
+                      : undefined
                   }
-                }}
-              >
-                {teamColorSet ? (
-                  <div
-                    className="pointer-events-none absolute inset-0 z-0 rounded-lg"
-                    style={{ backgroundColor: teamColorSet.badge }}
-                  />
-                ) : null}
-                <div className={teamColorSet ? 'relative z-10' : undefined}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <h3 className="truncate text-sm font-semibold text-[var(--color-text)]">
-                        {team.displayName}
-                      </h3>
-                      <StatusBadge status={status} />
-                    </div>
-                    <div className="flex shrink-0 gap-1">
-                      <button
-                        type="button"
-                        className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-blue-500/10 hover:text-blue-300 group-hover:opacity-100"
-                        onClick={(e) => handleCopyTeam(team.teamName, e)}
-                        title="Copy team"
-                      >
-                        <Copy size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
-                        onClick={(e) => handleDeleteTeam(team.teamName, e)}
-                        title="Delete team"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  <p className="mt-2 line-clamp-2 min-h-10 text-xs text-[var(--color-text-muted)]">
-                    {team.description || 'No description'}
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                    {team.members && team.members.length > 0 ? (
-                      team.members.map((m) => {
-                        const memberColor = m.color ? getTeamColorSet(m.color) : null;
-                        return (
-                          <span key={m.name} className="inline-flex items-center gap-1">
-                            <span
-                              className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
-                              style={
-                                memberColor
-                                  ? {
-                                      backgroundColor: memberColor.badge,
-                                      color: memberColor.text,
-                                      border: `1px solid ${memberColor.border}40`,
-                                    }
-                                  : undefined
-                              }
+                  onClick={() => openTeamTab(team.teamName, team.projectPath)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openTeamTab(team.teamName, team.projectPath);
+                    }
+                  }}
+                >
+                  {teamColorSet ? (
+                    <div
+                      className="pointer-events-none absolute inset-0 z-0 rounded-lg"
+                      style={{ backgroundColor: teamColorSet.badge }}
+                    />
+                  ) : null}
+                  <div className={teamColorSet ? 'relative z-10' : undefined}>
+                    <div className="flex items-start justify-between">
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <h3 className="truncate text-sm font-semibold text-[var(--color-text)]">
+                          {team.displayName}
+                        </h3>
+                        <StatusBadge status={status} />
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-blue-500/10 hover:text-blue-300 group-hover:opacity-100"
+                              onClick={(e) => handleCopyTeam(team.teamName, e)}
                             >
-                              {m.name}
-                            </span>
-                            {m.role ? (
-                              <span className="text-[9px] text-[var(--color-text-muted)]">
-                                {m.role}
+                              <Copy size={14} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">Copy team</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
+                              onClick={(e) => handleDeleteTeam(team.teamName, e)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">Delete team</TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </div>
+                    <p className="mt-2 line-clamp-2 min-h-10 text-xs text-[var(--color-text-muted)]">
+                      {team.description || 'No description'}
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                      {team.members && team.members.length > 0 ? (
+                        team.members.map((m) => {
+                          const memberColor = m.color ? getTeamColorSet(m.color) : null;
+                          return (
+                            <span key={m.name} className="inline-flex items-center gap-1">
+                              <span
+                                className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
+                                style={
+                                  memberColor
+                                    ? {
+                                        backgroundColor: memberColor.badge,
+                                        color: memberColor.text,
+                                        border: `1px solid ${memberColor.border}40`,
+                                      }
+                                    : undefined
+                                }
+                              >
+                                {m.name}
                               </span>
-                            ) : null}
-                          </span>
-                        );
-                      })
-                    ) : (
-                      <Badge variant="secondary" className="text-[10px] font-normal">
-                        Members: {team.memberCount}
-                      </Badge>
-                    )}
-                    {(() => {
-                      const tc = taskCountsByTeam.get(team.teamName);
-                      if (!tc || (tc.pending === 0 && tc.inProgress === 0 && tc.completed === 0)) {
+                              {m.role ? (
+                                <span className="text-[9px] text-[var(--color-text-muted)]">
+                                  {m.role}
+                                </span>
+                              ) : null}
+                            </span>
+                          );
+                        })
+                      ) : (
+                        <Badge variant="secondary" className="text-[10px] font-normal">
+                          Members: {team.memberCount}
+                        </Badge>
+                      )}
+                      {(() => {
+                        const tc = taskCountsByTeam.get(team.teamName);
+                        if (
+                          !tc ||
+                          (tc.pending === 0 && tc.inProgress === 0 && tc.completed === 0)
+                        ) {
+                          return (
+                            <Badge variant="secondary" className="text-[10px] font-normal">
+                              Tasks: 0
+                            </Badge>
+                          );
+                        }
                         return (
-                          <Badge variant="secondary" className="text-[10px] font-normal">
-                            Tasks: 0
-                          </Badge>
+                          <>
+                            {tc.inProgress > 0 && (
+                              <span className="inline-flex items-center rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
+                                {tc.inProgress} active
+                              </span>
+                            )}
+                            {tc.pending > 0 && (
+                              <span className="inline-flex items-center rounded-full bg-yellow-500/15 px-1.5 py-0.5 text-[10px] font-medium text-yellow-400">
+                                {tc.pending} pending
+                              </span>
+                            )}
+                            {tc.completed > 0 && (
+                              <span className="inline-flex items-center rounded-full bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-400">
+                                {tc.completed} done
+                              </span>
+                            )}
+                          </>
                         );
-                      }
+                      })()}
+                    </div>
+                    {(() => {
+                      const recentPaths = getRecentProjects(team);
+                      if (recentPaths.length === 0) return null;
                       return (
-                        <>
-                          {tc.inProgress > 0 && (
-                            <span className="inline-flex items-center rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
-                              {tc.inProgress} active
-                            </span>
-                          )}
-                          {tc.pending > 0 && (
-                            <span className="inline-flex items-center rounded-full bg-yellow-500/15 px-1.5 py-0.5 text-[10px] font-medium text-yellow-400">
-                              {tc.pending} pending
-                            </span>
-                          )}
-                          {tc.completed > 0 && (
-                            <span className="inline-flex items-center rounded-full bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-400">
-                              {tc.completed} done
-                            </span>
-                          )}
-                        </>
+                        <div className="mt-2 flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
+                          <FolderOpen size={10} className="shrink-0" />
+                          <span className="truncate">
+                            {recentPaths.map((p, i) => (
+                              <span key={p} title={p}>
+                                {i === 0 && status === 'running' ? (
+                                  <span className="text-emerald-400">{folderName(p)}</span>
+                                ) : (
+                                  folderName(p)
+                                )}
+                                {i < recentPaths.length - 1 ? ', ' : ''}
+                              </span>
+                            ))}
+                          </span>
+                        </div>
                       );
                     })()}
                   </div>
-                  {(() => {
-                    const recentPaths = getRecentProjects(team);
-                    if (recentPaths.length === 0) return null;
-                    return (
-                      <div className="mt-2 flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
-                        <FolderOpen size={10} className="shrink-0" />
-                        <span className="truncate">
-                          {recentPaths.map((p, i) => (
-                            <span key={p} title={p}>
-                              {i === 0 && status === 'running' ? (
-                                <span className="text-emerald-400">{folderName(p)}</span>
-                              ) : (
-                                folderName(p)
-                              )}
-                              {i < recentPaths.length - 1 ? ', ' : ''}
-                            </span>
-                          ))}
-                        </span>
-                      </div>
-                    );
-                  })()}
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {createDialogElement}
-    </div>
+              );
+            })}
+          </div>
+        )}
+        {createDialogElement}
+      </div>
+    </TooltipProvider>
   );
 };

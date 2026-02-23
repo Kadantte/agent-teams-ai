@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@renderer/components/ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { buildReplyBlock } from '@renderer/utils/agentMessageFormatting';
@@ -180,13 +181,18 @@ export const SendMessageDialog = ({
 
           {quote ? (
             <div className="relative rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5">
-              <button
-                type="button"
-                className="absolute right-1.5 top-1.5 rounded p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                onClick={() => setQuote(undefined)}
-              >
-                <X size={12} />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="absolute right-1.5 top-1.5 rounded p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                    onClick={() => setQuote(undefined)}
+                  >
+                    <X size={12} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left">Remove quote</TooltipContent>
+              </Tooltip>
               <span className="mb-0.5 block text-[10px] font-medium text-[var(--color-text-muted)]">
                 Replying to @{quote.from}
               </span>

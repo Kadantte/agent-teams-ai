@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react';
 
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
 import { formatDistanceToNowStrict } from 'date-fns';
 import {
@@ -205,29 +206,40 @@ const SessionRow = ({
       </button>
 
       <div className="flex shrink-0 items-center gap-1">
-        <button
-          type="button"
-          title={isSelected ? 'Remove filter' : 'Filter by this session'}
-          className={`rounded p-0.5 text-[var(--color-text-muted)] transition-opacity hover:text-blue-400 ${
-            isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleFilter();
-          }}
-        >
-          {isSelected ? <FilterX size={12} /> : <Filter size={12} />}
-        </button>
-        <button
-          type="button"
-          className="rounded p-0.5 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:text-[var(--color-text)] group-hover:opacity-100"
-          onClick={(e) => {
-            e.stopPropagation();
-            onClick();
-          }}
-        >
-          <ExternalLink size={12} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className={`rounded p-0.5 text-[var(--color-text-muted)] transition-opacity hover:text-blue-400 ${
+                isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleFilter();
+              }}
+            >
+              {isSelected ? <FilterX size={12} /> : <Filter size={12} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">
+            {isSelected ? 'Remove filter' : 'Filter by this session'}
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="rounded p-0.5 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:text-[var(--color-text)] group-hover:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClick();
+              }}
+            >
+              <ExternalLink size={12} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Open session</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { Button } from '@renderer/components/ui/button';
 import { Checkbox } from '@renderer/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { Crown, Filter } from 'lucide-react';
 
 import type { Session } from '@renderer/types/data';
@@ -57,22 +58,26 @@ export const KanbanFilterPopover = ({
 
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="relative h-7 px-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-          aria-label="Filter tasks"
-          title="Filter"
-        >
-          <Filter size={14} />
-          {activeCount > 0 && (
-            <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-medium text-white">
-              {activeCount}
-            </span>
-          )}
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="relative h-7 px-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              aria-label="Filter tasks"
+            >
+              <Filter size={14} />
+              {activeCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-medium text-white">
+                  {activeCount}
+                </span>
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Filter tasks</TooltipContent>
+      </Tooltip>
       <PopoverContent align="end" className="w-72 p-0">
         {/* Session section */}
         <div className="border-b border-[var(--color-border)] p-3">
