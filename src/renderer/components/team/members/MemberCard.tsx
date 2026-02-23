@@ -29,7 +29,7 @@ export const MemberCard = ({
 
   return (
     <div
-      className="group flex cursor-pointer items-center gap-2.5 rounded px-2 py-1.5 hover:bg-[var(--color-surface-raised)]"
+      className="group relative flex cursor-pointer items-center gap-2.5 rounded px-2 py-1.5"
       style={{
         borderLeft: `3px solid ${colors.border}`,
         backgroundColor: colors.badge,
@@ -45,6 +45,7 @@ export const MemberCard = ({
         }
       }}
     >
+      <div className="pointer-events-none absolute inset-0 rounded transition-colors group-hover:bg-white/5" />
       <div className="relative shrink-0">
         <img
           src={agentAvatarUrl(member.name)}

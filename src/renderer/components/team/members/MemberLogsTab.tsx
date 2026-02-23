@@ -41,10 +41,14 @@ export const MemberLogsTab = ({
 
     void (async () => {
       try {
+        if (taskId == null && !memberName) {
+          if (!cancelled) setLogs([]);
+          return;
+        }
         const result =
           taskId != null
             ? await api.teams.getLogsForTask(teamName, taskId)
-            : await api.teams.getMemberLogs(teamName, memberName ?? '');
+            : await api.teams.getMemberLogs(teamName, memberName!);
         if (!cancelled) {
           setLogs(result);
         }

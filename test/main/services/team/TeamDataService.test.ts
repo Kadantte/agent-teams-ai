@@ -160,7 +160,7 @@ describe('TeamDataService', () => {
     expect(result.status).toBe('pending');
     expect(createTaskMock).toHaveBeenCalledWith(
       'my-team',
-      expect.objectContaining({ status: 'pending', owner: 'alice' })
+      expect.objectContaining({ status: 'pending', owner: 'alice', createdBy: 'user' })
     );
   });
 });

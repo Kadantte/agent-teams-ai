@@ -282,7 +282,7 @@ function createTask(paths, flags) {
     description: String(description || subject),
     activeForm: activeForm ? String(activeForm) : undefined,
     owner,
-    createdBy: from || undefined,
+    createdBy: from,
     status,
     blocks: [],
     blockedBy: [],
