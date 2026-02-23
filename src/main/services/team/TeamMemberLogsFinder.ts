@@ -103,6 +103,68 @@ export class TeamMemberLogsFinder {
   }
 
   /**
+   * Returns session logs that reference the given task (TaskCreate, TaskUpdate, comments, etc.).
+   */
+  async findLogsForTask(teamName: string, taskId: string): Promise<MemberLogSummary[]> {
+    const discovery = await this.discoverProjectSessions(teamName);
+    if (!discovery) return [];
+
+    const { projectDir, projectId, config, sessionIds, knownMembers } = discovery;
+    const results: MemberLogSummary[] = [];
+    const leadMemberName =
+      config.members?.find((m) => m?.agentType === 'team-lead')?.name?.trim() || 'team-lead';
+
+    if (config.leadSessionId) {
+      const leadJsonl = path.join(projectDir, `${config.leadSessionId}.jsonl`);
+      try {
+        await fs.access(leadJsonl);
+        if (await this.fileMentionsTaskId(leadJsonl, taskId)) {
+          const leadSummary = await this.parseLeadSessionSummary(
+            leadJsonl,
+            projectId,
+            config.leadSessionId,
+            leadMemberName
+          );
+          if (leadSummary) results.push(leadSummary);
+        }
+      } catch {
+        // file missing or unreadable
+      }
+    }
+
+    for (const sessionId of sessionIds) {
+      const subagentsDir = path.join(projectDir, sessionId, 'subagents');
+      let files: string[];
+      try {
+        files = await fs.readdir(subagentsDir);
+      } catch {
+        continue;
+      }
+      for (const file of files) {
+        if (!file.startsWith('agent-') || !file.endsWith('.jsonl')) continue;
+        if (file.startsWith('agent-acompact')) continue;
+        const filePath = path.join(subagentsDir, file);
+        if (!(await this.fileMentionsTaskId(filePath, taskId))) continue;
+        const attribution = await this.attributeSubagent(filePath, knownMembers);
+        if (!attribution) continue;
+        const summary = await this.parseSubagentSummary(
+          filePath,
+          projectId,
+          sessionId,
+          file,
+          attribution.detectedMember,
+          knownMembers
+        );
+        if (summary) results.push(summary);
+      }
+    }
+
+    return results.sort(
+      (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
+    );
+  }
+
+  /**
    * Returns absolute paths to all JSONL files belonging to the specified member.
    * Uses the same discovery logic as findMemberLogs but collects file paths.
    */
@@ -149,16 +211,12 @@ export class TeamMemberLogsFinder {
     return paths;
   }
 
-  private async discoverMemberFiles(
-    teamName: string,
-    memberName: string
-  ): Promise<{
+  private async discoverProjectSessions(teamName: string): Promise<{
     projectDir: string;
     projectId: string;
     config: NonNullable<Awaited<ReturnType<TeamConfigReader['getConfig']>>>;
     sessionIds: string[];
     knownMembers: Set<string>;
-    isLeadMember: boolean;
   } | null> {
     const config = await this.configReader.getConfig(teamName);
     if (!config?.projectPath) {
@@ -171,11 +229,6 @@ export class TeamMemberLogsFinder {
     const baseDir = extractBaseDir(projectId);
     const projectDir = path.join(getProjectsBasePath(), baseDir);
 
-    const leadMemberName =
-      config.members?.find((m) => m?.agentType === 'team-lead')?.name?.trim() || 'team-lead';
-    const isLeadMember = leadMemberName.toLowerCase() === memberName.trim().toLowerCase();
-
-    // Collect all known session IDs: current lead + history
     const knownSessionIds = new Set<string>();
     if (config.leadSessionId) {
       knownSessionIds.add(config.leadSessionId);
@@ -190,17 +243,14 @@ export class TeamMemberLogsFinder {
 
     let sessionIds: string[];
     if (knownSessionIds.size > 0) {
-      // Verify each known session dir exists, fall back to full scan if none exist
       const verified: string[] = [];
       for (const sid of knownSessionIds) {
         const sidDir = path.join(projectDir, sid);
         try {
           const stat = await fs.stat(sidDir);
-          if (stat.isDirectory()) {
-            verified.push(sid);
-          }
+          if (stat.isDirectory()) verified.push(sid);
         } catch {
-          // dir doesn't exist, skip
+          // dir doesn't exist
         }
       }
       sessionIds = verified.length > 0 ? verified : await this.listSessionDirs(projectDir);
@@ -217,26 +267,69 @@ export class TeamMemberLogsFinder {
       const metaMembers = await this.membersMetaStore.getMembers(teamName);
       for (const member of metaMembers) {
         const normalized = member.name.trim().toLowerCase();
-        if (normalized.length > 0) {
-          knownMembers.add(normalized);
-        }
+        if (normalized.length > 0) knownMembers.add(normalized);
       }
     } catch {
-      // Best-effort enrichment.
+      // best-effort
     }
     try {
       const inboxMembers = await this.inboxReader.listInboxNames(teamName);
-      for (const memberNameFromInbox of inboxMembers) {
-        const normalized = memberNameFromInbox.trim().toLowerCase();
-        if (normalized.length > 0) {
-          knownMembers.add(normalized);
-        }
+      for (const name of inboxMembers) {
+        const normalized = name.trim().toLowerCase();
+        if (normalized.length > 0) knownMembers.add(normalized);
       }
     } catch {
-      // Best-effort enrichment.
+      // best-effort
     }
 
-    return { projectDir, projectId, config, sessionIds, knownMembers, isLeadMember };
+    return { projectDir, projectId, config, sessionIds, knownMembers };
+  }
+
+  private async discoverMemberFiles(
+    teamName: string,
+    memberName: string
+  ): Promise<{
+    projectDir: string;
+    projectId: string;
+    config: NonNullable<Awaited<ReturnType<TeamConfigReader['getConfig']>>>;
+    sessionIds: string[];
+    knownMembers: Set<string>;
+    isLeadMember: boolean;
+  } | null> {
+    const discovery = await this.discoverProjectSessions(teamName);
+    if (!discovery) return null;
+    const { config } = discovery;
+    const leadMemberName =
+      config.members?.find((m) => m?.agentType === 'team-lead')?.name?.trim() || 'team-lead';
+    const isLeadMember = leadMemberName.toLowerCase() === memberName.trim().toLowerCase();
+    return { ...discovery, isLeadMember };
+  }
+
+  private async fileMentionsTaskId(filePath: string, taskId: string): Promise<boolean> {
+    const escaped = taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const patterns = [
+      new RegExp(`"task_id"\\s*:\\s*"${escaped}"`, 'i'),
+      new RegExp(`"taskId"\\s*:\\s*"${escaped}"`, 'i'),
+      new RegExp(`#${escaped}\\b`),
+    ];
+    try {
+      const stream = createReadStream(filePath, { encoding: 'utf8' });
+      const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+      for await (const line of rl) {
+        for (const re of patterns) {
+          if (re.test(line)) {
+            rl.close();
+            stream.destroy();
+            return true;
+          }
+        }
+      }
+      rl.close();
+      stream.destroy();
+    } catch {
+      // ignore
+    }
+    return false;
   }
 
   private async listSessionDirs(projectDir: string): Promise<string[]> {

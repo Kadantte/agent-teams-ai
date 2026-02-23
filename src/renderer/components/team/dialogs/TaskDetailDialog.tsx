@@ -12,7 +12,14 @@ import {
 } from '@renderer/components/ui/dialog';
 import { TASK_STATUS_LABELS, TASK_STATUS_STYLES } from '@renderer/utils/memberHelpers';
 import { formatDistanceToNow } from 'date-fns';
-import { ArrowLeftFromLine, ArrowRightFromLine, Clock, FileText, User } from 'lucide-react';
+import {
+  ArrowLeftFromLine,
+  ArrowRightFromLine,
+  Clock,
+  FileText,
+  PenLine,
+  User,
+} from 'lucide-react';
 
 import { TaskCommentsSection } from './TaskCommentsSection';
 
@@ -92,6 +99,12 @@ export const TaskDetailDialog = ({
               {currentTask.owner ?? '\u2014'}
             </span>
           </div>
+          {currentTask.createdBy ? (
+            <div className="flex items-center gap-1.5 text-[var(--color-text-muted)]">
+              <PenLine size={12} />
+              <span className="text-[var(--color-text-secondary)]">{currentTask.createdBy}</span>
+            </div>
+          ) : null}
           {currentTask.createdAt
             ? (() => {
                 const date = new Date(currentTask.createdAt);
@@ -204,18 +217,12 @@ export const TaskDetailDialog = ({
         {/* Separator */}
         <div className="border-t border-[var(--color-border)]" />
 
-        {/* Session Logs */}
+        {/* Session Logs — sessions that reference this task */}
         <div className="min-w-0 overflow-hidden">
           <h4 className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">
             Execution Logs
           </h4>
-          {currentTask.owner ? (
-            <MemberLogsTab teamName={teamName} memberName={currentTask.owner} />
-          ) : (
-            <p className="py-6 text-center text-xs text-[var(--color-text-muted)]">
-              Assign a member to see execution logs
-            </p>
-          )}
+          <MemberLogsTab teamName={teamName} taskId={currentTask.id} />
         </div>
 
         <DialogFooter>

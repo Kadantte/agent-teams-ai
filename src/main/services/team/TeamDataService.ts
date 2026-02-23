@@ -203,6 +203,20 @@ export class TeamDataService {
       tasks,
       messages
     );
+
+    // Auto-sync: create comments from task-related inbox messages
+    if (tasksLoaded && messages.length > 0) {
+      try {
+        const didSync = await this.syncLinkedComments(teamName, tasks, messages);
+        if (didSync) {
+          // Re-read tasks only if new comments were actually written
+          tasks = await this.taskReader.getTasks(teamName);
+        }
+      } catch {
+        warnings.push('Comment sync from messages failed');
+      }
+    }
+
     return {
       teamName,
       config,
@@ -244,6 +258,7 @@ export class TeamDataService {
       subject: request.subject,
       description,
       owner: request.owner,
+      createdBy: 'user',
       status: shouldStart ? 'in_progress' : 'pending',
       blocks: [],
       blockedBy,
@@ -434,6 +449,60 @@ export class TeamDataService {
         joinedAt,
       }))
     );
+  }
+
+  /**
+   * Scans inbox messages for task-related discussions and auto-creates
+   * linked comments on disk. Uses deterministic comment ID for dedup.
+   * Returns true if any new comments were synced (caller should re-read tasks).
+   */
+  private async syncLinkedComments(
+    teamName: string,
+    tasks: TeamTask[],
+    messages: InboxMessage[]
+  ): Promise<boolean> {
+    const TASK_ID_PATTERN = /#(\d+)/g;
+    let synced = false;
+
+    // Dedup broadcasts: same sender + same text → process only once
+    const processedTexts = new Set<string>();
+
+    for (const msg of messages) {
+      if (!msg.messageId || !msg.summary || msg.from === 'user') continue;
+      if (msg.source === 'lead_session') continue;
+
+      const textKey = `${msg.from}\0${msg.text}`;
+      if (processedTexts.has(textKey)) continue;
+      processedTexts.add(textKey);
+
+      const matches = msg.summary.matchAll(TASK_ID_PATTERN);
+      const taskIds = new Set<string>();
+      for (const match of matches) {
+        taskIds.add(match[1]);
+      }
+
+      for (const taskId of taskIds) {
+        const task = tasks.find((t) => t.id === taskId);
+        if (!task) continue;
+
+        const commentId = `msg-${msg.messageId}`;
+        const existing = task.comments ?? [];
+        if (existing.some((c) => c.id === commentId)) continue;
+
+        try {
+          await this.taskWriter.addComment(teamName, taskId, msg.text, {
+            id: commentId,
+            author: msg.from,
+            createdAt: msg.timestamp,
+          });
+          synced = true;
+        } catch {
+          // Best-effort — don't fail getTeamData() on sync errors
+        }
+      }
+    }
+
+    return synced;
   }
 
   private async extractLeadSessionTexts(config: TeamConfig): Promise<InboxMessage[]> {

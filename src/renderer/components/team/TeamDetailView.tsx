@@ -5,6 +5,7 @@ import { Button } from '@renderer/components/ui/button';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
+import { buildTaskCountsByOwner } from '@renderer/utils/pathNormalize';
 import { MessageSquare, Pencil, Play, Plus, Search, Trash2, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -19,11 +20,13 @@ import { KanbanBoard } from './kanban/KanbanBoard';
 import { UNASSIGNED_OWNER } from './kanban/KanbanFilterPopover';
 import { MemberDetailDialog } from './members/MemberDetailDialog';
 import { MemberList } from './members/MemberList';
+import { MessagesFilterPopover } from './messages/MessagesFilterPopover';
 import { CollapsibleTeamSection } from './CollapsibleTeamSection';
 import { TeamProvisioningBanner } from './TeamProvisioningBanner';
 import { TeamSessionsSection } from './TeamSessionsSection';
 
 import type { KanbanFilterState } from './kanban/KanbanFilterPopover';
+import type { MessagesFilterState } from './messages/MessagesFilterPopover';
 import type { Session } from '@renderer/types/data';
 import type { ResolvedTeamMember, TeamTask } from '@shared/types';
 
@@ -134,6 +137,12 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
   );
 
   const [kanbanSearch, setKanbanSearch] = useState('');
+  const [messagesSearchQuery, setMessagesSearchQuery] = useState('');
+  const [messagesFilter, setMessagesFilter] = useState<MessagesFilterState>({
+    from: new Set(),
+    to: new Set(),
+  });
+  const [messagesFilterOpen, setMessagesFilterOpen] = useState(false);
 
   useEffect(() => {
     if (!teamName) {
@@ -251,12 +260,31 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
 
   const filteredMessages = useMemo(() => {
     if (!data) return [];
-    if (!timeWindow) return data.messages;
-    return data.messages.filter((m) => {
-      const ts = new Date(m.timestamp).getTime();
-      return ts >= timeWindow.start && ts < timeWindow.end;
-    });
-  }, [data, timeWindow]);
+    let list = data.messages;
+    if (timeWindow) {
+      list = list.filter((m) => {
+        const ts = new Date(m.timestamp).getTime();
+        return ts >= timeWindow.start && ts < timeWindow.end;
+      });
+    }
+    if (messagesFilter.from.size > 0) {
+      list = list.filter((m) => m.from?.trim() && messagesFilter.from.has(m.from.trim()));
+    }
+    if (messagesFilter.to.size > 0) {
+      list = list.filter((m) => m.to?.trim() && messagesFilter.to.has(m.to.trim()));
+    }
+    const q = messagesSearchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter((m) => {
+        const text = (m.text ?? '').toLowerCase();
+        const summary = (m.summary ?? '').toLowerCase();
+        const from = (m.from ?? '').toLowerCase();
+        const to = (m.to ?? '').toLowerCase();
+        return text.includes(q) || summary.includes(q) || from.includes(q) || to.includes(q);
+      });
+    }
+    return list;
+  }, [data, timeWindow, messagesFilter, messagesSearchQuery]);
 
   const kanbanDisplayTasks = useMemo(() => {
     const query = kanbanSearch.trim();
@@ -265,6 +293,8 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
   }, [filteredTasks, kanbanSearch]);
 
   const taskMap = useMemo(() => new Map((data?.tasks ?? []).map((t) => [t.id, t])), [data?.tasks]);
+
+  const memberTaskCounts = useMemo(() => buildTaskCountsByOwner(data?.tasks ?? []), [data?.tasks]);
 
   const openCreateTaskDialog = (subject = '', description = '', owner = ''): void => {
     setCreateTaskDialog({
@@ -351,6 +381,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     return (
       <div className="size-full overflow-auto p-4">
         <div className="mb-4 h-10 animate-pulse rounded-md bg-[var(--color-surface-raised)]" />
+        <TeamProvisioningBanner teamName={teamName} />
         <div className="space-y-3">
           <div className="h-24 animate-pulse rounded-md bg-[var(--color-surface-raised)]" />
           <div className="h-48 animate-pulse rounded-md bg-[var(--color-surface-raised)]" />
@@ -459,6 +490,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       <CollapsibleTeamSection title="Members" badge={data.members.length} defaultOpen>
         <MemberList
           members={data.members}
+          memberTaskCounts={memberTaskCounts}
           isTeamAlive={data.isAlive}
           onMemberClick={setSelectedMember}
           onSendMessage={(member) => {
@@ -592,25 +624,47 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         badge={filteredMessages.length}
         defaultOpen
         action={
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2.5 text-xs font-medium text-[var(--color-text)]"
-            onClick={(e) => {
-              e.stopPropagation();
-              setSendDialogRecipient(undefined);
-              setReplyQuote(undefined);
-              setSendDialogOpen(true);
-            }}
-          >
-            <MessageSquare size={12} />
-            Message
-          </Button>
+          <div className="flex items-center gap-2 pl-2">
+            <div className="flex w-36 items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-transparent px-2 py-1">
+              <Search size={12} className="shrink-0 text-[var(--color-text-muted)]" />
+              <input
+                type="search"
+                placeholder="Search..."
+                value={messagesSearchQuery}
+                onChange={(e) => setMessagesSearchQuery(e.target.value)}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
+              />
+            </div>
+            <MessagesFilterPopover
+              filter={messagesFilter}
+              messages={data?.messages ?? []}
+              open={messagesFilterOpen}
+              onOpenChange={setMessagesFilterOpen}
+              onApply={setMessagesFilter}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0 gap-1.5 px-2.5 text-xs font-medium text-[var(--color-text)]"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSendDialogRecipient(undefined);
+                setReplyQuote(undefined);
+                setSendDialogOpen(true);
+              }}
+            >
+              <MessageSquare size={12} />
+              Message
+            </Button>
+          </div>
         }
       >
         <ActivityTimeline
           messages={filteredMessages}
           members={data.members}
+          onMemberClick={setSelectedMember}
           onCreateTaskFromMessage={(subject, description) => {
             openCreateTaskDialog(subject, description);
           }}

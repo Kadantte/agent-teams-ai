@@ -692,6 +692,9 @@ export class HttpAPIClient implements ElectronAPI {
       console.warn('[HttpAPIClient] getMemberLogs is not available in browser mode');
       return [];
     },
+    getLogsForTask: async () => {
+      return [];
+    },
     getMemberStats: async () => {
       console.warn('[HttpAPIClient] getMemberStats is not available in browser mode');
       return {

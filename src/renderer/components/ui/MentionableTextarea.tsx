@@ -168,6 +168,22 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       textareaRef: internalRef,
     });
 
+    // Sync backdrop font with textarea computed font to prevent caret drift.
+    // Chromium UA stylesheet may apply different font-family / letter-spacing
+    // to <textarea> vs <div>, and sub-pixel differences accumulate over text length.
+    React.useLayoutEffect(() => {
+      const textarea = internalRef.current;
+      const backdrop = backdropRef.current;
+      if (!textarea || !backdrop) return;
+      const cs = window.getComputedStyle(textarea);
+      backdrop.style.font = cs.font;
+      backdrop.style.letterSpacing = cs.letterSpacing;
+      backdrop.style.wordSpacing = cs.wordSpacing;
+      backdrop.style.textIndent = cs.textIndent;
+      backdrop.style.textTransform = cs.textTransform;
+      backdrop.style.tabSize = cs.tabSize;
+    }, [value]); // re-sync when value changes (textarea may reflow)
+
     // --- Mention overlay ---
     const hasMentionOverlay = suggestions.length > 0;
 

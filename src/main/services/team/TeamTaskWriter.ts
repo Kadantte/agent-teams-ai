@@ -117,19 +117,28 @@ export class TeamTaskWriter {
     });
   }
 
-  async addComment(teamName: string, taskId: string, text: string): Promise<TaskComment> {
+  async addComment(
+    teamName: string,
+    taskId: string,
+    text: string,
+    options?: { id?: string; author?: string; createdAt?: string }
+  ): Promise<TaskComment> {
     const taskPath = path.join(getTasksBasePath(), teamName, `${taskId}.json`);
     const comment: TaskComment = {
-      id: randomUUID(),
-      author: 'user',
+      id: options?.id ?? randomUUID(),
+      author: options?.author ?? 'user',
       text,
-      createdAt: new Date().toISOString(),
+      createdAt: options?.createdAt ?? new Date().toISOString(),
     };
 
     await withTaskLock(taskPath, async () => {
       const raw = await fs.promises.readFile(taskPath, 'utf8');
       const task = JSON.parse(raw) as Record<string, unknown>;
       const existing = Array.isArray(task.comments) ? (task.comments as TaskComment[]) : [];
+      // Dedup by ID — skip if comment with same ID already exists
+      if (existing.some((c) => c.id === comment.id)) {
+        return;
+      }
       task.comments = [...existing, comment];
       await atomicWriteAsync(taskPath, JSON.stringify(task, null, 2));
 

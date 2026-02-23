@@ -18,10 +18,15 @@ import type { MemberLogSummary } from '@shared/types';
 
 interface MemberLogsTabProps {
   teamName: string;
-  memberName: string;
+  memberName?: string;
+  taskId?: string;
 }
 
-export const MemberLogsTab = ({ teamName, memberName }: MemberLogsTabProps): React.JSX.Element => {
+export const MemberLogsTab = ({
+  teamName,
+  memberName,
+  taskId,
+}: MemberLogsTabProps): React.JSX.Element => {
   const [logs, setLogs] = useState<MemberLogSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +41,14 @@ export const MemberLogsTab = ({ teamName, memberName }: MemberLogsTabProps): Rea
 
     void (async () => {
       try {
-        const result = await api.teams.getMemberLogs(teamName, memberName);
+        if (taskId == null && !memberName) {
+          if (!cancelled) setLogs([]);
+          return;
+        }
+        const result =
+          taskId != null
+            ? await api.teams.getLogsForTask(teamName, taskId)
+            : await api.teams.getMemberLogs(teamName, memberName!);
         if (!cancelled) {
           setLogs(result);
         }
@@ -54,7 +66,7 @@ export const MemberLogsTab = ({ teamName, memberName }: MemberLogsTabProps): Rea
     return () => {
       cancelled = true;
     };
-  }, [teamName, memberName]);
+  }, [teamName, memberName, taskId]);
 
   const handleExpand = useCallback(
     async (log: MemberLogSummary) => {
@@ -112,7 +124,9 @@ export const MemberLogsTab = ({ teamName, memberName }: MemberLogsTabProps): Rea
         <FileText size={20} className="mx-auto mb-2 opacity-40" />
         No logs found
         <p className="mt-1 text-[10px] opacity-60">
-          This member has no recorded session activity yet
+          {taskId != null
+            ? 'No session activity for this task yet'
+            : 'This member has no recorded session activity yet'}
         </p>
       </div>
     );

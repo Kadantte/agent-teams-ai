@@ -8,6 +8,7 @@ import {
   TEAM_DELETE_TEAM,
   TEAM_GET_ALL_TASKS,
   TEAM_GET_DATA,
+  TEAM_GET_LOGS_FOR_TASK,
   TEAM_GET_MEMBER_LOGS,
   TEAM_GET_MEMBER_STATS,
   TEAM_LAUNCH,
@@ -101,6 +102,7 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_ALIVE_LIST, handleAliveList);
   ipcMain.handle(TEAM_CREATE_CONFIG, handleCreateConfig);
   ipcMain.handle(TEAM_GET_MEMBER_LOGS, handleGetMemberLogs);
+  ipcMain.handle(TEAM_GET_LOGS_FOR_TASK, handleGetLogsForTask);
   ipcMain.handle(TEAM_GET_MEMBER_STATS, handleGetMemberStats);
   ipcMain.handle(TEAM_UPDATE_CONFIG, handleUpdateConfig);
   ipcMain.handle(TEAM_START_TASK, handleStartTask);
@@ -128,6 +130,7 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_ALIVE_LIST);
   ipcMain.removeHandler(TEAM_CREATE_CONFIG);
   ipcMain.removeHandler(TEAM_GET_MEMBER_LOGS);
+  ipcMain.removeHandler(TEAM_GET_LOGS_FOR_TASK);
   ipcMain.removeHandler(TEAM_GET_MEMBER_STATS);
   ipcMain.removeHandler(TEAM_UPDATE_CONFIG);
   ipcMain.removeHandler(TEAM_START_TASK);
@@ -760,6 +763,24 @@ async function handleGetMemberLogs(
   }
   return wrapTeamHandler('getMemberLogs', () =>
     getTeamMemberLogsFinder().findMemberLogs(vTeam.value!, vMember.value!)
+  );
+}
+
+async function handleGetLogsForTask(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  taskId: unknown
+): Promise<IpcResult<MemberLogSummary[]>> {
+  const vTeam = validateTeamName(teamName);
+  if (!vTeam.valid) {
+    return { success: false, error: vTeam.error ?? 'Invalid teamName' };
+  }
+  const vTask = validateTaskId(taskId);
+  if (!vTask.valid) {
+    return { success: false, error: vTask.error ?? 'Invalid taskId' };
+  }
+  return wrapTeamHandler('getLogsForTask', () =>
+    getTeamMemberLogsFinder().findLogsForTask(vTeam.value!, vTask.value!)
   );
 }
 

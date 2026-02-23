@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
 import { ReplyQuoteBlock } from '@renderer/components/team/activity/ReplyQuoteBlock';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useMarkCommentsRead } from '@renderer/hooks/useMarkCommentsRead';
 import { useStore } from '@renderer/store';
@@ -156,13 +157,18 @@ export const TaskCommentsSection = ({
               {replyTo.text}
             </div>
           </div>
-          <button
-            type="button"
-            className="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text-secondary)]"
-            onClick={() => setReplyTo(null)}
-          >
-            <X size={12} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text-secondary)]"
+                onClick={() => setReplyTo(null)}
+              >
+                <X size={12} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">Cancel reply</TooltipContent>
+          </Tooltip>
         </div>
       ) : null}
 

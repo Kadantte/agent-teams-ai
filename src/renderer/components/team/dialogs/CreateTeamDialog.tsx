@@ -26,6 +26,7 @@ import {
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { cn } from '@renderer/lib/utils';
+import { normalizePath } from '@renderer/utils/pathNormalize';
 import { getMemberColor } from '@shared/constants/memberColors';
 import { Check, CheckCircle2, Loader2 } from 'lucide-react';
 
@@ -61,6 +62,7 @@ interface CreateTeamDialogProps {
   provisioningError: string | null;
   existingTeamNames: string[];
   initialData?: TeamCopyData;
+  defaultProjectPath?: string | null;
   onClose: () => void;
   onCreate: (request: TeamCreateRequest) => Promise<void>;
   onOpenTeam: (teamName: string, projectPath?: string) => void;
@@ -230,6 +232,7 @@ export const CreateTeamDialog = ({
   provisioningError,
   existingTeamNames,
   initialData,
+  defaultProjectPath,
   onClose,
   onCreate,
   onOpenTeam,
@@ -259,6 +262,15 @@ export const CreateTeamDialog = ({
   const [launchTeam, setLaunchTeam] = useState(true);
   const [teamColor, setTeamColor] = useState('');
 
+  const resetUIState = (): void => {
+    setLocalError(null);
+    setFieldErrors({});
+    setIsSubmitting(false);
+    setPrepareState('idle');
+    setPrepareMessage(null);
+    setPrepareWarnings([]);
+  };
+
   const resetFormState = (): void => {
     setTeamName('');
     descriptionDraft.clearDraft();
@@ -268,13 +280,8 @@ export const CreateTeamDialog = ({
     setCwdMode('project');
     setSelectedProjectPath('');
     setCustomCwd('');
-    setLocalError(null);
-    setFieldErrors({});
-    setIsSubmitting(false);
-    setPrepareState('idle');
-    setPrepareMessage(null);
-    setPrepareWarnings([]);
     setLaunchTeam(true);
+    resetUIState();
   };
 
   useEffect(() => {
@@ -420,8 +427,15 @@ export const CreateTeamDialog = ({
     if (selectedProjectPath || projects.length === 0) {
       return;
     }
+    if (defaultProjectPath) {
+      const match = projects.find((p) => normalizePath(p.path) === defaultProjectPath);
+      if (match) {
+        setSelectedProjectPath(match.path);
+        return;
+      }
+    }
     setSelectedProjectPath(projects[0].path);
-  }, [cwdMode, projects, selectedProjectPath]);
+  }, [cwdMode, projects, selectedProjectPath, defaultProjectPath]);
 
   const effectiveCwd = cwdMode === 'project' ? selectedProjectPath.trim() : customCwd.trim();
 
@@ -552,7 +566,7 @@ export const CreateTeamDialog = ({
       open={open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
-          resetFormState();
+          resetUIState();
           onClose();
         }
       }}

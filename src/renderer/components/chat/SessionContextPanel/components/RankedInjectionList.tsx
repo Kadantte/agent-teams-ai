@@ -27,7 +27,7 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; label: string 
   'tool-output': { bg: 'rgba(251, 191, 36, 0.15)', text: '#fbbf24', label: 'Tool' },
   'thinking-text': { bg: 'rgba(167, 139, 250, 0.15)', text: '#a78bfa', label: 'Thinking' },
   'task-coordination': { bg: 'rgba(251, 146, 60, 0.15)', text: '#fb923c', label: 'Team' },
-  'user-message': { bg: 'rgba(96, 165, 250, 0.15)', text: '#60a5fa', label: 'User' },
+  'user-message': { bg: 'rgba(249, 115, 22, 0.15)', text: '#fb923c', label: 'User' },
 };
 
 // =============================================================================

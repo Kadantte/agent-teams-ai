@@ -29,6 +29,8 @@ interface ActivityItemProps {
   message: InboxMessage;
   memberRole?: string;
   memberColor?: string;
+  recipientColor?: string;
+  onMemberNameClick?: (memberName: string) => void;
   onCreateTask?: (subject: string, description: string) => void;
   onReply?: (message: InboxMessage) => void;
 }
@@ -124,10 +126,13 @@ export const ActivityItem = ({
   message,
   memberRole,
   memberColor,
+  recipientColor,
+  onMemberNameClick,
   onCreateTask,
   onReply,
 }: ActivityItemProps): React.JSX.Element => {
   const colors = getTeamColorSet(memberColor ?? message.color ?? '');
+  const recipientColors = message.to && recipientColor ? getTeamColorSet(recipientColor) : null;
   const formattedRole = formatAgentRole(memberRole);
 
   const timestamp = Number.isNaN(Date.parse(message.timestamp))
@@ -217,17 +222,35 @@ export const ActivityItem = ({
           <MessageSquare className="size-3.5 shrink-0" style={{ color: colors.border }} />
         )}
 
-        {/* Name badge */}
-        <span
-          className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
-          style={{
-            backgroundColor: colors.badge,
-            color: colors.text,
-            border: `1px solid ${colors.border}40`,
-          }}
-        >
-          {message.from}
-        </span>
+        {/* Name badge — clickable to open member popup */}
+        {onMemberNameClick ? (
+          <button
+            type="button"
+            className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide transition-opacity hover:opacity-90 focus:outline-none focus:ring-1 focus:ring-[var(--color-border)]"
+            style={{
+              backgroundColor: colors.badge,
+              color: colors.text,
+              border: `1px solid ${colors.border}40`,
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMemberNameClick(message.from);
+            }}
+          >
+            {message.from}
+          </button>
+        ) : (
+          <span
+            className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
+            style={{
+              backgroundColor: colors.badge,
+              color: colors.text,
+              border: `1px solid ${colors.border}40`,
+            }}
+          >
+            {message.from}
+          </span>
+        )}
 
         {/* Role */}
         {formattedRole ? (
@@ -254,10 +277,57 @@ export const ActivityItem = ({
           </span>
         ) : null}
 
-        {/* Recipient */}
-        {message.to && message.to !== message.from ? (
-          <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
-            &rarr; {message.to}
+        {/* Recipient — badge like sender, clickable to open member popup */}
+        {message.to && message.to !== message.from && recipientColors ? (
+          <span className="text-[10px]">
+            <span style={{ color: CARD_ICON_MUTED }}>&rarr; </span>
+            {onMemberNameClick ? (
+              <button
+                type="button"
+                className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide transition-opacity hover:opacity-90 focus:outline-none focus:ring-1 focus:ring-[var(--color-border)]"
+                style={{
+                  backgroundColor: recipientColors.badge,
+                  color: recipientColors.text,
+                  border: `1px solid ${recipientColors.border}40`,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMemberNameClick(message.to!);
+                }}
+              >
+                {message.to}
+              </button>
+            ) : (
+              <span
+                className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
+                style={{
+                  backgroundColor: recipientColors.badge,
+                  color: recipientColors.text,
+                  border: `1px solid ${recipientColors.border}40`,
+                }}
+              >
+                {message.to}
+              </span>
+            )}
+          </span>
+        ) : message.to && message.to !== message.from ? (
+          <span className="text-[10px]">
+            <span style={{ color: CARD_ICON_MUTED }}>&rarr; </span>
+            {onMemberNameClick ? (
+              <button
+                type="button"
+                className="rounded px-0.5 py-0 font-medium transition-opacity hover:opacity-90 focus:outline-none focus:ring-1 focus:ring-[var(--color-border)]"
+                style={{ color: CARD_ICON_MUTED }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMemberNameClick(message.to!);
+                }}
+              >
+                {message.to}
+              </button>
+            ) : (
+              <span style={{ color: CARD_ICON_MUTED }}>{message.to}</span>
+            )}
           </span>
         ) : null}
 

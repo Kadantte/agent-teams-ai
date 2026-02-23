@@ -28,16 +28,16 @@
   --highlight-text-inactive: #fef08a;
   --highlight-ring: #facc15;
 
-  /* User chat bubble — cool slate */
+  /* User chat bubble — orange (Claude Code) */
   --chat-user-bg: #1c1d26;
   --chat-user-text: #94a3b8;
-  --chat-user-border: rgba(148, 163, 184, 0.1);
-  --chat-user-shadow: 0 1px 0 0 rgba(99, 102, 241, 0.04);
+  --chat-user-border: rgba(249, 115, 22, 0.2);
+  --chat-user-shadow: 0 1px 0 0 rgba(249, 115, 22, 0.06);
 
   /* User bubble inline tags */
-  --chat-user-tag-bg: rgba(148, 163, 184, 0.08);
-  --chat-user-tag-text: #e2e8f0;
-  --chat-user-tag-border: rgba(148, 163, 184, 0.12);
+  --chat-user-tag-bg: rgba(249, 115, 22, 0.12);
+  --chat-user-tag-text: #fb923c;
+  --chat-user-tag-border: rgba(249, 115, 22, 0.2);
 
   /* Tool items */
   --tool-item-name: #e2e8f0;
@@ -218,16 +218,16 @@
   --highlight-text-inactive: #422006;
   --highlight-ring: #ca8a04;
 
-  /* User chat bubble - Warm neutral, clearly visible */
+  /* User chat bubble - orange (Claude Code) */
   --chat-user-bg: #eae9e6;
   --chat-user-text: #5a5955;
-  --chat-user-border: #d5d3cf;
-  --chat-user-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --chat-user-border: rgba(249, 115, 22, 0.35);
+  --chat-user-shadow: 0 1px 2px 0 rgba(249, 115, 22, 0.08);
 
-  /* User bubble inline tags - Warm neutral */
-  --chat-user-tag-bg: rgba(0, 0, 0, 0.05);
-  --chat-user-tag-text: #3a3935;
-  --chat-user-tag-border: rgba(0, 0, 0, 0.08);
+  /* User bubble inline tags */
+  --chat-user-tag-bg: rgba(249, 115, 22, 0.12);
+  --chat-user-tag-text: #c2410c;
+  --chat-user-tag-border: rgba(249, 115, 22, 0.25);
 
   /* Tool items - Warm high contrast */
   --tool-item-name: #1c1b19;
