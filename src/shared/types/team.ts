@@ -60,6 +60,7 @@ export interface TeamTask {
   description?: string;
   activeForm?: string;
   owner?: string;
+  createdBy?: string;
   status: TeamTaskStatus;
   blocks?: string[];
   blockedBy?: string[];

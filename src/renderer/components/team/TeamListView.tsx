@@ -98,10 +98,14 @@ export const TeamListView = (): React.JSX.Element => {
     fetchTeams,
     openTeamTab,
     deleteTeam,
-    selectedProjectId,
     projects,
     globalTasks,
     fetchAllTasks,
+    viewMode,
+    repositoryGroups,
+    selectedRepositoryId,
+    selectedWorktreeId,
+    activeProjectId,
   } = useStore(
     useShallow((s) => ({
       teams: s.teams,
@@ -110,10 +114,14 @@ export const TeamListView = (): React.JSX.Element => {
       fetchTeams: s.fetchTeams,
       openTeamTab: s.openTeamTab,
       deleteTeam: s.deleteTeam,
-      selectedProjectId: s.selectedProjectId,
       projects: s.projects,
       globalTasks: s.globalTasks,
       fetchAllTasks: s.fetchAllTasks,
+      viewMode: s.viewMode,
+      repositoryGroups: s.repositoryGroups,
+      selectedRepositoryId: s.selectedRepositoryId,
+      selectedWorktreeId: s.selectedWorktreeId,
+      activeProjectId: s.activeProjectId,
     }))
   );
   const { connectionMode, createTeam, provisioningError, provisioningRuns } = useStore(
@@ -144,11 +152,23 @@ export const TeamListView = (): React.JSX.Element => {
     };
   }, [electronMode, teams]);
 
-  const selectedProjectPath = useMemo(() => {
-    if (!selectedProjectId) return null;
-    const project = projects.find((p) => p.id === selectedProjectId);
+  const currentProjectPath = useMemo(() => {
+    if (viewMode === 'grouped') {
+      const repo = repositoryGroups.find((r) => r.id === selectedRepositoryId);
+      const worktree = repo?.worktrees.find((w) => w.id === selectedWorktreeId);
+      const path = worktree?.path ?? null;
+      return path ? normalizePath(path) : null;
+    }
+    const project = projects.find((p) => p.id === activeProjectId);
     return project ? normalizePath(project.path) : null;
-  }, [selectedProjectId, projects]);
+  }, [
+    viewMode,
+    repositoryGroups,
+    selectedRepositoryId,
+    selectedWorktreeId,
+    projects,
+    activeProjectId,
+  ]);
 
   const filteredTeams = useMemo<TeamSummary[]>(() => {
     let result = teams;
@@ -163,10 +183,10 @@ export const TeamListView = (): React.JSX.Element => {
       );
     }
 
-    if (selectedProjectPath) {
+    if (currentProjectPath) {
       const matches = (t: TeamSummary): boolean => {
-        if (t.projectPath && normalizePath(t.projectPath) === selectedProjectPath) return true;
-        return t.projectPathHistory?.some((p) => normalizePath(p) === selectedProjectPath) ?? false;
+        if (t.projectPath && normalizePath(t.projectPath) === currentProjectPath) return true;
+        return t.projectPathHistory?.some((p) => normalizePath(p) === currentProjectPath) ?? false;
       };
       result = [...result].sort((a, b) => {
         const aMatch = matches(a) ? 0 : 1;
@@ -176,7 +196,7 @@ export const TeamListView = (): React.JSX.Element => {
     }
 
     return result;
-  }, [teams, searchQuery, selectedProjectPath]);
+  }, [teams, searchQuery, currentProjectPath]);
 
   const handleDeleteTeam = useCallback(
     (teamName: string, e: React.MouseEvent) => {
@@ -249,6 +269,7 @@ export const TeamListView = (): React.JSX.Element => {
       provisioningError={provisioningError}
       existingTeamNames={teams.map((t) => t.teamName)}
       initialData={copyData ?? undefined}
+      defaultProjectPath={currentProjectPath}
       onClose={() => {
         setShowCreateDialog(false);
         setCopyData(null);

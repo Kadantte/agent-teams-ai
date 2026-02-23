@@ -274,12 +274,15 @@ function createTask(paths, flags) {
   const taskPath = path.join(paths.tasksDir, String(nextId) + '.json');
   if (fs.existsSync(taskPath)) die('Task already exists: ' + String(nextId));
 
+  const from = typeof flags.from === 'string' && flags.from.trim() ? flags.from.trim() : undefined;
+
   const task = {
     id: nextId,
     subject,
     description: String(description || subject),
     activeForm: activeForm ? String(activeForm) : undefined,
     owner,
+    createdBy: from || undefined,
     status,
     blocks: [],
     blockedBy: [],
@@ -419,7 +422,7 @@ function printHelp() {
       '  node teamctl.js task set-status <id> <pending|in_progress|completed|deleted> [--team <team>]',
       '  node teamctl.js task complete <id> [--team <team>]',
       '  node teamctl.js task start <id> [--team <team>]',
-      '  node teamctl.js task create --subject "..." [--description "..."] [--prompt "..."] [--owner "member"] [--notify --from "member"] [--team <team>]',
+      '  node teamctl.js task create --subject "..." [--description "..."] [--prompt "..."] [--owner "member"] [--status pending|in_progress|completed|deleted] [--notify --from "member"] [--team <team>]',
       '  node teamctl.js task comment <id> --text "..." [--from "member"] [--team <team>]',
       '  node teamctl.js kanban set-column <id> <review|approved> [--team <team>]',
       '  node teamctl.js kanban clear <id> [--team <team>]',

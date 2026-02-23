@@ -242,6 +242,9 @@ export const TEAM_CREATE_CONFIG = 'team:createConfig';
 /** Get member subagent logs */
 export const TEAM_GET_MEMBER_LOGS = 'team:getMemberLogs';
 
+/** Get session logs that reference a task */
+export const TEAM_GET_LOGS_FOR_TASK = 'team:getLogsForTask';
+
 /** Update team config (name, description) */
 export const TEAM_UPDATE_CONFIG = 'team:updateConfig';
 

@@ -263,16 +263,25 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
     ? `\nAdditional instructions from the user:\n${request.prompt.trim()}\n`
     : '';
 
+  const leadName =
+    request.members.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
+
   return `You are running in a non-interactive CLI session. Do not ask questions. Do everything in a single turn.
+You are "${leadName}", the team lead.
 
 Goal: Provision a Claude Code agent team with live teammates.
-
+${userPromptBlock}
 Constraints:
 - Do NOT call TeamDelete under any circumstances.
 - Do NOT use TodoWrite — use TaskCreate for tasks.
 - Do NOT send shutdown_request messages (SendMessage type: "shutdown_request" is FORBIDDEN).
 - Do NOT shut down, terminate, or clean up the team or its members.
 - Keep assistant text minimal.
+- NEVER send duplicate messages to the same member. One SendMessage per member per topic is enough.
+
+Task board operations — use teamctl.js via Bash:
+- Create task: node "$HOME/.claude/tools/teamctl.js" --team "${request.teamName}" task create --subject "..." --description "..." --owner "<actual-member-name>" --notify --from "${leadName}"
+- Update status: node "$HOME/.claude/tools/teamctl.js" --team "${request.teamName}" task set-status <id> <pending|in_progress|completed|deleted>
 
 Steps (execute in this exact order):
 
@@ -287,8 +296,10 @@ Steps (execute in this exact order):
 
 ${taskProtocol}"
 
-3) After spawning all members, output a short summary.
-${userPromptBlock}
+3) If user instructions above mention tasks or work for members — create each task via teamctl.js (see "Task board operations"). The --notify flag sends the assignment to the member automatically, so do NOT send a separate SendMessage for the same task.
+
+4) After all steps, output a short summary.
+
 Members:
 ${members}
 `;
@@ -304,16 +315,24 @@ function buildLaunchPrompt(
     : '';
   const taskProtocol = buildTaskStatusProtocol(request.teamName);
 
+  const leadName = members.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
+
   return `You are running in a non-interactive CLI session. Do not ask questions. Do everything in a single turn.
+You are "${leadName}", the team lead.
 
 Goal: Reconnect with existing team "${request.teamName}".
-
+${userPromptBlock}
 Constraints:
 - Do NOT call TeamDelete under any circumstances.
 - Do NOT use TodoWrite — use TaskCreate for tasks.
 - Do NOT send shutdown_request messages (SendMessage type: "shutdown_request" is FORBIDDEN).
 - Do NOT shut down, terminate, or clean up the team or its members.
 - Keep assistant text minimal.
+- NEVER send duplicate messages to the same member. One SendMessage per member per topic is enough.
+
+Task board operations — use teamctl.js via Bash:
+- Create task: node "$HOME/.claude/tools/teamctl.js" --team "${request.teamName}" task create --subject "..." --description "..." --owner "<actual-member-name>" --notify --from "${leadName}"
+- Update status: node "$HOME/.claude/tools/teamctl.js" --team "${request.teamName}" task set-status <id> <pending|in_progress|completed|deleted>
 
 Steps (execute in this exact order):
 
@@ -329,8 +348,10 @@ Steps (execute in this exact order):
 
 ${taskProtocol}"
 
-4) After spawning all members, output a short summary.
-${userPromptBlock}
+4) If user instructions above mention tasks or work for members — create each task via teamctl.js (see "Task board operations"). The --notify flag sends the assignment to the member automatically, so do NOT send a separate SendMessage for the same task.
+
+5) After all steps, output a short summary.
+
 Members:
 ${membersBlock}
 `;

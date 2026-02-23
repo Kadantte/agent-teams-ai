@@ -351,6 +351,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     return (
       <div className="size-full overflow-auto p-4">
         <div className="mb-4 h-10 animate-pulse rounded-md bg-[var(--color-surface-raised)]" />
+        <TeamProvisioningBanner teamName={teamName} />
         <div className="space-y-3">
           <div className="h-24 animate-pulse rounded-md bg-[var(--color-surface-raised)]" />
           <div className="h-48 animate-pulse rounded-md bg-[var(--color-surface-raised)]" />
@@ -611,6 +612,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         <ActivityTimeline
           messages={filteredMessages}
           members={data.members}
+          onMemberClick={setSelectedMember}
           onCreateTaskFromMessage={(subject, description) => {
             openCreateTaskDialog(subject, description);
           }}

@@ -361,6 +361,7 @@ export interface TeamsAPI {
   aliveList: () => Promise<string[]>;
   createConfig: (request: TeamCreateConfigRequest) => Promise<void>;
   getMemberLogs: (teamName: string, memberName: string) => Promise<MemberLogSummary[]>;
+  getLogsForTask: (teamName: string, taskId: string) => Promise<MemberLogSummary[]>;
   getMemberStats: (teamName: string, memberName: string) => Promise<MemberFullStats>;
   launchTeam: (request: TeamLaunchRequest) => Promise<TeamLaunchResponse>;
   getAllTasks: () => Promise<GlobalTask[]>;

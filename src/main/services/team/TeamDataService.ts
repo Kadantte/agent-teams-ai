@@ -244,6 +244,7 @@ export class TeamDataService {
       subject: request.subject,
       description,
       owner: request.owner,
+      createdBy: 'user',
       status: shouldStart ? 'in_progress' : 'pending',
       blocks: [],
       blockedBy,

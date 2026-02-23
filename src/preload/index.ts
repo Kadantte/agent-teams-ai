@@ -28,6 +28,7 @@ import {
   TEAM_DELETE_TEAM,
   TEAM_GET_ALL_TASKS,
   TEAM_GET_DATA,
+  TEAM_GET_LOGS_FOR_TASK,
   TEAM_GET_MEMBER_LOGS,
   TEAM_GET_MEMBER_STATS,
   TEAM_LAUNCH,
@@ -571,6 +572,9 @@ const electronAPI: ElectronAPI = {
     },
     getMemberLogs: async (teamName: string, memberName: string) => {
       return invokeIpcWithResult<MemberLogSummary[]>(TEAM_GET_MEMBER_LOGS, teamName, memberName);
+    },
+    getLogsForTask: async (teamName: string, taskId: string) => {
+      return invokeIpcWithResult<MemberLogSummary[]>(TEAM_GET_LOGS_FOR_TASK, teamName, taskId);
     },
     getMemberStats: async (teamName: string, memberName: string) => {
       return invokeIpcWithResult<MemberFullStats>(TEAM_GET_MEMBER_STATS, teamName, memberName);

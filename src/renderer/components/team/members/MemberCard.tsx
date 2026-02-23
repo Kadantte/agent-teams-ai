@@ -1,4 +1,5 @@
 import { Badge } from '@renderer/components/ui/badge';
+import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { agentAvatarUrl, getMemberDotClass, getPresenceLabel } from '@renderer/utils/memberHelpers';
 import { ListPlus, MessageSquare } from 'lucide-react';
@@ -7,6 +8,7 @@ import type { ResolvedTeamMember } from '@shared/types';
 
 interface MemberCardProps {
   member: ResolvedTeamMember;
+  memberColor: string;
   isTeamAlive?: boolean;
   onClick?: () => void;
   onSendMessage?: () => void;
@@ -15,6 +17,7 @@ interface MemberCardProps {
 
 export const MemberCard = ({
   member,
+  memberColor,
   isTeamAlive,
   onClick,
   onSendMessage,
@@ -22,10 +25,15 @@ export const MemberCard = ({
 }: MemberCardProps): React.JSX.Element => {
   const dotClass = getMemberDotClass(member, isTeamAlive);
   const presenceLabel = getPresenceLabel(member, isTeamAlive);
+  const colors = getTeamColorSet(memberColor);
 
   return (
     <div
       className="group flex cursor-pointer items-center gap-2.5 rounded px-2 py-1.5 hover:bg-[var(--color-surface-raised)]"
+      style={{
+        borderLeft: `3px solid ${colors.border}`,
+        backgroundColor: colors.badge,
+      }}
       title={member.currentTaskId ? `Current task: ${member.currentTaskId}` : undefined}
       role="button"
       tabIndex={0}

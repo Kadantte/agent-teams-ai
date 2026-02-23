@@ -121,4 +121,46 @@ describe('TeamDataService', () => {
       expect.objectContaining({ projectPath: '/Users/dev/my-project' })
     );
   });
+
+  it('creates task with status pending when startImmediately is false', async () => {
+    const createTaskMock = vi.fn(async () => undefined);
+    const service = new TeamDataService(
+      {
+        listTeams: vi.fn(),
+        getConfig: vi.fn(async () => ({ name: 'My team', members: [] })),
+      } as never,
+      {
+        getNextTaskId: vi.fn(async () => '2'),
+        getTasks: vi.fn(async () => []),
+      } as never,
+      {
+        listInboxNames: vi.fn(async () => []),
+        getMessages: vi.fn(async () => []),
+      } as never,
+      {} as never,
+      {
+        createTask: createTaskMock,
+        addBlocksEntry: vi.fn(async () => undefined),
+      } as never,
+      {
+        resolveMembers: vi.fn(() => []),
+      } as never,
+      {
+        getState: vi.fn(async () => ({ teamName: 'my-team', reviewers: [], tasks: {} })),
+        garbageCollect: vi.fn(async () => undefined),
+      } as never
+    );
+
+    const result = await service.createTask('my-team', {
+      subject: 'Review main file',
+      owner: 'alice',
+      startImmediately: false,
+    });
+
+    expect(result.status).toBe('pending');
+    expect(createTaskMock).toHaveBeenCalledWith(
+      'my-team',
+      expect.objectContaining({ status: 'pending', owner: 'alice' })
+    );
+  });
 });
