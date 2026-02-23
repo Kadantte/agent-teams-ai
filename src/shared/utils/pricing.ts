@@ -73,7 +73,12 @@ export function calculateMessageCost(
   cacheCreationTokens: number
 ): number {
   const pricing = getPricing(modelName);
-  if (!pricing) return 0;
+  if (!pricing) {
+    if (inputTokens > 0 || outputTokens > 0) {
+      console.warn(`[pricing] No pricing data for model "${modelName}", cost will be $0`);
+    }
+    return 0;
+  }
 
   const inputCost = calculateTieredCost(
     inputTokens,

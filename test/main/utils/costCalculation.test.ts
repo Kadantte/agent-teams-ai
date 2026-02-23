@@ -2,7 +2,7 @@
  * Tests for cost calculation in jsonl.ts
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { calculateMetrics } from '@main/utils/jsonl';
 import type { ParsedMessage } from '@main/types';
 
@@ -84,6 +84,7 @@ describe('Cost Calculation', () => {
     });
 
     it('should return 0 cost when model pricing not found', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const messages: ParsedMessage[] = [
         {
           type: 'assistant',
@@ -103,6 +104,7 @@ describe('Cost Calculation', () => {
 
       const metrics = calculateMetrics(messages);
       expect(metrics.costUsd).toBe(0);
+      warnSpy.mockRestore();
     });
   });
 
