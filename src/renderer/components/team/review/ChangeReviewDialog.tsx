@@ -391,16 +391,15 @@ export const ChangeReviewDialog = ({
                   {!isFileContentLoading &&
                     fileContent &&
                     fileContent.contentSource !== 'unavailable' &&
-                    fileContent.originalFullContent !== null &&
                     fileContent.modifiedFullContent !== null && (
                       <div className="flex-1 overflow-auto">
                         <DiffErrorBoundary
                           filePath={selectedFile.filePath}
-                          oldString={fileContent.originalFullContent}
+                          oldString={fileContent.originalFullContent ?? ''}
                           newString={fileContent.modifiedFullContent}
                         >
                           <CodeMirrorDiffView
-                            original={fileContent.originalFullContent}
+                            original={fileContent.originalFullContent ?? ''}
                             modified={fileContent.modifiedFullContent}
                             fileName={selectedFile.relativePath}
                             showMergeControls={true}
