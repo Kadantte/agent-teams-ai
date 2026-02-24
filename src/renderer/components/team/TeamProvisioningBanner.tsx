@@ -145,6 +145,7 @@ export const TeamProvisioningBanner = ({
           startedAt={progress.startedAt}
           pid={progress.pid}
           cliLogsTail={progress.cliLogsTail}
+          assistantOutput={progress.assistantOutput}
           onCancel={
             canCancel
               ? () => {
