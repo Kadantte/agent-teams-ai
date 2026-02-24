@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
 import { cn } from '@renderer/lib/utils';
-import hljs from 'highlight.js';
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+
+import { MarkdownViewer } from '../chat/viewers/MarkdownViewer';
 
 import { STEP_LABELS, STEP_ORDER } from './provisioningSteps';
 
@@ -27,6 +28,8 @@ export interface ProvisioningProgressBlockProps {
   pid?: number;
   /** Tail of CLI logs */
   cliLogsTail?: string;
+  /** Accumulated assistant text output for live preview */
+  assistantOutput?: string;
   className?: string;
 }
 
@@ -59,32 +62,6 @@ function useElapsedTimer(startedAt?: string): string | null {
   return elapsed;
 }
 
-function highlightLogsHtml(text: string): string {
-  return text
-    .split('\n')
-    .map((line) => {
-      const trimmed = line.trimStart();
-      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        try {
-          const parsed: unknown = JSON.parse(trimmed);
-          const pretty = JSON.stringify(parsed, null, 2);
-          return hljs.highlight(pretty, { language: 'json' }).value;
-        } catch {
-          return escapeHtml(line);
-        }
-      }
-      if (line === '[stdout]' || line === '[stderr]') {
-        return `<span class="hljs-comment">${escapeHtml(line)}</span>`;
-      }
-      return escapeHtml(line);
-    })
-    .join('\n');
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 export const ProvisioningProgressBlock = ({
   title,
   message,
@@ -94,21 +71,27 @@ export const ProvisioningProgressBlock = ({
   startedAt,
   pid,
   cliLogsTail,
+  assistantOutput,
   className,
 }: ProvisioningProgressBlockProps): React.JSX.Element => {
   const elapsed = useElapsedTimer(startedAt);
   const [logsOpen, setLogsOpen] = useState(false);
   const logsRef = useRef<HTMLPreElement>(null);
-  const highlightedHtml = useMemo(
-    () => (cliLogsTail ? highlightLogsHtml(cliLogsTail) : ''),
-    [cliLogsTail]
-  );
+  const outputScrollRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scroll CLI logs
   useEffect(() => {
     if (logsOpen && logsRef.current) {
       logsRef.current.scrollTop = logsRef.current.scrollHeight;
     }
   }, [logsOpen, cliLogsTail]);
+
+  // Auto-scroll assistant output
+  useEffect(() => {
+    if (outputScrollRef.current) {
+      outputScrollRef.current.scrollTop = outputScrollRef.current.scrollHeight;
+    }
+  }, [assistantOutput]);
 
   return (
     <div
@@ -174,6 +157,17 @@ export const ProvisioningProgressBlock = ({
           );
         })}
       </div>
+      {assistantOutput ? (
+        <div className="mt-2">
+          <p className="mb-1 text-[11px] font-medium text-[var(--color-text-muted)]">Live output</p>
+          <div
+            ref={outputScrollRef}
+            className="max-h-[400px] overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2"
+          >
+            <MarkdownViewer content={assistantOutput} bare maxHeight="max-h-none" />
+          </div>
+        </div>
+      ) : null}
       {cliLogsTail ? (
         <div className="mt-2">
           <button
@@ -182,18 +176,15 @@ export const ProvisioningProgressBlock = ({
             onClick={() => setLogsOpen((v) => !v)}
           >
             {logsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            CLI output
+            CLI logs
           </button>
           {logsOpen ? (
             <pre
               ref={logsRef}
-              className="hljs mt-1 max-h-[400px] overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
-              // Safe: highlightedHtml is built from hljs.highlight() which only produces
-              // hljs-* <span> tags, combined with escapeHtml() for non-JSON lines.
-              // Input is CLI stdout/stderr from a local process, not user-supplied web content.
-
-              dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-            />
+              className="mt-1 max-h-[400px] overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
+            >
+              {cliLogsTail}
+            </pre>
           ) : null}
         </div>
       ) : null}

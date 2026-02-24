@@ -128,6 +128,8 @@ interface ProvisioningRun {
    * Flushed to liveLeadProcessMessages on result.success.
    */
   directReplyParts: string[];
+  /** Accumulates assistant text during provisioning phase for live UI preview. */
+  provisioningOutputParts: string[];
 }
 
 type ProvisioningAuthSource =
@@ -446,6 +448,10 @@ function updateProgress(
   message: string,
   extras?: Pick<TeamProvisioningProgress, 'pid' | 'error' | 'warnings' | 'cliLogsTail'>
 ): TeamProvisioningProgress {
+  const assistantOutput =
+    run.provisioningOutputParts.length > 0
+      ? run.provisioningOutputParts.join('')
+      : run.progress.assistantOutput;
   run.progress = {
     ...run.progress,
     state,
@@ -455,6 +461,7 @@ function updateProgress(
     error: extras?.error,
     warnings: extras?.warnings,
     cliLogsTail: extras?.cliLogsTail ?? run.progress.cliLogsTail,
+    assistantOutput,
   };
   return run.progress;
 }
@@ -485,13 +492,17 @@ function extractLogsTail(stdoutBuffer: string, stderrBuffer: string): string | u
 
 function emitLogsProgress(run: ProvisioningRun): void {
   const logsTail = extractLogsTail(run.stdoutBuffer, run.stderrBuffer);
-  if (!logsTail) {
+  const assistantOutput =
+    run.provisioningOutputParts.length > 0 ? run.provisioningOutputParts.join('') : undefined;
+
+  if (!logsTail && !assistantOutput) {
     return;
   }
   run.progress = {
     ...run.progress,
     updatedAt: nowIso(),
-    cliLogsTail: logsTail,
+    ...(logsTail !== undefined && { cliLogsTail: logsTail }),
+    ...(assistantOutput !== undefined && { assistantOutput }),
   };
   run.onProgress(run.progress);
 }
@@ -702,6 +713,7 @@ export class TeamProvisioningService {
       fsPhase: 'waiting_config',
       leadRelayCapture: null,
       directReplyParts: [],
+      provisioningOutputParts: [],
       progress: {
         runId,
         teamName: request.teamName,
@@ -972,6 +984,7 @@ export class TeamProvisioningService {
       fsPhase: 'waiting_members',
       leadRelayCapture: null,
       directReplyParts: [],
+      provisioningOutputParts: [],
       progress: {
         runId,
         teamName: request.teamName,
@@ -1560,6 +1573,12 @@ export class TeamProvisioningService {
       if (textParts.length > 0) {
         const text = textParts.join('');
         logger.debug(`[${run.teamName}] assistant: ${text.slice(0, 200)}`);
+        // During provisioning (before provisioningComplete), accumulate for live UI preview.
+        // Emission is handled by the throttled emitLogsProgress() in the stdout data handler.
+        if (!run.provisioningComplete) {
+          run.provisioningOutputParts.push(text);
+        }
+
         if (run.leadRelayCapture) {
           const capture = run.leadRelayCapture;
           if (!capture.settled) {

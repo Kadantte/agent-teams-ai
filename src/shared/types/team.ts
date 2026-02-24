@@ -262,6 +262,8 @@ export interface TeamProvisioningProgress {
   error?: string;
   warnings?: string[];
   cliLogsTail?: string;
+  /** Accumulated assistant text output during provisioning (for live preview). */
+  assistantOutput?: string;
 }
 
 export interface GlobalTask extends TeamTaskWithKanban {
