@@ -32,7 +32,7 @@ export function getPresenceLabel(
   if (member.status === 'terminated') return 'terminated';
   if (isTeamProvisioning) return 'connecting';
   if (isTeamAlive === false) return 'offline';
-  if (member.status === 'unknown') return 'unknown';
+  if (member.status === 'unknown') return 'idle';
   return member.currentTaskId ? 'working' : 'idle';
 }
 

@@ -1286,12 +1286,29 @@ async function handleAddMember(
     return { success: false, error: 'role must be a string' };
   }
 
-  return wrapTeamHandler('addMember', () =>
-    getTeamDataService().addMember(vTeam.value!, {
-      name: vName.value!,
+  return wrapTeamHandler('addMember', async () => {
+    const tn = vTeam.value!;
+    const memberName = vName.value!;
+    await getTeamDataService().addMember(tn, {
+      name: memberName,
       role: role,
-    })
-  );
+    });
+
+    // If team is alive, notify the lead to spawn the new teammate
+    const provisioning = getTeamProvisioningService();
+    if (provisioning.isTeamAlive(tn)) {
+      const roleHint = typeof role === 'string' && role.trim() ? ` with role "${role.trim()}"` : '';
+      const spawnMessage =
+        `A new teammate "${memberName}"${roleHint} has been added to the team. ` +
+        `Please spawn them immediately using the Task tool with team_name="${tn}" and name="${memberName}".`;
+      try {
+        await provisioning.sendMessageToTeam(tn, spawnMessage);
+      } catch {
+        // Best-effort: lead process may not be responsive
+        logger.warn(`Failed to notify lead about new member "${memberName}" in ${tn}`);
+      }
+    }
+  });
 }
 
 async function handleRemoveMember(

@@ -81,7 +81,7 @@ export class TeamMemberResolver {
         ) ?? null;
       const memberMessages = messages.filter((message) => message.from === name);
       const latestMessage = memberMessages[0] ?? null;
-      const status = this.resolveStatus(latestMessage);
+      const status = this.resolveStatus(latestMessage, currentTask !== null);
       const configMember = configMemberMap.get(name);
       const metaMember = metaMemberMap.get(name);
       members.push({
@@ -103,9 +103,11 @@ export class TeamMemberResolver {
     return members;
   }
 
-  private resolveStatus(message: InboxMessage | null): MemberStatus {
+  private resolveStatus(message: InboxMessage | null, hasActiveTask: boolean): MemberStatus {
     if (!message) {
-      return 'unknown';
+      // Member exists in config but has no messages yet —
+      // if they own an in_progress task they're clearly active, otherwise idle
+      return hasActiveTask ? 'active' : 'idle';
     }
 
     const structured = this.parseStructuredMessage(message.text);
