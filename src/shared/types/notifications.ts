@@ -262,6 +262,8 @@ export interface AppConfig {
     defaultTab: 'dashboard' | 'last-session';
     /** Optional custom Claude root folder (auto-detected when null) */
     claudeRootPath: string | null;
+    /** Agent communication language ('system' = use OS locale) */
+    agentLanguage: string;
   };
   /** Display and UI settings */
   display: {

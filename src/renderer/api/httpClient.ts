@@ -8,6 +8,7 @@
 
 import type {
   AppConfig,
+  AttachmentFileData,
   ClaudeMdFileInfo,
   ClaudeRootFolderSelection,
   ClaudeRootInfo,
@@ -20,6 +21,7 @@ import type {
   GlobalTask,
   HttpServerAPI,
   HttpServerStatus,
+  KanbanColumnId,
   NotificationsAPI,
   NotificationTrigger,
   PaginatedSessionsResult,
@@ -666,12 +668,26 @@ export class HttpAPIClient implements ElectronAPI {
     ): Promise<void> => {
       throw new Error('Team kanban is not available in browser mode');
     },
+    updateKanbanColumnOrder: async (
+      _teamName: string,
+      _columnId: KanbanColumnId,
+      _orderedTaskIds: string[]
+    ): Promise<void> => {
+      throw new Error('Team kanban column order is not available in browser mode');
+    },
     updateTaskStatus: async (
       _teamName: string,
       _taskId: string,
       _status: TeamTaskStatus
     ): Promise<void> => {
       throw new Error('Team task status update is not available in browser mode');
+    },
+    updateTaskOwner: async (
+      _teamName: string,
+      _taskId: string,
+      _owner: string | null
+    ): Promise<void> => {
+      throw new Error('Team task owner update is not available in browser mode');
     },
     startTask: async (_teamName: string, _taskId: string): Promise<void> => {
       throw new Error('Team start task is not available in browser mode');
@@ -725,6 +741,21 @@ export class HttpAPIClient implements ElectronAPI {
     },
     addTaskComment: async () => {
       throw new Error('Task comments are not available in browser mode');
+    },
+    addMember: async (): Promise<void> => {
+      throw new Error('Team member management is not available in browser mode');
+    },
+    removeMember: async (): Promise<void> => {
+      throw new Error('Team member management is not available in browser mode');
+    },
+    getProjectBranch: async (_projectPath: string): Promise<string | null> => {
+      return null;
+    },
+    getAttachments: async (
+      _teamName: string,
+      _messageId: string
+    ): Promise<AttachmentFileData[]> => {
+      return [];
     },
     onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void): (() => void) => {
       return this.addEventListener('team-change', (data: unknown) =>

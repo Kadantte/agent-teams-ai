@@ -8,6 +8,7 @@ import type { InboxMessage, ResolvedTeamMember } from '@shared/types';
 
 interface ActivityTimelineProps {
   messages: InboxMessage[];
+  teamName: string;
   members?: ResolvedTeamMember[];
   /**
    * When provided, unread is derived from this set and getMessageKey.
@@ -25,6 +26,7 @@ const VIEWPORT_THRESHOLD = 0.15;
 
 const MessageRowWithObserver = ({
   message,
+  teamName,
   memberRole,
   memberColor,
   recipientColor,
@@ -35,6 +37,7 @@ const MessageRowWithObserver = ({
   onVisible,
 }: {
   message: InboxMessage;
+  teamName: string;
   memberRole?: string;
   memberColor?: string;
   recipientColor?: string;
@@ -78,6 +81,7 @@ const MessageRowWithObserver = ({
     <div ref={ref} className="min-h-px">
       <ActivityItem
         message={message}
+        teamName={teamName}
         memberRole={memberRole}
         memberColor={memberColor}
         recipientColor={recipientColor}
@@ -92,6 +96,7 @@ const MessageRowWithObserver = ({
 
 export const ActivityTimeline = ({
   messages,
+  teamName,
   members,
   readState,
   onCreateTaskFromMessage,
@@ -161,6 +166,7 @@ export const ActivityTimeline = ({
           <MessageRowWithObserver
             key={messageKey}
             message={message}
+            teamName={teamName}
             memberRole={info?.role}
             memberColor={info?.color}
             recipientColor={recipientColor}

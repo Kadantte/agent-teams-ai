@@ -25,6 +25,22 @@ export function getSessionResetState(): Partial<AppState> {
 }
 
 /**
+ * Atomically navigate to a specific worktree.
+ * Use instead of selectRepository() + selectWorktree() to avoid race condition
+ * (two competing fetchSessionsInitial calls where the stale response can overwrite).
+ */
+export function getWorktreeNavigationState(repoId: string, worktreeId: string): Partial<AppState> {
+  return {
+    selectedRepositoryId: repoId,
+    selectedWorktreeId: worktreeId,
+    selectedProjectId: worktreeId,
+    activeProjectId: worktreeId,
+    sidebarCollapsed: false,
+    ...getSessionResetState(),
+  };
+}
+
+/**
  * Full state reset (session + project + repository + conversation).
  * Used when closing all tabs or resetting to initial state.
  */

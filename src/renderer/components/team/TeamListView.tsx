@@ -14,7 +14,17 @@ import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useStore } from '@renderer/store';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
 import { getBaseName } from '@renderer/utils/pathUtils';
-import { CheckCircle, Clock, Copy, FolderOpen, Play, Search, Square, Trash2 } from 'lucide-react';
+import {
+  CheckCircle,
+  Clock,
+  Copy,
+  FolderOpen,
+  GitBranch,
+  Play,
+  Search,
+  Square,
+  Trash2,
+} from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { CreateTeamDialog } from './dialogs/CreateTeamDialog';
@@ -97,6 +107,7 @@ export const TeamListView = (): React.JSX.Element => {
   const [copyData, setCopyData] = useState<TeamCopyData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [aliveTeams, setAliveTeams] = useState<string[]>([]);
+  const [branchByPath, setBranchByPath] = useState<Map<string, string | null>>(new Map());
   const {
     teams,
     teamsLoading,
@@ -203,6 +214,49 @@ export const TeamListView = (): React.JSX.Element => {
 
     return result;
   }, [teams, searchQuery, currentProjectPath]);
+
+  // Live branch/worktree for team project paths (poll so it updates during process)
+  const projectPathsToPoll = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const team of filteredTeams) {
+      const p = team.projectPath?.trim();
+      if (p) {
+        const key = normalizePath(p);
+        if (!byKey.has(key)) byKey.set(key, p);
+      }
+    }
+    return Array.from(byKey.entries());
+  }, [filteredTeams]);
+
+  useEffect(() => {
+    if (!electronMode || projectPathsToPoll.length === 0) return;
+    let cancelled = false;
+    const poll = async (): Promise<void> => {
+      const next = new Map<string, string | null>();
+      for (const [pathKey, actualPath] of projectPathsToPoll) {
+        if (cancelled) return;
+        try {
+          const branch = await api.teams.getProjectBranch(actualPath);
+          if (!cancelled) next.set(pathKey, branch);
+        } catch {
+          if (!cancelled) next.set(pathKey, null);
+        }
+      }
+      if (!cancelled && next.size > 0) {
+        setBranchByPath((prev) => {
+          const m = new Map(prev);
+          for (const [k, v] of next) m.set(k, v);
+          return m;
+        });
+      }
+    };
+    void poll();
+    const interval = setInterval(poll, 6000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [electronMode, projectPathsToPoll]);
 
   const handleDeleteTeam = useCallback(
     (teamName: string, e: React.MouseEvent) => {
@@ -509,9 +563,25 @@ export const TeamListView = (): React.JSX.Element => {
                         </Tooltip>
                       </div>
                     </div>
-                    <p className="mt-2 line-clamp-2 min-h-10 text-xs text-[var(--color-text-muted)]">
-                      {team.description || 'No description'}
-                    </p>
+                    <div className="mt-2 flex min-h-10 items-start gap-2">
+                      <p className="line-clamp-2 min-w-0 flex-1 text-xs text-[var(--color-text-muted)]">
+                        {team.description || 'No description'}
+                      </p>
+                      {team.projectPath &&
+                        (() => {
+                          const branch = branchByPath.get(normalizePath(team.projectPath));
+                          if (!branch) return null;
+                          return (
+                            <span
+                              className="flex shrink-0 items-center gap-1 rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                              title={branch}
+                            >
+                              <GitBranch size={10} />
+                              <span className="max-w-24 truncate">{branch}</span>
+                            </span>
+                          );
+                        })()}
+                    </div>
                     <div className="mt-3 flex flex-wrap items-center gap-1.5">
                       {team.members && team.members.length > 0 ? (
                         team.members.map((m) => {

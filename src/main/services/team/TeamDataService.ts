@@ -8,9 +8,12 @@ import {
 import { AGENT_BLOCK_CLOSE, AGENT_BLOCK_OPEN } from '@shared/constants/agentBlocks';
 import { getMemberColor } from '@shared/constants/memberColors';
 import { createLogger } from '@shared/utils/logger';
+import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+
+import { gitIdentityResolver } from '../parsing/GitIdentityResolver';
 
 import { atomicWriteAsync } from './atomicWrite';
 import { TeamAgentToolsInstaller } from './TeamAgentToolsInstaller';
@@ -20,21 +23,26 @@ import { TeamInboxWriter } from './TeamInboxWriter';
 import { TeamKanbanManager } from './TeamKanbanManager';
 import { TeamMemberResolver } from './TeamMemberResolver';
 import { TeamMembersMetaStore } from './TeamMembersMetaStore';
+import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskReader } from './TeamTaskReader';
 import { TeamTaskWriter } from './TeamTaskWriter';
 
 import type {
+  AddMemberRequest,
   CreateTaskRequest,
   GlobalTask,
   InboxMessage,
+  KanbanColumnId,
   KanbanState,
   KanbanTaskState,
+  ResolvedTeamMember,
   SendMessageRequest,
   SendMessageResult,
   TaskComment,
   TeamConfig,
   TeamCreateConfigRequest,
   TeamData,
+  TeamMember,
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
@@ -57,7 +65,8 @@ export class TeamDataService {
     private readonly memberResolver: TeamMemberResolver = new TeamMemberResolver(),
     private readonly kanbanManager: TeamKanbanManager = new TeamKanbanManager(),
     private readonly toolsInstaller: TeamAgentToolsInstaller = new TeamAgentToolsInstaller(),
-    private readonly membersMetaStore: TeamMembersMetaStore = new TeamMembersMetaStore()
+    private readonly membersMetaStore: TeamMembersMetaStore = new TeamMembersMetaStore(),
+    private readonly sentMessagesStore: TeamSentMessagesStore = new TeamSentMessagesStore()
   ) {}
 
   async listTeams(): Promise<TeamSummary[]> {
@@ -162,11 +171,21 @@ export class TeamDataService {
       const leadTexts = await this.extractLeadSessionTexts(config);
       if (leadTexts.length > 0) {
         messages = [...messages, ...leadTexts];
-        messages.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
       }
     } catch {
       warnings.push('Lead session texts failed to load');
     }
+
+    try {
+      const sentMessages = await this.sentMessagesStore.readMessages(teamName);
+      if (sentMessages.length > 0) {
+        messages = [...messages, ...sentMessages];
+      }
+    } catch {
+      warnings.push('Sent messages failed to load');
+    }
+
+    messages.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
     let metaMembers: TeamConfig['members'] = [];
     try {
@@ -211,6 +230,9 @@ export class TeamDataService {
       messages
     );
 
+    // Enrich members with git branch when it differs from lead's branch
+    await this.enrichMemberBranches(members, config);
+
     // Auto-sync: create comments from task-related inbox messages
     if (tasksLoaded && messages.length > 0) {
       try {
@@ -239,6 +261,84 @@ export class TeamDataService {
       kanbanState,
       warnings: warnings.length > 0 ? warnings : undefined,
     };
+  }
+
+  /**
+   * Enriches members with gitBranch when their cwd differs from the lead's.
+   * Mutates members in-place for efficiency (called right after resolveMembers).
+   */
+  private async enrichMemberBranches(
+    members: ResolvedTeamMember[],
+    config: TeamConfig
+  ): Promise<void> {
+    // Determine lead's cwd — prefer explicit member entry, fall back to config.projectPath
+    const leadEntry = config.members?.find((m) => m.name === 'team-lead');
+    const leadCwd = leadEntry?.cwd ?? config.projectPath;
+    if (!leadCwd) return;
+
+    let leadBranch: string | null = null;
+    try {
+      leadBranch = await gitIdentityResolver.getBranch(leadCwd);
+    } catch {
+      // Lead cwd may not be a git repo — skip enrichment entirely
+      return;
+    }
+
+    await Promise.all(
+      members.map(async (member) => {
+        if (!member.cwd || member.cwd === leadCwd) return;
+        try {
+          const branch = await gitIdentityResolver.getBranch(member.cwd);
+          if (branch && branch !== leadBranch) {
+            // eslint-disable-next-line no-param-reassign -- intentional in-place enrichment
+            member.gitBranch = branch;
+          }
+        } catch {
+          // Member cwd may not be a git repo — skip silently
+        }
+      })
+    );
+  }
+
+  async addMember(teamName: string, request: AddMemberRequest): Promise<void> {
+    const members = await this.membersMetaStore.getMembers(teamName);
+    const existing = members.find((m) => m.name.toLowerCase() === request.name.toLowerCase());
+
+    if (existing) {
+      if (existing.removedAt) {
+        throw new Error(`Name "${request.name}" was previously used by a removed member`);
+      }
+      throw new Error(`Member "${request.name}" already exists`);
+    }
+
+    const newMember: TeamMember = {
+      name: request.name,
+      role: request.role?.trim() || undefined,
+      agentType: 'general-purpose',
+      color: getMemberColor(members.filter((m) => !m.removedAt).length),
+      joinedAt: Date.now(),
+    };
+
+    members.push(newMember);
+    await this.membersMetaStore.writeMembers(teamName, members);
+  }
+
+  async removeMember(teamName: string, memberName: string): Promise<void> {
+    const members = await this.membersMetaStore.getMembers(teamName);
+    const member = members.find((m) => m.name === memberName);
+
+    if (!member) {
+      throw new Error(`Member "${memberName}" not found`);
+    }
+    if (member.removedAt) {
+      throw new Error(`Member "${memberName}" is already removed`);
+    }
+    if (member.agentType === 'team-lead') {
+      throw new Error('Cannot remove team lead');
+    }
+
+    member.removedAt = Date.now();
+    await this.membersMetaStore.writeMembers(teamName, members);
   }
 
   async createTask(teamName: string, request: CreateTaskRequest): Promise<TeamTask> {
@@ -364,6 +464,10 @@ export class TeamDataService {
     await this.taskWriter.updateStatus(teamName, taskId, status);
   }
 
+  async updateTaskOwner(teamName: string, taskId: string, owner: string | null): Promise<void> {
+    await this.taskWriter.updateOwner(teamName, taskId, owner);
+  }
+
   async addTaskComment(teamName: string, taskId: string, text: string): Promise<TaskComment> {
     const comment = await this.taskWriter.addComment(teamName, taskId, text);
 
@@ -396,6 +500,54 @@ export class TeamDataService {
 
   async sendMessage(teamName: string, request: SendMessageRequest): Promise<SendMessageResult> {
     return this.inboxWriter.sendMessage(teamName, request);
+  }
+
+  async sendDirectToLead(
+    teamName: string,
+    leadName: string,
+    text: string,
+    summary?: string
+  ): Promise<SendMessageResult> {
+    const messageId = randomUUID();
+    const msg: InboxMessage = {
+      from: 'user',
+      to: leadName,
+      text,
+      timestamp: new Date().toISOString(),
+      read: true,
+      summary,
+      messageId,
+      source: 'user_sent',
+    };
+    await this.sentMessagesStore.appendMessage(teamName, msg);
+    return { deliveredToInbox: false, deliveredViaStdin: true, messageId };
+  }
+
+  async getLeadMemberName(teamName: string): Promise<string | null> {
+    try {
+      const config = await this.configReader.getConfig(teamName);
+
+      // Check config.json members first (Claude Code-created teams)
+      if (config?.members?.length) {
+        const lead = config.members.find(
+          (m) => m.agentType === 'team-lead' || m.name === 'team-lead'
+        );
+        if (lead?.name) return lead.name;
+      }
+
+      // Fallback: check members.meta.json (UI-created teams)
+      const metaMembers = await this.membersMetaStore.getMembers(teamName);
+      if (metaMembers.length > 0) {
+        const lead = metaMembers.find((m) => m.agentType === 'team-lead' || m.name === 'team-lead');
+        if (lead?.name) return lead.name;
+        return metaMembers[0]?.name ?? null;
+      }
+
+      // Last resort: check config.json first member
+      return config?.members?.[0]?.name ?? null;
+    } catch {
+      return null;
+    }
   }
 
   async requestReview(teamName: string, taskId: string): Promise<void> {
@@ -629,5 +781,13 @@ export class TeamDataService {
       }
       throw error;
     }
+  }
+
+  async updateKanbanColumnOrder(
+    teamName: string,
+    columnId: KanbanColumnId,
+    orderedTaskIds: string[]
+  ): Promise<void> {
+    await this.kanbanManager.updateColumnOrder(teamName, columnId, orderedTaskIds);
   }
 }

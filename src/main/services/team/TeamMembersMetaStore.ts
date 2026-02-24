@@ -24,6 +24,7 @@ function normalizeMember(member: TeamMember): TeamMember | null {
     color: typeof member.color === 'string' ? member.color.trim() || undefined : undefined,
     joinedAt: typeof member.joinedAt === 'number' ? member.joinedAt : undefined,
     agentId: typeof member.agentId === 'string' ? member.agentId : undefined,
+    removedAt: typeof member.removedAt === 'number' ? member.removedAt : undefined,
   };
 }
 

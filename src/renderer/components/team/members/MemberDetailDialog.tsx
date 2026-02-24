@@ -1,12 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 import { Button } from '@renderer/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from '@renderer/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
-import { BarChart3, FileText, ListPlus, MessageSquare } from 'lucide-react';
+import { BarChart3, FileText, ListPlus, MessageSquare, UserMinus } from 'lucide-react';
 
 import { MemberDetailHeader } from './MemberDetailHeader';
-import { MemberDetailStats } from './MemberDetailStats';
+import { MemberDetailStats, type MemberDetailTab } from './MemberDetailStats';
 import { MemberLogsTab } from './MemberLogsTab';
 import { MemberMessagesTab } from './MemberMessagesTab';
 import { MemberStatsTab } from './MemberStatsTab';
@@ -26,6 +26,7 @@ interface MemberDetailDialogProps {
   onSendMessage: () => void;
   onAssignTask: () => void;
   onTaskClick: (task: TeamTaskWithKanban) => void;
+  onRemoveMember?: () => void;
 }
 
 export const MemberDetailDialog = ({
@@ -40,6 +41,7 @@ export const MemberDetailDialog = ({
   onSendMessage,
   onAssignTask,
   onTaskClick,
+  onRemoveMember,
 }: MemberDetailDialogProps): React.JSX.Element | null => {
   const memberTasks = useMemo(
     () => (member ? tasks.filter((t) => t.owner === member.name) : []),
@@ -61,28 +63,37 @@ export const MemberDetailDialog = ({
     [memberTasks]
   );
 
+  const [activeTab, setActiveTab] = useState<MemberDetailTab>('tasks');
+
   if (!member) return null;
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <DialogContent className="min-w-0 overflow-hidden sm:max-w-4xl">
-        <DialogHeader>
-          <MemberDetailHeader
-            member={member}
-            isTeamAlive={isTeamAlive}
-            isTeamProvisioning={isTeamProvisioning}
+      <DialogContent className="min-w-0 sm:max-w-4xl">
+        <div className="flex items-start gap-4">
+          <DialogHeader className="shrink-0">
+            <MemberDetailHeader
+              member={member}
+              isTeamAlive={isTeamAlive}
+              isTeamProvisioning={isTeamProvisioning}
+            />
+          </DialogHeader>
+
+          <MemberDetailStats
+            totalTasks={memberTasks.length}
+            inProgressTasks={inProgressTasks}
+            completedTasks={completedTasks}
+            messageCount={memberMessages.length}
+            lastActiveAt={member.lastActiveAt}
+            onTabChange={setActiveTab}
           />
-        </DialogHeader>
+        </div>
 
-        <MemberDetailStats
-          totalTasks={memberTasks.length}
-          inProgressTasks={inProgressTasks}
-          completedTasks={completedTasks}
-          messageCount={memberMessages.length}
-          lastActiveAt={member.lastActiveAt}
-        />
-
-        <Tabs defaultValue="tasks">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as MemberDetailTab)}
+          className="min-w-0 overflow-hidden"
+        >
           <TabsList className="w-full">
             <TabsTrigger value="tasks" className="flex-1 gap-1.5">
               Tasks
@@ -113,7 +124,7 @@ export const MemberDetailDialog = ({
             <MemberTasksTab tasks={memberTasks} onTaskClick={onTaskClick} />
           </TabsContent>
           <TabsContent value="messages">
-            <MemberMessagesTab messages={memberMessages} />
+            <MemberMessagesTab messages={memberMessages} teamName={teamName} />
           </TabsContent>
           <TabsContent value="stats">
             <MemberStatsTab teamName={teamName} memberName={member.name} />
@@ -124,14 +135,33 @@ export const MemberDetailDialog = ({
         </Tabs>
 
         <DialogFooter>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={onSendMessage}>
-            <MessageSquare size={14} />
-            Send Message
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={onAssignTask}>
-            <ListPlus size={14} />
-            Assign Task
-          </Button>
+          {member.removedAt ? (
+            <span className="text-xs text-[var(--color-text-muted)]">
+              Removed {new Date(member.removedAt).toLocaleDateString()}
+            </span>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={onSendMessage}>
+                <MessageSquare size={14} />
+                Send Message
+              </Button>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={onAssignTask}>
+                <ListPlus size={14} />
+                Assign Task
+              </Button>
+              {onRemoveMember && member.agentType !== 'team-lead' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                  onClick={onRemoveMember}
+                >
+                  <UserMinus size={14} />
+                  Remove
+                </Button>
+              )}
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

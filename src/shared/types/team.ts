@@ -5,6 +5,8 @@ export interface TeamMember {
   role?: string;
   color?: string;
   joinedAt?: number;
+  cwd?: string;
+  removedAt?: number;
 }
 
 export interface TeamConfig {
@@ -80,6 +82,25 @@ export interface TeamTaskWithKanban extends TeamTask {
   kanbanColumn?: 'review' | 'approved';
 }
 
+export type AttachmentMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+
+export interface AttachmentMeta {
+  id: string;
+  filename: string;
+  mimeType: AttachmentMediaType;
+  size: number;
+}
+
+export interface AttachmentPayload extends AttachmentMeta {
+  data: string;
+}
+
+export interface AttachmentFileData {
+  id: string;
+  data: string;
+  mimeType: AttachmentMediaType;
+}
+
 export interface InboxMessage {
   from: string;
   to?: string;
@@ -89,7 +110,8 @@ export interface InboxMessage {
   summary?: string;
   color?: string;
   messageId?: string;
-  source?: 'inbox' | 'lead_session' | 'lead_process';
+  source?: 'inbox' | 'lead_session' | 'lead_process' | 'user_sent';
+  attachments?: AttachmentMeta[];
 }
 
 export interface SendMessageRequest {
@@ -97,10 +119,12 @@ export interface SendMessageRequest {
   text: string;
   summary?: string;
   from?: string;
+  attachments?: AttachmentPayload[];
 }
 
 export interface SendMessageResult {
   deliveredToInbox: boolean;
+  deliveredViaStdin?: boolean;
   messageId: string;
 }
 
@@ -119,6 +143,8 @@ export interface KanbanState {
   teamName: string;
   reviewers: string[];
   tasks: Record<string, KanbanTaskState>;
+  /** Порядок id задач по колонкам для отображения на канбан-доске (drag-and-drop). */
+  columnOrder?: Partial<Record<KanbanColumnId, string[]>>;
 }
 
 export type UpdateKanbanPatch =
@@ -136,6 +162,10 @@ export interface ResolvedTeamMember {
   color?: string;
   agentType?: string;
   role?: string;
+  cwd?: string;
+  /** Set only when member's git branch differs from the lead's branch. */
+  gitBranch?: string;
+  removedAt?: number;
 }
 
 export interface TeamData {
@@ -153,6 +183,7 @@ export interface TeamLaunchRequest {
   teamName: string;
   cwd: string;
   prompt?: string;
+  model?: string;
 }
 
 export interface TeamLaunchResponse {
@@ -199,6 +230,7 @@ export interface TeamCreateRequest {
   members: TeamProvisioningMemberInput[];
   cwd: string;
   prompt?: string;
+  model?: string;
 }
 
 export interface TeamCreateConfigRequest {
@@ -289,4 +321,13 @@ export interface MemberFullStats {
   totalDurationMs: number;
   sessionCount: number;
   computedAt: string;
+}
+
+export interface AddMemberRequest {
+  name: string;
+  role?: string;
+}
+
+export interface RemoveMemberRequest {
+  name: string;
 }

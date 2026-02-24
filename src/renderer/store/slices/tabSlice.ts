@@ -22,7 +22,7 @@ import {
   syncFocusedPaneState,
   updatePane,
 } from '../utils/paneHelpers';
-import { getFullResetState } from '../utils/stateResetHelpers';
+import { getFullResetState, getWorktreeNavigationState } from '../utils/stateResetHelpers';
 
 import type { AppState, SearchNavigationContext } from '../types';
 import type { PaneLayout } from '@renderer/types/panes';
@@ -384,8 +384,8 @@ export const createTabSlice: StateCreator<AppState, [], [], TabSlice> = (set, ge
                 (wt) => normalizePath(wt.path) === normalizedTeamPath
               );
               if (matchingWorktree && state.selectedWorktreeId !== matchingWorktree.id) {
-                state.selectRepository(repo.id);
-                state.selectWorktree(matchingWorktree.id);
+                set(getWorktreeNavigationState(repo.id, matchingWorktree.id));
+                void get().fetchSessionsInitial(matchingWorktree.id);
                 break;
               }
             }

@@ -30,6 +30,7 @@ interface SettingsHandlers {
   // General handlers
   handleGeneralToggle: (key: keyof AppConfig['general'], value: boolean) => void;
   handleThemeChange: (value: 'dark' | 'light' | 'system') => void;
+  handleLanguageChange: (value: string) => void;
   handleDefaultTabChange: (value: 'dashboard' | 'last-session') => void;
 
   // Notification handlers
@@ -77,6 +78,13 @@ export function useSettingsHandlers({
   const handleThemeChange = useCallback(
     (value: 'dark' | 'light' | 'system') => {
       void updateConfig('general', { theme: value });
+    },
+    [updateConfig]
+  );
+
+  const handleLanguageChange = useCallback(
+    (value: string) => {
+      void updateConfig('general', { agentLanguage: value });
     },
     [updateConfig]
   );
@@ -287,6 +295,7 @@ export function useSettingsHandlers({
           theme: 'dark',
           defaultTab: 'dashboard',
           claudeRootPath: null,
+          agentLanguage: 'system',
         },
         display: {
           showTimestamps: true,
@@ -373,6 +382,7 @@ export function useSettingsHandlers({
   return {
     handleGeneralToggle,
     handleThemeChange,
+    handleLanguageChange,
     handleDefaultTabChange,
     handleNotificationToggle,
     handleSnooze,

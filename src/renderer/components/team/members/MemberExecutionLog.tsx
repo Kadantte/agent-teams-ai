@@ -4,10 +4,12 @@ import { DisplayItemList } from '@renderer/components/chat/DisplayItemList';
 import { LastOutputDisplay } from '@renderer/components/chat/LastOutputDisplay';
 import { SystemChatGroup } from '@renderer/components/chat/SystemChatGroup';
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { enhanceAIGroup } from '@renderer/utils/aiGroupEnhancer';
 import { transformChunksToConversation } from '@renderer/utils/groupTransformer';
+import { createAgentBlockRegex } from '@shared/constants/agentBlocks';
 import { format } from 'date-fns';
-import { Bot, ChevronDown } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight } from 'lucide-react';
 
 import type { EnhancedChunk } from '@renderer/types/data';
 import type { AIGroup, UserGroup } from '@renderer/types/groups';
@@ -88,31 +90,66 @@ export const MemberExecutionLog = ({
   );
 };
 
+/** Extract agent-only instruction blocks and human-visible text from a message. */
+function splitAgentBlocks(raw: string): { humanText: string; agentInfo: string[] } {
+  const agentInfo: string[] = [];
+  const regex = createAgentBlockRegex();
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(raw)) !== null) {
+    const content = m[0]
+      .replace(/^```info_for_agent\n?/, '')
+      .replace(/\n?```$/, '')
+      .trim();
+    if (content) agentInfo.push(content);
+  }
+  const humanText = raw.replace(createAgentBlockRegex(), '').trim();
+  return { humanText, agentInfo };
+}
+
 const UserLogItem = ({ group }: { group: UserGroup }): React.JSX.Element => {
   const text = group.content.rawText ?? group.content.text ?? '';
-  if (!text.trim()) {
+  const { humanText, agentInfo } = useMemo(() => splitAgentBlocks(text), [text]);
+  const [agentInfoOpen, setAgentInfoOpen] = useState(false);
+
+  if (!humanText && agentInfo.length === 0) {
     return (
-      <div className="flex min-w-0 justify-end">
-        <div className="min-w-0 max-w-[85%] rounded-2xl rounded-br-sm border border-[var(--color-border)] bg-[var(--chat-user-bg)] px-4 py-3">
-          <div className="text-[10px] text-[var(--color-text-muted)]">
-            {format(group.timestamp, 'h:mm:ss a')}
-          </div>
-          <div className="mt-1 text-xs text-[var(--color-text-muted)]">(empty)</div>
-        </div>
+      <div className="py-1 text-[10px] text-[var(--color-text-muted)]">
+        {format(group.timestamp, 'h:mm:ss a')} — (empty)
       </div>
     );
   }
 
   return (
-    <div className="flex min-w-0 justify-end">
-      <div className="min-w-0 max-w-full rounded-2xl rounded-br-sm border border-[var(--chat-user-border)] bg-[var(--chat-user-bg)] px-4 py-3">
-        <div className="text-right text-[10px] text-[var(--color-text-muted)]">
-          {format(group.timestamp, 'h:mm:ss a')}
-        </div>
-        <div className="mt-2 min-w-0 break-words text-sm text-[var(--chat-user-text)]">
-          <MarkdownViewer content={text} copyable />
-        </div>
+    <div className="min-w-0 space-y-1 overflow-hidden py-1">
+      <div className="text-[10px] text-[var(--color-text-muted)]">
+        {format(group.timestamp, 'h:mm:ss a')}
       </div>
+      {humanText && (
+        <div className="min-w-0 overflow-x-auto break-words text-xs text-[var(--chat-user-text)]">
+          <MarkdownViewer content={humanText} copyable />
+        </div>
+      )}
+      {agentInfo.length > 0 && (
+        <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <button
+            type="button"
+            className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+            onClick={() => setAgentInfoOpen((v) => !v)}
+          >
+            <ChevronRight
+              size={10}
+              className={`shrink-0 transition-transform ${agentInfoOpen ? 'rotate-90' : ''}`}
+            />
+            <Bot size={10} className="shrink-0" />
+            Agent instructions
+          </button>
+          {agentInfoOpen && (
+            <pre className="overflow-x-auto border-t border-[var(--color-border)] px-2 py-1.5 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+              {agentInfo.join('\n\n')}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -149,23 +186,28 @@ const AIExecutionGroup = ({
   return (
     <div className="space-y-3 border-l-2 pl-3" style={{ borderColor: 'var(--chat-ai-border)' }}>
       {hasToggleContent ? (
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 text-left"
-          onClick={onToggleExpanded}
-          aria-expanded={expanded}
-        >
-          <Bot className="size-4 shrink-0 text-[var(--color-text-secondary)]" />
-          <span className="shrink-0 text-xs font-semibold text-[var(--color-text-secondary)]">
-            Claude
-          </span>
-          <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-muted)]">
-            {enhanced.itemsSummary}
-          </span>
-          <ChevronDown
-            className={`size-3.5 shrink-0 text-[var(--color-text-muted)] transition-transform ${expanded ? 'rotate-180' : ''}`}
-          />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 text-left"
+              onClick={onToggleExpanded}
+              aria-expanded={expanded}
+            >
+              <Bot className="size-4 shrink-0 text-[var(--color-text-secondary)]" />
+              <span className="shrink-0 text-xs font-semibold text-[var(--color-text-secondary)]">
+                Claude
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-muted)]">
+                {enhanced.itemsSummary}
+              </span>
+              <ChevronDown
+                className={`size-3.5 shrink-0 text-[var(--color-text-muted)] transition-transform ${expanded ? 'rotate-180' : ''}`}
+              />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{expanded ? 'Collapse' : 'Expand'}</TooltipContent>
+        </Tooltip>
       ) : null}
 
       {hasToggleContent && expanded ? (

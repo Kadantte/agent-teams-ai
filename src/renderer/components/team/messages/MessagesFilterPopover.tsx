@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@renderer/components/ui/button';
 import { Checkbox } from '@renderer/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { Filter } from 'lucide-react';
 
 import type { InboxMessage } from '@shared/types';
@@ -93,22 +94,26 @@ export const MessagesFilterPopover = ({
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="relative h-7 px-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-          aria-label="Filter messages"
-          title="Filter"
-        >
-          <Filter size={14} />
-          {activeCount > 0 && (
-            <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-medium text-white">
-              {activeCount}
-            </span>
-          )}
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="relative h-7 px-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              aria-label="Filter messages"
+            >
+              <Filter size={14} />
+              {activeCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-medium text-white">
+                  {activeCount}
+                </span>
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Filter messages</TooltipContent>
+      </Tooltip>
       <PopoverContent align="end" className="w-72 p-0">
         <div className="border-b border-[var(--color-border)] p-3">
           <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">

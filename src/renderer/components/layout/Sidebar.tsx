@@ -115,49 +115,79 @@ export const Sidebar = (): React.JSX.Element => {
       >
         <SidebarHeader />
 
-        {/* Tab bar: Tasks | Sessions */}
+        {/* Tab bar: Tasks | Sessions — tab strip style, filters on the right */}
         <div
-          className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5"
+          className="flex shrink-0 items-end gap-2 border-b px-3 pt-1"
           style={{ borderColor: 'var(--color-border)' }}
         >
-          <div className="flex gap-0.5">
+          <div className="flex flex-1" />
+          <div className="flex" role="tablist" aria-label="Sidebar view">
             <button
               type="button"
-              className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                sidebarTab === 'tasks'
-                  ? 'bg-surface-raised text-text'
-                  : 'text-text-muted hover:text-text-secondary'
+              role="tab"
+              aria-selected={sidebarTab === 'tasks'}
+              aria-controls="sidebar-tasks-panel"
+              id="sidebar-tab-tasks"
+              className={`relative px-3 py-1.5 text-[11px] font-medium transition-colors ${
+                sidebarTab === 'tasks' ? 'text-text' : 'text-text-muted hover:text-text-secondary'
               }`}
+              style={
+                sidebarTab === 'tasks'
+                  ? {
+                      borderBottom: '2px solid var(--color-text)',
+                      marginBottom: '-1px',
+                    }
+                  : undefined
+              }
               onClick={() => setSidebarTab('tasks')}
             >
               Tasks
             </button>
             <button
               type="button"
-              className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+              role="tab"
+              aria-selected={sidebarTab === 'sessions'}
+              aria-controls="sidebar-sessions-panel"
+              id="sidebar-tab-sessions"
+              className={`relative px-3 py-1.5 text-[11px] font-medium transition-colors ${
                 sidebarTab === 'sessions'
-                  ? 'bg-surface-raised text-text'
+                  ? 'text-text'
                   : 'text-text-muted hover:text-text-secondary'
               }`}
+              style={
+                sidebarTab === 'sessions'
+                  ? {
+                      borderBottom: '2px solid var(--color-text)',
+                      marginBottom: '-1px',
+                    }
+                  : undefined
+              }
               onClick={() => setSidebarTab('sessions')}
             >
               Sessions
             </button>
           </div>
-          {sidebarTab === 'tasks' && (
-            <TaskFiltersPopover
-              open={taskFiltersPopoverOpen}
-              onOpenChange={setTaskFiltersPopoverOpen}
-              teams={teams.map((t) => ({ teamName: t.teamName, displayName: t.displayName }))}
-              filters={taskFilters}
-              onFiltersChange={setTaskFilters}
-              onApply={() => {}}
-            />
-          )}
+          <div className="flex flex-1 justify-end pb-0.5">
+            {sidebarTab === 'tasks' && (
+              <TaskFiltersPopover
+                open={taskFiltersPopoverOpen}
+                onOpenChange={setTaskFiltersPopoverOpen}
+                teams={teams.map((t) => ({ teamName: t.teamName, displayName: t.displayName }))}
+                filters={taskFilters}
+                onFiltersChange={setTaskFilters}
+                onApply={() => {}}
+              />
+            )}
+          </div>
         </div>
 
         {/* Content: Tasks list or Sessions list */}
-        <div className="min-w-0 flex-1 overflow-hidden">
+        <div
+          id={sidebarTab === 'tasks' ? 'sidebar-tasks-panel' : 'sidebar-sessions-panel'}
+          role="tabpanel"
+          aria-labelledby={`sidebar-tab-${sidebarTab}`}
+          className="min-w-0 flex-1 overflow-hidden"
+        >
           {sidebarTab === 'tasks' ? (
             <GlobalTaskList
               hideHeader

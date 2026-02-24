@@ -191,6 +191,9 @@ export const TEAM_GET_DATA = 'team:getData';
 /** Update team kanban state */
 export const TEAM_UPDATE_KANBAN = 'team:updateKanban';
 
+/** Update kanban column task order (drag-and-drop within column) */
+export const TEAM_UPDATE_KANBAN_COLUMN_ORDER = 'team:updateKanbanColumnOrder';
+
 /** Send inbox message to team member */
 export const TEAM_SEND_MESSAGE = 'team:sendMessage';
 
@@ -230,6 +233,9 @@ export const TEAM_CREATE_TASK = 'team:createTask';
 /** Update task status directly (pending/in_progress/completed) */
 export const TEAM_UPDATE_TASK_STATUS = 'team:updateTaskStatus';
 
+/** Update task owner (reassign) */
+export const TEAM_UPDATE_TASK_OWNER = 'team:updateTaskOwner';
+
 /** Delete a team and its associated task directory */
 export const TEAM_DELETE_TEAM = 'team:deleteTeam';
 
@@ -260,3 +266,15 @@ export const TEAM_GET_ALL_TASKS = 'team:getAllTasks';
 
 /** Add a comment to a task */
 export const TEAM_ADD_TASK_COMMENT = 'team:addTaskComment';
+
+/** Get current git branch for a project path (live read from .git/HEAD) */
+export const TEAM_GET_PROJECT_BRANCH = 'team:getProjectBranch';
+
+/** Add a new member to an existing team */
+export const TEAM_ADD_MEMBER = 'team:addMember';
+
+/** Soft-delete a team member */
+export const TEAM_REMOVE_MEMBER = 'team:removeMember';
+
+/** Get attachment data for a message */
+export const TEAM_GET_ATTACHMENTS = 'team:getAttachments';

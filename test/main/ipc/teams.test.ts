@@ -16,7 +16,9 @@ vi.mock('@preload/constants/ipcChannels', () => ({
   TEAM_SEND_MESSAGE: 'team:sendMessage',
   TEAM_REQUEST_REVIEW: 'team:requestReview',
   TEAM_UPDATE_KANBAN: 'team:updateKanban',
+  TEAM_UPDATE_KANBAN_COLUMN_ORDER: 'team:updateKanbanColumnOrder',
   TEAM_UPDATE_TASK_STATUS: 'team:updateTaskStatus',
+  TEAM_UPDATE_TASK_OWNER: 'team:updateTaskOwner',
   TEAM_PROCESS_SEND: 'team:processSend',
   TEAM_PROCESS_ALIVE: 'team:processAlive',
   TEAM_ALIVE_LIST: 'team:aliveList',
@@ -28,6 +30,10 @@ vi.mock('@preload/constants/ipcChannels', () => ({
   TEAM_START_TASK: 'team:startTask',
   TEAM_GET_ALL_TASKS: 'team:getAllTasks',
   TEAM_ADD_TASK_COMMENT: 'team:addTaskComment',
+  TEAM_ADD_MEMBER: 'team:addMember',
+  TEAM_REMOVE_MEMBER: 'team:removeMember',
+  TEAM_GET_PROJECT_BRANCH: 'team:getProjectBranch',
+  TEAM_GET_ATTACHMENTS: 'team:getAttachments',
 }));
 
 import {
@@ -54,8 +60,13 @@ import {
   TEAM_START_TASK,
   TEAM_UPDATE_CONFIG,
   TEAM_UPDATE_KANBAN,
+  TEAM_UPDATE_KANBAN_COLUMN_ORDER,
   TEAM_UPDATE_TASK_STATUS,
+  TEAM_ADD_MEMBER,
   TEAM_ADD_TASK_COMMENT,
+  TEAM_GET_ATTACHMENTS,
+  TEAM_GET_PROJECT_BRANCH,
+  TEAM_REMOVE_MEMBER,
 } from '../../../src/preload/constants/ipcChannels';
 import {
   initializeTeamHandlers,
@@ -82,6 +93,7 @@ describe('ipc teams handlers', () => {
     createTask: vi.fn(async () => ({ id: '1', subject: 'Test', status: 'pending' })),
     requestReview: vi.fn(async () => undefined),
     updateKanban: vi.fn(async () => undefined),
+    updateKanbanColumnOrder: vi.fn(async () => undefined),
     updateTaskStatus: vi.fn(async () => undefined),
     startTask: vi.fn(async () => undefined),
     addTaskComment: vi.fn(async () => ({
@@ -90,6 +102,8 @@ describe('ipc teams handlers', () => {
       text: 'test comment',
       createdAt: new Date().toISOString(),
     })),
+    addMember: vi.fn(async () => undefined),
+    removeMember: vi.fn(async () => undefined),
   };
   const provisioningService = {
     prepareForProvisioning: vi.fn(async () => ({
@@ -135,6 +149,7 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_SEND_MESSAGE)).toBe(true);
     expect(handlers.has(TEAM_REQUEST_REVIEW)).toBe(true);
     expect(handlers.has(TEAM_UPDATE_KANBAN)).toBe(true);
+    expect(handlers.has(TEAM_UPDATE_KANBAN_COLUMN_ORDER)).toBe(true);
     expect(handlers.has(TEAM_UPDATE_TASK_STATUS)).toBe(true);
     expect(handlers.has(TEAM_START_TASK)).toBe(true);
     expect(handlers.has(TEAM_PROCESS_SEND)).toBe(true);
@@ -148,6 +163,8 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_UPDATE_CONFIG)).toBe(true);
     expect(handlers.has(TEAM_GET_ALL_TASKS)).toBe(true);
     expect(handlers.has(TEAM_ADD_TASK_COMMENT)).toBe(true);
+    expect(handlers.has(TEAM_ADD_MEMBER)).toBe(true);
+    expect(handlers.has(TEAM_REMOVE_MEMBER)).toBe(true);
   });
 
   it('returns success false on invalid sendMessage args', async () => {
@@ -212,6 +229,7 @@ describe('ipc teams handlers', () => {
   it('dedups live lead replies when lead_session already has same text', async () => {
     service.getTeamData.mockResolvedValueOnce({
       teamName: 'my-team',
+      config: { name: 'My Team' },
       messages: [
         {
           from: 'team-lead',
@@ -301,6 +319,64 @@ describe('ipc teams handlers', () => {
     });
   });
 
+  describe('addMember', () => {
+    it('calls service on valid input', async () => {
+      const handler = handlers.get(TEAM_ADD_MEMBER)!;
+      const result = (await handler({} as never, 'my-team', {
+        name: 'alice',
+        role: 'developer',
+      })) as { success: boolean };
+      expect(result.success).toBe(true);
+      expect(service.addMember).toHaveBeenCalledWith('my-team', {
+        name: 'alice',
+        role: 'developer',
+      });
+    });
+
+    it('rejects invalid team name', async () => {
+      const handler = handlers.get(TEAM_ADD_MEMBER)!;
+      const result = (await handler({} as never, '../bad', {
+        name: 'alice',
+      })) as { success: boolean };
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects invalid member name', async () => {
+      const handler = handlers.get(TEAM_ADD_MEMBER)!;
+      const result = (await handler({} as never, 'my-team', {
+        name: '../bad',
+      })) as { success: boolean };
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects missing payload', async () => {
+      const handler = handlers.get(TEAM_ADD_MEMBER)!;
+      const result = (await handler({} as never, 'my-team', null)) as { success: boolean };
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('removeMember', () => {
+    it('calls service on valid input', async () => {
+      const handler = handlers.get(TEAM_REMOVE_MEMBER)!;
+      const result = (await handler({} as never, 'my-team', 'alice')) as { success: boolean };
+      expect(result.success).toBe(true);
+      expect(service.removeMember).toHaveBeenCalledWith('my-team', 'alice');
+    });
+
+    it('rejects invalid team name', async () => {
+      const handler = handlers.get(TEAM_REMOVE_MEMBER)!;
+      const result = (await handler({} as never, '../bad', 'alice')) as { success: boolean };
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects invalid member name', async () => {
+      const handler = handlers.get(TEAM_REMOVE_MEMBER)!;
+      const result = (await handler({} as never, 'my-team', '../bad')) as { success: boolean };
+      expect(result.success).toBe(false);
+    });
+  });
+
   describe('createTeam prompt validation', () => {
     it('accepts valid prompt in team create request', async () => {
       const handler = handlers.get(TEAM_CREATE)!;
@@ -342,6 +418,7 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_SEND_MESSAGE)).toBe(false);
     expect(handlers.has(TEAM_REQUEST_REVIEW)).toBe(false);
     expect(handlers.has(TEAM_UPDATE_KANBAN)).toBe(false);
+    expect(handlers.has(TEAM_UPDATE_KANBAN_COLUMN_ORDER)).toBe(false);
     expect(handlers.has(TEAM_UPDATE_TASK_STATUS)).toBe(false);
     expect(handlers.has(TEAM_START_TASK)).toBe(false);
     expect(handlers.has(TEAM_PROCESS_SEND)).toBe(false);
@@ -355,5 +432,9 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_UPDATE_CONFIG)).toBe(false);
     expect(handlers.has(TEAM_GET_ALL_TASKS)).toBe(false);
     expect(handlers.has(TEAM_ADD_TASK_COMMENT)).toBe(false);
+    expect(handlers.has(TEAM_ADD_MEMBER)).toBe(false);
+    expect(handlers.has(TEAM_REMOVE_MEMBER)).toBe(false);
+    expect(handlers.has(TEAM_GET_PROJECT_BRANCH)).toBe(false);
+    expect(handlers.has(TEAM_GET_ATTACHMENTS)).toBe(false);
   });
 });

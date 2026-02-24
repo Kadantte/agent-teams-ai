@@ -1,4 +1,5 @@
 /* eslint-disable no-param-reassign -- ProvisioningRun object is intentionally mutated as a state tracker throughout the provisioning lifecycle */
+import { ConfigManager } from '@main/services/infrastructure/ConfigManager';
 import {
   encodePath,
   extractBaseDir,
@@ -8,9 +9,11 @@ import {
   getTasksBasePath,
   getTeamsBasePath,
 } from '@main/utils/pathDecoder';
+import { resolveLanguageName } from '@shared/utils/agentLanguage';
 import { createLogger } from '@shared/utils/logger';
 import { execFile, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
+import { app } from 'electron';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -22,6 +25,7 @@ import { withInboxLock } from './inboxLock';
 import { TeamConfigReader } from './TeamConfigReader';
 import { TeamInboxReader } from './TeamInboxReader';
 import { TeamMembersMetaStore } from './TeamMembersMetaStore';
+import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 
 import type {
   InboxMessage,
@@ -42,7 +46,7 @@ const VERIFY_POLL_MS = 500;
 const STDERR_RING_LIMIT = 64 * 1024;
 const STDOUT_RING_LIMIT = 64 * 1024;
 const LOG_PROGRESS_THROTTLE_MS = 300;
-const UI_LOGS_TAIL_LIMIT = 8000;
+const UI_LOGS_TAIL_LIMIT = 128 * 1024;
 const SHELL_ENV_TIMEOUT_MS = 12000;
 const CLI_PREPARE_TIMEOUT_MS = 10000;
 const PREFLIGHT_TIMEOUT_MS = 30000;
@@ -120,6 +124,11 @@ interface ProvisioningRun {
     rejectOnce: (error: string) => void;
     timeoutHandle: NodeJS.Timeout;
   } | null;
+  /**
+   * Accumulates assistant text for direct user→lead messages (no relay capture active).
+   * Flushed to liveLeadProcessMessages on result.success.
+   */
+  directReplyParts: string[];
 }
 
 type ProvisioningAuthSource =
@@ -279,11 +288,20 @@ function buildTaskStatusProtocol(teamName: string): string {
 Failure to follow this protocol means the task board will show incorrect status.`;
 }
 
+function getAgentLanguageInstruction(): string {
+  const config = ConfigManager.getInstance().getConfig();
+  const langCode = config.general.agentLanguage || 'system';
+  const systemLocale = app.getLocale();
+  const languageName = resolveLanguageName(langCode, systemLocale);
+  return `IMPORTANT: Communicate in ${languageName}. All messages, summaries, and task descriptions MUST be in ${languageName}.`;
+}
+
 function buildProvisioningPrompt(request: TeamCreateRequest): string {
   const displayName = request.displayName?.trim() || request.teamName;
   const description = request.description?.trim() || 'No description';
   const members = buildMembersPrompt(request.members);
   const taskProtocol = buildTaskStatusProtocol(request.teamName);
+  const languageInstruction = getAgentLanguageInstruction();
   const userPromptBlock = request.prompt?.trim()
     ? `\nAdditional instructions from the user:\n${request.prompt.trim()}\n`
     : '';
@@ -296,6 +314,8 @@ You are "${leadName}", the team lead.
 
 Goal: Provision a Claude Code agent team with live teammates.
 ${userPromptBlock}
+${languageInstruction}
+
 Constraints:
 - Do NOT call TeamDelete under any circumstances.
 - Do NOT use TodoWrite.
@@ -327,7 +347,8 @@ Steps (execute in this exact order):
    - subagent_type: "general-purpose"
    - prompt:
      You are {name}, a {role} on team "${displayName}" (${request.teamName}).
-     Introduce yourself briefly (name and role) and confirm you are ready — use the language that matches the project's CLAUDE.md or the user's locale.
+     ${languageInstruction}
+     Introduce yourself briefly (name and role) and confirm you are ready.
      Then wait for task assignments.
 
      ${taskProtocol}
@@ -352,6 +373,7 @@ function buildLaunchPrompt(
     ? `\nAdditional instructions from the user:\n${request.prompt.trim()}\n`
     : '';
   const taskProtocol = buildTaskStatusProtocol(request.teamName);
+  const languageInstruction = getAgentLanguageInstruction();
 
   const leadName = members.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
 
@@ -360,6 +382,8 @@ You are "${leadName}", the team lead.
 
 Goal: Reconnect with existing team "${request.teamName}".
 ${userPromptBlock}
+${languageInstruction}
+
 Constraints:
 - Do NOT call TeamDelete under any circumstances.
 - Do NOT use TodoWrite.
@@ -392,7 +416,8 @@ Steps (execute in this exact order):
    - subagent_type: "general-purpose"
    - prompt:
      You are {name}, a {role} on team "${request.teamName}".
-     The team has been reconnected. Introduce yourself briefly (name and role) and confirm you are ready — use the language that matches the project's CLAUDE.md or the user's locale.
+     ${languageInstruction}
+     The team has been reconnected. Introduce yourself briefly (name and role) and confirm you are ready.
      Then resume any pending work you own (if any) and wait for new assignments.
 
      ${taskProtocol}
@@ -501,7 +526,8 @@ export class TeamProvisioningService {
   constructor(
     private readonly configReader: TeamConfigReader = new TeamConfigReader(),
     private readonly inboxReader: TeamInboxReader = new TeamInboxReader(),
-    private readonly membersMetaStore: TeamMembersMetaStore = new TeamMembersMetaStore()
+    private readonly membersMetaStore: TeamMembersMetaStore = new TeamMembersMetaStore(),
+    private readonly sentMessagesStore: TeamSentMessagesStore = new TeamSentMessagesStore()
   ) {}
 
   setTeamChangeEmitter(emitter: ((event: TeamChangeEvent) => void) | null): void {
@@ -668,6 +694,7 @@ export class TeamProvisioningService {
       isLaunch: false,
       fsPhase: 'waiting_config',
       leadRelayCapture: null,
+      directReplyParts: [],
       progress: {
         runId,
         teamName: request.teamName,
@@ -706,6 +733,7 @@ export class TeamProvisioningService {
           '--disallowedTools',
           'TeamDelete,TodoWrite',
           '--dangerously-skip-permissions',
+          ...(request.model ? ['--model', request.model] : []),
         ],
         {
           cwd: request.cwd,
@@ -936,6 +964,7 @@ export class TeamProvisioningService {
       isLaunch: true,
       fsPhase: 'waiting_members',
       leadRelayCapture: null,
+      directReplyParts: [],
       progress: {
         runId,
         teamName: request.teamName,
@@ -983,6 +1012,9 @@ export class TeamProvisioningService {
       logger.info(
         `[${request.teamName}] Launching with --resume ${previousSessionId} for session continuity`
       );
+    }
+    if (request.model) {
+      launchArgs.push('--model', request.model);
     }
     // New sessions: CLI creates its own ID. No --resume with synthetic name — docs say
     // --resume is for existing sessions and may show an interactive picker if not found.
@@ -1140,7 +1172,11 @@ export class TeamProvisioningService {
    * Send a message to the team's lead process via stream-json stdin.
    * The lead will receive it as a new user turn and can delegate to teammates.
    */
-  async sendMessageToTeam(teamName: string, message: string): Promise<void> {
+  async sendMessageToTeam(
+    teamName: string,
+    message: string,
+    attachments?: { data: string; mimeType: string }[]
+  ): Promise<void> {
     const runId = this.activeByTeam.get(teamName);
     if (!runId) {
       throw new Error(`No active process for team "${teamName}"`);
@@ -1149,11 +1185,26 @@ export class TeamProvisioningService {
     if (!run?.child?.stdin?.writable) {
       throw new Error(`Team "${teamName}" process stdin is not writable`);
     }
+
+    const contentBlocks: Record<string, unknown>[] = [{ type: 'text', text: message }];
+    if (attachments?.length) {
+      for (const att of attachments) {
+        contentBlocks.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: att.mimeType,
+            data: att.data,
+          },
+        });
+      }
+    }
+
     const payload = JSON.stringify({
       type: 'user',
       message: {
         role: 'user',
-        content: [{ type: 'text', text: message }],
+        content: contentBlocks,
       },
     });
     run.child.stdin.write(payload + '\n');
@@ -1273,6 +1324,8 @@ export class TeamProvisioningService {
           },
         };
         run.leadRelayCapture = capture;
+        // Clear any direct reply parts — relay capture takes priority
+        run.directReplyParts = [];
       });
 
       try {
@@ -1442,7 +1495,7 @@ export class TeamProvisioningService {
     return next;
   }
 
-  private pushLiveLeadProcessMessage(teamName: string, message: InboxMessage): void {
+  pushLiveLeadProcessMessage(teamName: string, message: InboxMessage): void {
     const MAX = 100;
     const list = this.liveLeadProcessMessages.get(teamName) ?? [];
     list.push(message);
@@ -1512,6 +1565,9 @@ export class TeamProvisioningService {
               capture.resolveOnce(combined);
             }, capture.idleMs);
           }
+        } else if (run.provisioningComplete) {
+          // Accumulate assistant text for direct user→lead messages (no relay capture).
+          run.directReplyParts.push(text);
         }
       }
     }
@@ -1532,6 +1588,35 @@ export class TeamProvisioningService {
           const capture = run.leadRelayCapture;
           const combined = capture.textParts.join('').trim();
           capture.resolveOnce(combined);
+        } else if (run.provisioningComplete && run.directReplyParts.length > 0) {
+          // Flush accumulated assistant reply from direct user→lead message
+          const replyText = run.directReplyParts.join('').trim();
+          run.directReplyParts = [];
+          const leadName =
+            run.request.members.find((m) => m.role?.toLowerCase().includes('lead'))?.name ||
+            'team-lead';
+          if (replyText.length > 0) {
+            const replyMsg: InboxMessage = {
+              from: leadName,
+              to: 'user',
+              text: replyText,
+              timestamp: nowIso(),
+              read: true,
+              summary: replyText.length > 60 ? replyText.slice(0, 57) + '...' : replyText,
+              messageId: `lead-direct-${run.runId}-${Date.now()}`,
+              source: 'lead_process',
+            };
+            this.pushLiveLeadProcessMessage(run.teamName, replyMsg);
+            // Persist to disk so replies survive app restart
+            void this.sentMessagesStore
+              .appendMessage(run.teamName, replyMsg)
+              .catch(() => undefined);
+            this.teamChangeEmitter?.({
+              type: 'inbox',
+              teamName: run.teamName,
+              detail: 'lead-direct-reply',
+            });
+          }
         }
         if (!run.provisioningComplete) {
           void this.handleProvisioningTurnComplete(run);

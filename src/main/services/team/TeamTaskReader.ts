@@ -98,6 +98,7 @@ export class TeamTaskReader {
           description: typeof parsed.description === 'string' ? parsed.description : undefined,
           activeForm: typeof parsed.activeForm === 'string' ? parsed.activeForm : undefined,
           owner: typeof parsed.owner === 'string' ? parsed.owner : undefined,
+          createdBy: typeof parsed.createdBy === 'string' ? parsed.createdBy : undefined,
           status: (['pending', 'in_progress', 'completed', 'deleted'] as const).includes(
             parsed.status as TeamTask['status']
           )

@@ -61,10 +61,15 @@ export class TeamConfigReader {
           }
         }
 
+        const removedNames = new Set<string>();
         try {
           const metaMembers = await this.membersMetaStore.getMembers(entry.name);
           for (const member of metaMembers) {
-            addMember(member);
+            if (member.removedAt) {
+              removedNames.add(member.name.trim());
+            } else {
+              addMember(member);
+            }
           }
         } catch {
           logger.debug(`Failed to read members.meta.json for team: ${entry.name}`);
@@ -84,6 +89,10 @@ export class TeamConfigReader {
           }
         } catch {
           // Inbox folder may not exist yet.
+        }
+
+        for (const name of removedNames) {
+          memberMap.delete(name);
         }
 
         const memberCount = memberMap.size;

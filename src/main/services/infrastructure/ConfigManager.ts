@@ -181,6 +181,7 @@ export interface GeneralConfig {
   theme: 'dark' | 'light' | 'system';
   defaultTab: 'dashboard' | 'last-session';
   claudeRootPath: string | null;
+  agentLanguage: string;
 }
 
 export interface DisplayConfig {
@@ -248,6 +249,7 @@ const DEFAULT_CONFIG: AppConfig = {
     theme: 'dark',
     defaultTab: 'dashboard',
     claudeRootPath: null,
+    agentLanguage: 'system',
   },
   display: {
     showTimestamps: true,

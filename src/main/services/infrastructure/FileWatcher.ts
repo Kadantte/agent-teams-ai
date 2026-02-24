@@ -921,7 +921,7 @@ export class FileWatcher extends EventEmitter {
     }
 
     // Classify only the paths we care about in iteration 02.
-    if (normalized.includes('inboxes')) {
+    if (normalized.includes('inboxes') || relative === 'sentMessages.json') {
       const event: TeamChangeEvent = {
         type: 'inbox',
         teamName,

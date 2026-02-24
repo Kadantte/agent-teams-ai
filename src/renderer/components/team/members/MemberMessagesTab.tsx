@@ -4,6 +4,7 @@ import type { InboxMessage } from '@shared/types';
 
 interface MemberMessagesTabProps {
   messages: InboxMessage[];
+  teamName: string;
   onCreateTask?: (subject: string, description: string) => void;
 }
 
@@ -11,6 +12,7 @@ const MAX_MESSAGES = 100;
 
 export const MemberMessagesTab = ({
   messages,
+  teamName,
   onCreateTask,
 }: MemberMessagesTabProps): React.JSX.Element => {
   const displayMessages = messages.slice(0, MAX_MESSAGES);
@@ -26,7 +28,12 @@ export const MemberMessagesTab = ({
   return (
     <div className="max-h-[320px] space-y-2 overflow-y-auto">
       {displayMessages.map((msg, idx) => (
-        <ActivityItem key={msg.messageId ?? idx} message={msg} onCreateTask={onCreateTask} />
+        <ActivityItem
+          key={msg.messageId ?? idx}
+          message={msg}
+          teamName={teamName}
+          onCreateTask={onCreateTask}
+        />
       ))}
     </div>
   );

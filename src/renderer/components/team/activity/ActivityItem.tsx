@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
+import { AttachmentDisplay } from '@renderer/components/team/attachments/AttachmentDisplay';
+import { MemberBadge } from '@renderer/components/team/MemberBadge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import {
   CARD_BG,
   CARD_BORDER_STYLE,
@@ -16,7 +19,8 @@ import {
 } from '@renderer/utils/agentMessageFormatting';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { createAgentBlockRegex } from '@shared/constants/agentBlocks';
-import { Bot, ChevronRight, ListPlus, MessageSquare, Reply } from 'lucide-react';
+import { isRateLimitMessage } from '@shared/utils/rateLimitDetector';
+import { AlertTriangle, ChevronRight, ListPlus, Reply } from 'lucide-react';
 
 import { ReplyQuoteBlock } from './ReplyQuoteBlock';
 
@@ -27,6 +31,7 @@ type StructuredMessage = Record<string, unknown>;
 
 interface ActivityItemProps {
   message: InboxMessage;
+  teamName: string;
   memberRole?: string;
   memberColor?: string;
   recipientColor?: string;
@@ -126,6 +131,7 @@ function stripAgentBlocks(text: string): string {
 
 export const ActivityItem = ({
   message,
+  teamName,
   memberRole,
   memberColor,
   recipientColor,
@@ -135,7 +141,6 @@ export const ActivityItem = ({
   onReply,
 }: ActivityItemProps): React.JSX.Element => {
   const colors = getTeamColorSet(memberColor ?? message.color ?? '');
-  const recipientColors = message.to && recipientColor ? getTeamColorSet(recipientColor) : null;
   const formattedRole = formatAgentRole(memberRole);
 
   const timestamp = Number.isNaN(Date.parse(message.timestamp))
@@ -143,10 +148,13 @@ export const ActivityItem = ({
     : new Date(message.timestamp).toLocaleString();
 
   const structured = parseStructuredAgentMessage(message.text);
-  const noiseLabel = structured ? getNoiseLabel(structured) : null;
+  // Only flag agent messages as rate-limited, not user's own quotes
+  const rateLimited = message.from !== 'user' && isRateLimitMessage(message.text);
+  // Never collapse rate limit messages as noise — they must be visible
+  const noiseLabel = structured && !rateLimited ? getNoiseLabel(structured) : null;
 
-  // System/automated messages start collapsed
-  const systemLabel = !structured ? getSystemMessageLabel(message.text) : null;
+  // System/automated messages start collapsed (but not rate limits)
+  const systemLabel = !structured && !rateLimited ? getSystemMessageLabel(message.text) : null;
   const [isExpanded, setIsExpanded] = useState(!systemLabel);
 
   // Strip agent-only blocks from displayed text
@@ -184,9 +192,11 @@ export const ActivityItem = ({
     <article
       className="group overflow-hidden rounded-md"
       style={{
-        backgroundColor: CARD_BG,
-        border: CARD_BORDER_STYLE,
-        borderLeft: `3px solid ${colors.border}`,
+        backgroundColor: rateLimited ? 'var(--tool-result-error-bg)' : CARD_BG,
+        border: rateLimited ? '1px solid var(--tool-result-error-border)' : CARD_BORDER_STYLE,
+        borderLeft: rateLimited
+          ? '3px solid var(--tool-result-error-text)'
+          : `3px solid ${colors.border}`,
       }}
     >
       {/* Header — div with role=button (cannot use <button> due to nested buttons inside) */}
@@ -224,41 +234,12 @@ export const ActivityItem = ({
           />
         ) : null}
 
-        {message.source === 'lead_session' || message.source === 'lead_process' ? (
-          <Bot className="size-3.5 shrink-0" style={{ color: colors.border }} />
-        ) : (
-          <MessageSquare className="size-3.5 shrink-0" style={{ color: colors.border }} />
-        )}
-
-        {/* Name badge — clickable to open member popup */}
-        {onMemberNameClick ? (
-          <button
-            type="button"
-            className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide transition-opacity hover:opacity-90 focus:outline-none focus:ring-1 focus:ring-[var(--color-border)]"
-            style={{
-              backgroundColor: colors.badge,
-              color: colors.text,
-              border: `1px solid ${colors.border}40`,
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onMemberNameClick(message.from);
-            }}
-          >
-            {message.from}
-          </button>
-        ) : (
-          <span
-            className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
-            style={{
-              backgroundColor: colors.badge,
-              color: colors.text,
-              border: `1px solid ${colors.border}40`,
-            }}
-          >
-            {message.from}
-          </span>
-        )}
+        {/* Sender avatar + name badge */}
+        <MemberBadge
+          name={message.from}
+          color={memberColor ?? message.color}
+          onClick={onMemberNameClick}
+        />
 
         {/* Role */}
         {formattedRole ? (
@@ -289,58 +270,22 @@ export const ActivityItem = ({
           </span>
         ) : null}
 
-        {/* Recipient — badge like sender, clickable to open member popup */}
-        {message.to && message.to !== message.from && recipientColors ? (
-          <span className="text-[10px]">
-            <span style={{ color: CARD_ICON_MUTED }}>&rarr; </span>
-            {onMemberNameClick ? (
-              <button
-                type="button"
-                className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide transition-opacity hover:opacity-90 focus:outline-none focus:ring-1 focus:ring-[var(--color-border)]"
-                style={{
-                  backgroundColor: recipientColors.badge,
-                  color: recipientColors.text,
-                  border: `1px solid ${recipientColors.border}40`,
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onMemberNameClick(message.to!);
-                }}
-              >
-                {message.to}
-              </button>
-            ) : (
-              <span
-                className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
-                style={{
-                  backgroundColor: recipientColors.badge,
-                  color: recipientColors.text,
-                  border: `1px solid ${recipientColors.border}40`,
-                }}
-              >
-                {message.to}
-              </span>
-            )}
+        {/* Rate limit warning badge */}
+        {rateLimited ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-400">
+            <AlertTriangle size={10} />
+            Rate Limited
           </span>
-        ) : message.to && message.to !== message.from ? (
-          <span className="text-[10px]">
-            <span style={{ color: CARD_ICON_MUTED }}>&rarr; </span>
-            {onMemberNameClick ? (
-              <button
-                type="button"
-                className="rounded px-0.5 py-0 font-medium transition-opacity hover:opacity-90 focus:outline-none focus:ring-1 focus:ring-[var(--color-border)]"
-                style={{ color: CARD_ICON_MUTED }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onMemberNameClick(message.to!);
-                }}
-              >
-                {message.to}
-              </button>
-            ) : (
-              <span style={{ color: CARD_ICON_MUTED }}>{message.to}</span>
-            )}
-          </span>
+        ) : null}
+
+        {/* Recipient — arrow + avatar + badge */}
+        {message.to && message.to !== message.from ? (
+          <>
+            <span style={{ color: CARD_ICON_MUTED }} className="text-[10px]">
+              &rarr;
+            </span>
+            <MemberBadge name={message.to} color={recipientColor} onClick={onMemberNameClick} />
+          </>
         ) : null}
 
         {/* Summary */}
@@ -351,32 +296,40 @@ export const ActivityItem = ({
         {/* Timestamp + reply + create task */}
         <div className="flex shrink-0 items-center gap-1.5">
           {onReply && (
-            <button
-              type="button"
-              className="rounded p-0.5 opacity-0 transition-opacity hover:bg-[var(--color-surface-raised)] group-hover:opacity-100"
-              style={{ color: CARD_ICON_MUTED }}
-              title="Reply to message"
-              onClick={(e) => {
-                e.stopPropagation();
-                onReply(message);
-              }}
-            >
-              <Reply size={14} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="rounded p-0.5 opacity-0 transition-opacity hover:bg-[var(--color-surface-raised)] group-hover:opacity-100"
+                  style={{ color: CARD_ICON_MUTED }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReply(message);
+                  }}
+                >
+                  <Reply size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Reply to message</TooltipContent>
+            </Tooltip>
           )}
           {onCreateTask && (
-            <button
-              type="button"
-              className="rounded p-0.5 opacity-0 transition-opacity hover:bg-[var(--color-surface-raised)] group-hover:opacity-100"
-              style={{ color: CARD_ICON_MUTED }}
-              title="Create task from message"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCreateTask();
-              }}
-            >
-              <ListPlus size={14} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="rounded p-0.5 opacity-0 transition-opacity hover:bg-[var(--color-surface-raised)] group-hover:opacity-100"
+                  style={{ color: CARD_ICON_MUTED }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCreateTask();
+                  }}
+                >
+                  <ListPlus size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Create task from message</TooltipContent>
+            </Tooltip>
           )}
           <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
             {timestamp}
@@ -404,8 +357,20 @@ export const ActivityItem = ({
           ) : parsedReply ? (
             <ReplyQuoteBlock reply={parsedReply} />
           ) : (
-            <MarkdownViewer content={displayText ?? message.text} maxHeight="max-h-56" copyable />
+            <MarkdownViewer
+              content={displayText ?? message.text}
+              maxHeight="max-h-56"
+              copyable
+              bare
+            />
           )}
+          {message.attachments?.length && message.messageId ? (
+            <AttachmentDisplay
+              teamName={teamName}
+              messageId={message.messageId}
+              attachments={message.attachments}
+            />
+          ) : null}
         </div>
       ) : null}
     </article>

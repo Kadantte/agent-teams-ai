@@ -2,18 +2,28 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@renderer/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { buildTaskCountsByOwner } from '@renderer/utils/pathNormalize';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
-import { MessageSquare, Pencil, Play, Plus, Search, Trash2, X } from 'lucide-react';
+import { GitBranch, Pencil, Play, Plus, Search, Trash2, UserPlus, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { ActiveTasksBlock } from './activity/ActiveTasksBlock';
 import { ActivityTimeline } from './activity/ActivityTimeline';
 import { PendingRepliesBlock } from './activity/PendingRepliesBlock';
+import { AddMemberDialog } from './dialogs/AddMemberDialog';
 import { CreateTaskDialog } from './dialogs/CreateTaskDialog';
 import { EditTeamDialog } from './dialogs/EditTeamDialog';
 import { LaunchTeamDialog } from './dialogs/LaunchTeamDialog';
@@ -24,6 +34,7 @@ import { KanbanBoard } from './kanban/KanbanBoard';
 import { UNASSIGNED_OWNER } from './kanban/KanbanFilterPopover';
 import { MemberDetailDialog } from './members/MemberDetailDialog';
 import { MemberList } from './members/MemberList';
+import { MessageComposer } from './messages/MessageComposer';
 import { MessagesFilterPopover } from './messages/MessagesFilterPopover';
 import { CollapsibleTeamSection } from './CollapsibleTeamSection';
 import { TeamProvisioningBanner } from './TeamProvisioningBanner';
@@ -78,9 +89,13 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     defaultOwner: '',
   });
   const [creatingTask, setCreatingTask] = useState(false);
+  const [addMemberDialogOpen, setAddMemberDialogOpen] = useState(false);
+  const [addingMemberLoading, setAddingMemberLoading] = useState(false);
+  const [removeMemberConfirm, setRemoveMemberConfirm] = useState<string | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [launchDialogOpen, setLaunchDialogOpen] = useState(false);
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [sendDialogRecipient, setSendDialogRecipient] = useState<string | undefined>(undefined);
   const [replyQuote, setReplyQuote] = useState<{ from: string; text: string } | undefined>(
     undefined
@@ -102,7 +117,9 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     projects,
     selectTeam,
     updateKanban,
+    updateKanbanColumnOrder,
     updateTaskStatus,
+    updateTaskOwner,
     sendTeamMessage,
     requestReview,
     createTeamTask,
@@ -113,6 +130,8 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     sendMessageError,
     lastSendMessageResult,
     reviewActionError,
+    addMember,
+    removeMember,
     launchTeam,
     provisioningError,
     isTeamProvisioning,
@@ -126,7 +145,9 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       projects: s.projects,
       selectTeam: s.selectTeam,
       updateKanban: s.updateKanban,
+      updateKanbanColumnOrder: s.updateKanbanColumnOrder,
       updateTaskStatus: s.updateTaskStatus,
+      updateTaskOwner: s.updateTaskOwner,
       sendTeamMessage: s.sendTeamMessage,
       requestReview: s.requestReview,
       createTeamTask: s.createTeamTask,
@@ -137,6 +158,8 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       sendMessageError: s.sendMessageError,
       lastSendMessageResult: s.lastSendMessageResult,
       reviewActionError: s.reviewActionError,
+      addMember: s.addMember,
+      removeMember: s.removeMember,
       launchTeam: s.launchTeam,
       provisioningError: s.provisioningError,
       isTeamProvisioning: Object.values(s.provisioningRuns).some(
@@ -203,6 +226,28 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       cancelled = true;
     };
   }, [projectId]);
+
+  // Resolve lead's git branch from project path
+  const [leadBranch, setLeadBranch] = useState<string | null>(null);
+  useEffect(() => {
+    const projectPath = data?.config.projectPath?.trim();
+    if (!projectPath || typeof api.teams?.getProjectBranch !== 'function') {
+      setLeadBranch(null);
+      return;
+    }
+    let cancelled = false;
+    void api.teams.getProjectBranch(projectPath).then(
+      (branch) => {
+        if (!cancelled) setLeadBranch(branch);
+      },
+      () => {
+        if (!cancelled) setLeadBranch(null);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [data?.config.projectPath]);
 
   // Filter sessions to team-only using sessionHistory + leadSessionId
   const teamSessions = useMemo(() => {
@@ -313,6 +358,11 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     return filterKanbanTasks(filteredTasks, query);
   }, [filteredTasks, kanbanSearch]);
 
+  const activeMembers = useMemo(
+    () => (data?.members ?? []).filter((m) => !m.removedAt),
+    [data?.members]
+  );
+
   const taskMap = useMemo(() => new Map((data?.tasks ?? []).map((t) => [t.id, t])), [data?.tasks]);
 
   const memberTaskCounts = useMemo(() => buildTaskCountsByOwner(data?.tasks ?? []), [data?.tasks]);
@@ -354,12 +404,11 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
   };
 
   const handleDeleteTeam = useCallback((): void => {
-    const confirmed = window.confirm(
-      `Delete team "${teamName}"? This action is irreversible. All team data and tasks will be deleted.`
-    );
-    if (!confirmed) {
-      return;
-    }
+    setDeleteConfirmOpen(true);
+  }, []);
+
+  const confirmDeleteTeam = useCallback((): void => {
+    setDeleteConfirmOpen(false);
     void (async () => {
       try {
         await deleteTeam(teamName);
@@ -475,45 +524,75 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             headerColorSet && 'relative z-10'
           )}
         >
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h2 className="text-base font-semibold text-[var(--color-text)]">{data.config.name}</h2>
-            {data.config.description && (
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                {data.config.description}
-              </p>
-            )}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            {!data.isAlive ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 px-2 text-xs text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                onClick={() => setLaunchDialogOpen(true)}
-              >
-                <Play size={12} />
-                Launch
-              </Button>
-            ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 px-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              onClick={() => setEditDialogOpen(true)}
-            >
-              <Pencil size={12} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 px-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300"
-              onClick={handleDeleteTeam}
-            >
-              <Trash2 size={12} />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  onClick={() => setEditDialogOpen(true)}
+                >
+                  <Pencil size={12} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Edit team</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                  onClick={handleDeleteTeam}
+                >
+                  <Trash2 size={12} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Delete team</TooltipContent>
+            </Tooltip>
           </div>
         </div>
+        {(data.config.description || leadBranch) && (
+          <div
+            className={cn(
+              'flex items-center justify-between gap-2',
+              headerColorSet && 'relative z-10'
+            )}
+          >
+            <p className="min-w-0 truncate text-xs text-[var(--color-text-muted)]">
+              {data.config.description || ''}
+            </p>
+            {leadBranch ? (
+              <span
+                className="flex shrink-0 items-center gap-1 text-[10px] text-[var(--color-text-muted)]"
+                title={leadBranch}
+              >
+                <GitBranch size={10} />
+                <span className="max-w-32 truncate">{leadBranch}</span>
+              </span>
+            ) : null}
+          </div>
+        )}
       </div>
+
+      {!data.isAlive ? (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+          <span className="text-xs text-amber-200">Team is offline</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 gap-1 px-2 text-xs text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+            onClick={() => setLaunchDialogOpen(true)}
+          >
+            <Play size={12} />
+            Launch
+          </Button>
+        </div>
+      ) : null}
 
       <TeamProvisioningBanner teamName={teamName} />
 
@@ -528,7 +607,25 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         </div>
       ) : null}
 
-      <CollapsibleTeamSection title="Members" badge={data.members.length} defaultOpen>
+      <CollapsibleTeamSection
+        title="Team"
+        badge={activeMembers.length}
+        defaultOpen
+        action={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 px-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            onClick={(e) => {
+              e.stopPropagation();
+              setAddMemberDialogOpen(true);
+            }}
+          >
+            <UserPlus size={12} />
+            Member
+          </Button>
+        }
+      >
         <MemberList
           members={data.members}
           memberTaskCounts={memberTaskCounts}
@@ -581,28 +678,6 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
           </Button>
         }
       >
-        <div className="relative mb-2">
-          <Search
-            size={14}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
-          />
-          <input
-            type="text"
-            placeholder="Search tasks… (#id or text)"
-            value={kanbanSearch}
-            onChange={(e) => setKanbanSearch(e.target.value)}
-            className="h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-8 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-border-emphasis)] focus:outline-none"
-          />
-          {kanbanSearch && (
-            <button
-              type="button"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              onClick={() => setKanbanSearch('')}
-            >
-              <X size={14} />
-            </button>
-          )}
-        </div>
         <KanbanBoard
           tasks={kanbanDisplayTasks}
           teamName={teamName}
@@ -610,8 +685,37 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
           filter={kanbanFilter}
           sessions={teamSessions}
           leadSessionId={data.config.leadSessionId}
-          members={data.members}
+          members={activeMembers}
           onFilterChange={setKanbanFilter}
+          toolbarLeft={
+            <div className="relative">
+              <Search
+                size={14}
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+              />
+              <input
+                type="text"
+                placeholder="Search tasks… (#id or text)"
+                value={kanbanSearch}
+                onChange={(e) => setKanbanSearch(e.target.value)}
+                className="h-8 w-full min-w-[140px] max-w-[240px] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-8 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-border-emphasis)] focus:outline-none"
+              />
+              {kanbanSearch && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                      onClick={() => setKanbanSearch('')}
+                    >
+                      <X size={14} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Clear search</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          }
           onRequestReview={(taskId) => {
             void requestReview(teamName, taskId);
           }}
@@ -651,6 +755,9 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
           }}
           onCompleteTask={(taskId) => {
             void updateTaskStatus(teamName, taskId, 'completed');
+          }}
+          onColumnOrderChange={(columnId, orderedTaskIds) => {
+            void updateKanbanColumnOrder(teamName, columnId, orderedTaskIds);
           }}
           onScrollToTask={(taskId) => {
             const el = document.querySelector(`[data-task-id="${taskId}"]`);
@@ -692,23 +799,28 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
               onOpenChange={setMessagesFilterOpen}
               onApply={setMessagesFilter}
             />
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 shrink-0 gap-1.5 px-2.5 text-xs font-medium text-[var(--color-text)]"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSendDialogRecipient(undefined);
-                setReplyQuote(undefined);
-                setSendDialogOpen(true);
-              }}
-            >
-              <MessageSquare size={12} />
-              Message
-            </Button>
           </div>
         }
       >
+        <MessageComposer
+          teamName={teamName}
+          members={activeMembers}
+          isTeamAlive={data.isAlive}
+          sending={sendingMessage}
+          sendError={sendMessageError}
+          onSend={(member, text, summary, attachments) => {
+            const sentAtMs = Date.now();
+            setPendingRepliesByMember((prev) => ({ ...prev, [member]: sentAtMs }));
+            void sendTeamMessage(teamName, { member, text, summary, attachments }).catch(() => {
+              setPendingRepliesByMember((prev) => {
+                if (prev[member] !== sentAtMs) return prev;
+                const next = { ...prev };
+                delete next[member];
+                return next;
+              });
+            });
+          }}
+        />
         <PendingRepliesBlock
           members={data.members}
           pendingRepliesByMember={pendingRepliesByMember}
@@ -722,6 +834,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         />
         <ActivityTimeline
           messages={filteredMessages}
+          teamName={teamName}
           members={data.members}
           readState={{ readSet, getMessageKey: toMessageKey }}
           onMemberClick={setSelectedMember}
@@ -786,12 +899,17 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
           setSelectedMember(null);
           setSelectedTask(task);
         }}
+        onRemoveMember={() => {
+          const name = selectedMember?.name;
+          if (!name) return;
+          setRemoveMemberConfirm(name);
+        }}
       />
 
       <CreateTaskDialog
         open={createTaskDialog.open}
         teamName={teamName}
-        members={data.members}
+        members={activeMembers}
         tasks={data.tasks}
         isTeamAlive={data.isAlive && !isTeamProvisioning}
         defaultSubject={createTaskDialog.defaultSubject}
@@ -812,6 +930,81 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         onSaved={() => void selectTeam(teamName)}
       />
 
+      <AddMemberDialog
+        open={addMemberDialogOpen}
+        teamName={teamName}
+        existingNames={data.members.map((m) => m.name)}
+        adding={addingMemberLoading}
+        onClose={() => setAddMemberDialogOpen(false)}
+        onAdd={(name, role) => {
+          setAddingMemberLoading(true);
+          void (async () => {
+            try {
+              await addMember(teamName, { name, role });
+              setAddMemberDialogOpen(false);
+            } catch {
+              // error shown via store
+            } finally {
+              setAddingMemberLoading(false);
+            }
+          })();
+        }}
+      />
+
+      <Dialog
+        open={removeMemberConfirm !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveMemberConfirm(null);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Remove member</DialogTitle>
+            <DialogDescription>
+              Remove &ldquo;{removeMemberConfirm}&rdquo; from the team? Tasks and messages will be
+              preserved, but this name cannot be reused.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setRemoveMemberConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                const name = removeMemberConfirm;
+                setRemoveMemberConfirm(null);
+                setSelectedMember(null);
+                if (name) void removeMember(teamName, name);
+              }}
+            >
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete team</DialogTitle>
+            <DialogDescription>
+              Delete team &ldquo;{data.config.name}&rdquo;? This action is irreversible. All team
+              data and tasks will be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setDeleteConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" size="sm" onClick={confirmDeleteTeam}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <LaunchTeamDialog
         open={launchDialogOpen}
         teamName={teamName}
@@ -826,7 +1019,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
 
       <SendMessageDialog
         open={sendDialogOpen}
-        members={data.members}
+        members={activeMembers}
         defaultRecipient={sendDialogRecipient}
         quotedMessage={replyQuote}
         sending={sendingMessage}
@@ -860,7 +1053,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         teamName={teamName}
         kanbanTaskState={selectedTask ? data?.kanbanState.tasks[selectedTask.id] : undefined}
         taskMap={taskMap}
-        members={data?.members ?? []}
+        members={activeMembers}
         onClose={() => setSelectedTask(null)}
         onScrollToTask={(taskId) => {
           setSelectedTask(null);
@@ -870,6 +1063,9 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             el.classList.add('ring-2', 'ring-blue-400/50');
             setTimeout(() => el.classList.remove('ring-2', 'ring-blue-400/50'), 1500);
           }
+        }}
+        onOwnerChange={(taskId, owner) => {
+          void updateTaskOwner(teamName, taskId, owner);
         }}
       />
     </div>

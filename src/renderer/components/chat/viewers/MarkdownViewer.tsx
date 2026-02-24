@@ -47,6 +47,8 @@ interface MarkdownViewerProps {
   itemId?: string;
   /** When true, shows a copy button (overlay when no label, inline in header when label exists) */
   copyable?: boolean;
+  /** When true, renders without wrapper background/border (for embedding inside cards) */
+  bare?: boolean;
 }
 
 // =============================================================================
@@ -277,6 +279,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
   label,
   itemId,
   copyable = false,
+  bare = false,
 }) => {
   // Only subscribe to search store when itemId is provided
   const { searchQuery, searchMatches, currentSearchIndex } = useStore(
@@ -300,11 +303,15 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
 
   return (
     <div
-      className={`min-w-0 overflow-hidden rounded-lg shadow-sm ${copyable && !label ? 'group relative' : ''} ${className}`}
-      style={{
-        backgroundColor: CODE_BG,
-        border: `1px solid ${CODE_BORDER}`,
-      }}
+      className={`min-w-0 overflow-hidden ${bare ? '' : 'rounded-lg shadow-sm'} ${copyable && !label ? 'group relative' : ''} ${className}`}
+      style={
+        bare
+          ? undefined
+          : {
+              backgroundColor: CODE_BG,
+              border: `1px solid ${CODE_BORDER}`,
+            }
+      }
     >
       {/* Copy button overlay (when no label header) */}
       {copyable && !label && <CopyButton text={content} />}

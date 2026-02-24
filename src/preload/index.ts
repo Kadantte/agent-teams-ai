@@ -18,6 +18,7 @@ import {
   SSH_SAVE_LAST_CONNECTION,
   SSH_STATUS,
   SSH_TEST,
+  TEAM_ADD_MEMBER,
   TEAM_ADD_TASK_COMMENT,
   TEAM_ALIVE_LIST,
   TEAM_CANCEL_PROVISIONING,
@@ -27,10 +28,12 @@ import {
   TEAM_CREATE_TASK,
   TEAM_DELETE_TEAM,
   TEAM_GET_ALL_TASKS,
+  TEAM_GET_ATTACHMENTS,
   TEAM_GET_DATA,
   TEAM_GET_LOGS_FOR_TASK,
   TEAM_GET_MEMBER_LOGS,
   TEAM_GET_MEMBER_STATS,
+  TEAM_GET_PROJECT_BRANCH,
   TEAM_LAUNCH,
   TEAM_LIST,
   TEAM_PREPARE_PROVISIONING,
@@ -38,12 +41,15 @@ import {
   TEAM_PROCESS_SEND,
   TEAM_PROVISIONING_PROGRESS,
   TEAM_PROVISIONING_STATUS,
+  TEAM_REMOVE_MEMBER,
   TEAM_REQUEST_REVIEW,
   TEAM_SEND_MESSAGE,
   TEAM_START_TASK,
   TEAM_STOP,
   TEAM_UPDATE_CONFIG,
   TEAM_UPDATE_KANBAN,
+  TEAM_UPDATE_KANBAN_COLUMN_ORDER,
+  TEAM_UPDATE_TASK_OWNER,
   TEAM_UPDATE_TASK_STATUS,
   UPDATER_CHECK,
   UPDATER_DOWNLOAD,
@@ -84,7 +90,9 @@ import {
 } from './constants/ipcChannels';
 
 import type {
+  AddMemberRequest,
   AppConfig,
+  AttachmentFileData,
   ClaudeRootFolderSelection,
   ClaudeRootInfo,
   ContextInfo,
@@ -93,6 +101,7 @@ import type {
   GlobalTask,
   HttpServerStatus,
   IpcResult,
+  KanbanColumnId,
   MemberFullStats,
   MemberLogSummary,
   NotificationTrigger,
@@ -553,8 +562,23 @@ const electronAPI: ElectronAPI = {
     updateKanban: async (teamName: string, taskId: string, patch: UpdateKanbanPatch) => {
       return invokeIpcWithResult<void>(TEAM_UPDATE_KANBAN, teamName, taskId, patch);
     },
+    updateKanbanColumnOrder: async (
+      teamName: string,
+      columnId: KanbanColumnId,
+      orderedTaskIds: string[]
+    ) => {
+      return invokeIpcWithResult<void>(
+        TEAM_UPDATE_KANBAN_COLUMN_ORDER,
+        teamName,
+        columnId,
+        orderedTaskIds
+      );
+    },
     updateTaskStatus: async (teamName: string, taskId: string, status: TeamTaskStatus) => {
       return invokeIpcWithResult<void>(TEAM_UPDATE_TASK_STATUS, teamName, taskId, status);
+    },
+    updateTaskOwner: async (teamName: string, taskId: string, owner: string | null) => {
+      return invokeIpcWithResult<void>(TEAM_UPDATE_TASK_OWNER, teamName, taskId, owner);
     },
     startTask: async (teamName: string, taskId: string) => {
       return invokeIpcWithResult<void>(TEAM_START_TASK, teamName, taskId);
@@ -600,6 +624,18 @@ const electronAPI: ElectronAPI = {
     },
     addTaskComment: async (teamName: string, taskId: string, text: string) => {
       return invokeIpcWithResult<TaskComment>(TEAM_ADD_TASK_COMMENT, teamName, taskId, text);
+    },
+    addMember: async (teamName: string, request: AddMemberRequest) => {
+      return invokeIpcWithResult<void>(TEAM_ADD_MEMBER, teamName, request);
+    },
+    removeMember: async (teamName: string, memberName: string) => {
+      return invokeIpcWithResult<void>(TEAM_REMOVE_MEMBER, teamName, memberName);
+    },
+    getProjectBranch: async (projectPath: string) => {
+      return invokeIpcWithResult<string | null>(TEAM_GET_PROJECT_BRANCH, projectPath);
+    },
+    getAttachments: async (teamName: string, messageId: string) => {
+      return invokeIpcWithResult<AttachmentFileData[]>(TEAM_GET_ATTACHMENTS, teamName, messageId);
     },
     onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void): (() => void) => {
       ipcRenderer.on(

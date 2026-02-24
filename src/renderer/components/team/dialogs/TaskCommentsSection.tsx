@@ -118,19 +118,24 @@ export const TaskCommentsSection = ({
                       : formatDistanceToNow(date, { addSuffix: true });
                   })()}
                 </span>
-                <button
-                  type="button"
-                  className="ml-auto flex items-center gap-0.5 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:text-[var(--color-text-secondary)] group-hover:opacity-100"
-                  onClick={() =>
-                    setReplyTo({
-                      author: comment.author,
-                      text: parseMessageReply(comment.text)?.replyText ?? comment.text,
-                    })
-                  }
-                >
-                  <Reply size={11} />
-                  Reply
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="ml-auto flex items-center gap-0.5 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:text-[var(--color-text-secondary)] group-hover:opacity-100"
+                      onClick={() =>
+                        setReplyTo({
+                          author: comment.author,
+                          text: parseMessageReply(comment.text)?.replyText ?? comment.text,
+                        })
+                      }
+                    >
+                      <Reply size={11} />
+                      Reply
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Reply to comment</TooltipContent>
+                </Tooltip>
               </div>
               {(() => {
                 const reply = parseMessageReply(comment.text);

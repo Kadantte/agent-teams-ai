@@ -142,6 +142,9 @@ export const TeamProvisioningBanner = ({
           message={progress.message}
           currentStepIndex={progressStepIndex >= 0 ? progressStepIndex : -1}
           loading
+          startedAt={progress.startedAt}
+          pid={progress.pid}
+          cliLogsTail={progress.cliLogsTail}
           onCancel={
             canCancel
               ? () => {

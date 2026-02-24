@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { MemberExecutionLog } from '@renderer/components/team/members/MemberExecutionLog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { formatDuration } from '@renderer/utils/formatters';
 import {
   AlertCircle,
@@ -207,35 +208,40 @@ const LogCard = ({
 
   return (
     <div className="min-w-0 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <button
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-raised)]"
-        onClick={onToggle}
-      >
-        {expanded ? (
-          <ChevronDown size={12} className="shrink-0 text-[var(--color-text-muted)]" />
-        ) : (
-          <ChevronRight size={12} className="shrink-0 text-[var(--color-text-muted)]" />
-        )}
-        <div className="min-w-0 flex-1 overflow-hidden">
-          <div className="truncate text-[var(--color-text)]" title={log.description}>
-            {log.description}
-          </div>
-          <div className="mt-0.5 flex items-center gap-3 text-[10px] text-[var(--color-text-muted)]">
-            <span className="flex items-center gap-1">
-              <Clock size={10} />
-              {timeAgo}
-            </span>
-            {log.durationMs > 0 && <span>{formatDuration(log.durationMs)}</span>}
-            <span className="flex items-center gap-1">
-              <MessageSquare size={10} />
-              {log.messageCount}
-            </span>
-            {log.isOngoing && (
-              <span className="rounded-full bg-green-500/20 px-1.5 text-green-400">active</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className="flex w-full min-w-0 items-center gap-2 overflow-hidden px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-raised)]"
+            onClick={onToggle}
+          >
+            {expanded ? (
+              <ChevronDown size={12} className="shrink-0 text-[var(--color-text-muted)]" />
+            ) : (
+              <ChevronRight size={12} className="shrink-0 text-[var(--color-text-muted)]" />
             )}
-          </div>
-        </div>
-      </button>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div className="truncate text-[var(--color-text)]" title={log.description}>
+                {log.description}
+              </div>
+              <div className="mt-0.5 flex items-center gap-3 text-[10px] text-[var(--color-text-muted)]">
+                <span className="flex items-center gap-1">
+                  <Clock size={10} />
+                  {timeAgo}
+                </span>
+                {log.durationMs > 0 && <span>{formatDuration(log.durationMs)}</span>}
+                <span className="flex items-center gap-1">
+                  <MessageSquare size={10} />
+                  {log.messageCount}
+                </span>
+                {log.isOngoing && (
+                  <span className="rounded-full bg-green-500/20 px-1.5 text-green-400">active</span>
+                )}
+              </div>
+            </div>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{expanded ? 'Hide details' : 'Show details'}</TooltipContent>
+      </Tooltip>
 
       {expanded && (
         <div className="border-t border-[var(--color-border)] px-3 py-2">

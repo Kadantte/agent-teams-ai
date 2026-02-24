@@ -1,8 +1,9 @@
 import { Badge } from '@renderer/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { agentAvatarUrl, getMemberDotClass, getPresenceLabel } from '@renderer/utils/memberHelpers';
-import { ListPlus, Loader2, MessageSquare } from 'lucide-react';
+import { GitBranch, Loader2, MessageSquare, Plus } from 'lucide-react';
 
 import type { TaskStatusCounts } from '@renderer/utils/pathNormalize';
 import type { ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
@@ -15,6 +16,7 @@ interface MemberCardProps {
   isTeamProvisioning?: boolean;
   currentTask?: TeamTaskWithKanban | null;
   isAwaitingReply?: boolean;
+  isRemoved?: boolean;
   onOpenTask?: () => void;
   onClick?: () => void;
   onSendMessage?: () => void;
@@ -29,6 +31,7 @@ export const MemberCard = ({
   isTeamProvisioning,
   currentTask,
   isAwaitingReply,
+  isRemoved,
   onOpenTask,
   onClick,
   onSendMessage,
@@ -41,14 +44,12 @@ export const MemberCard = ({
   const inProgress = taskCounts?.inProgress ?? 0;
   const completed = taskCounts?.completed ?? 0;
   const totalTasks = pending + inProgress + completed;
-  const completedRatio = totalTasks > 0 ? completed / totalTasks : 0;
-
-  const progressPercent = Math.round(completedRatio * 100);
+  const progressPercent = totalTasks > 0 ? Math.round((completed / totalTasks) * 100) : 0;
 
   return (
-    <div className="rounded">
+    <div className={isRemoved ? 'rounded opacity-50' : 'rounded'}>
       <div
-        className="group relative cursor-pointer rounded-t px-2 py-1.5"
+        className="group relative cursor-pointer rounded px-2 py-1.5"
         style={{
           borderLeft: `3px solid ${colors.border}`,
           backgroundColor: colors.badge,
@@ -64,7 +65,7 @@ export const MemberCard = ({
           }
         }}
       >
-        <div className="pointer-events-none absolute inset-0 rounded-t transition-colors group-hover:bg-white/5" />
+        <div className="pointer-events-none absolute inset-0 rounded transition-colors group-hover:bg-white/5" />
         <div className="flex items-center gap-2.5">
           <div className="relative shrink-0">
             <img
@@ -80,6 +81,12 @@ export const MemberCard = ({
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm">
             <span className="shrink-0 font-medium text-[var(--color-text)]">{member.name}</span>
+            {member.gitBranch ? (
+              <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-[var(--color-text-muted)]">
+                <GitBranch size={10} />
+                {member.gitBranch}
+              </span>
+            ) : null}
             {currentTask ? (
               <>
                 <Loader2
@@ -133,55 +140,72 @@ export const MemberCard = ({
           })()}
           <Badge
             variant="secondary"
-            className="shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--color-text-muted)]"
-            title={member.currentTaskId ? `Current task: ${member.currentTaskId}` : undefined}
+            className={`shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none ${isRemoved ? 'bg-zinc-600 text-zinc-300' : 'text-[var(--color-text-muted)]'}`}
+            title={
+              isRemoved
+                ? 'This member has been removed'
+                : member.currentTaskId
+                  ? `Current task: ${member.currentTaskId}`
+                  : undefined
+            }
           >
-            {presenceLabel}
+            {isRemoved ? 'removed' : presenceLabel}
           </Badge>
-          <Badge
-            variant="secondary"
-            className="shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none"
+          <div
+            className="shrink-0"
+            title={totalTasks > 0 ? `${completed}/${totalTasks} completed` : undefined}
           >
-            {member.taskCount} {member.taskCount === 1 ? 'task' : 'tasks'}
-          </Badge>
-          <div className="flex shrink-0 items-center gap-0.5">
-            <button
-              type="button"
-              className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-              title="Send message"
-              onClick={(e) => {
-                e.stopPropagation();
-                onSendMessage?.();
-              }}
+            <Badge
+              variant="secondary"
+              className="shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none"
             >
-              <MessageSquare size={13} />
-            </button>
-            <button
-              type="button"
-              className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-              title="Assign task"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAssignTask?.();
-              }}
-            >
-              <ListPlus size={13} />
-            </button>
+              {member.taskCount} {member.taskCount === 1 ? 'task' : 'tasks'}
+            </Badge>
+            {totalTasks > 0 && (
+              <div className="mx-0.5 mt-0.5 h-[2px] rounded-full bg-[var(--color-border)]">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            )}
           </div>
+          {!isRemoved && (
+            <div className="flex shrink-0 items-center gap-0.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSendMessage?.();
+                    }}
+                  >
+                    <MessageSquare size={13} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Send message</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAssignTask?.();
+                    }}
+                  >
+                    <Plus size={13} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Assign task</TooltipContent>
+              </Tooltip>
+            </div>
+          )}
         </div>
       </div>
-      <div
-        className="h-px rounded-b bg-[var(--color-border)]"
-        role="progressbar"
-        aria-valuenow={completed}
-        aria-valuemin={0}
-        aria-valuemax={totalTasks}
-        aria-label={`Tasks ${completed}/${totalTasks} completed`}
-        title={`${completed}/${totalTasks} tasks`}
-        style={{
-          background: `linear-gradient(to right, #10b981 ${progressPercent}%, var(--color-border) ${progressPercent}%)`,
-        }}
-      />
     </div>
   );
 };

@@ -14,8 +14,11 @@ import type {
   TriggerTestResult,
 } from './notifications';
 import type {
+  AddMemberRequest,
+  AttachmentFileData,
   CreateTaskRequest,
   GlobalTask,
+  KanbanColumnId,
   MemberFullStats,
   MemberLogSummary,
   SendMessageRequest,
@@ -354,7 +357,13 @@ export interface TeamsAPI {
   createTask: (teamName: string, request: CreateTaskRequest) => Promise<TeamTask>;
   requestReview: (teamName: string, taskId: string) => Promise<void>;
   updateKanban: (teamName: string, taskId: string, patch: UpdateKanbanPatch) => Promise<void>;
+  updateKanbanColumnOrder: (
+    teamName: string,
+    columnId: KanbanColumnId,
+    orderedTaskIds: string[]
+  ) => Promise<void>;
   updateTaskStatus: (teamName: string, taskId: string, status: TeamTaskStatus) => Promise<void>;
+  updateTaskOwner: (teamName: string, taskId: string, owner: string | null) => Promise<void>;
   startTask: (teamName: string, taskId: string) => Promise<void>;
   processSend: (teamName: string, message: string) => Promise<void>;
   processAlive: (teamName: string) => Promise<boolean>;
@@ -371,7 +380,11 @@ export interface TeamsAPI {
   launchTeam: (request: TeamLaunchRequest) => Promise<TeamLaunchResponse>;
   getAllTasks: () => Promise<GlobalTask[]>;
   updateConfig: (teamName: string, updates: TeamUpdateConfigRequest) => Promise<TeamConfig>;
+  addMember: (teamName: string, request: AddMemberRequest) => Promise<void>;
+  removeMember: (teamName: string, memberName: string) => Promise<void>;
   addTaskComment: (teamName: string, taskId: string, text: string) => Promise<TaskComment>;
+  getProjectBranch: (projectPath: string) => Promise<string | null>;
+  getAttachments: (teamName: string, messageId: string) => Promise<AttachmentFileData[]>;
   onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void) => () => void;
   onProvisioningProgress: (
     callback: (event: unknown, data: TeamProvisioningProgress) => void

@@ -1,4 +1,7 @@
+import { randomUUID } from 'node:crypto';
+
 import {
+  TEAM_ADD_MEMBER,
   TEAM_ADD_TASK_COMMENT,
   TEAM_ALIVE_LIST,
   TEAM_CANCEL_PROVISIONING,
@@ -7,10 +10,12 @@ import {
   TEAM_CREATE_TASK,
   TEAM_DELETE_TEAM,
   TEAM_GET_ALL_TASKS,
+  TEAM_GET_ATTACHMENTS,
   TEAM_GET_DATA,
   TEAM_GET_LOGS_FOR_TASK,
   TEAM_GET_MEMBER_LOGS,
   TEAM_GET_MEMBER_STATS,
+  TEAM_GET_PROJECT_BRANCH,
   TEAM_LAUNCH,
   TEAM_LIST,
   TEAM_PREPARE_PROVISIONING,
@@ -18,21 +23,34 @@ import {
   TEAM_PROCESS_SEND,
   TEAM_PROVISIONING_PROGRESS,
   TEAM_PROVISIONING_STATUS,
+  TEAM_REMOVE_MEMBER,
   TEAM_REQUEST_REVIEW,
   TEAM_SEND_MESSAGE,
   TEAM_START_TASK,
   TEAM_STOP,
   TEAM_UPDATE_CONFIG,
   TEAM_UPDATE_KANBAN,
+  TEAM_UPDATE_KANBAN_COLUMN_ORDER,
+  TEAM_UPDATE_TASK_OWNER,
   TEAM_UPDATE_TASK_STATUS,
   // eslint-disable-next-line boundaries/element-types -- IPC channel constants are shared between main and preload by design
 } from '@preload/constants/ipcChannels';
 import { createLogger } from '@shared/utils/logger';
+import { isRateLimitMessage } from '@shared/utils/rateLimitDetector';
 import { type IpcMain, type IpcMainInvokeEvent } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { NotificationManager } from '../services/infrastructure/NotificationManager';
+import { gitIdentityResolver } from '../services/parsing/GitIdentityResolver';
+
 import { validateFromField, validateMemberName, validateTaskId, validateTeamName } from './guards';
+
+/** Track rate limit message keys already notified to avoid duplicate OS notifications across refreshes. */
+const notifiedRateLimitKeys = new Set<string>();
+const RATE_LIMIT_KEYS_MAX = 500;
+
+import { TeamAttachmentStore } from '../services/team/TeamAttachmentStore';
 
 import type {
   MemberStatsComputer,
@@ -41,9 +59,13 @@ import type {
   TeamProvisioningService,
 } from '../services';
 import type {
+  AttachmentFileData,
+  AttachmentMeta,
+  AttachmentPayload,
   CreateTaskRequest,
   GlobalTask,
   IpcResult,
+  KanbanColumnId,
   MemberFullStats,
   MemberLogSummary,
   SendMessageRequest,
@@ -67,10 +89,62 @@ import type {
 
 const logger = createLogger('IPC:teams');
 
+/**
+ * Check messages for rate limit indicators and fire native notifications for new ones.
+ */
+function checkRateLimitMessages(
+  messages: readonly { messageId?: string; from: string; text: string; timestamp: string }[],
+  teamName: string,
+  teamDisplayName: string,
+  projectPath?: string
+): void {
+  for (const msg of messages) {
+    if (msg.from === 'user') continue;
+    if (!isRateLimitMessage(msg.text)) continue;
+
+    // Prefix key with teamName to avoid collisions across teams
+    const rawKey = msg.messageId ?? `${msg.from}:${msg.timestamp}`;
+    const key = `${teamName}:${rawKey}`;
+    if (notifiedRateLimitKeys.has(key)) continue;
+    notifiedRateLimitKeys.add(key);
+
+    // Prevent unbounded memory growth
+    if (notifiedRateLimitKeys.size > RATE_LIMIT_KEYS_MAX) {
+      const first = notifiedRateLimitKeys.values().next().value!;
+      notifiedRateLimitKeys.delete(first);
+    }
+
+    void NotificationManager.getInstance()
+      .addError({
+        id: randomUUID(),
+        timestamp: Date.now(),
+        sessionId: `team:${teamName}`,
+        projectId: teamName,
+        filePath: '',
+        source: 'rate-limit',
+        message: `[${msg.from}] ${msg.text.slice(0, 200)}`,
+        triggerColor: 'red',
+        triggerName: 'Rate Limit',
+        context: {
+          projectName: teamDisplayName,
+          cwd: projectPath,
+        },
+      })
+      .catch(() => undefined);
+  }
+}
+
 let teamDataService: TeamDataService | null = null;
 let teamProvisioningService: TeamProvisioningService | null = null;
 let teamMemberLogsFinder: TeamMemberLogsFinder | null = null;
 let memberStatsComputer: MemberStatsComputer | null = null;
+
+const attachmentStore = new TeamAttachmentStore();
+
+const ALLOWED_ATTACHMENT_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10MB per file
+const MAX_ATTACHMENTS = 5;
+const MAX_TOTAL_ATTACHMENT_SIZE = 20 * 1024 * 1024; // 20MB total
 
 export function initializeTeamHandlers(
   service: TeamDataService,
@@ -96,7 +170,9 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_CREATE_TASK, handleCreateTask);
   ipcMain.handle(TEAM_REQUEST_REVIEW, handleRequestReview);
   ipcMain.handle(TEAM_UPDATE_KANBAN, handleUpdateKanban);
+  ipcMain.handle(TEAM_UPDATE_KANBAN_COLUMN_ORDER, handleUpdateKanbanColumnOrder);
   ipcMain.handle(TEAM_UPDATE_TASK_STATUS, handleUpdateTaskStatus);
+  ipcMain.handle(TEAM_UPDATE_TASK_OWNER, handleUpdateTaskOwner);
   ipcMain.handle(TEAM_DELETE_TEAM, handleDeleteTeam);
   ipcMain.handle(TEAM_PROCESS_SEND, handleProcessSend);
   ipcMain.handle(TEAM_PROCESS_ALIVE, handleProcessAlive);
@@ -110,6 +186,10 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_START_TASK, handleStartTask);
   ipcMain.handle(TEAM_GET_ALL_TASKS, handleGetAllTasks);
   ipcMain.handle(TEAM_ADD_TASK_COMMENT, handleAddTaskComment);
+  ipcMain.handle(TEAM_ADD_MEMBER, handleAddMember);
+  ipcMain.handle(TEAM_REMOVE_MEMBER, handleRemoveMember);
+  ipcMain.handle(TEAM_GET_PROJECT_BRANCH, handleGetProjectBranch);
+  ipcMain.handle(TEAM_GET_ATTACHMENTS, handleGetAttachments);
   logger.info('Team handlers registered');
 }
 
@@ -125,7 +205,9 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_CREATE_TASK);
   ipcMain.removeHandler(TEAM_REQUEST_REVIEW);
   ipcMain.removeHandler(TEAM_UPDATE_KANBAN);
+  ipcMain.removeHandler(TEAM_UPDATE_KANBAN_COLUMN_ORDER);
   ipcMain.removeHandler(TEAM_UPDATE_TASK_STATUS);
+  ipcMain.removeHandler(TEAM_UPDATE_TASK_OWNER);
   ipcMain.removeHandler(TEAM_DELETE_TEAM);
   ipcMain.removeHandler(TEAM_PROCESS_SEND);
   ipcMain.removeHandler(TEAM_PROCESS_ALIVE);
@@ -139,6 +221,10 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_START_TASK);
   ipcMain.removeHandler(TEAM_GET_ALL_TASKS);
   ipcMain.removeHandler(TEAM_ADD_TASK_COMMENT);
+  ipcMain.removeHandler(TEAM_ADD_MEMBER);
+  ipcMain.removeHandler(TEAM_REMOVE_MEMBER);
+  ipcMain.removeHandler(TEAM_GET_PROJECT_BRANCH);
+  ipcMain.removeHandler(TEAM_GET_ATTACHMENTS);
 }
 
 function getTeamDataService(): TeamDataService {
@@ -165,6 +251,23 @@ async function wrapTeamHandler<T>(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`[teams:${operation}] ${message}`);
+    return { success: false, error: message };
+  }
+}
+
+async function handleGetProjectBranch(
+  _event: IpcMainInvokeEvent,
+  projectPath: unknown
+): Promise<IpcResult<string | null>> {
+  if (typeof projectPath !== 'string' || projectPath.trim().length === 0) {
+    return { success: false, error: 'projectPath must be a non-empty string' };
+  }
+  try {
+    const branch = await gitIdentityResolver.getBranch(projectPath.trim());
+    return { success: true, data: branch };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`[teams:getProjectBranch] ${message}`);
     return { success: false, error: message };
   }
 }
@@ -203,8 +306,12 @@ async function handleGetData(
     void provisioning.relayLeadInboxMessages(tn).catch(() => undefined);
   }
 
+  const displayName = data.config.name || tn;
+  const projectPath = data.config.projectPath;
+
   const live = provisioning.getLiveLeadProcessMessages(tn);
   if (live.length === 0) {
+    checkRateLimitMessages(data.messages, tn, displayName, projectPath);
     return { success: true, data: { ...data, isAlive } };
   }
 
@@ -244,6 +351,7 @@ async function handleGetData(
   }
   merged.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
+  checkRateLimitMessages(merged, tn, displayName, projectPath);
   return { success: true, data: { ...data, isAlive, messages: merged } };
 }
 
@@ -387,6 +495,7 @@ async function validateProvisioningRequest(
       members,
       cwd,
       prompt: typeof payload.prompt === 'string' ? payload.prompt.trim() || undefined : undefined,
+      model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
     },
   };
 }
@@ -447,12 +556,17 @@ async function handleLaunchTeam(
     return { success: false, error: 'prompt must be a string' };
   }
 
+  if (payload.model !== undefined && typeof payload.model !== 'string') {
+    return { success: false, error: 'model must be a string' };
+  }
+
   return wrapTeamHandler('launch', () =>
     getTeamProvisioningService().launchTeam(
       {
         teamName: validatedTeamName.value!,
         cwd,
         prompt: typeof payload.prompt === 'string' ? payload.prompt.trim() || undefined : undefined,
+        model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
       },
       (progress) => {
         try {
@@ -526,6 +640,76 @@ function isUpdateKanbanPatch(value: unknown): value is UpdateKanbanPatch {
   return patch.op === 'set_column' && (patch.column === 'review' || patch.column === 'approved');
 }
 
+async function handleGetAttachments(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  messageId: unknown
+): Promise<IpcResult<AttachmentFileData[]>> {
+  const vTeam = validateTeamName(teamName);
+  if (!vTeam.valid) return { success: false, error: vTeam.error ?? 'Invalid teamName' };
+  if (typeof messageId !== 'string' || messageId.trim().length === 0) {
+    return { success: false, error: 'messageId must be a non-empty string' };
+  }
+  const safeMessageId = messageId.trim();
+  if (safeMessageId.includes('/') || safeMessageId.includes('\\') || safeMessageId.includes('..')) {
+    return { success: false, error: 'Invalid messageId' };
+  }
+  return wrapTeamHandler('getAttachments', () =>
+    attachmentStore.getAttachments(vTeam.value!, safeMessageId)
+  );
+}
+
+function validateAttachments(
+  attachments: unknown
+): { valid: true; value: AttachmentPayload[] } | { valid: false; error: string } {
+  if (!Array.isArray(attachments)) {
+    return { valid: false, error: 'attachments must be an array' };
+  }
+  if (attachments.length > MAX_ATTACHMENTS) {
+    return { valid: false, error: `Maximum ${MAX_ATTACHMENTS} attachments allowed` };
+  }
+  let totalSize = 0;
+  const result: AttachmentPayload[] = [];
+  for (const att of attachments) {
+    if (!att || typeof att !== 'object') {
+      return { valid: false, error: 'Invalid attachment entry' };
+    }
+    const a = att as Partial<AttachmentPayload>;
+    if (typeof a.id !== 'string' || typeof a.filename !== 'string') {
+      return { valid: false, error: 'Attachment must have id and filename' };
+    }
+    if (typeof a.data !== 'string' || typeof a.mimeType !== 'string') {
+      return { valid: false, error: 'Attachment must have data and mimeType' };
+    }
+    if (typeof a.size !== 'number' || a.size <= 0) {
+      return { valid: false, error: 'Attachment must have a positive size' };
+    }
+    if (!ALLOWED_ATTACHMENT_TYPES.has(a.mimeType)) {
+      return { valid: false, error: `Unsupported attachment type: ${a.mimeType}` };
+    }
+    if (a.size > MAX_ATTACHMENT_SIZE) {
+      return { valid: false, error: `Attachment "${a.filename}" exceeds 10MB limit` };
+    }
+    // Sanity check: base64 data should be roughly 4/3 of the reported binary size
+    const estimatedBinarySize = Math.ceil(a.data.length * 0.75);
+    if (estimatedBinarySize > MAX_ATTACHMENT_SIZE * 1.1) {
+      return { valid: false, error: `Attachment "${a.filename}" data exceeds size limit` };
+    }
+    totalSize += a.size;
+    result.push({
+      id: a.id,
+      filename: a.filename,
+      data: a.data,
+      mimeType: a.mimeType,
+      size: a.size,
+    });
+  }
+  if (totalSize > MAX_TOTAL_ATTACHMENT_SIZE) {
+    return { valid: false, error: 'Total attachment size exceeds 20MB limit' };
+  }
+  return { valid: true, value: result };
+}
+
 async function handleSendMessage(
   _event: IpcMainInvokeEvent,
   teamName: unknown,
@@ -558,24 +742,98 @@ async function handleSendMessage(
     }
   }
 
+  let validatedAttachments: AttachmentPayload[] | undefined;
+  if (
+    payload.attachments !== undefined &&
+    Array.isArray(payload.attachments) &&
+    payload.attachments.length > 0
+  ) {
+    const attResult = validateAttachments(payload.attachments);
+    if (!attResult.valid) {
+      return { success: false, error: attResult.error };
+    }
+    validatedAttachments = attResult.value;
+  }
+
   return wrapTeamHandler('sendMessage', async () => {
     const tn = validatedTeamName.value!;
+    const provisioning = getTeamProvisioningService();
+    const isAlive = provisioning.isTeamAlive(tn);
+
+    const leadName = await getTeamDataService().getLeadMemberName(tn);
+    const memberName = validatedMember.value!;
+    const isLeadRecipient = leadName !== null && memberName === leadName;
+
+    // Attachments only supported for live lead (stdin content blocks)
+    if (validatedAttachments?.length && (!isLeadRecipient || !isAlive)) {
+      throw new Error(
+        'Attachments are only supported when sending to the team lead while the team is online'
+      );
+    }
+
+    // Smart routing: lead + alive → stdin direct, else → inbox
+    if (isLeadRecipient && isAlive) {
+      try {
+        await provisioning.sendMessageToTeam(tn, payload.text!, validatedAttachments);
+
+        const result = await getTeamDataService().sendDirectToLead(
+          tn,
+          leadName,
+          payload.text!,
+          payload.summary
+        );
+
+        const attachmentMeta: AttachmentMeta[] | undefined = validatedAttachments?.map((a) => ({
+          id: a.id,
+          filename: a.filename,
+          mimeType: a.mimeType,
+          size: a.size,
+        }));
+
+        // Save attachment binary data to disk (best-effort)
+        if (validatedAttachments?.length && result.messageId) {
+          void attachmentStore
+            .saveAttachments(tn, result.messageId, validatedAttachments)
+            .catch((e) => logger.warn(`Failed to save attachments: ${e}`));
+        }
+
+        provisioning.pushLiveLeadProcessMessage(tn, {
+          from: 'user',
+          to: leadName,
+          text: payload.text!,
+          timestamp: new Date().toISOString(),
+          read: true,
+          summary: payload.summary,
+          messageId: result.messageId,
+          source: 'user_sent',
+          attachments: attachmentMeta,
+        });
+
+        return result;
+      } catch (stdinError) {
+        // Stdin failed (process died between check and write)
+        // If attachments were requested, fail rather than silently dropping them
+        if (validatedAttachments?.length) {
+          throw new Error(
+            'Failed to deliver message with attachments: team process became unavailable'
+          );
+        }
+        logger.warn('stdin fallback for ' + tn + ': ' + String(stdinError));
+        // Fallback to inbox path for text-only messages
+      }
+    }
+
+    // Inbox path: offline lead or regular members (no attachment support)
     const result = await getTeamDataService().sendMessage(tn, {
-      member: validatedMember.value!,
+      member: memberName,
       text: payload.text!,
       summary: payload.summary,
       from: payload.from,
     });
 
-    // Best-effort: if messaging the lead while process is alive, relay immediately (no UI dependency).
-    try {
-      const provisioning = getTeamProvisioningService();
-      if (provisioning.isTeamAlive(tn)) {
-        // Avoid reading unrelated inboxes; relayLeadInboxMessages will no-op when nothing new exists.
-        void provisioning.relayLeadInboxMessages(tn).catch(() => undefined);
-      }
-    } catch {
-      // ignore
+    // Best-effort relay for lead via inbox
+    if (isLeadRecipient && isAlive) {
+      void provisioning.relayLeadInboxMessages(tn).catch(() => undefined);
     }
 
     return result;
@@ -705,6 +963,44 @@ async function handleUpdateKanban(
   });
 }
 
+const KANBAN_COLUMN_IDS: KanbanColumnId[] = ['todo', 'in_progress', 'done', 'review', 'approved'];
+
+function validateKanbanColumnId(
+  value: unknown
+): { valid: true; value: KanbanColumnId } | { valid: false; error: string } {
+  if (typeof value !== 'string' || !KANBAN_COLUMN_IDS.includes(value as KanbanColumnId)) {
+    return { valid: false, error: `columnId must be one of: ${KANBAN_COLUMN_IDS.join(', ')}` };
+  }
+  return { valid: true, value: value as KanbanColumnId };
+}
+
+async function handleUpdateKanbanColumnOrder(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  columnId: unknown,
+  orderedTaskIds: unknown
+): Promise<IpcResult<void>> {
+  const validatedTeamName = validateTeamName(teamName);
+  if (!validatedTeamName.valid) {
+    return { success: false, error: validatedTeamName.error ?? 'Invalid teamName' };
+  }
+  const validatedColumnId = validateKanbanColumnId(columnId);
+  if (!validatedColumnId.valid) {
+    return { success: false, error: validatedColumnId.error ?? 'Invalid columnId' };
+  }
+  if (!Array.isArray(orderedTaskIds)) {
+    return { success: false, error: 'orderedTaskIds must be an array' };
+  }
+  const ids = orderedTaskIds.filter((id): id is string => typeof id === 'string');
+  return wrapTeamHandler('updateKanbanColumnOrder', () =>
+    getTeamDataService().updateKanbanColumnOrder(
+      validatedTeamName.value!,
+      validatedColumnId.value,
+      ids
+    )
+  );
+}
+
 const VALID_TASK_STATUSES: TeamTaskStatus[] = ['pending', 'in_progress', 'completed'];
 
 async function handleUpdateTaskStatus(
@@ -733,6 +1029,31 @@ async function handleUpdateTaskStatus(
       validatedTaskId.value!,
       status as TeamTaskStatus
     )
+  );
+}
+
+async function handleUpdateTaskOwner(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  taskId: unknown,
+  owner: unknown
+): Promise<IpcResult<void>> {
+  const validatedTeamName = validateTeamName(teamName);
+  if (!validatedTeamName.valid) {
+    return { success: false, error: validatedTeamName.error ?? 'Invalid teamName' };
+  }
+
+  const validatedTaskId = validateTaskId(taskId);
+  if (!validatedTaskId.valid) {
+    return { success: false, error: validatedTaskId.error ?? 'Invalid taskId' };
+  }
+
+  if (owner !== null && (typeof owner !== 'string' || owner.length === 0)) {
+    return { success: false, error: 'owner must be a non-empty string or null' };
+  }
+
+  return wrapTeamHandler('updateTaskOwner', () =>
+    getTeamDataService().updateTaskOwner(validatedTeamName.value!, validatedTaskId.value!, owner)
   );
 }
 
@@ -944,6 +1265,47 @@ async function handleStartTask(
 
 async function handleGetAllTasks(_event: IpcMainInvokeEvent): Promise<IpcResult<GlobalTask[]>> {
   return wrapTeamHandler('getAllTasks', () => getTeamDataService().getAllTasks());
+}
+
+async function handleAddMember(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  payload: unknown
+): Promise<IpcResult<void>> {
+  const vTeam = validateTeamName(teamName);
+  if (!vTeam.valid) return { success: false, error: vTeam.error ?? 'Invalid teamName' };
+
+  if (!payload || typeof payload !== 'object') {
+    return { success: false, error: 'Invalid payload' };
+  }
+  const { name, role } = payload as { name?: unknown; role?: unknown };
+  const vName = validateMemberName(name);
+  if (!vName.valid) return { success: false, error: vName.error ?? 'Invalid member name' };
+  if (role !== undefined && typeof role !== 'string') {
+    return { success: false, error: 'role must be a string' };
+  }
+
+  return wrapTeamHandler('addMember', () =>
+    getTeamDataService().addMember(vTeam.value!, {
+      name: vName.value!,
+      role: role,
+    })
+  );
+}
+
+async function handleRemoveMember(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  memberName: unknown
+): Promise<IpcResult<void>> {
+  const vTeam = validateTeamName(teamName);
+  if (!vTeam.valid) return { success: false, error: vTeam.error ?? 'Invalid teamName' };
+  const vMember = validateMemberName(memberName);
+  if (!vMember.valid) return { success: false, error: vMember.error ?? 'Invalid memberName' };
+
+  return wrapTeamHandler('removeMember', () =>
+    getTeamDataService().removeMember(vTeam.value!, vMember.value!)
+  );
 }
 
 async function handleAddTaskComment(

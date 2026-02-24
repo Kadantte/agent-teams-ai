@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@renderer/components/ui/select';
+import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import {
@@ -235,18 +229,30 @@ export const GlobalTaskList = ({
         )}
       </div>
 
-      {/* Grouping mode */}
-      <div className="flex shrink-0 items-center gap-2 px-2 py-1">
+      {/* Grouping mode — compact segmented toggle */}
+      <div className="flex shrink-0 items-center gap-1.5 px-2 py-1">
         <span className="shrink-0 text-[11px] text-text-muted">Group by:</span>
-        <Select value={groupingMode} onValueChange={(v) => setGroupingMode(v as TaskGroupingMode)}>
-          <SelectTrigger className="h-7 min-w-0 flex-1 border-[var(--color-border)] px-2 text-[11px]">
-            <SelectValue placeholder="Group by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="project">Project</SelectItem>
-            <SelectItem value="time">Time</SelectItem>
-          </SelectContent>
-        </Select>
+        <div
+          className="bg-surface-raised/60 inline-flex rounded-md p-0.5 text-[11px]"
+          role="group"
+          aria-label="Group by"
+        >
+          {(['project', 'time'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setGroupingMode(mode)}
+              className={cn(
+                'rounded px-2 py-0.5 transition-colors',
+                groupingMode === mode
+                  ? 'bg-surface-raised text-text shadow-sm'
+                  : 'text-text-muted hover:text-text-secondary'
+              )}
+            >
+              {mode === 'project' ? 'Project' : 'Time'}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Content */}

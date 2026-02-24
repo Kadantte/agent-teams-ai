@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
 import { CollapsibleTeamSection } from '@renderer/components/team/CollapsibleTeamSection';
+import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { MemberLogsTab } from '@renderer/components/team/members/MemberLogsTab';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
@@ -13,16 +14,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@renderer/components/ui/select';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { markAsRead } from '@renderer/services/commentReadStorage';
+import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import {
-  agentAvatarUrl,
   KANBAN_COLUMN_DISPLAY,
   TASK_STATUS_LABELS,
   TASK_STATUS_STYLES,
 } from '@renderer/utils/memberHelpers';
 import { formatDistanceToNow } from 'date-fns';
-import { ArrowLeftFromLine, ArrowRightFromLine, Clock, Link2, PenLine, User } from 'lucide-react';
+import { ArrowLeftFromLine, ArrowRightFromLine, Clock, Link2, PenLine } from 'lucide-react';
 
 import { TaskCommentsSection } from './TaskCommentsSection';
 
@@ -37,6 +45,7 @@ interface TaskDetailDialogProps {
   members: ResolvedTeamMember[];
   onClose: () => void;
   onScrollToTask?: (taskId: string) => void;
+  onOwnerChange?: (taskId: string, owner: string | null) => void;
 }
 
 export const TaskDetailDialog = ({
@@ -48,6 +57,7 @@ export const TaskDetailDialog = ({
   members,
   onClose,
   onScrollToTask,
+  onOwnerChange,
 }: TaskDetailDialogProps): React.JSX.Element => {
   const currentTask = task ? (taskMap.get(task.id) ?? task) : null;
 
@@ -101,10 +111,12 @@ export const TaskDetailDialog = ({
     )
     .map((t) => t.id);
   const ownerMember = currentTask.owner ? members.find((m) => m.name === currentTask.owner) : null;
+  const isTodo = status === 'pending' && !kanbanColumn;
+  const canReassign = isTodo && onOwnerChange;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[85vh] min-w-0 overflow-y-auto overflow-x-hidden sm:max-w-4xl">
+      <DialogContent className="min-w-0 sm:max-w-4xl">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
@@ -125,31 +137,46 @@ export const TaskDetailDialog = ({
         {/* Metadata */}
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3">
           <div className="flex min-w-0 items-center gap-2">
-            {ownerMember ? (
-              <div
-                className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1"
-                style={{
-                  borderLeft: `3px solid ${getTeamColorSet(ownerMember.color ?? '').border}`,
-                  backgroundColor: getTeamColorSet(ownerMember.color ?? '').badge,
+            {canReassign ? (
+              <Select
+                value={currentTask.owner ?? '__unassigned__'}
+                onValueChange={(v) => {
+                  onOwnerChange(currentTask.id, v === '__unassigned__' ? null : v);
                 }}
               >
-                <img
-                  src={agentAvatarUrl(ownerMember.name, 32)}
-                  alt={ownerMember.name}
-                  className="size-6 shrink-0 rounded-full bg-[var(--color-surface-raised)]"
-                  loading="lazy"
-                />
-                <span className="min-w-0 truncate font-medium text-[var(--color-text)]">
-                  {ownerMember.name}
-                </span>
-              </div>
+                <SelectTrigger className="h-8 w-auto min-w-[140px] text-xs">
+                  <SelectValue placeholder="Unassigned" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                  {members.map((m) => {
+                    const role = formatAgentRole(m.role) ?? formatAgentRole(m.agentType);
+                    const memberColor = m.color ? getTeamColorSet(m.color) : null;
+                    return (
+                      <SelectItem key={m.name} value={m.name}>
+                        <span className="inline-flex items-center gap-1.5">
+                          {memberColor ? (
+                            <span
+                              className="inline-block size-2 shrink-0 rounded-full"
+                              style={{ backgroundColor: memberColor.border }}
+                            />
+                          ) : null}
+                          <span style={memberColor ? { color: memberColor.text } : undefined}>
+                            {m.name}
+                          </span>
+                          {role ? (
+                            <span className="text-[var(--color-text-muted)]">({role})</span>
+                          ) : null}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            ) : currentTask.owner ? (
+              <MemberBadge name={currentTask.owner} color={ownerMember?.color} size="md" />
             ) : (
-              <div className="flex items-center gap-1.5 text-[var(--color-text-muted)]">
-                <User size={12} />
-                <span className="text-[var(--color-text-secondary)]">
-                  {currentTask.owner ?? '\u2014'}
-                </span>
-              </div>
+              <span className="text-xs text-[var(--color-text-muted)]">&mdash;</span>
             )}
           </div>
           {currentTask.createdBy ? (

@@ -24,6 +24,7 @@ import {
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
+import { AlertTriangle, Search } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
 import type { ResolvedTeamMember, TeamTask } from '@shared/types';
@@ -73,6 +74,8 @@ export const CreateTaskDialog = ({
   const [related, setRelated] = useState<string[]>([]);
   const [startImmediately, setStartImmediately] = useState(true);
   const promptDraft = useDraftPersistence({ key: `createTask:${teamName}:prompt` });
+  const [blockedBySearch, setBlockedBySearch] = useState('');
+  const [relatedSearch, setRelatedSearch] = useState('');
   const [prevOpen, setPrevOpen] = useState(false);
 
   if (open && !prevOpen) {
@@ -85,6 +88,8 @@ export const CreateTaskDialog = ({
     setRelated([]);
     setStartImmediately(isTeamAlive);
     promptDraft.clearDraft();
+    setBlockedBySearch('');
+    setRelatedSearch('');
   }
   if (open !== prevOpen) {
     setPrevOpen(open);
@@ -149,6 +154,16 @@ export const CreateTaskDialog = ({
             board.
           </DialogDescription>
         </DialogHeader>
+
+        {!isTeamAlive ? (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" />
+            <p className="text-xs leading-relaxed text-amber-300">
+              Team is offline. The task will be added to <strong>TODO</strong> &mdash; launch the
+              team to start execution.
+            </p>
+          </div>
+        ) : null}
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
@@ -265,39 +280,63 @@ export const CreateTaskDialog = ({
           {availableTasks.length > 0 ? (
             <div className="grid gap-2">
               <Label>Blocked by tasks (optional)</Label>
-              <div className="max-h-32 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-                {availableTasks.map((t) => {
-                  const isSelected = blockedBy.includes(t.id);
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors ${
-                        isSelected
-                          ? 'bg-blue-500/15 text-blue-300'
-                          : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)]'
-                      }`}
-                      onClick={() => toggleBlockedBy(t.id)}
-                    >
-                      <span
-                        className={`flex size-3.5 shrink-0 items-center justify-center rounded-sm border text-[9px] ${
-                          isSelected
-                            ? 'border-blue-400 bg-blue-500/30 text-blue-300'
-                            : 'border-[var(--color-border-emphasis)]'
-                        }`}
-                      >
-                        {isSelected ? '\u2713' : ''}
-                      </span>
-                      <Badge
-                        variant="secondary"
-                        className="shrink-0 px-1 py-0 text-[10px] font-normal"
-                      >
-                        #{t.id}
-                      </Badge>
-                      <span className="truncate">{t.subject}</span>
-                    </button>
-                  );
-                })}
+              <div className="overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
+                {availableTasks.length > 3 ? (
+                  <div className="relative border-b border-[var(--color-border)] px-2 py-1.5">
+                    <Search
+                      size={12}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Search tasks..."
+                      value={blockedBySearch}
+                      onChange={(e) => setBlockedBySearch(e.target.value)}
+                      className="w-full bg-transparent py-0.5 pl-5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
+                    />
+                  </div>
+                ) : null}
+                <div className="max-h-[108px] overflow-y-auto p-1.5">
+                  {availableTasks
+                    .filter(
+                      (t) =>
+                        !blockedBySearch ||
+                        t.subject.toLowerCase().includes(blockedBySearch.toLowerCase()) ||
+                        t.id.includes(blockedBySearch)
+                    )
+                    .map((t) => {
+                      const isSelected = blockedBy.includes(t.id);
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors ${
+                            isSelected
+                              ? 'bg-blue-500/15 text-blue-300'
+                              : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)]'
+                          }`}
+                          onClick={() => toggleBlockedBy(t.id)}
+                        >
+                          <span
+                            className={`flex size-3.5 shrink-0 items-center justify-center rounded-sm border text-[9px] ${
+                              isSelected
+                                ? 'border-blue-400 bg-blue-500/30 text-blue-300'
+                                : 'border-[var(--color-border-emphasis)]'
+                            }`}
+                          >
+                            {isSelected ? '\u2713' : ''}
+                          </span>
+                          <Badge
+                            variant="secondary"
+                            className="shrink-0 px-1 py-0 text-[10px] font-normal"
+                          >
+                            #{t.id}
+                          </Badge>
+                          <span className="truncate">{t.subject}</span>
+                        </button>
+                      );
+                    })}
+                </div>
               </div>
               {blockedBy.length > 0 ? (
                 <p className="text-[11px] text-yellow-300">
@@ -310,39 +349,63 @@ export const CreateTaskDialog = ({
           {availableTasks.length > 0 ? (
             <div className="grid gap-2">
               <Label>Related tasks (optional)</Label>
-              <div className="max-h-32 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-                {availableTasks.map((t) => {
-                  const isSelected = related.includes(t.id);
-                  return (
-                    <button
-                      key={`related:${t.id}`}
-                      type="button"
-                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors ${
-                        isSelected
-                          ? 'bg-purple-500/15 text-purple-300'
-                          : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)]'
-                      }`}
-                      onClick={() => toggleRelated(t.id)}
-                    >
-                      <span
-                        className={`flex size-3.5 shrink-0 items-center justify-center rounded-sm border text-[9px] ${
-                          isSelected
-                            ? 'border-purple-400 bg-purple-500/30 text-purple-300'
-                            : 'border-[var(--color-border-emphasis)]'
-                        }`}
-                      >
-                        {isSelected ? '\u2713' : ''}
-                      </span>
-                      <Badge
-                        variant="secondary"
-                        className="shrink-0 px-1 py-0 text-[10px] font-normal"
-                      >
-                        #{t.id}
-                      </Badge>
-                      <span className="truncate">{t.subject}</span>
-                    </button>
-                  );
-                })}
+              <div className="overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
+                {availableTasks.length > 3 ? (
+                  <div className="relative border-b border-[var(--color-border)] px-2 py-1.5">
+                    <Search
+                      size={12}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Search tasks..."
+                      value={relatedSearch}
+                      onChange={(e) => setRelatedSearch(e.target.value)}
+                      className="w-full bg-transparent py-0.5 pl-5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
+                    />
+                  </div>
+                ) : null}
+                <div className="max-h-[108px] overflow-y-auto p-1.5">
+                  {availableTasks
+                    .filter(
+                      (t) =>
+                        !relatedSearch ||
+                        t.subject.toLowerCase().includes(relatedSearch.toLowerCase()) ||
+                        t.id.includes(relatedSearch)
+                    )
+                    .map((t) => {
+                      const isSelected = related.includes(t.id);
+                      return (
+                        <button
+                          key={`related:${t.id}`}
+                          type="button"
+                          className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors ${
+                            isSelected
+                              ? 'bg-purple-500/15 text-purple-300'
+                              : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-raised)]'
+                          }`}
+                          onClick={() => toggleRelated(t.id)}
+                        >
+                          <span
+                            className={`flex size-3.5 shrink-0 items-center justify-center rounded-sm border text-[9px] ${
+                              isSelected
+                                ? 'border-purple-400 bg-purple-500/30 text-purple-300'
+                                : 'border-[var(--color-border-emphasis)]'
+                            }`}
+                          >
+                            {isSelected ? '\u2713' : ''}
+                          </span>
+                          <Badge
+                            variant="secondary"
+                            className="shrink-0 px-1 py-0 text-[10px] font-normal"
+                          >
+                            #{t.id}
+                          </Badge>
+                          <span className="truncate">{t.subject}</span>
+                        </button>
+                      );
+                    })}
+                </div>
               </div>
               {related.length > 0 ? (
                 <p className="text-[11px] text-purple-300">

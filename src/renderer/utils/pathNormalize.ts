@@ -1,7 +1,9 @@
 import type { GlobalTask } from '@shared/types';
 
 export function normalizePath(p: string): string {
-  return p.endsWith('/') ? p.slice(0, -1) : p;
+  let s = p.replace(/\\/g, '/');
+  while (s.endsWith('/')) s = s.slice(0, -1);
+  return s.toLowerCase();
 }
 
 export interface TaskStatusCounts {

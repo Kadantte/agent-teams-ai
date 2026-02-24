@@ -5,9 +5,11 @@ import * as path from 'path';
 
 import { atomicWriteAsync } from './atomicWrite';
 
-import type { KanbanState, UpdateKanbanPatch } from '@shared/types';
+import type { KanbanColumnId, KanbanState, UpdateKanbanPatch } from '@shared/types';
 
 const logger = createLogger('Service:TeamKanbanManager');
+
+const KANBAN_COLUMN_IDS: KanbanColumnId[] = ['todo', 'in_progress', 'done', 'review', 'approved'];
 
 function createDefaultState(teamName: string): KanbanState {
   return {
@@ -19,6 +21,23 @@ function createDefaultState(teamName: string): KanbanState {
 
 function isValidColumn(value: unknown): value is 'review' | 'approved' {
   return value === 'review' || value === 'approved';
+}
+
+function sanitizeColumnOrder(raw: unknown): KanbanState['columnOrder'] | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+  const result: NonNullable<KanbanState['columnOrder']> = {};
+  for (const colId of KANBAN_COLUMN_IDS) {
+    const arr = (raw as Record<string, unknown>)[colId];
+    if (Array.isArray(arr)) {
+      const ids = arr.filter((id): id is string => typeof id === 'string');
+      if (ids.length > 0) {
+        result[colId] = ids;
+      }
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export class TeamKanbanManager {
@@ -72,7 +91,23 @@ export class TeamKanbanManager {
         ? parsed.reviewers.filter((r): r is string => typeof r === 'string' && r.trim().length > 0)
         : [],
       tasks: sanitizedTasks,
+      columnOrder: sanitizeColumnOrder(parsed.columnOrder),
     };
+  }
+
+  async updateColumnOrder(
+    teamName: string,
+    columnId: KanbanColumnId,
+    orderedTaskIds: string[]
+  ): Promise<void> {
+    const state = await this.getState(teamName);
+    const columnOrder = { ...state.columnOrder };
+    if (orderedTaskIds.length > 0) {
+      columnOrder[columnId] = orderedTaskIds;
+    } else {
+      delete columnOrder[columnId];
+    }
+    await this.writeState(teamName, { ...state, columnOrder });
   }
 
   async updateTask(teamName: string, taskId: string, patch: UpdateKanbanPatch): Promise<void> {
@@ -106,12 +141,32 @@ export class TeamKanbanManager {
       }
     }
 
+    let columnOrderChanged = false;
+    if (state.columnOrder) {
+      const cleaned: NonNullable<KanbanState['columnOrder']> = {};
+      for (const [colId, ids] of Object.entries(state.columnOrder)) {
+        const valid = ids.filter((id) => validTaskIds.has(id));
+        if (valid.length > 0) {
+          cleaned[colId as KanbanColumnId] = valid;
+        }
+        if (valid.length !== ids.length) {
+          columnOrderChanged = true;
+        }
+      }
+      if (columnOrderChanged) {
+        state.columnOrder = Object.keys(cleaned).length > 0 ? cleaned : undefined;
+      }
+    }
+
     const after = Object.keys(state.tasks).length;
-    if (before === after) {
+    const tasksChanged = before !== after;
+    if (!tasksChanged && !columnOrderChanged) {
       return;
     }
 
-    logger.debug(`Removed ${before - after} stale kanban entries for team ${teamName}`);
+    if (tasksChanged) {
+      logger.debug(`Removed ${before - after} stale kanban entries for team ${teamName}`);
+    }
     await this.writeState(teamName, state);
   }
 
@@ -125,6 +180,9 @@ export class TeamKanbanManager {
       teamName,
       reviewers: state.reviewers,
       tasks: state.tasks,
+      ...(state.columnOrder && Object.keys(state.columnOrder).length > 0
+        ? { columnOrder: state.columnOrder }
+        : {}),
     };
     await atomicWriteAsync(statePath, JSON.stringify(payload, null, 2));
   }

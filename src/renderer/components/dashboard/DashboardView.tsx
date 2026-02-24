@@ -11,6 +11,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
+import { getWorktreeNavigationState } from '@renderer/store/utils/stateResetHelpers';
 import {
   buildTaskCountsByProject,
   normalizePath,
@@ -256,13 +257,38 @@ const RepositoryCard = ({
 // Ghost Card (New Project)
 // =============================================================================
 
+interface WorktreeMatch {
+  repoId: string;
+  worktreeId: string;
+}
+
+function findMatchingWorktree(
+  groups: RepositoryGroup[],
+  selectedPath: string
+): WorktreeMatch | null {
+  const norm = normalizePath(selectedPath);
+  for (const repo of groups) {
+    for (const worktree of repo.worktrees) {
+      if (normalizePath(worktree.path) === norm) {
+        return { repoId: repo.id, worktreeId: worktree.id };
+      }
+    }
+  }
+  return null;
+}
+
 const NewProjectCard = (): React.JSX.Element => {
-  const { repositoryGroups, selectRepository } = useStore(
+  const { repositoryGroups, fetchRepositoryGroups } = useStore(
     useShallow((s) => ({
       repositoryGroups: s.repositoryGroups,
-      selectRepository: s.selectRepository,
+      fetchRepositoryGroups: s.fetchRepositoryGroups,
     }))
   );
+
+  const navigateToMatch = (match: WorktreeMatch): void => {
+    useStore.setState(getWorktreeNavigationState(match.repoId, match.worktreeId));
+    void useStore.getState().fetchSessionsInitial(match.worktreeId);
+  };
 
   const handleClick = async (): Promise<void> => {
     try {
@@ -273,17 +299,23 @@ const NewProjectCard = (): React.JSX.Element => {
 
       const selectedPath = selectedPaths[0];
 
-      // Match selected path against known repository worktrees
-      for (const repo of repositoryGroups) {
-        for (const worktree of repo.worktrees) {
-          if (worktree.path === selectedPath) {
-            selectRepository(repo.id);
-            return;
-          }
-        }
+      // Match selected path against known repository worktrees (normalized comparison)
+      const match = findMatchingWorktree(repositoryGroups, selectedPath);
+      if (match) {
+        navigateToMatch(match);
+        return;
       }
 
-      // No match found - open the folder in file manager as fallback
+      // No match — refresh repository groups and retry
+      await fetchRepositoryGroups();
+      const refreshedGroups = useStore.getState().repositoryGroups;
+      const matchAfterRefresh = findMatchingWorktree(refreshedGroups, selectedPath);
+      if (matchAfterRefresh) {
+        navigateToMatch(matchAfterRefresh);
+        return;
+      }
+
+      // Still no match — open the folder in file manager as fallback
       const result = await api.openPath(selectedPath, undefined, true);
       if (!result.success) {
         logger.error('Failed to open folder:', result.error);

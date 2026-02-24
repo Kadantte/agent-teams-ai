@@ -40,7 +40,7 @@ export class TeamMemberResolver {
 
     const configMemberMap = new Map<
       string,
-      { agentType?: string; role?: string; color?: string }
+      { agentType?: string; role?: string; color?: string; cwd?: string }
     >();
     if (Array.isArray(config.members)) {
       for (const m of config.members) {
@@ -49,12 +49,16 @@ export class TeamMemberResolver {
             agentType: m.agentType,
             role: m.role,
             color: m.color,
+            cwd: m.cwd,
           });
         }
       }
     }
 
-    const metaMemberMap = new Map<string, { agentType?: string; role?: string; color?: string }>();
+    const metaMemberMap = new Map<
+      string,
+      { agentType?: string; role?: string; color?: string; removedAt?: number }
+    >();
     if (Array.isArray(metaMembers)) {
       for (const member of metaMembers) {
         if (typeof member?.name === 'string' && member.name.trim() !== '') {
@@ -62,6 +66,7 @@ export class TeamMemberResolver {
             agentType: member.agentType,
             role: member.role,
             color: member.color,
+            removedAt: member.removedAt,
           });
         }
       }
@@ -89,6 +94,8 @@ export class TeamMemberResolver {
         color: latestMessage?.color ?? configMember?.color ?? metaMember?.color,
         agentType: configMember?.agentType ?? metaMember?.agentType,
         role: configMember?.role ?? metaMember?.role,
+        cwd: configMember?.cwd,
+        removedAt: metaMember?.removedAt,
       });
     }
 

@@ -6,8 +6,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api, isElectronMode } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
+import { Combobox } from '@renderer/components/ui/combobox';
 import { useStore } from '@renderer/store';
 import { getFullResetState } from '@renderer/store/utils/stateResetHelpers';
+import { AGENT_LANGUAGE_OPTIONS, resolveLanguageName } from '@shared/utils/agentLanguage';
 import { Check, Copy, FolderOpen, Laptop, Loader2, RotateCcw } from 'lucide-react';
 
 import { SettingRow, SettingsSectionHeader, SettingsSelect, SettingsToggle } from '../components';
@@ -28,6 +30,7 @@ interface GeneralSectionProps {
   readonly saving: boolean;
   readonly onGeneralToggle: (key: 'launchAtLogin' | 'showDockIcon', value: boolean) => void;
   readonly onThemeChange: (value: 'dark' | 'light' | 'system') => void;
+  readonly onLanguageChange: (value: string) => void;
 }
 
 export const GeneralSection = ({
@@ -35,6 +38,7 @@ export const GeneralSection = ({
   saving,
   onGeneralToggle,
   onThemeChange,
+  onLanguageChange,
 }: GeneralSectionProps): React.JSX.Element => {
   const [serverStatus, setServerStatus] = useState<HttpServerStatus>({
     running: false,
@@ -247,8 +251,59 @@ export const GeneralSection = ({
 
   const isElectron = useMemo(() => isElectronMode(), []);
 
+  const agentLanguageDescription = useMemo(() => {
+    const current = safeConfig.general.agentLanguage ?? 'system';
+    if (current === 'system') {
+      const browserLang = navigator.language;
+      const primaryCode = browserLang.includes('-') ? browserLang.split('-')[0] : browserLang;
+      const detected = resolveLanguageName('system', browserLang);
+      const detectedFlag = AGENT_LANGUAGE_OPTIONS.find((o) => o.value === primaryCode)?.flag ?? '';
+      const flagPrefix = detectedFlag ? `${detectedFlag} ` : '';
+      return `Language for agent communication (detected: ${flagPrefix}${detected})`;
+    }
+    return 'Language for agent communication';
+  }, [safeConfig.general.agentLanguage]);
+
+  const languageComboboxOptions = useMemo(
+    () =>
+      AGENT_LANGUAGE_OPTIONS.map((opt) => ({
+        value: opt.value,
+        label: `${opt.flag}  ${opt.label}`,
+        meta: { flag: opt.flag },
+      })),
+    []
+  );
+
+  const renderLanguageOption = useCallback(
+    (
+      option: { value: string; label: string; meta?: Record<string, unknown> },
+      isSelected: boolean
+    ) => (
+      <>
+        <Check className={`mr-2 size-3.5 shrink-0 ${isSelected ? 'opacity-100' : 'opacity-0'}`} />
+        <span className="text-[var(--color-text)]">{option.label}</span>
+      </>
+    ),
+    []
+  );
+
   return (
     <div>
+      <SettingsSectionHeader title="Agent Language" />
+      <SettingRow label="Language" description={agentLanguageDescription}>
+        <Combobox
+          options={languageComboboxOptions}
+          value={safeConfig.general.agentLanguage ?? 'system'}
+          onValueChange={onLanguageChange}
+          placeholder="Select language..."
+          searchPlaceholder="Search language..."
+          emptyMessage="No language found."
+          disabled={saving}
+          className="min-w-[180px]"
+          renderOption={renderLanguageOption}
+        />
+      </SettingRow>
+
       {isElectron && (
         <>
           <SettingsSectionHeader title="Startup" />

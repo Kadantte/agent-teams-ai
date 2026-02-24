@@ -3,12 +3,16 @@ import { normalizePath } from '@renderer/utils/pathNormalize';
 import { IpcError, unwrapIpc } from '@renderer/utils/unwrapIpc';
 import { createLogger } from '@shared/utils/logger';
 
+import { getWorktreeNavigationState } from '../utils/stateResetHelpers';
+
 const logger = createLogger('teamSlice');
 
 import type { AppState } from '../types';
 import type {
+  AddMemberRequest,
   CreateTaskRequest,
   GlobalTask,
+  KanbanColumnId,
   SendMessageRequest,
   SendMessageResult,
   TaskComment,
@@ -71,12 +75,20 @@ export interface TeamSlice {
   sendTeamMessage: (teamName: string, request: SendMessageRequest) => Promise<void>;
   requestReview: (teamName: string, taskId: string) => Promise<void>;
   updateKanban: (teamName: string, taskId: string, patch: UpdateKanbanPatch) => Promise<void>;
+  updateKanbanColumnOrder: (
+    teamName: string,
+    columnId: KanbanColumnId,
+    orderedTaskIds: string[]
+  ) => Promise<void>;
   createTeamTask: (teamName: string, request: CreateTaskRequest) => Promise<TeamTask>;
   startTask: (teamName: string, taskId: string) => Promise<void>;
   updateTaskStatus: (teamName: string, taskId: string, status: TeamTaskStatus) => Promise<void>;
+  updateTaskOwner: (teamName: string, taskId: string, owner: string | null) => Promise<void>;
   addingComment: boolean;
   addCommentError: string | null;
   addTaskComment: (teamName: string, taskId: string, text: string) => Promise<TaskComment>;
+  addMember: (teamName: string, request: AddMemberRequest) => Promise<void>;
+  removeMember: (teamName: string, memberName: string) => Promise<void>;
   deleteTeam: (teamName: string) => Promise<void>;
   createTeam: (request: TeamCreateRequest) => Promise<string>;
   launchTeam: (request: TeamLaunchRequest) => Promise<string>;
@@ -180,14 +192,22 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     }
 
     const state = get();
+    // Use display name from teams list or selected team data if available
+    const teamSummary = state.teams.find((t) => t.teamName === teamName);
+    const displayName = teamSummary?.displayName || state.selectedTeamData?.config.name || teamName;
+
     const allTabs = state.getAllPaneTabs();
     const existing = allTabs.find((tab) => tab.type === 'team' && tab.teamName === teamName);
     if (existing) {
       state.setActiveTab(existing.id);
+      // Sync label in case display name changed
+      if (existing.label !== displayName) {
+        state.updateTabLabel(existing.id, displayName);
+      }
     } else {
       state.openTab({
         type: 'team',
-        label: teamName,
+        label: displayName,
         teamName,
       });
     }
@@ -222,6 +242,14 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         selectedTeamError: null,
       });
 
+      // Sync tab label with the team's display name from config
+      const displayName = data.config.name || teamName;
+      const allTabs = get().getAllPaneTabs();
+      const teamTab = allTabs.find((tab) => tab.type === 'team' && tab.teamName === teamName);
+      if (teamTab && teamTab.label !== displayName) {
+        get().updateTabLabel(teamTab.id, displayName);
+      }
+
       // Auto-select the project associated with this team's cwd/projectPath.
       // Must search both flat projects and grouped repositoryGroups/worktrees
       // because the default viewMode is 'grouped' and flat projects may be empty.
@@ -244,8 +272,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
             );
             if (matchingWorktree) {
               if (state.selectedWorktreeId !== matchingWorktree.id) {
-                state.selectRepository(repo.id);
-                state.selectWorktree(matchingWorktree.id);
+                set(getWorktreeNavigationState(repo.id, matchingWorktree.id));
+                void get().fetchSessionsInitial(matchingWorktree.id);
               }
               break;
             }
@@ -330,6 +358,17 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     }
   },
 
+  updateKanbanColumnOrder: async (
+    teamName: string,
+    columnId: KanbanColumnId,
+    orderedTaskIds: string[]
+  ) => {
+    await unwrapIpc('team:updateKanbanColumnOrder', () =>
+      api.teams.updateKanbanColumnOrder(teamName, columnId, orderedTaskIds)
+    );
+    await get().refreshTeamData(teamName);
+  },
+
   sendTeamMessage: async (teamName: string, request: SendMessageRequest) => {
     set({ sendingMessage: true, sendMessageError: null, lastSendMessageResult: null });
     try {
@@ -382,6 +421,13 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     await get().refreshTeamData(teamName);
   },
 
+  updateTaskOwner: async (teamName: string, taskId: string, owner: string | null) => {
+    await unwrapIpc('team:updateTaskOwner', () =>
+      api.teams.updateTaskOwner(teamName, taskId, owner)
+    );
+    await get().refreshTeamData(teamName);
+  },
+
   addTaskComment: async (teamName, taskId, text) => {
     set({ addingComment: true, addCommentError: null });
     try {
@@ -396,6 +442,16 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       set({ addingComment: false, addCommentError: msg });
       throw error;
     }
+  },
+
+  addMember: async (teamName: string, request: AddMemberRequest) => {
+    await unwrapIpc('team:addMember', () => api.teams.addMember(teamName, request));
+    await get().refreshTeamData(teamName);
+  },
+
+  removeMember: async (teamName: string, memberName: string) => {
+    await unwrapIpc('team:removeMember', () => api.teams.removeMember(teamName, memberName));
+    await get().refreshTeamData(teamName);
   },
 
   deleteTeam: async (teamName: string) => {

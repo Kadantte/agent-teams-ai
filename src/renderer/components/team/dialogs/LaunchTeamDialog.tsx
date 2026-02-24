@@ -14,10 +14,17 @@ import {
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@renderer/components/ui/select';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { cn } from '@renderer/lib/utils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
-import { Check, CheckCircle2, Loader2 } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, Loader2 } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
 import type {
@@ -91,6 +98,7 @@ export const LaunchTeamDialog = ({
   const [prepareMessage, setPrepareMessage] = useState<string | null>(null);
   const [prepareWarnings, setPrepareWarnings] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedModel, setSelectedModel] = useState('');
 
   const resetFormState = (): void => {
     setLocalError(null);
@@ -101,6 +109,7 @@ export const LaunchTeamDialog = ({
     setCwdMode('project');
     setSelectedProjectPath('');
     setCustomCwd('');
+    setSelectedModel('');
   };
 
   // Warm up CLI on open
@@ -231,6 +240,7 @@ export const LaunchTeamDialog = ({
           teamName,
           cwd: effectiveCwd,
           prompt: promptDraft.value.trim() || undefined,
+          model: selectedModel && selectedModel !== '__default__' ? selectedModel : undefined,
         });
         resetFormState();
         onClose();
@@ -252,7 +262,7 @@ export const LaunchTeamDialog = ({
         }
       }}
     >
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-sm">Launch Team</DialogTitle>
           <DialogDescription className="text-xs">
@@ -262,17 +272,31 @@ export const LaunchTeamDialog = ({
         </DialogHeader>
 
         {prepareState === 'failed' ? (
-          <div className="rounded border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-300">
-            <p>{prepareMessage ?? 'Failed to prepare environment'}</p>
-            {prepareWarnings.length > 0 ? (
-              <div className="mt-1 space-y-1">
-                {prepareWarnings.map((warning) => (
-                  <p key={warning} className="text-[11px] text-amber-300">
-                    {warning}
-                  </p>
-                ))}
+          <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-400" />
+              <div className="min-w-0 space-y-1">
+                <p className="font-medium text-red-300">
+                  CLI environment is not available — launch is blocked
+                </p>
+                <p className="text-red-300/80">
+                  {prepareMessage ?? 'Failed to prepare environment'}
+                </p>
+                {prepareWarnings.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {prepareWarnings.map((warning) => (
+                      <p key={warning} className="text-[11px] text-amber-300">
+                        {warning}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+                <p className="text-[11px] text-[var(--color-text-muted)]">
+                  Make sure <span className="font-mono">claude</span> CLI is installed and available
+                  in PATH, then reopen this dialog.
+                </p>
               </div>
-            ) : null}
+            </div>
           </div>
         ) : null}
 
@@ -397,6 +421,21 @@ export const LaunchTeamDialog = ({
                 ) : null
               }
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-[var(--color-text-muted)]">Model (optional)</Label>
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Default (account setting)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">Default (account setting)</SelectItem>
+                <SelectItem value="opus">Opus 4.6</SelectItem>
+                <SelectItem value="sonnet">Sonnet 4.5</SelectItem>
+                <SelectItem value="haiku">Haiku 4.5</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

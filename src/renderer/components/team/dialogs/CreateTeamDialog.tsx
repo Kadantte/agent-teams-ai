@@ -28,7 +28,7 @@ import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { cn } from '@renderer/lib/utils';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { getMemberColor } from '@shared/constants/memberColors';
-import { Check, CheckCircle2, Loader2 } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, Loader2 } from 'lucide-react';
 
 const TEAM_COLOR_NAMES = [
   'blue',
@@ -173,6 +173,7 @@ function validateRequest(
   options?: { requireCwd?: boolean }
 ): ValidationResult {
   const requireCwd = options?.requireCwd ?? true;
+  // eslint-disable-next-line security/detect-unsafe-regex -- kebab-case pattern is linear, no ReDoS
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(request.teamName) || request.teamName.length > 64) {
     return {
       valid: false,
@@ -261,6 +262,7 @@ export const CreateTeamDialog = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [launchTeam, setLaunchTeam] = useState(true);
   const [teamColor, setTeamColor] = useState('');
+  const [selectedModel, setSelectedModel] = useState('');
 
   const resetUIState = (): void => {
     setLocalError(null);
@@ -281,6 +283,7 @@ export const CreateTeamDialog = ({
     setSelectedProjectPath('');
     setCustomCwd('');
     setLaunchTeam(true);
+    setSelectedModel('');
     resetUIState();
   };
 
@@ -460,6 +463,9 @@ export const CreateTeamDialog = ({
     [members]
   );
 
+  const effectiveModel =
+    selectedModel && selectedModel !== '__default__' ? selectedModel : undefined;
+
   const request = useMemo<TeamCreateRequest>(
     () => ({
       teamName: teamName.trim(),
@@ -468,8 +474,9 @@ export const CreateTeamDialog = ({
       members: buildMembers(members),
       cwd: effectiveCwd,
       prompt: prompt.trim() || undefined,
+      model: effectiveModel,
     }),
-    [teamName, description, teamColor, members, effectiveCwd, prompt]
+    [teamName, description, teamColor, members, effectiveCwd, prompt, effectiveModel]
   );
 
   const activeError = localError ?? provisioningError;
@@ -571,7 +578,7 @@ export const CreateTeamDialog = ({
         }
       }}
     >
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-sm">{initialData ? 'Copy Team' : 'Create Team'}</DialogTitle>
           <DialogDescription className="text-xs">
@@ -582,17 +589,31 @@ export const CreateTeamDialog = ({
         </DialogHeader>
 
         {canCreate && launchTeam && prepareState === 'failed' ? (
-          <div className="rounded border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-300">
-            <p>{prepareMessage ?? 'Failed to prepare environment'}</p>
-            {prepareWarnings.length > 0 ? (
-              <div className="mt-1 space-y-1">
-                {prepareWarnings.map((warning) => (
-                  <p key={warning} className="text-[11px] text-amber-300">
-                    {warning}
-                  </p>
-                ))}
+          <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-400" />
+              <div className="min-w-0 space-y-1">
+                <p className="font-medium text-red-300">
+                  CLI environment is not available — launch is blocked
+                </p>
+                <p className="text-red-300/80">
+                  {prepareMessage ?? 'Failed to prepare environment'}
+                </p>
+                {prepareWarnings.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {prepareWarnings.map((warning) => (
+                      <p key={warning} className="text-[11px] text-amber-300">
+                        {warning}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+                <p className="text-[11px] text-[var(--color-text-muted)]">
+                  Make sure <span className="font-mono">claude</span> CLI is installed and available
+                  in PATH, then reopen this dialog.
+                </p>
               </div>
-            ) : null}
+            </div>
           </div>
         ) : null}
 
@@ -793,6 +814,23 @@ export const CreateTeamDialog = ({
                   ) : null
                 }
               />
+            </div>
+          ) : null}
+
+          {launchTeam ? (
+            <div className="space-y-1.5 md:col-span-2">
+              <Label className="text-xs text-[var(--color-text-muted)]">Model (optional)</Label>
+              <Select value={selectedModel} onValueChange={setSelectedModel}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Default (account setting)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">Default (account setting)</SelectItem>
+                  <SelectItem value="opus">Opus 4.6</SelectItem>
+                  <SelectItem value="sonnet">Sonnet 4.5</SelectItem>
+                  <SelectItem value="haiku">Haiku 4.5</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           ) : null}
 
