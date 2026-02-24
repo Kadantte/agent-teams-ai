@@ -6,6 +6,7 @@ import { api } from '@renderer/api';
 import { cleanupStale as cleanupCommentReadState } from '@renderer/services/commentReadStorage';
 import { create } from 'zustand';
 
+import { createChangeReviewSlice } from './slices/changeReviewSlice';
 import { createConfigSlice } from './slices/configSlice';
 import { createConnectionSlice } from './slices/connectionSlice';
 import { createContextSlice } from './slices/contextSlice';
@@ -48,6 +49,7 @@ export const useStore = create<AppState>()((...args) => ({
   ...createConnectionSlice(...args),
   ...createContextSlice(...args),
   ...createUpdateSlice(...args),
+  ...createChangeReviewSlice(...args),
 }));
 
 // =============================================================================

@@ -52,6 +52,7 @@ import { MemberDetailDialog } from './members/MemberDetailDialog';
 import { MemberList } from './members/MemberList';
 import { MessageComposer } from './messages/MessageComposer';
 import { MessagesFilterPopover } from './messages/MessagesFilterPopover';
+import { ChangeReviewDialog } from './review/ChangeReviewDialog';
 import { CollapsibleTeamSection } from './CollapsibleTeamSection';
 import { TeamProvisioningBanner } from './TeamProvisioningBanner';
 import { TeamSessionsSection } from './TeamSessionsSection';
@@ -119,6 +120,12 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
   const [replyQuote, setReplyQuote] = useState<{ from: string; text: string } | undefined>(
     undefined
   );
+  const [reviewDialogState, setReviewDialogState] = useState<{
+    open: boolean;
+    mode: 'agent' | 'task';
+    memberName?: string;
+    taskId?: string;
+  }>({ open: false, mode: 'task' });
 
   // Active teams for conflict warning in LaunchTeamDialog
   const [activeTeamsForLaunch, setActiveTeamsForLaunch] = useState<
@@ -485,6 +492,10 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       setStoppingTeam(false);
     }
   }, [teamName, refreshTeamData]);
+
+  const handleViewChanges = useCallback((taskId: string) => {
+    setReviewDialogState({ open: true, mode: 'task', taskId });
+  }, []);
 
   const handleDeleteTeam = useCallback((): void => {
     setDeleteConfirmOpen(true);
@@ -962,6 +973,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             }
           }}
           onTaskClick={(task) => setSelectedTask(task)}
+          onViewChanges={handleViewChanges}
           onAddTask={(startImmediately) => openCreateTaskDialog('', '', '', startImmediately)}
         />
       </CollapsibleTeamSection>
@@ -1315,6 +1327,15 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         onOwnerChange={(taskId, owner) => {
           void updateTaskOwner(teamName, taskId, owner);
         }}
+      />
+
+      <ChangeReviewDialog
+        open={reviewDialogState.open}
+        onOpenChange={(open) => setReviewDialogState((prev) => ({ ...prev, open }))}
+        teamName={teamName}
+        mode={reviewDialogState.mode}
+        memberName={reviewDialogState.memberName}
+        taskId={reviewDialogState.taskId}
       />
     </div>
   );

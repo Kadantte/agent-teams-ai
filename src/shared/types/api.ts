@@ -14,6 +14,17 @@ import type {
   TriggerTestResult,
 } from './notifications';
 import type {
+  AgentChangeSet,
+  ApplyReviewRequest,
+  ApplyReviewResult,
+  ChangeStats,
+  ConflictCheckResult,
+  FileChangeWithContent,
+  RejectResult,
+  SnippetDiff,
+  TaskChangeSetV2,
+} from './review';
+import type {
   AddMemberRequest,
   AttachmentFileData,
   CreateTaskRequest,
@@ -421,6 +432,45 @@ export interface TeamsAPI {
 }
 
 // =============================================================================
+// Review API
+// =============================================================================
+
+export interface ReviewAPI {
+  // Phase 1
+  getAgentChanges: (teamName: string, memberName: string) => Promise<AgentChangeSet>;
+  getTaskChanges: (teamName: string, taskId: string) => Promise<TaskChangeSetV2>;
+  getChangeStats: (teamName: string, memberName: string) => Promise<ChangeStats>;
+  getFileContent: (
+    teamName: string,
+    memberName: string | undefined,
+    filePath: string
+  ) => Promise<FileChangeWithContent>;
+  applyDecisions: (request: ApplyReviewRequest) => Promise<ApplyReviewResult>;
+  // Phase 2
+  checkConflict: (filePath: string, expectedModified: string) => Promise<ConflictCheckResult>;
+  rejectHunks: (
+    filePath: string,
+    original: string,
+    modified: string,
+    hunkIndices: number[],
+    snippets: SnippetDiff[]
+  ) => Promise<RejectResult>;
+  rejectFile: (filePath: string, original: string, modified: string) => Promise<RejectResult>;
+  previewReject: (
+    filePath: string,
+    original: string,
+    modified: string,
+    hunkIndices: number[],
+    snippets: SnippetDiff[]
+  ) => Promise<{ preview: string; hasConflicts: boolean }>;
+  // Phase 4
+  getGitFileLog: (
+    projectPath: string,
+    filePath: string
+  ) => Promise<{ hash: string; timestamp: string; message: string }[]>;
+}
+
+// =============================================================================
 // Main Electron API
 // =============================================================================
 
@@ -541,6 +591,9 @@ export interface ElectronAPI {
 
   // Team management API
   teams: TeamsAPI;
+
+  // Review API
+  review: ReviewAPI;
 }
 
 // =============================================================================

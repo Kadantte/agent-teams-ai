@@ -10,6 +10,16 @@ import {
   HTTP_SERVER_GET_STATUS,
   HTTP_SERVER_START,
   HTTP_SERVER_STOP,
+  REVIEW_APPLY_DECISIONS,
+  REVIEW_CHECK_CONFLICT,
+  REVIEW_GET_AGENT_CHANGES,
+  REVIEW_GET_CHANGE_STATS,
+  REVIEW_GET_FILE_CONTENT,
+  REVIEW_GET_GIT_FILE_LOG,
+  REVIEW_GET_TASK_CHANGES,
+  REVIEW_PREVIEW_REJECT,
+  REVIEW_REJECT_FILE,
+  REVIEW_REJECT_HUNKS,
   SSH_CONNECT,
   SSH_DISCONNECT,
   SSH_GET_CONFIG_HOSTS,
@@ -93,13 +103,19 @@ import {
 
 import type {
   AddMemberRequest,
+  AgentChangeSet,
   AppConfig,
+  ApplyReviewRequest,
+  ApplyReviewResult,
   AttachmentFileData,
+  ChangeStats,
   ClaudeRootFolderSelection,
   ClaudeRootInfo,
+  ConflictCheckResult,
   ContextInfo,
   CreateTaskRequest,
   ElectronAPI,
+  FileChangeWithContent,
   GlobalTask,
   HttpServerStatus,
   IpcResult,
@@ -107,14 +123,17 @@ import type {
   MemberFullStats,
   MemberLogSummary,
   NotificationTrigger,
+  RejectResult,
   SendMessageRequest,
   SendMessageResult,
   SessionsByIdsOptions,
   SessionsPaginationOptions,
+  SnippetDiff,
   SshConfigHostEntry,
   SshConnectionConfig,
   SshConnectionStatus,
   SshLastConnection,
+  TaskChangeSetV2,
   TaskComment,
   TeamChangeEvent,
   TeamConfig,
@@ -668,6 +687,81 @@ const electronAPI: ElectronAPI = {
           callback as (event: Electron.IpcRendererEvent, ...args: unknown[]) => void
         );
       };
+    },
+  },
+
+  // ===== Review API =====
+  review: {
+    getAgentChanges: async (teamName: string, memberName: string) => {
+      return invokeIpcWithResult<AgentChangeSet>(REVIEW_GET_AGENT_CHANGES, teamName, memberName);
+    },
+    getTaskChanges: async (teamName: string, taskId: string) => {
+      return invokeIpcWithResult<TaskChangeSetV2>(REVIEW_GET_TASK_CHANGES, teamName, taskId);
+    },
+    getChangeStats: async (teamName: string, memberName: string) => {
+      return invokeIpcWithResult<ChangeStats>(REVIEW_GET_CHANGE_STATS, teamName, memberName);
+    },
+    getFileContent: async (teamName: string, memberName: string | undefined, filePath: string) => {
+      return invokeIpcWithResult<FileChangeWithContent>(
+        REVIEW_GET_FILE_CONTENT,
+        teamName,
+        memberName ?? '',
+        filePath
+      );
+    },
+    applyDecisions: async (request: ApplyReviewRequest) => {
+      return invokeIpcWithResult<ApplyReviewResult>(REVIEW_APPLY_DECISIONS, request);
+    },
+    // Phase 2
+    checkConflict: async (filePath: string, expectedModified: string) => {
+      return invokeIpcWithResult<ConflictCheckResult>(
+        REVIEW_CHECK_CONFLICT,
+        filePath,
+        expectedModified
+      );
+    },
+    rejectHunks: async (
+      filePath: string,
+      original: string,
+      modified: string,
+      hunkIndices: number[],
+      snippets: SnippetDiff[]
+    ) => {
+      return invokeIpcWithResult<RejectResult>(
+        REVIEW_REJECT_HUNKS,
+        filePath,
+        original,
+        modified,
+        hunkIndices,
+        snippets
+      );
+    },
+    rejectFile: async (filePath: string, original: string, modified: string) => {
+      return invokeIpcWithResult<RejectResult>(REVIEW_REJECT_FILE, filePath, original, modified);
+    },
+    previewReject: async (
+      filePath: string,
+      original: string,
+      modified: string,
+      hunkIndices: number[],
+      snippets: SnippetDiff[]
+    ) => {
+      return invokeIpcWithResult<{ preview: string; hasConflicts: boolean }>(
+        REVIEW_PREVIEW_REJECT,
+        filePath,
+        original,
+        modified,
+        hunkIndices,
+        snippets
+      );
+    },
+    // Phase 4
+    getGitFileLog: async (projectPath: string, filePath: string) => {
+      return invokeIpcWithResult<{ hash: string; timestamp: string; message: string }[]>(
+        REVIEW_GET_GIT_FILE_LOG,
+        projectPath,
+        filePath
+      );
     },
   },
 };

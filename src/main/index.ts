@@ -9,6 +9,10 @@
  * - Manage application lifecycle
  */
 
+import { ChangeExtractorService } from '@main/services/team/ChangeExtractorService';
+import { FileContentResolver } from '@main/services/team/FileContentResolver';
+import { GitDiffFallback } from '@main/services/team/GitDiffFallback';
+import { ReviewApplierService } from '@main/services/team/ReviewApplierService';
 import {
   CONTEXT_CHANGED,
   SSH_STATUS,
@@ -39,6 +43,7 @@ import {
   ServiceContext,
   ServiceContextRegistry,
   SshConnectionManager,
+  TaskBoundaryParser,
   TeamAgentToolsInstaller,
   TeamDataService,
   TeamMemberLogsFinder,
@@ -303,6 +308,11 @@ function initializeServices(): void {
   teamProvisioningService = new TeamProvisioningService();
   const teamMemberLogsFinder = new TeamMemberLogsFinder();
   const memberStatsComputer = new MemberStatsComputer(teamMemberLogsFinder);
+  const taskBoundaryParser = new TaskBoundaryParser();
+  const changeExtractor = new ChangeExtractorService(teamMemberLogsFinder, taskBoundaryParser);
+  const gitDiffFallback = new GitDiffFallback();
+  const fileContentResolver = new FileContentResolver(teamMemberLogsFinder, gitDiffFallback);
+  const reviewApplier = new ReviewApplierService();
 
   // Fire-and-forget: warm up CLI and install teamctl.js at startup
   void teamProvisioningService.warmup();
@@ -336,7 +346,11 @@ function initializeServices(): void {
     {
       httpServer,
       startHttpServer: () => startHttpServer(handleModeSwitch),
-    }
+    },
+    changeExtractor,
+    fileContentResolver,
+    reviewApplier,
+    gitDiffFallback
   );
 
   // Forward SSH state changes to renderer and HTTP SSE clients

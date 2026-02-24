@@ -1,5 +1,10 @@
+export { ChangeExtractorService } from './ChangeExtractorService';
 export { ClaudeBinaryResolver } from './ClaudeBinaryResolver';
+export { FileContentResolver } from './FileContentResolver';
+export { GitDiffFallback } from './GitDiffFallback';
 export { MemberStatsComputer } from './MemberStatsComputer';
+export { ReviewApplierService } from './ReviewApplierService';
+export { TaskBoundaryParser } from './TaskBoundaryParser';
 export { TeamAgentToolsInstaller } from './TeamAgentToolsInstaller';
 export { TeamAttachmentStore } from './TeamAttachmentStore';
 export { TeamConfigReader } from './TeamConfigReader';

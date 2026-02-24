@@ -284,3 +284,41 @@ export const TEAM_UPDATE_MEMBER_ROLE = 'team:updateMemberRole';
 
 /** Get attachment data for a message */
 export const TEAM_GET_ATTACHMENTS = 'team:getAttachments';
+
+// =============================================================================
+// Review API Channels
+// =============================================================================
+
+/** Получить все изменения агента */
+export const REVIEW_GET_AGENT_CHANGES = 'review:getAgentChanges';
+
+/** Получить изменения задачи */
+export const REVIEW_GET_TASK_CHANGES = 'review:getTaskChanges';
+
+/** Получить краткую статистику изменений */
+export const REVIEW_GET_CHANGE_STATS = 'review:getChangeStats';
+
+// Phase 2 — Review actions
+
+/** Проверить конфликт файла (изменён ли на диске) */
+export const REVIEW_CHECK_CONFLICT = 'review:checkConflict';
+
+/** Откатить выбранные hunks */
+export const REVIEW_REJECT_HUNKS = 'review:rejectHunks';
+
+/** Откатить весь файл к оригиналу */
+export const REVIEW_REJECT_FILE = 'review:rejectFile';
+
+/** Preview результата reject (без записи на диск) */
+export const REVIEW_PREVIEW_REJECT = 'review:previewReject';
+
+/** Применить batch решений review */
+export const REVIEW_APPLY_DECISIONS = 'review:applyDecisions';
+
+/** Получить полное содержимое файла для diff view */
+export const REVIEW_GET_FILE_CONTENT = 'review:getFileContent';
+
+// Phase 4 — Git fallback
+
+/** Get git file change log */
+export const REVIEW_GET_GIT_FILE_LOG = 'review:getGitFileLog';

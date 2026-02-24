@@ -772,4 +772,44 @@ export class HttpAPIClient implements ElectronAPI {
       return () => {};
     },
   };
+
+  // Review API stubs
+  review = {
+    getAgentChanges: async (_teamName: string, _memberName: string) => {
+      throw new Error('Review is not available in browser mode');
+    },
+    getTaskChanges: async (_teamName: string, _taskId: string) => {
+      throw new Error('Review is not available in browser mode');
+    },
+    getChangeStats: async (_teamName: string, _memberName: string) => {
+      throw new Error('Review is not available in browser mode');
+    },
+    getFileContent: async (
+      _teamName: string,
+      _memberName: string | undefined,
+      _filePath: string
+    ) => {
+      throw new Error('Review is not available in browser mode');
+    },
+    applyDecisions: async () => {
+      throw new Error('Review is not available in browser mode');
+    },
+    // Phase 2 stubs
+    checkConflict: async () => {
+      throw new Error('Review is not available in browser mode');
+    },
+    rejectHunks: async () => {
+      throw new Error('Review is not available in browser mode');
+    },
+    rejectFile: async () => {
+      throw new Error('Review is not available in browser mode');
+    },
+    previewReject: async () => {
+      throw new Error('Review is not available in browser mode');
+    },
+    // Phase 4 stubs
+    getGitFileLog: async () => {
+      throw new Error('Review is not available in browser mode');
+    },
+  };
 }

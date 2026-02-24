@@ -243,6 +243,36 @@ export class TeamMemberLogsFinder {
     return paths;
   }
 
+  /** Быстрая проверка: содержит ли файл TaskUpdate/teamctl маркер для данного taskId */
+  async hasTaskUpdateMarker(filePath: string, taskId: string): Promise<boolean> {
+    const stream = createReadStream(filePath, { encoding: 'utf8' });
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    const escapedTaskId = taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`"taskId"\\s*:\\s*"${escapedTaskId}"`);
+
+    try {
+      for await (const line of rl) {
+        if (line.includes('TaskUpdate') && pattern.test(line)) {
+          rl.close();
+          stream.destroy();
+          return true;
+        }
+        if (line.includes('teamctl') && line.includes('task') && line.includes(taskId)) {
+          rl.close();
+          stream.destroy();
+          return true;
+        }
+      }
+    } catch {
+      // ignore read errors
+    }
+
+    rl.close();
+    stream.destroy();
+    return false;
+  }
+
   private async discoverProjectSessions(teamName: string): Promise<{
     projectDir: string;
     projectId: string;

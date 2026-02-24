@@ -76,6 +76,8 @@ interface KanbanBoardProps {
   onCancelTask: (taskId: string) => void;
   onScrollToTask?: (taskId: string) => void;
   onTaskClick?: (task: TeamTask) => void;
+  /** Открывает diff-просмотр изменений задачи. */
+  onViewChanges?: (taskId: string) => void;
   /** Вызывается после изменения порядка задач в колонке (drag-and-drop). */
   onColumnOrderChange?: (columnId: KanbanColumnId, orderedTaskIds: string[]) => void;
   /** Слот слева в одной строке с фильтром и переключателем вида (например, поле поиска). */
@@ -151,6 +153,7 @@ interface SortableKanbanTaskCardProps {
   onCancelTask: (taskId: string) => void;
   onScrollToTask?: (taskId: string) => void;
   onTaskClick?: (task: TeamTask) => void;
+  onViewChanges?: (taskId: string) => void;
 }
 
 const SortableKanbanTaskCard = ({
@@ -169,6 +172,7 @@ const SortableKanbanTaskCard = ({
   onCancelTask,
   onScrollToTask,
   onTaskClick,
+  onViewChanges,
 }: SortableKanbanTaskCardProps): React.JSX.Element => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -201,6 +205,7 @@ const SortableKanbanTaskCard = ({
         onCancelTask={onCancelTask}
         onScrollToTask={onScrollToTask}
         onTaskClick={onTaskClick}
+        onViewChanges={onViewChanges}
       />
     </div>
   );
@@ -224,6 +229,7 @@ export const KanbanBoard = ({
   onCancelTask,
   onScrollToTask,
   onTaskClick,
+  onViewChanges,
   onColumnOrderChange,
   toolbarLeft,
   onAddTask,
@@ -335,6 +341,7 @@ export const KanbanBoard = ({
                 onCancelTask={onCancelTask}
                 onScrollToTask={onScrollToTask}
                 onTaskClick={onTaskClick}
+                onViewChanges={onViewChanges}
               />
             ))}
           </SortableContext>
@@ -363,6 +370,7 @@ export const KanbanBoard = ({
             onCancelTask={onCancelTask}
             onScrollToTask={onScrollToTask}
             onTaskClick={onTaskClick}
+            onViewChanges={onViewChanges}
           />
         ))}
         {addButton}

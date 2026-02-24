@@ -6,7 +6,14 @@ import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover';
 import { useUnreadCommentCount } from '@renderer/hooks/useUnreadCommentCount';
-import { ArrowLeftFromLine, ArrowRightFromLine, CheckCircle2, Play, XCircle } from 'lucide-react';
+import {
+  ArrowLeftFromLine,
+  ArrowRightFromLine,
+  CheckCircle2,
+  FileCode,
+  Play,
+  XCircle,
+} from 'lucide-react';
 
 import type { KanbanColumnId, KanbanTaskState, ResolvedTeamMember, TeamTask } from '@shared/types';
 
@@ -27,6 +34,7 @@ interface KanbanTaskCardProps {
   onCancelTask: (taskId: string) => void;
   onScrollToTask?: (taskId: string) => void;
   onTaskClick?: (task: TeamTask) => void;
+  onViewChanges?: (taskId: string) => void;
 }
 
 interface DependencyBadgeProps {
@@ -132,6 +140,7 @@ export const KanbanTaskCard = ({
   onCancelTask,
   onScrollToTask,
   onTaskClick,
+  onViewChanges,
 }: KanbanTaskCardProps): React.JSX.Element => {
   const unreadCount = useUnreadCommentCount(teamName, task.id, task.comments);
   const blockedByIds = task.blockedBy?.filter((id) => id.length > 0) ?? [];
@@ -331,6 +340,21 @@ export const KanbanTaskCard = ({
             >
               Move back to DONE
             </Button>
+          ) : null}
+
+          {(columnId === 'done' || columnId === 'review' || columnId === 'approved') &&
+          onViewChanges ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewChanges(task.id);
+              }}
+              className="flex items-center gap-1 text-[10px] text-[var(--color-text-muted)] transition-colors hover:text-blue-400"
+            >
+              <FileCode className="size-3" />
+              Changes
+            </button>
           ) : null}
         </div>
 
