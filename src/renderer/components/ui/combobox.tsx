@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { cn } from '@renderer/lib/utils';
 import { Command as CommandPrimitive } from 'cmdk';
-import { Check, ChevronsUpDown } from 'lucide-react';
+import { Check, ChevronsUpDown, X } from 'lucide-react';
 
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
 
@@ -24,6 +24,10 @@ interface ComboboxProps {
   disabled?: boolean;
   className?: string;
   renderOption?: (option: ComboboxOption, isSelected: boolean, query: string) => React.ReactNode;
+  /** Label for the reset item shown at the top of the dropdown. */
+  resetLabel?: string;
+  /** Called when the user clicks the reset item. */
+  onReset?: () => void;
 }
 
 export const Combobox = ({
@@ -36,6 +40,8 @@ export const Combobox = ({
   disabled = false,
   className,
   renderOption,
+  resetLabel,
+  onReset,
 }: ComboboxProps): React.JSX.Element => {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
@@ -91,6 +97,23 @@ export const Combobox = ({
             <CommandPrimitive.Empty className="py-4 pr-2 text-center text-xs text-[var(--color-text-muted)]">
               {emptyMessage}
             </CommandPrimitive.Empty>
+            {onReset && value && !search.trim() ? (
+              <CommandPrimitive.Item
+                value="__reset__"
+                onSelect={() => {
+                  onReset();
+                  setOpen(false);
+                  setSearch('');
+                }}
+                className="relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-0 pr-2 text-xs outline-none data-[selected=true]:bg-[var(--color-surface-raised)] data-[selected=true]:text-[var(--color-text)]"
+                style={{ paddingLeft: 0 }}
+              >
+                <X className="mr-2 size-3.5 shrink-0 text-[var(--color-text-muted)]" />
+                <span className="text-[var(--color-text-muted)]">
+                  {resetLabel ?? 'Reset selection'}
+                </span>
+              </CommandPrimitive.Item>
+            ) : null}
             {options
               .filter((opt) => {
                 if (!search.trim()) return true;

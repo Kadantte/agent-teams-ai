@@ -22,7 +22,11 @@ import {
   syncFocusedPaneState,
   updatePane,
 } from '../utils/paneHelpers';
-import { getFullResetState, getWorktreeNavigationState } from '../utils/stateResetHelpers';
+import {
+  getFullResetState,
+  getSessionResetState,
+  getWorktreeNavigationState,
+} from '../utils/stateResetHelpers';
 
 import type { AppState, SearchNavigationContext } from '../types';
 import type { PaneLayout } from '@renderer/types/panes';
@@ -55,6 +59,7 @@ export interface TabSlice {
 
   // Project context actions
   setActiveProject: (projectId: string) => void;
+  clearActiveProject: () => void;
 
   // Per-tab UI state actions
   setTabContextPanelVisible: (tabId: string, visible: boolean) => void;
@@ -676,6 +681,16 @@ export const createTabSlice: StateCreator<AppState, [], [], TabSlice> = (set, ge
   setActiveProject: (projectId: string) => {
     set({ activeProjectId: projectId });
     get().selectProject(projectId);
+  },
+
+  clearActiveProject: () => {
+    set({
+      activeProjectId: null,
+      selectedProjectId: null,
+      selectedRepositoryId: null,
+      selectedWorktreeId: null,
+      ...getSessionResetState(),
+    });
   },
 
   // Navigate to a session (from search or other sources)

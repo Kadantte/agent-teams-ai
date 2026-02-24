@@ -14,6 +14,7 @@ import {
   Eye,
   LayoutGrid,
   PlayCircle,
+  Plus,
   ShieldCheck,
 } from 'lucide-react';
 
@@ -280,7 +281,22 @@ export const KanbanBoard = ({
 
   const renderCards = (columnId: KanbanColumnId, columnTasks: TeamTask[]): React.JSX.Element => {
     if (columnTasks.length === 0) {
-      return (
+      const addHandler =
+        onAddTask && columnId === 'todo'
+          ? () => onAddTask(false)
+          : onAddTask && columnId === 'in_progress'
+            ? () => onAddTask(true)
+            : undefined;
+      return addHandler ? (
+        <button
+          type="button"
+          onClick={addHandler}
+          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-border-emphasis)] hover:text-[var(--color-text-secondary)]"
+        >
+          <Plus size={13} />
+          Add task
+        </button>
+      ) : (
         <div className="rounded-md border border-dashed border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
           No tasks
         </div>
@@ -398,12 +414,6 @@ export const KanbanBoard = ({
           {COLUMNS.map((column) => {
             const columnTasks = groupedOrdered.get(column.id) ?? [];
             const accent = COLUMN_ACCENTS[column.id];
-            const addHandler =
-              onAddTask && column.id === 'todo'
-                ? () => onAddTask(false)
-                : onAddTask && column.id === 'in_progress'
-                  ? () => onAddTask(true)
-                  : undefined;
             return (
               <KanbanColumn
                 key={column.id}
@@ -412,7 +422,6 @@ export const KanbanBoard = ({
                 icon={accent.icon}
                 headerBg={accent.headerBg}
                 bodyBg={accent.bodyBg}
-                onAddTask={addHandler}
               >
                 {renderCards(column.id, columnTasks)}
               </KanbanColumn>
@@ -424,12 +433,6 @@ export const KanbanBoard = ({
           {COLUMNS.map((column) => {
             const columnTasks = groupedOrdered.get(column.id) ?? [];
             const accent = COLUMN_ACCENTS[column.id];
-            const addHandler =
-              onAddTask && column.id === 'todo'
-                ? () => onAddTask(false)
-                : onAddTask && column.id === 'in_progress'
-                  ? () => onAddTask(true)
-                  : undefined;
             return (
               <div key={column.id} className="w-64 shrink-0">
                 <KanbanColumn
@@ -438,7 +441,6 @@ export const KanbanBoard = ({
                   icon={accent.icon}
                   headerBg={accent.headerBg}
                   bodyBg={accent.bodyBg}
-                  onAddTask={addHandler}
                 >
                   {renderCards(column.id, columnTasks)}
                 </KanbanColumn>

@@ -24,6 +24,7 @@ import {
   Play,
   Plus,
   Search,
+  Square,
   Trash2,
   UserPlus,
   X,
@@ -107,6 +108,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
   const [launchDialogOpen, setLaunchDialogOpen] = useState(false);
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [stoppingTeam, setStoppingTeam] = useState(false);
   const [sendDialogRecipient, setSendDialogRecipient] = useState<string | undefined>(undefined);
   const [replyQuote, setReplyQuote] = useState<{ from: string; text: string } | undefined>(
     undefined
@@ -427,6 +429,17 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     });
   };
 
+  const handleStopTeam = useCallback(async (): Promise<void> => {
+    setStoppingTeam(true);
+    try {
+      await api.teams.stop(teamName);
+    } catch (err) {
+      console.error('Failed to stop team:', err);
+    } finally {
+      setStoppingTeam(false);
+    }
+  }, [teamName]);
+
   const handleDeleteTeam = useCallback((): void => {
     setDeleteConfirmOpen(true);
   }, []);
@@ -552,6 +565,23 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             <h2 className="text-base font-semibold text-[var(--color-text)]">{data.config.name}</h2>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            {data.isAlive && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    disabled={stoppingTeam}
+                    onClick={() => void handleStopTeam()}
+                  >
+                    <Square size={12} className={stoppingTeam ? 'animate-pulse' : ''} />
+                    Stop
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Stop team</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -603,7 +633,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         )}
       </div>
 
-      {!data.isAlive ? (
+      {!data.isAlive && !isTeamProvisioning ? (
         <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
           <span className="text-xs text-amber-200">Team is offline</span>
           <Button

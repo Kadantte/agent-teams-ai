@@ -788,15 +788,39 @@ async function handleSendMessage(
 
     // Smart routing: lead + alive → stdin direct, else → inbox
     if (isLeadRecipient && isAlive) {
+      // Separate try blocks: stdin delivery vs persistence
+      // If stdin succeeds but persistence fails, do NOT fallback to inbox (would duplicate)
+      let stdinSent = false;
       try {
         await provisioning.sendMessageToTeam(tn, payload.text!, validatedAttachments);
+        stdinSent = true;
+      } catch (stdinError: unknown) {
+        // Stdin failed (process died between check and write)
+        // If attachments were requested, fail rather than silently dropping them
+        if (validatedAttachments?.length) {
+          throw new Error(
+            'Failed to deliver message with attachments: team process became unavailable'
+          );
+        }
+        const errMsg = stdinError instanceof Error ? stdinError.message : 'unknown error';
+        logger.warn(`stdin fallback for ${tn}: ${errMsg}`);
+        // Fallback to inbox path below
+      }
 
-        const result = await getTeamDataService().sendDirectToLead(
-          tn,
-          leadName,
-          payload.text!,
-          payload.summary
-        );
+      if (stdinSent) {
+        // Persistence is best-effort — stdin already delivered the message
+        let result: SendMessageResult;
+        try {
+          result = await getTeamDataService().sendDirectToLead(
+            tn,
+            leadName,
+            payload.text!,
+            payload.summary
+          );
+        } catch (persistError) {
+          logger.warn(`Persistence failed after stdin delivery for ${tn}: ${String(persistError)}`);
+          result = { deliveredToInbox: false, messageId: `stdin-${Date.now()}` };
+        }
 
         const attachmentMeta: AttachmentMeta[] | undefined = validatedAttachments?.map((a) => ({
           id: a.id,
@@ -825,17 +849,6 @@ async function handleSendMessage(
         });
 
         return result;
-      } catch (stdinError: unknown) {
-        // Stdin failed (process died between check and write)
-        // If attachments were requested, fail rather than silently dropping them
-        if (validatedAttachments?.length) {
-          throw new Error(
-            'Failed to deliver message with attachments: team process became unavailable'
-          );
-        }
-        const errMsg = stdinError instanceof Error ? stdinError.message : 'unknown error';
-        logger.warn(`stdin fallback for ${tn}: ${errMsg}`);
-        // Fallback to inbox path for text-only messages
       }
     }
 

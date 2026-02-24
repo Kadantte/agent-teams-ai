@@ -1,6 +1,5 @@
 import { Badge } from '@renderer/components/ui/badge';
 import { cn } from '@renderer/lib/utils';
-import { Plus } from 'lucide-react';
 
 interface KanbanColumnProps {
   title: string;
@@ -8,7 +7,6 @@ interface KanbanColumnProps {
   icon?: React.ReactNode;
   headerBg?: string;
   bodyBg?: string;
-  onAddTask?: () => void;
   children: React.ReactNode;
 }
 
@@ -18,7 +16,6 @@ export const KanbanColumn = ({
   icon,
   headerBg,
   bodyBg,
-  onAddTask,
   children,
 }: KanbanColumnProps): React.JSX.Element => {
   return (
@@ -37,21 +34,9 @@ export const KanbanColumn = ({
           {icon}
           {title}
         </h4>
-        <div className="flex items-center gap-1.5">
-          {onAddTask ? (
-            <button
-              type="button"
-              onClick={onAddTask}
-              className="inline-flex size-5 items-center justify-center rounded text-[var(--color-text-muted)] transition-colors hover:bg-white/10 hover:text-[var(--color-text)]"
-              aria-label={`Add task to ${title}`}
-            >
-              <Plus size={13} />
-            </button>
-          ) : null}
-          <Badge variant="secondary" className="px-2 py-0.5 text-[10px] font-normal">
-            {count}
-          </Badge>
-        </div>
+        <Badge variant="secondary" className="px-2 py-0.5 text-[10px] font-normal">
+          {count}
+        </Badge>
       </header>
       <div className="flex max-h-[480px] flex-col gap-2 overflow-auto p-2">{children}</div>
     </section>

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AttachmentPreviewList } from '@renderer/components/team/attachments/AttachmentPreviewList';
 import { DropZoneOverlay } from '@renderer/components/team/attachments/DropZoneOverlay';
@@ -81,13 +81,26 @@ export const MessageComposer = ({
   const isLeadRecipient = selectedMember?.role === 'lead' || selectedMember?.name === 'team-lead';
   const canAttach = isLeadRecipient && isTeamAlive && canAddMore;
 
+  // Track whether we initiated a send — clear draft only on confirmed success
+  const pendingSendRef = useRef(false);
+
   const handleSend = useCallback(() => {
     if (!canSend) return;
     const autoSummary = trimmed.length > 60 ? trimmed.slice(0, 57) + '...' : trimmed;
+    pendingSendRef.current = true;
     onSend(recipient, trimmed, autoSummary, attachments.length > 0 ? attachments : undefined);
-    draft.clearDraft();
-    clearAttachments();
-  }, [canSend, recipient, trimmed, onSend, draft, attachments, clearAttachments]);
+  }, [canSend, recipient, trimmed, onSend, attachments]);
+
+  // Clear draft only after send completes successfully (sending: true → false, no error)
+  useEffect(() => {
+    if (!sending && pendingSendRef.current) {
+      pendingSendRef.current = false;
+      if (!sendError) {
+        draft.clearDraft();
+        clearAttachments();
+      }
+    }
+  }, [sending, sendError, draft, clearAttachments]);
 
   const handleKeyDownCapture = useCallback(
     (e: React.KeyboardEvent) => {

@@ -155,6 +155,7 @@ export const SidebarHeader = (): React.JSX.Element => {
     projects,
     activeProjectId,
     setActiveProject,
+    clearActiveProject,
     fetchRepositoryGroups,
     fetchProjects,
     toggleSidebar,
@@ -169,6 +170,7 @@ export const SidebarHeader = (): React.JSX.Element => {
       projects: s.projects,
       activeProjectId: s.activeProjectId,
       setActiveProject: s.setActiveProject,
+      clearActiveProject: s.clearActiveProject,
       fetchRepositoryGroups: s.fetchRepositoryGroups,
       fetchProjects: s.fetchProjects,
       toggleSidebar: s.toggleSidebar,
@@ -279,6 +281,8 @@ export const SidebarHeader = (): React.JSX.Element => {
                 : 'Nothing found'
             }
             className="text-sm font-medium"
+            resetLabel="Reset selection"
+            onReset={clearActiveProject}
             renderOption={(option, isSelected) => {
               const sessionCount = (option.meta?.sessionCount as number) ?? 0;
               const path = option.meta?.path as string | undefined;
