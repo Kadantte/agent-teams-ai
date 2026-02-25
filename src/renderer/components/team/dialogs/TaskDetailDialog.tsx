@@ -23,6 +23,7 @@ import {
 } from '@renderer/components/ui/select';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { markAsRead } from '@renderer/services/commentReadStorage';
+import { useStore } from '@renderer/store';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import {
   buildMemberColorMap,
@@ -31,7 +32,15 @@ import {
   TASK_STATUS_STYLES,
 } from '@renderer/utils/memberHelpers';
 import { formatDistanceToNow } from 'date-fns';
-import { ArrowLeftFromLine, ArrowRightFromLine, Clock, Link2, PenLine } from 'lucide-react';
+import {
+  ArrowLeftFromLine,
+  ArrowRightFromLine,
+  Clock,
+  FileCode,
+  Link2,
+  Loader2,
+  PenLine,
+} from 'lucide-react';
 
 import { TaskCommentsSection } from './TaskCommentsSection';
 
@@ -47,6 +56,7 @@ interface TaskDetailDialogProps {
   onClose: () => void;
   onScrollToTask?: (taskId: string) => void;
   onOwnerChange?: (taskId: string, owner: string | null) => void;
+  onViewChanges?: (taskId: string, filePath?: string) => void;
 }
 
 export const TaskDetailDialog = ({
@@ -59,6 +69,7 @@ export const TaskDetailDialog = ({
   onClose,
   onScrollToTask,
   onOwnerChange,
+  onViewChanges,
 }: TaskDetailDialogProps): React.JSX.Element => {
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
   const currentTask = task ? (taskMap.get(task.id) ?? task) : null;
@@ -70,6 +81,35 @@ export const TaskDetailDialog = ({
     const latest = Math.max(...comments.map((c) => new Date(c.createdAt).getTime()));
     if (latest > 0) markAsRead(teamName, currentTask.id, latest);
   }, [open, teamName, currentTask]);
+
+  // Lazy-load task changes when dialog is open and task is completed
+  const isTaskCompleted = currentTask?.status === 'completed';
+  const activeChangeSet = useStore((s) => s.activeChangeSet);
+  const changeSetLoading = useStore((s) => s.changeSetLoading);
+  const fetchTaskChanges = useStore((s) => s.fetchTaskChanges);
+
+  const taskChangesFiles = useMemo(() => {
+    if (!activeChangeSet || !currentTask) return null;
+    if ('taskId' in activeChangeSet && activeChangeSet.taskId === currentTask.id) {
+      return activeChangeSet.files;
+    }
+    return null;
+  }, [activeChangeSet, currentTask]);
+
+  useEffect(() => {
+    if (!open || !currentTask || !isTaskCompleted || !onViewChanges) return;
+    // Only fetch if we don't already have data for this task
+    if (taskChangesFiles !== null) return;
+    void fetchTaskChanges(teamName, currentTask.id);
+  }, [
+    open,
+    currentTask,
+    isTaskCompleted,
+    teamName,
+    fetchTaskChanges,
+    taskChangesFiles,
+    onViewChanges,
+  ]);
 
   const handleDependencyClick = (taskId: string): void => {
     onClose();
@@ -216,6 +256,51 @@ export const TaskDetailDialog = ({
             <p className="text-xs text-[var(--color-text-muted)]">No description</p>
           )}
         </CollapsibleTeamSection>
+
+        {/* Changes */}
+        {isTaskCompleted && onViewChanges ? (
+          <CollapsibleTeamSection
+            title="Changes"
+            badge={taskChangesFiles ? taskChangesFiles.length : undefined}
+            defaultOpen
+          >
+            {changeSetLoading && !taskChangesFiles ? (
+              <div className="flex items-center gap-2 py-2 text-xs text-[var(--color-text-muted)]">
+                <Loader2 size={14} className="animate-spin" />
+                Loading changes...
+              </div>
+            ) : taskChangesFiles && taskChangesFiles.length > 0 ? (
+              <div className="max-h-[200px] space-y-0.5 overflow-y-auto">
+                {taskChangesFiles.map((file) => (
+                  <button
+                    key={file.filePath}
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-surface-raised)]"
+                    onClick={() => {
+                      onClose();
+                      onViewChanges(currentTask.id, file.filePath);
+                    }}
+                  >
+                    <FileCode size={14} className="shrink-0 text-[var(--color-text-muted)]" />
+                    <span className="min-w-0 flex-1 truncate font-mono text-[var(--color-text-secondary)]">
+                      {file.relativePath}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {file.linesAdded > 0 ? (
+                        <span className="text-emerald-400">+{file.linesAdded}</span>
+                      ) : null}
+                      {file.linesRemoved > 0 ? (
+                        <span className="text-red-400">-{file.linesRemoved}</span>
+                      ) : null}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--color-text-muted)]">No file changes detected</p>
+            )}
+          </CollapsibleTeamSection>
+        ) : null}
 
         <div className="mb-3 space-y-2">
           {/* Dependencies */}

@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { cn } from '@renderer/lib/utils';
 import { AlertTriangle, ChevronRight, Info, ShieldCheck, X } from 'lucide-react';
 
+import { ConfidenceBadge } from './ConfidenceBadge';
+
 import type { TaskScopeConfidence } from '@shared/types';
 import type { FC } from 'react';
 
@@ -81,8 +83,13 @@ export const ScopeWarningBanner = ({
           Read more
           <ChevronRight className={cn('size-3 transition-transform', expanded && 'rotate-90')} />
         </button>
+
+        <div className="flex-1" />
+
+        <ConfidenceBadge confidence={confidence} />
+
         {onDismiss && (
-          <button onClick={onDismiss} className="ml-auto text-text-muted hover:text-text">
+          <button onClick={onDismiss} className="text-text-muted hover:text-text">
             <X className="size-3.5" />
           </button>
         )}

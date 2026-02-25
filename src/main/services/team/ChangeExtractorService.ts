@@ -4,6 +4,8 @@ import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import * as readline from 'readline';
 
+import { TeamConfigReader } from './TeamConfigReader';
+
 import type { TaskBoundaryParser } from './TaskBoundaryParser';
 import type { TeamMemberLogsFinder } from './TeamMemberLogsFinder';
 import type {
@@ -39,7 +41,8 @@ export class ChangeExtractorService {
 
   constructor(
     private readonly logsFinder: TeamMemberLogsFinder,
-    private readonly boundaryParser: TaskBoundaryParser
+    private readonly boundaryParser: TaskBoundaryParser,
+    private readonly configReader: TeamConfigReader = new TeamConfigReader()
   ) {}
 
   /** Получить все изменения агента */
@@ -51,6 +54,7 @@ export class ChangeExtractorService {
     }
 
     const paths = await this.logsFinder.findMemberLogPaths(teamName, memberName);
+    const projectPath = await this.resolveProjectPath(teamName);
 
     // Собираем все snippets из всех JSONL файлов
     const allSnippets: SnippetDiff[] = [];
@@ -70,7 +74,7 @@ export class ChangeExtractorService {
       allSnippets.push(...snippets);
     }
 
-    const files = this.aggregateByFile(allSnippets);
+    const files = this.aggregateByFile(allSnippets, projectPath);
 
     let totalLinesAdded = 0;
     let totalLinesRemoved = 0;
@@ -106,6 +110,8 @@ export class ChangeExtractorService {
       return this.emptyTaskChangeSet(teamName, taskId);
     }
 
+    const projectPath = await this.resolveProjectPath(teamName);
+
     // Парсим boundaries для каждого лог-файла и ищем scope данной задачи
     const allScopes: TaskChangeScope[] = [];
     for (const ref of logRefs) {
@@ -118,12 +124,12 @@ export class ChangeExtractorService {
 
     // Если scope не найден — fallback на весь файл
     if (allScopes.length === 0) {
-      return this.fallbackSingleTaskScope(teamName, taskId, logRefs);
+      return this.fallbackSingleTaskScope(teamName, taskId, logRefs, projectPath);
     }
 
     // Фильтруем snippets по tool_use IDs из scope
     const allowedToolUseIds = new Set(allScopes.flatMap((s) => s.toolUseIds));
-    const files = await this.extractFilteredChanges(logRefs, allowedToolUseIds);
+    const files = await this.extractFilteredChanges(logRefs, allowedToolUseIds, projectPath);
 
     const worstTier = Math.max(...allScopes.map((s) => s.confidence.tier));
     const warnings: string[] = [];
@@ -156,6 +162,16 @@ export class ChangeExtractorService {
   }
 
   // ---- Private methods ----
+
+  /** Получить projectPath из конфига команды */
+  private async resolveProjectPath(teamName: string): Promise<string | undefined> {
+    try {
+      const config = await this.configReader.getConfig(teamName);
+      return config?.projectPath?.trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   /** Парсить один JSONL файл и извлечь все snippets (двухпроходный подход) */
   private async parseJSONLFile(filePath: string): Promise<SnippetDiff[]> {
@@ -376,11 +392,19 @@ export class ChangeExtractorService {
         totalAdded += added;
         totalRemoved += removed;
       }
+      // Normalize separators for cross-platform path stripping
+      const normalizedFp = fp.replace(/\\/g, '/');
+      const normalizedProject = projectPath?.replace(/\\/g, '/');
+      const relative = normalizedProject
+        ? normalizedFp.startsWith(normalizedProject + '/')
+          ? normalizedFp.slice(normalizedProject.length + 1)
+          : normalizedFp.startsWith(normalizedProject)
+            ? normalizedFp.slice(normalizedProject.length)
+            : normalizedFp.split('/').slice(-3).join('/')
+        : normalizedFp.split('/').slice(-3).join('/');
       return {
         filePath: fp,
-        relativePath: projectPath
-          ? fp.replace(projectPath + '/', '')
-          : fp.split('/').slice(-3).join('/'),
+        relativePath: relative,
         snippets: data.snippets,
         linesAdded: totalAdded,
         linesRemoved: totalRemoved,
@@ -487,7 +511,8 @@ export class ChangeExtractorService {
   /** Извлечь изменения из JSONL файлов, фильтруя по tool_use IDs */
   private async extractFilteredChanges(
     logRefs: LogFileRef[],
-    allowedToolUseIds: Set<string>
+    allowedToolUseIds: Set<string>,
+    projectPath?: string
   ): Promise<FileChangeSummary[]> {
     const allSnippets: SnippetDiff[] = [];
     for (const ref of logRefs) {
@@ -503,27 +528,29 @@ export class ChangeExtractorService {
         allSnippets.push(...snippets);
       }
     }
-    return this.aggregateByFile(allSnippets);
+    return this.aggregateByFile(allSnippets, projectPath);
   }
 
   /** Извлечь все изменения из одного файла */
   private async extractAllChanges(
     filePath: string,
-    _memberName: string
+    _memberName: string,
+    projectPath?: string
   ): Promise<FileChangeSummary[]> {
     const snippets = await this.parseJSONLFile(filePath);
-    return this.aggregateByFile(snippets);
+    return this.aggregateByFile(snippets, projectPath);
   }
 
   /** Fallback: вернуть все изменения из лог-файлов как Tier 4 */
   private async fallbackSingleTaskScope(
     teamName: string,
     taskId: string,
-    logRefs: LogFileRef[]
+    logRefs: LogFileRef[],
+    projectPath?: string
   ): Promise<TaskChangeSetV2> {
     const allFiles: FileChangeSummary[] = [];
     for (const ref of logRefs) {
-      const files = await this.extractAllChanges(ref.filePath, ref.memberName);
+      const files = await this.extractAllChanges(ref.filePath, ref.memberName, projectPath);
       allFiles.push(...files);
     }
 

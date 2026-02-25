@@ -93,13 +93,9 @@ export function buildMemberColorMap(members: MemberColorInput[]): Map<string, st
     map.set(removed[i].name, removed[i].color ?? getMemberColor(active.length + i));
   }
 
-  // Map "user" to team-lead's resolved color
-  const lead = members.find(
-    (m) => m.agentType === 'team-lead' || m.role?.toLowerCase().includes('lead')
-  );
-  if (lead) {
-    map.set('user', map.get(lead.name) ?? getMemberColor(0));
-  }
+  // "user" = the human operator; gets a unique reserved color
+  // that is never assigned to any team member.
+  map.set('user', 'user');
 
   return map;
 }

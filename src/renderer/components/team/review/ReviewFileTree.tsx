@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
@@ -14,6 +14,7 @@ interface ReviewFileTreeProps {
   viewedSet?: Set<string>;
   onMarkViewed?: (filePath: string) => void;
   onUnmarkViewed?: (filePath: string) => void;
+  activeFilePath?: string;
 }
 
 interface TreeNode {
@@ -108,6 +109,7 @@ const FileStatusIcon = ({ status }: { status: FileStatus }) => {
 const TreeItem = ({
   node,
   selectedFilePath,
+  activeFilePath,
   onSelectFile,
   depth,
   hunkDecisions,
@@ -117,6 +119,7 @@ const TreeItem = ({
 }: {
   node: TreeNode;
   selectedFilePath: string | null;
+  activeFilePath?: string;
   onSelectFile: (filePath: string) => void;
   depth: number;
   hunkDecisions: Record<string, HunkDecision>;
@@ -126,15 +129,19 @@ const TreeItem = ({
 }) => {
   if (node.isFile && node.file) {
     const isSelected = node.file.filePath === selectedFilePath;
+    const isActive = node.file.filePath === activeFilePath && !isSelected;
     const status = getFileStatus(node.file, hunkDecisions);
     return (
       <button
+        data-tree-file={node.file.filePath}
         onClick={() => onSelectFile(node.file!.filePath)}
         className={cn(
           'flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs transition-colors',
           isSelected
             ? 'bg-blue-500/20 text-blue-300'
-            : 'text-text-secondary hover:bg-surface-raised hover:text-text'
+            : isActive
+              ? 'border-l-2 border-blue-400 text-text'
+              : 'text-text-secondary hover:bg-surface-raised hover:text-text'
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
@@ -196,6 +203,7 @@ const TreeItem = ({
             key={child.fullPath}
             node={child}
             selectedFilePath={selectedFilePath}
+            activeFilePath={activeFilePath}
             onSelectFile={onSelectFile}
             depth={depth + 1}
             hunkDecisions={hunkDecisions}
@@ -215,9 +223,22 @@ export const ReviewFileTree = ({
   viewedSet,
   onMarkViewed,
   onUnmarkViewed,
+  activeFilePath,
 }: ReviewFileTreeProps) => {
   const hunkDecisions = useStore((state) => state.hunkDecisions);
   const tree = useMemo(() => buildTree(files), [files]);
+
+  // Auto-scroll tree to active file when scroll-spy updates
+  useEffect(() => {
+    if (!activeFilePath) return;
+
+    const btn = document.querySelector<HTMLElement>(
+      `[data-tree-file="${CSS.escape(activeFilePath)}"]`
+    );
+    if (btn) {
+      btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [activeFilePath]);
 
   if (files.length === 0) {
     return <div className="p-4 text-center text-xs text-text-muted">No changed files</div>;
@@ -235,6 +256,7 @@ export const ReviewFileTree = ({
             key={node.fullPath}
             node={node}
             selectedFilePath={selectedFilePath}
+            activeFilePath={activeFilePath}
             onSelectFile={onSelectFile}
             depth={0}
             hunkDecisions={hunkDecisions}

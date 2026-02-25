@@ -492,6 +492,11 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* Prevent drag region bleed-through on Windows: all fixed overlays must be no-drag */
+.fixed {
+  -webkit-app-region: no-drag;
+}
+
 /* Hide horizontal scrollbar in tab bar */
 .scrollbar-none {
   scrollbar-width: none;

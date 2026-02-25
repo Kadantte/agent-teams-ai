@@ -45,6 +45,8 @@ export const ReviewToolbar = ({
 }: ReviewToolbarProps): React.ReactElement => {
   const hasRejected = stats.rejected > 0;
   const canApply = hasRejected && !applying;
+  const totalChanges = stats.pending + stats.accepted + stats.rejected;
+  const reviewedCount = stats.accepted + stats.rejected;
 
   return (
     <div className="flex items-center gap-3 border-b border-border bg-surface-sidebar px-4 py-2">
@@ -75,6 +77,21 @@ export const ReviewToolbar = ({
         <span className="text-red-400">-{changeStats.linesRemoved}</span>
         <span className="ml-1">across {changeStats.filesChanged} files</span>
       </div>
+
+      {/* Review progress */}
+      {totalChanges > 0 && (
+        <div className="flex items-center gap-2 text-xs">
+          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-zinc-700/50">
+            <div
+              className="h-full rounded-full bg-blue-500/70 transition-all duration-300"
+              style={{ width: `${(reviewedCount / totalChanges) * 100}%` }}
+            />
+          </div>
+          <span className="text-text-muted">
+            {reviewedCount}/{totalChanges}
+          </span>
+        </div>
+      )}
 
       <div className="flex-1" />
 
@@ -140,7 +157,7 @@ export const ReviewToolbar = ({
             Accept All
           </button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">Accept all changes in current file</TooltipContent>
+        <TooltipContent side="bottom">Accept all changes across all files</TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -153,7 +170,7 @@ export const ReviewToolbar = ({
             Reject All
           </button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">Reject all changes in current file</TooltipContent>
+        <TooltipContent side="bottom">Reject all changes across all files</TooltipContent>
       </Tooltip>
 
       <Tooltip>

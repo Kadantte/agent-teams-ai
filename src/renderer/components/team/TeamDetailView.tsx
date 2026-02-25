@@ -495,9 +495,21 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     }
   }, [teamName, refreshTeamData]);
 
+  const selectReviewFile = useStore((s) => s.selectReviewFile);
+
   const handleViewChanges = useCallback((taskId: string) => {
     setReviewDialogState({ open: true, mode: 'task', taskId });
   }, []);
+
+  const handleViewChangesForFile = useCallback(
+    (taskId: string, filePath?: string) => {
+      setReviewDialogState({ open: true, mode: 'task', taskId });
+      if (filePath) {
+        selectReviewFile(filePath);
+      }
+    },
+    [selectReviewFile]
+  );
 
   const handleDeleteTeam = useCallback((): void => {
     setDeleteConfirmOpen(true);
@@ -1093,6 +1105,10 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             setSendDialogOpen(true);
           }}
           onMessageVisible={handleMessageVisible}
+          onTaskIdClick={(taskId) => {
+            const task = taskMap.get(taskId);
+            if (task) setSelectedTask(task);
+          }}
         />
       </CollapsibleTeamSection>
 
@@ -1331,6 +1347,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         onOwnerChange={(taskId, owner) => {
           void updateTaskOwner(teamName, taskId, owner);
         }}
+        onViewChanges={handleViewChangesForFile}
       />
 
       <ChangeReviewDialog

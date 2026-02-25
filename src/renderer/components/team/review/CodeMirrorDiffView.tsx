@@ -25,6 +25,7 @@ import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 
 import { acceptChunk, getChunks, mergeUndoSupport, rejectChunk } from './CodeMirrorDiffUtils';
+import { portionCollapseExtension } from './portionCollapse';
 
 interface CodeMirrorDiffViewProps {
   original: string;
@@ -45,6 +46,10 @@ interface CodeMirrorDiffViewProps {
   onContentChanged?: (content: string) => void;
   /** Cached EditorState to restore (preserves undo history between file switches) */
   initialState?: EditorState;
+  /** Use portion collapse instead of CM's collapseUnchanged (Expand N / Expand All buttons) */
+  usePortionCollapse?: boolean;
+  /** Lines per "Expand N" click (only with usePortionCollapse). Default: 100 */
+  portionSize?: number;
 }
 
 /** Synchronous language extension for common file types (bundled by Vite) */
@@ -275,6 +280,8 @@ export const CodeMirrorDiffView = ({
   editorViewRef: externalViewRef,
   onContentChanged,
   initialState,
+  usePortionCollapse = false,
+  portionSize = 100,
 }: CodeMirrorDiffViewProps): React.ReactElement => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -305,6 +312,8 @@ export const CodeMirrorDiffView = ({
   const langCompartment = useRef(new Compartment());
   // Compartment for merge view — allows dynamic collapse reconfigure without editor recreation
   const mergeCompartment = useRef(new Compartment());
+  // Compartment for portion collapse (separate from merge to allow independent reconfigure)
+  const portionCompartment = useRef(new Compartment());
 
   // Collapse as ref — used in buildExtensions (initial value) without triggering full rebuild
   const collapseRef = useRef({ enabled: collapseUnchangedProp, margin: collapseMargin });
@@ -322,7 +331,7 @@ export const CodeMirrorDiffView = ({
         syntaxHighlightDeletions: true,
       };
 
-      if (collapse) {
+      if (collapse && !usePortionCollapse) {
         mergeConfig.collapseUnchanged = {
           margin,
           minSize: 4,
@@ -442,7 +451,7 @@ export const CodeMirrorDiffView = ({
 
       return unifiedMergeView(mergeConfig);
     },
-    [original, showMergeControls, scrollToNextChunk]
+    [original, showMergeControls, scrollToNextChunk, usePortionCollapse]
   );
 
   const buildExtensions = useCallback(() => {
@@ -660,8 +669,21 @@ export const CodeMirrorDiffView = ({
       )
     );
 
+    // Portion collapse — must come AFTER merge view so ChunkField is available
+    extensions.push(
+      portionCompartment.current.of(
+        usePortionCollapse && collapseRef.current.enabled
+          ? portionCollapseExtension({
+              margin: collapseRef.current.margin,
+              minSize: 4,
+              portionSize,
+            })
+          : []
+      )
+    );
+
     return extensions;
-  }, [readOnly, showMergeControls, buildMergeExtension]);
+  }, [readOnly, showMergeControls, buildMergeExtension, usePortionCollapse, portionSize]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -729,16 +751,27 @@ export const CodeMirrorDiffView = ({
     };
   }, [fileName, buildExtensions, initialState]);
 
-  // Dynamic collapse toggle — reconfigure compartment in-place, preserving undo history
+  // Dynamic collapse toggle — reconfigure compartments in-place, preserving undo history
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({
-      effects: mergeCompartment.current.reconfigure(
-        buildMergeExtension(collapseUnchangedProp, collapseMargin)
-      ),
+      effects: [
+        mergeCompartment.current.reconfigure(
+          buildMergeExtension(collapseUnchangedProp, collapseMargin)
+        ),
+        portionCompartment.current.reconfigure(
+          usePortionCollapse && collapseUnchangedProp
+            ? portionCollapseExtension({
+                margin: collapseMargin,
+                minSize: 4,
+                portionSize,
+              })
+            : []
+        ),
+      ],
     });
-  }, [collapseUnchangedProp, collapseMargin, buildMergeExtension]);
+  }, [collapseUnchangedProp, collapseMargin, buildMergeExtension, usePortionCollapse, portionSize]);
 
   // Auto-viewed detection via IntersectionObserver
   useEffect(() => {

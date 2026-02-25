@@ -41,6 +41,8 @@ interface ActivityItemProps {
   onMemberNameClick?: (memberName: string) => void;
   onCreateTask?: (subject: string, description: string) => void;
   onReply?: (message: InboxMessage) => void;
+  /** Called when a task ID link (e.g. #10) is clicked in message text. */
+  onTaskIdClick?: (taskId: string) => void;
 }
 
 function getStringField(obj: StructuredMessage, key: string): string | null {
@@ -125,6 +127,11 @@ function getSystemMessageLabel(text: string): string | null {
 // Full message card — left colored border, name badge, collapsible content
 // ---------------------------------------------------------------------------
 
+/** Convert `#<digits>` in plain text to markdown links with task:// protocol. */
+function linkifyTaskIdsInMarkdown(text: string): string {
+  return text.replace(/#(\d+)/g, '[#$1](task://$1)');
+}
+
 export const ActivityItem = ({
   message,
   teamName,
@@ -135,6 +142,7 @@ export const ActivityItem = ({
   onMemberNameClick,
   onCreateTask,
   onReply,
+  onTaskIdClick,
 }: ActivityItemProps): React.JSX.Element => {
   const colors = getTeamColorSet(memberColor ?? message.color ?? '');
   const formattedRole = formatAgentRole(memberRole);
@@ -153,11 +161,13 @@ export const ActivityItem = ({
   const systemLabel = !structured && !rateLimited ? getSystemMessageLabel(message.text) : null;
   const [isExpanded, setIsExpanded] = useState(!systemLabel);
 
-  // Strip agent-only blocks from displayed text
-  const displayText = useMemo(
-    () => (structured ? null : stripAgentBlocks(message.text)),
-    [structured, message.text]
-  );
+  // Strip agent-only blocks from displayed text + linkify task IDs
+  const displayText = useMemo(() => {
+    if (structured) return null;
+    const stripped = stripAgentBlocks(message.text).trim();
+    if (!stripped) return null; // All content was agent-only blocks → show summary instead
+    return onTaskIdClick ? linkifyTaskIdsInMarkdown(stripped) : stripped;
+  }, [structured, message.text, onTaskIdClick]);
 
   // Check if this is a reply message
   const parsedReply = useMemo(
@@ -355,9 +365,31 @@ export const ActivityItem = ({
             </div>
           ) : parsedReply ? (
             <ReplyQuoteBlock reply={parsedReply} />
-          ) : (
-            <MarkdownViewer content={displayText ?? ''} maxHeight="max-h-56" copyable bare />
-          )}
+          ) : displayText ? (
+            <span
+              onClickCapture={
+                onTaskIdClick
+                  ? (e) => {
+                      const link = (e.target as HTMLElement).closest<HTMLAnchorElement>(
+                        'a[href^="task://"]'
+                      );
+                      if (link) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const taskId = link.getAttribute('href')?.replace('task://', '');
+                        if (taskId) onTaskIdClick(taskId);
+                      }
+                    }
+                  : undefined
+              }
+            >
+              <MarkdownViewer content={displayText} maxHeight="max-h-56" copyable bare />
+            </span>
+          ) : summaryText ? (
+            <p className="text-xs italic" style={{ color: CARD_TEXT_LIGHT }}>
+              {summaryText}
+            </p>
+          ) : null}
           {message.attachments?.length && message.messageId ? (
             <AttachmentDisplay
               teamName={teamName}

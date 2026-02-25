@@ -335,7 +335,8 @@ function buildAgentBlockUsagePolicy(): string {
 ${AGENT_BLOCK_OPEN}
 (internal instructions: commands, script usage, paths, etc.)
 ${AGENT_BLOCK_CLOSE}
-- Put ONLY the internal instructions inside the agent-only block.`;
+- Put ONLY the internal instructions inside the agent-only block.
+- CRITICAL: Messages to "user" (the human) must NEVER contain agent-only blocks. Write them as plain readable text — the human sees these messages directly in the UI. Agent-only blocks are stripped before display, so a message containing ONLY an agent-only block will appear completely empty.`;
 }
 
 function getSystemLocale(): string {

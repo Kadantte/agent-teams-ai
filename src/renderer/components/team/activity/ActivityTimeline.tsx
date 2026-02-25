@@ -20,6 +20,8 @@ interface ActivityTimelineProps {
   onMemberClick?: (member: ResolvedTeamMember) => void;
   /** Called when a message enters the viewport (for marking as read). */
   onMessageVisible?: (message: InboxMessage) => void;
+  /** Called when a task ID link (e.g. #10) is clicked in message text. */
+  onTaskIdClick?: (taskId: string) => void;
 }
 
 const VIEWPORT_THRESHOLD = 0.15;
@@ -35,6 +37,7 @@ const MessageRowWithObserver = ({
   onCreateTask,
   onReply,
   onVisible,
+  onTaskIdClick,
 }: {
   message: InboxMessage;
   teamName: string;
@@ -46,6 +49,7 @@ const MessageRowWithObserver = ({
   onCreateTask?: (subject: string, description: string) => void;
   onReply?: (message: InboxMessage) => void;
   onVisible?: (message: InboxMessage) => void;
+  onTaskIdClick?: (taskId: string) => void;
 }): React.JSX.Element => {
   const ref = useRef<HTMLDivElement>(null);
   const reportedRef = useRef(false);
@@ -89,6 +93,7 @@ const MessageRowWithObserver = ({
         onMemberNameClick={onMemberNameClick}
         onCreateTask={onCreateTask}
         onReply={onReply}
+        onTaskIdClick={onTaskIdClick}
       />
     </div>
   );
@@ -103,6 +108,7 @@ export const ActivityTimeline = ({
   onReplyToMessage,
   onMemberClick,
   onMessageVisible,
+  onTaskIdClick,
 }: ActivityTimelineProps): React.JSX.Element => {
   const colorMap = members ? buildMemberColorMap(members) : new Map<string, string>();
   const memberInfo = new Map<string, { role?: string; color?: string }>();
@@ -167,6 +173,7 @@ export const ActivityTimeline = ({
             onCreateTask={onCreateTaskFromMessage}
             onReply={onReplyToMessage}
             onVisible={onMessageVisible}
+            onTaskIdClick={onTaskIdClick}
           />
         );
       })}

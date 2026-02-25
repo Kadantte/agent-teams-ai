@@ -9,11 +9,15 @@ interface KeyboardShortcutsHelpProps {
 
 const shortcuts = [
   { keys: ['\u2325+J'], action: 'Next change' },
+  { keys: ['\u2325+K'], action: 'Previous change' },
+  { keys: ['\u2325+\u2193'], action: 'Next file' },
+  { keys: ['\u2325+\u2191'], action: 'Previous file' },
   { keys: ['\u2318+Y'], action: 'Accept change' },
   { keys: ['\u2318+N'], action: 'Reject change' },
   { keys: ['\u2318+\u21A9'], action: 'Save file' },
   { keys: ['\u2318+Z'], action: 'Undo' },
   { keys: ['\u2318+\u21E7+Z'], action: 'Redo' },
+  { keys: ['?'], action: 'Toggle shortcuts' },
   { keys: ['Esc'], action: 'Close dialog' },
 ];
 
