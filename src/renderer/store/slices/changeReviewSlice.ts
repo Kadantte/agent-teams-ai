@@ -7,6 +7,10 @@ const taskChangesCheckInFlight = new Set<string>();
 const taskChangesNegativeCache = new Map<string, number>();
 const NEGATIVE_CACHE_TTL = 30_000;
 
+/** Debounce timer for persisting decisions to disk */
+let persistDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const PERSIST_DEBOUNCE_MS = 500;
+
 import type { AppState } from '../types';
 import type {
   AgentChangeSet,
@@ -64,7 +68,14 @@ export interface ChangeReviewSlice {
   fetchTaskChanges: (teamName: string, taskId: string) => Promise<void>;
   selectReviewFile: (filePath: string | null) => void;
   clearChangeReview: () => void;
+  clearChangeReviewCache: () => void;
+  resetAllReviewState: () => void;
   fetchChangeStats: (teamName: string, memberName: string) => Promise<void>;
+
+  // Decision persistence actions
+  loadDecisionsFromDisk: (teamName: string, scopeKey: string) => Promise<void>;
+  persistDecisions: (teamName: string, scopeKey: string) => void;
+  clearDecisionsFromDisk: (teamName: string, scopeKey: string) => Promise<void>;
 
   // Phase 2 actions
   setHunkDecision: (filePath: string, hunkIndex: number, decision: HunkDecision) => void;
@@ -175,6 +186,70 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
       applying: false,
       editedContents: {},
     });
+  },
+
+  clearChangeReviewCache: () => {
+    set({
+      activeChangeSet: null,
+      changeSetLoading: false,
+      changeSetError: null,
+      selectedReviewFilePath: null,
+      fileContents: {},
+      fileContentsLoading: {},
+      applyError: null,
+      applying: false,
+      editedContents: {},
+    });
+  },
+
+  resetAllReviewState: () => {
+    set({
+      activeChangeSet: null,
+      changeSetLoading: false,
+      changeSetError: null,
+      selectedReviewFilePath: null,
+      hunkDecisions: {},
+      fileDecisions: {},
+      fileContents: {},
+      fileContentsLoading: {},
+      applyError: null,
+      applying: false,
+      editedContents: {},
+    });
+  },
+
+  // ── Decision persistence ──
+
+  loadDecisionsFromDisk: async (teamName: string, scopeKey: string) => {
+    try {
+      const data = await api.review.loadDecisions(teamName, scopeKey);
+      // Always set decisions — even to empty if no saved file exists.
+      // This prevents stale decisions from a previous scope leaking through.
+      set({
+        hunkDecisions: data?.hunkDecisions ?? {},
+        fileDecisions: data?.fileDecisions ?? {},
+      });
+    } catch (error) {
+      logger.error('loadDecisionsFromDisk error:', error);
+    }
+  },
+
+  persistDecisions: (teamName: string, scopeKey: string) => {
+    if (persistDebounceTimer) {
+      clearTimeout(persistDebounceTimer);
+    }
+    persistDebounceTimer = setTimeout(() => {
+      const { hunkDecisions, fileDecisions } = get();
+      void api.review.saveDecisions(teamName, scopeKey, hunkDecisions, fileDecisions);
+    }, PERSIST_DEBOUNCE_MS);
+  },
+
+  clearDecisionsFromDisk: async (teamName: string, scopeKey: string) => {
+    try {
+      await api.review.clearDecisions(teamName, scopeKey);
+    } catch (error) {
+      logger.error('clearDecisionsFromDisk error:', error);
+    }
   },
 
   fetchChangeStats: async (teamName: string, memberName: string) => {

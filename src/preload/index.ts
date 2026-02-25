@@ -12,14 +12,17 @@ import {
   HTTP_SERVER_STOP,
   REVIEW_APPLY_DECISIONS,
   REVIEW_CHECK_CONFLICT,
+  REVIEW_CLEAR_DECISIONS,
   REVIEW_GET_AGENT_CHANGES,
   REVIEW_GET_CHANGE_STATS,
   REVIEW_GET_FILE_CONTENT,
   REVIEW_GET_GIT_FILE_LOG,
   REVIEW_GET_TASK_CHANGES,
+  REVIEW_LOAD_DECISIONS,
   REVIEW_PREVIEW_REJECT,
   REVIEW_REJECT_FILE,
   REVIEW_REJECT_HUNKS,
+  REVIEW_SAVE_DECISIONS,
   REVIEW_SAVE_EDITED_FILE,
   SSH_CONNECT,
   SSH_DISCONNECT,
@@ -123,6 +126,7 @@ import type {
   FileChangeWithContent,
   GlobalTask,
   HttpServerStatus,
+  HunkDecision,
   IpcResult,
   KanbanColumnId,
   MemberFullStats,
@@ -776,6 +780,30 @@ const electronAPI: ElectronAPI = {
     // Editable diff
     saveEditedFile: async (filePath: string, content: string) => {
       return invokeIpcWithResult<{ success: boolean }>(REVIEW_SAVE_EDITED_FILE, filePath, content);
+    },
+    // Decision persistence
+    loadDecisions: async (teamName: string, scopeKey: string) => {
+      return invokeIpcWithResult<{
+        hunkDecisions: Record<string, HunkDecision>;
+        fileDecisions: Record<string, HunkDecision>;
+      } | null>(REVIEW_LOAD_DECISIONS, teamName, scopeKey);
+    },
+    saveDecisions: async (
+      teamName: string,
+      scopeKey: string,
+      hunkDecisions: Record<string, HunkDecision>,
+      fileDecisions: Record<string, HunkDecision>
+    ) => {
+      return invokeIpcWithResult<void>(
+        REVIEW_SAVE_DECISIONS,
+        teamName,
+        scopeKey,
+        hunkDecisions,
+        fileDecisions
+      );
+    },
+    clearDecisions: async (teamName: string, scopeKey: string) => {
+      return invokeIpcWithResult<void>(REVIEW_CLEAR_DECISIONS, teamName, scopeKey);
     },
     onCmdN: (callback: () => void): (() => void) => {
       const handler = (): void => callback();

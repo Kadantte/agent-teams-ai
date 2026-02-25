@@ -20,6 +20,7 @@ import type {
   ChangeStats,
   ConflictCheckResult,
   FileChangeWithContent,
+  HunkDecision,
   RejectResult,
   SnippetDiff,
   TaskChangeSetV2,
@@ -470,6 +471,21 @@ export interface ReviewAPI {
   ) => Promise<{ preview: string; hasConflicts: boolean }>;
   // Editable diff
   saveEditedFile: (filePath: string, content: string) => Promise<{ success: boolean }>;
+  // Decision persistence
+  loadDecisions: (
+    teamName: string,
+    scopeKey: string
+  ) => Promise<{
+    hunkDecisions: Record<string, HunkDecision>;
+    fileDecisions: Record<string, HunkDecision>;
+  } | null>;
+  saveDecisions: (
+    teamName: string,
+    scopeKey: string,
+    hunkDecisions: Record<string, HunkDecision>,
+    fileDecisions: Record<string, HunkDecision>
+  ) => Promise<void>;
+  clearDecisions: (teamName: string, scopeKey: string) => Promise<void>;
   onCmdN?: (callback: () => void) => (() => void) | undefined;
   // Phase 4
   getGitFileLog: (

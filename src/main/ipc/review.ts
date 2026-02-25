@@ -4,17 +4,21 @@
  * Паттерн: module-level state + guard + wrapReviewHandler (как teams.ts)
  */
 
+import { ReviewDecisionStore } from '@main/services/team/ReviewDecisionStore';
 import {
   REVIEW_APPLY_DECISIONS,
   REVIEW_CHECK_CONFLICT,
+  REVIEW_CLEAR_DECISIONS,
   REVIEW_GET_AGENT_CHANGES,
   REVIEW_GET_CHANGE_STATS,
   REVIEW_GET_FILE_CONTENT,
   REVIEW_GET_GIT_FILE_LOG,
   REVIEW_GET_TASK_CHANGES,
+  REVIEW_LOAD_DECISIONS,
   REVIEW_PREVIEW_REJECT,
   REVIEW_REJECT_FILE,
   REVIEW_REJECT_HUNKS,
+  REVIEW_SAVE_DECISIONS,
   REVIEW_SAVE_EDITED_FILE,
   // eslint-disable-next-line boundaries/element-types -- IPC channel constants are shared between main and preload by design
 } from '@preload/constants/ipcChannels';
@@ -32,6 +36,7 @@ import type {
   ChangeStats,
   ConflictCheckResult,
   FileChangeWithContent,
+  HunkDecision,
   RejectResult,
   SnippetDiff,
   TaskChangeSetV2,
@@ -46,6 +51,7 @@ let changeExtractor: ChangeExtractorService | null = null;
 let reviewApplier: ReviewApplierService | null = null;
 let fileContentResolver: FileContentResolver | null = null;
 let gitDiffFallback: GitDiffFallback | null = null;
+const reviewDecisionStore = new ReviewDecisionStore();
 
 function getChangeExtractor(): ChangeExtractorService {
   if (!changeExtractor) throw new Error('Review handlers not initialized');
@@ -94,6 +100,10 @@ export function registerReviewHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(REVIEW_SAVE_EDITED_FILE, handleSaveEditedFile);
   // Phase 4
   ipcMain.handle(REVIEW_GET_GIT_FILE_LOG, handleGetGitFileLog);
+  // Decision persistence
+  ipcMain.handle(REVIEW_LOAD_DECISIONS, handleLoadDecisions);
+  ipcMain.handle(REVIEW_SAVE_DECISIONS, handleSaveDecisions);
+  ipcMain.handle(REVIEW_CLEAR_DECISIONS, handleClearDecisions);
 }
 
 export function removeReviewHandlers(ipcMain: IpcMain): void {
@@ -112,6 +122,10 @@ export function removeReviewHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(REVIEW_SAVE_EDITED_FILE);
   // Phase 4
   ipcMain.removeHandler(REVIEW_GET_GIT_FILE_LOG);
+  // Decision persistence
+  ipcMain.removeHandler(REVIEW_LOAD_DECISIONS);
+  ipcMain.removeHandler(REVIEW_SAVE_DECISIONS);
+  ipcMain.removeHandler(REVIEW_CLEAR_DECISIONS);
 }
 
 // --- Локальный wrapReviewHandler ---
@@ -260,4 +274,39 @@ async function handleGetGitFileLog(
     }
     return gitDiffFallback.getFileLog(projectPath, filePath);
   });
+}
+
+// --- Decision Persistence Handlers ---
+
+async function handleLoadDecisions(
+  _event: IpcMainInvokeEvent,
+  teamName: string,
+  scopeKey: string
+): Promise<
+  IpcResult<{
+    hunkDecisions: Record<string, HunkDecision>;
+    fileDecisions: Record<string, HunkDecision>;
+  } | null>
+> {
+  return wrapReviewHandler('loadDecisions', () => reviewDecisionStore.load(teamName, scopeKey));
+}
+
+async function handleSaveDecisions(
+  _event: IpcMainInvokeEvent,
+  teamName: string,
+  scopeKey: string,
+  hunkDecisions: Record<string, HunkDecision>,
+  fileDecisions: Record<string, HunkDecision>
+): Promise<IpcResult<void>> {
+  return wrapReviewHandler('saveDecisions', () =>
+    reviewDecisionStore.save(teamName, scopeKey, { hunkDecisions, fileDecisions })
+  );
+}
+
+async function handleClearDecisions(
+  _event: IpcMainInvokeEvent,
+  teamName: string,
+  scopeKey: string
+): Promise<IpcResult<void>> {
+  return wrapReviewHandler('clearDecisions', () => reviewDecisionStore.clear(teamName, scopeKey));
 }

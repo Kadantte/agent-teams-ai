@@ -51,7 +51,7 @@ export const ChangeReviewDialog = ({
     changeSetError,
     fetchAgentChanges,
     fetchTaskChanges,
-    clearChangeReview,
+    clearChangeReviewCache,
     hunkDecisions,
     fileDecisions,
     fileContents,
@@ -70,6 +70,10 @@ export const ChangeReviewDialog = ({
     updateEditedContent,
     discardFileEdits,
     saveEditedFile,
+    loadDecisionsFromDisk,
+    persistDecisions,
+    clearDecisionsFromDisk,
+    resetAllReviewState,
   } = useStore();
 
   // Active file from scroll-spy (replaces selectedReviewFilePath for continuous scroll)
@@ -104,6 +108,9 @@ export const ChangeReviewDialog = ({
 
   // Build scope key for viewed storage
   const scopeKey = mode === 'task' ? `task:${taskId ?? ''}` : `agent:${memberName ?? ''}`;
+
+  // Build scope key for decision persistence (filesystem-safe: use `-` instead of `:`)
+  const decisionScopeKey = mode === 'task' ? `task-${taskId ?? ''}` : `agent-${memberName ?? ''}`;
 
   // File paths for viewed tracking
   const allFilePaths = useMemo(
@@ -243,21 +250,46 @@ export const ChangeReviewDialog = ({
   // Load data on open
   useEffect(() => {
     if (!open) return;
+
+    // Load persisted decisions from disk
+    void loadDecisionsFromDisk(teamName, decisionScopeKey);
+
+    // Fetch changeSet
     if (mode === 'agent' && memberName) {
       void fetchAgentChanges(teamName, memberName);
     } else if (mode === 'task' && taskId) {
       void fetchTaskChanges(teamName, taskId);
     }
-    return () => clearChangeReview();
+
+    // On close — clear only volatile cache, keep decisions in store
+    return () => clearChangeReviewCache();
   }, [
     open,
     mode,
     teamName,
     memberName,
     taskId,
+    decisionScopeKey,
     fetchAgentChanges,
     fetchTaskChanges,
-    clearChangeReview,
+    clearChangeReviewCache,
+    loadDecisionsFromDisk,
+  ]);
+
+  // Persist decisions to disk on change (debounced via store action)
+  const hasDecisions =
+    Object.keys(hunkDecisions).length > 0 || Object.keys(fileDecisions).length > 0;
+  useEffect(() => {
+    if (!open || !hasDecisions) return;
+    persistDecisions(teamName, decisionScopeKey);
+  }, [
+    open,
+    hasDecisions,
+    hunkDecisions,
+    fileDecisions,
+    teamName,
+    decisionScopeKey,
+    persistDecisions,
   ]);
 
   // Reset initial scroll flag when initialFilePath changes
@@ -336,9 +368,23 @@ export const ChangeReviewDialog = ({
     };
   }, [activeChangeSet]);
 
-  const handleApply = useCallback(() => {
-    void applyReview(teamName, taskId, memberName);
-  }, [applyReview, teamName, taskId, memberName]);
+  const handleApply = useCallback(async () => {
+    await applyReview(teamName, taskId, memberName);
+    // Only cleanup if apply succeeded (no error in store)
+    const state = useStore.getState();
+    if (!state.applyError) {
+      void clearDecisionsFromDisk(teamName, decisionScopeKey);
+      resetAllReviewState();
+    }
+  }, [
+    applyReview,
+    teamName,
+    taskId,
+    memberName,
+    clearDecisionsFromDisk,
+    decisionScopeKey,
+    resetAllReviewState,
+  ]);
 
   // Active file for timeline (derived from scroll-spy)
   const activeFile = useMemo(() => {

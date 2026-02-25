@@ -337,3 +337,12 @@ export const REVIEW_SAVE_EDITED_FILE = 'review:saveEditedFile';
 
 /** Get git file change log */
 export const REVIEW_GET_GIT_FILE_LOG = 'review:getGitFileLog';
+
+/** Load persisted review decisions from disk */
+export const REVIEW_LOAD_DECISIONS = 'review:loadDecisions';
+
+/** Save review decisions to disk */
+export const REVIEW_SAVE_DECISIONS = 'review:saveDecisions';
+
+/** Clear review decisions from disk */
+export const REVIEW_CLEAR_DECISIONS = 'review:clearDecisions';
