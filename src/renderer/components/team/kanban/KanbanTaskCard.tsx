@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { UnreadCommentsBadge } from '@renderer/components/team/UnreadCommentsBadge';
@@ -7,6 +7,7 @@ import { Button } from '@renderer/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover';
 import { useUnreadCommentCount } from '@renderer/hooks/useUnreadCommentCount';
 import { useStore } from '@renderer/store';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import {
   ArrowLeftFromLine,
   ArrowRightFromLine,
@@ -143,6 +144,7 @@ export const KanbanTaskCard = ({
   onTaskClick,
   onViewChanges,
 }: KanbanTaskCardProps): React.JSX.Element => {
+  const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
   const unreadCount = useUnreadCommentCount(teamName, task.id, task.comments);
   const blockedByIds = task.blockedBy?.filter((id) => id.length > 0) ?? [];
   const blocksIds = task.blocks?.filter((id) => id.length > 0) ?? [];
@@ -184,12 +186,7 @@ export const KanbanTaskCard = ({
         <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[10px] font-normal">
           #{task.id}
         </Badge>
-        {task.owner ? (
-          <MemberBadge
-            name={task.owner}
-            color={members.find((m) => m.name === task.owner)?.color}
-          />
-        ) : null}
+        {task.owner ? <MemberBadge name={task.owner} color={colorMap.get(task.owner)} /> : null}
         <h5 className="min-w-0 truncate text-sm font-medium text-[var(--color-text)]">
           {task.subject}
         </h5>

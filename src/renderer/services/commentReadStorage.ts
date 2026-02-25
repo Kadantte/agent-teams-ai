@@ -1,6 +1,7 @@
 import { get, set } from 'idb-keyval';
 
 const IDB_KEY = 'comment-read-state';
+const LS_KEY = 'comment-read-state';
 const SAVE_DEBOUNCE_MS = 300;
 const STALE_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -8,13 +9,14 @@ type ReadState = Record<string, number>; // key = "teamName/taskId", value = tim
 
 let cache: ReadState = {};
 let loaded = false;
+let idbAvailable = true; // flips to false on first IndexedDB failure
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
 
 // --- useSyncExternalStore API ---
 export function subscribe(listener: () => void): () => void {
   listeners.add(listener);
-  if (!loaded) void loadFromIdb();
+  if (!loaded) void load();
   return () => {
     listeners.delete(listener);
   };
@@ -46,6 +48,28 @@ export function getUnreadCount(
   return comments.filter((c) => new Date(c.createdAt).getTime() > lastRead).length;
 }
 
+// --- localStorage fallback ---
+function lsLoad(): ReadState | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as ReadState)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function lsSave(state: ReadState): void {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+  } catch {
+    // localStorage full or unavailable — silently ignore
+  }
+}
+
 // --- Internal ---
 function hasIndexedDB(): boolean {
   return typeof indexedDB !== 'undefined';
@@ -59,54 +83,79 @@ function scheduleSave(): void {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    void saveToIdb();
+    void save();
   }, SAVE_DEBOUNCE_MS);
 }
 
-async function loadFromIdb(): Promise<void> {
+async function load(): Promise<void> {
   if (loaded) return;
-  if (!hasIndexedDB()) {
-    loaded = true;
-    return;
-  }
-  try {
-    const stored = await get<ReadState>(IDB_KEY);
-    if (stored && typeof stored === 'object') {
-      cache = { ...stored, ...cache }; // merge: in-memory wins over stale IDB
-      notify();
+
+  // Try IndexedDB first
+  if (hasIndexedDB() && idbAvailable) {
+    try {
+      const stored = await get<ReadState>(IDB_KEY);
+      if (stored && typeof stored === 'object') {
+        cache = { ...stored, ...cache };
+        notify();
+      }
+      loaded = true;
+      return;
+    } catch {
+      // IndexedDB broken — fall back to localStorage silently
+      idbAvailable = false;
     }
-  } catch (e) {
-    console.error('[commentReadStorage] load failed:', e);
+  }
+
+  // Fallback: localStorage
+  const stored = lsLoad();
+  if (stored) {
+    cache = { ...stored, ...cache };
+    notify();
   }
   loaded = true;
 }
 
-async function saveToIdb(): Promise<void> {
-  if (!hasIndexedDB()) return;
-  try {
-    await set(IDB_KEY, cache);
-  } catch (e) {
-    console.error('[commentReadStorage] save failed:', e);
+async function save(): Promise<void> {
+  if (idbAvailable && hasIndexedDB()) {
+    try {
+      await set(IDB_KEY, cache);
+      return;
+    } catch {
+      idbAvailable = false;
+    }
   }
+  lsSave(cache);
 }
 
 export async function cleanupStale(): Promise<void> {
-  if (!hasIndexedDB()) return;
-  try {
-    const stored = await get<ReadState>(IDB_KEY);
-    if (!stored) return;
-    const now = Date.now();
-    const cleaned: ReadState = {};
+  const now = Date.now();
+  const clean = (state: ReadState): { cleaned: ReadState; changed: boolean } => {
+    const result: ReadState = {};
     let changed = false;
-    for (const [k, v] of Object.entries(stored)) {
+    for (const [k, v] of Object.entries(state)) {
       if (now - v < STALE_THRESHOLD_MS) {
-        cleaned[k] = v;
+        result[k] = v;
       } else {
         changed = true;
       }
     }
-    if (changed) await set(IDB_KEY, cleaned);
-  } catch (e) {
-    console.error('[commentReadStorage] cleanup failed:', e);
+    return { cleaned: result, changed };
+  };
+
+  if (idbAvailable && hasIndexedDB()) {
+    try {
+      const stored = await get<ReadState>(IDB_KEY);
+      if (!stored) return;
+      const { cleaned, changed } = clean(stored);
+      if (changed) await set(IDB_KEY, cleaned);
+      return;
+    } catch {
+      idbAvailable = false;
+    }
   }
+
+  const stored = lsLoad();
+  if (!stored) return;
+  const { cleaned, changed } = clean(stored);
+  if (changed) lsSave(cleaned);
 }

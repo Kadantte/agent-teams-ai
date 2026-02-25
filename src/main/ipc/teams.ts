@@ -17,6 +17,7 @@ import {
   TEAM_GET_MEMBER_STATS,
   TEAM_GET_PROJECT_BRANCH,
   TEAM_LAUNCH,
+  TEAM_LEAD_ACTIVITY,
   TEAM_LIST,
   TEAM_PREPARE_PROVISIONING,
   TEAM_PROCESS_ALIVE,
@@ -193,6 +194,7 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_UPDATE_MEMBER_ROLE, handleUpdateMemberRole);
   ipcMain.handle(TEAM_GET_PROJECT_BRANCH, handleGetProjectBranch);
   ipcMain.handle(TEAM_GET_ATTACHMENTS, handleGetAttachments);
+  ipcMain.handle(TEAM_LEAD_ACTIVITY, handleLeadActivity);
   logger.info('Team handlers registered');
 }
 
@@ -229,6 +231,7 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_UPDATE_MEMBER_ROLE);
   ipcMain.removeHandler(TEAM_GET_PROJECT_BRANCH);
   ipcMain.removeHandler(TEAM_GET_ATTACHMENTS);
+  ipcMain.removeHandler(TEAM_LEAD_ACTIVITY);
 }
 
 function getTeamDataService(): TeamDataService {
@@ -1261,6 +1264,19 @@ async function handleGetMemberStats(
 
 async function handleAliveList(_event: IpcMainInvokeEvent): Promise<IpcResult<string[]>> {
   return wrapTeamHandler('aliveList', async () => getTeamProvisioningService().getAliveTeams());
+}
+
+async function handleLeadActivity(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown
+): Promise<IpcResult<string>> {
+  const validated = validateTeamName(teamName);
+  if (!validated.valid) {
+    return { success: false, error: validated.error ?? 'Invalid teamName' };
+  }
+  return wrapTeamHandler('leadActivity', async () =>
+    getTeamProvisioningService().getLeadActivityState(validated.value!)
+  );
 }
 
 async function handleStopTeam(

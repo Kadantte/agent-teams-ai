@@ -140,12 +140,7 @@ export const ReviewToolbar = ({
             Accept All
           </button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <span>Accept all changes in current file</span>
-          <kbd className="ml-2 rounded border border-border bg-surface-raised px-1 py-0.5 font-mono text-[10px] text-text-muted">
-            ⌘Y
-          </kbd>
-        </TooltipContent>
+        <TooltipContent side="bottom">Accept all changes in current file</TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -158,12 +153,7 @@ export const ReviewToolbar = ({
             Reject All
           </button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <span>Reject all changes in current file</span>
-          <kbd className="ml-2 rounded border border-border bg-surface-raised px-1 py-0.5 font-mono text-[10px] text-text-muted">
-            ⌘N
-          </kbd>
-        </TooltipContent>
+        <TooltipContent side="bottom">Reject all changes in current file</TooltipContent>
       </Tooltip>
 
       <Tooltip>

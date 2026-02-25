@@ -47,6 +47,7 @@ import {
   TEAM_GET_MEMBER_STATS,
   TEAM_GET_PROJECT_BRANCH,
   TEAM_LAUNCH,
+  TEAM_LEAD_ACTIVITY,
   TEAM_LIST,
   TEAM_PREPARE_PROVISIONING,
   TEAM_PROCESS_ALIVE,
@@ -663,6 +664,10 @@ const electronAPI: ElectronAPI = {
     getAttachments: async (teamName: string, messageId: string) => {
       return invokeIpcWithResult<AttachmentFileData[]>(TEAM_GET_ATTACHMENTS, teamName, messageId);
     },
+    getLeadActivity: async (teamName: string) => {
+      const result = await invokeIpcWithResult<string>(TEAM_LEAD_ACTIVITY, teamName);
+      return result as 'active' | 'idle' | 'offline';
+    },
     onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void): (() => void) => {
       ipcRenderer.on(
         TEAM_CHANGE,
@@ -761,9 +766,9 @@ const electronAPI: ElectronAPI = {
       return invokeIpcWithResult<{ success: boolean }>(REVIEW_SAVE_EDITED_FILE, filePath, content);
     },
     onCmdN: (callback: () => void): (() => void) => {
-      const handler = () => callback();
+      const handler = (): void => callback();
       ipcRenderer.on('review:cmdN', handler);
-      return () => {
+      return (): void => {
         ipcRenderer.removeListener('review:cmdN', handler);
       };
     },

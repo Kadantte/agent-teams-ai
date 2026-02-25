@@ -40,6 +40,7 @@ vi.mock('@preload/constants/ipcChannels', () => ({
   TEAM_UPDATE_MEMBER_ROLE: 'team:updateMemberRole',
   TEAM_GET_PROJECT_BRANCH: 'team:getProjectBranch',
   TEAM_GET_ATTACHMENTS: 'team:getAttachments',
+  TEAM_LEAD_ACTIVITY: 'team:leadActivity',
 }));
 
 import {
@@ -72,6 +73,7 @@ import {
   TEAM_ADD_TASK_COMMENT,
   TEAM_GET_ATTACHMENTS,
   TEAM_GET_PROJECT_BRANCH,
+  TEAM_LEAD_ACTIVITY,
   TEAM_REMOVE_MEMBER,
   TEAM_UPDATE_MEMBER_ROLE,
 } from '../../../src/preload/constants/ipcChannels';
@@ -134,6 +136,7 @@ describe('ipc teams handlers', () => {
     relayLeadInboxMessages: vi.fn(async () => 0),
     getLiveLeadProcessMessages: vi.fn(() => []),
     getAliveTeams: vi.fn(() => ['my-team']),
+    getLeadActivityState: vi.fn(() => 'idle'),
     stopTeam: vi.fn(() => undefined),
   };
 
@@ -174,6 +177,7 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_ADD_MEMBER)).toBe(true);
     expect(handlers.has(TEAM_REMOVE_MEMBER)).toBe(true);
     expect(handlers.has(TEAM_UPDATE_MEMBER_ROLE)).toBe(true);
+    expect(handlers.has(TEAM_LEAD_ACTIVITY)).toBe(true);
   });
 
   it('returns success false on invalid sendMessage args', async () => {
@@ -482,5 +486,6 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_UPDATE_MEMBER_ROLE)).toBe(false);
     expect(handlers.has(TEAM_GET_PROJECT_BRANCH)).toBe(false);
     expect(handlers.has(TEAM_GET_ATTACHMENTS)).toBe(false);
+    expect(handlers.has(TEAM_LEAD_ACTIVITY)).toBe(false);
   });
 });

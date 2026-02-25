@@ -25,6 +25,7 @@ import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { AlertTriangle, Check, CheckCircle2, Loader2 } from 'lucide-react';
 
@@ -248,15 +249,16 @@ export const LaunchTeamDialog = ({
     );
   }, [activeTeams, effectiveCwd, teamName]);
 
+  const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
   const mentionSuggestions = useMemo<MentionSuggestion[]>(
     () =>
       members.map((m) => ({
         id: m.name,
         name: m.name,
         subtitle: formatAgentRole(m.role) ?? formatAgentRole(m.agentType) ?? undefined,
-        color: m.color,
+        color: colorMap.get(m.name),
       })),
-    [members]
+    [members, colorMap]
   );
 
   const activeError = localError ?? provisioningError;

@@ -1,6 +1,7 @@
 import { CARD_BG, CARD_BORDER_STYLE, CARD_ICON_MUTED } from '@renderer/constants/cssVariables';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 
@@ -17,6 +18,7 @@ export const PendingRepliesBlock = ({
   pendingRepliesByMember,
   onMemberClick,
 }: PendingRepliesBlockProps): React.JSX.Element | null => {
+  const colorMap = buildMemberColorMap(members);
   const pending = Object.entries(pendingRepliesByMember)
     .map(([name, sentAtMs]) => ({
       member: members.find((m) => m.name === name) ?? null,
@@ -34,7 +36,7 @@ export const PendingRepliesBlock = ({
         Awaiting replies
       </p>
       {pending.map(({ member, sentAtMs }) => {
-        const colors = getTeamColorSet(member.color ?? '');
+        const colors = getTeamColorSet(colorMap.get(member.name) ?? '');
         const roleLabel = formatAgentRole(
           member.role ?? (member.agentType !== 'general-purpose' ? member.agentType : undefined)
         );

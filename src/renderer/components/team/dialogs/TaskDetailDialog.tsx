@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
 import { CollapsibleTeamSection } from '@renderer/components/team/CollapsibleTeamSection';
@@ -25,6 +25,7 @@ import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { markAsRead } from '@renderer/services/commentReadStorage';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import {
+  buildMemberColorMap,
   KANBAN_COLUMN_DISPLAY,
   TASK_STATUS_LABELS,
   TASK_STATUS_STYLES,
@@ -59,6 +60,7 @@ export const TaskDetailDialog = ({
   onScrollToTask,
   onOwnerChange,
 }: TaskDetailDialogProps): React.JSX.Element => {
+  const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
   const currentTask = task ? (taskMap.get(task.id) ?? task) : null;
 
   useEffect(() => {
@@ -110,7 +112,6 @@ export const TaskDetailDialog = ({
         t.id !== currentTask.id && Array.isArray(t.related) && t.related.includes(currentTask.id)
     )
     .map((t) => t.id);
-  const ownerMember = currentTask.owner ? members.find((m) => m.name === currentTask.owner) : null;
   const isTodo = status === 'pending' && !kanbanColumn;
   const canReassign = isTodo && onOwnerChange;
 
@@ -151,7 +152,8 @@ export const TaskDetailDialog = ({
                   <SelectItem value="__unassigned__">Unassigned</SelectItem>
                   {members.map((m) => {
                     const role = formatAgentRole(m.role) ?? formatAgentRole(m.agentType);
-                    const memberColor = m.color ? getTeamColorSet(m.color) : null;
+                    const resolvedColor = colorMap.get(m.name);
+                    const memberColor = resolvedColor ? getTeamColorSet(resolvedColor) : null;
                     return (
                       <SelectItem key={m.name} value={m.name}>
                         <span className="inline-flex items-center gap-1.5">
@@ -174,7 +176,11 @@ export const TaskDetailDialog = ({
                 </SelectContent>
               </Select>
             ) : currentTask.owner ? (
-              <MemberBadge name={currentTask.owner} color={ownerMember?.color} size="md" />
+              <MemberBadge
+                name={currentTask.owner}
+                color={colorMap.get(currentTask.owner)}
+                size="md"
+              />
             ) : (
               <span className="text-xs text-[var(--color-text-muted)]">&mdash;</span>
             )}

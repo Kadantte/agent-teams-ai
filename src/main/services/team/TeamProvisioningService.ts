@@ -133,7 +133,11 @@ interface ProvisioningRun {
   provisioningOutputParts: string[];
   /** Session ID detected from stream-json output (result.session_id or message.session_id). */
   detectedSessionId: string | null;
+  /** Lead process activity: 'active' during turn processing, 'idle' waiting for input, 'offline' after exit. */
+  leadActivityState: LeadActivityState;
 }
+
+type LeadActivityState = 'active' | 'idle' | 'offline';
 
 type ProvisioningAuthSource =
   | 'anthropic_api_key'
@@ -609,6 +613,24 @@ export class TeamProvisioningService {
     return [...(this.liveLeadProcessMessages.get(teamName) ?? [])];
   }
 
+  getLeadActivityState(teamName: string): 'active' | 'idle' | 'offline' {
+    const runId = this.activeByTeam.get(teamName);
+    if (!runId) return 'offline';
+    const run = this.runs.get(runId);
+    if (!run || run.processKilled || run.cancelRequested) return 'offline';
+    return run.leadActivityState;
+  }
+
+  private setLeadActivity(run: ProvisioningRun, state: 'active' | 'idle' | 'offline'): void {
+    if (run.leadActivityState === state) return;
+    run.leadActivityState = state;
+    this.teamChangeEmitter?.({
+      type: 'lead-activity',
+      teamName: run.teamName,
+      detail: state,
+    });
+  }
+
   async warmup(): Promise<void> {
     try {
       const claudePath = await ClaudeBinaryResolver.resolve();
@@ -768,6 +790,7 @@ export class TeamProvisioningService {
       directReplyParts: [],
       provisioningOutputParts: [],
       detectedSessionId: null,
+      leadActivityState: 'active',
       progress: {
         runId,
         teamName: request.teamName,
@@ -1040,6 +1063,7 @@ export class TeamProvisioningService {
       directReplyParts: [],
       provisioningOutputParts: [],
       detectedSessionId: null,
+      leadActivityState: 'active',
       progress: {
         runId,
         teamName: request.teamName,
@@ -1283,6 +1307,7 @@ export class TeamProvisioningService {
       },
     });
     run.child.stdin.write(payload + '\n');
+    this.setLeadActivity(run, 'active');
   }
 
   /**
@@ -1740,6 +1765,9 @@ export class TeamProvisioningService {
             })();
       if (subtype === 'success') {
         logger.info(`[${run.teamName}] stream-json result: success — turn complete, process alive`);
+        if (run.provisioningComplete) {
+          this.setLeadActivity(run, 'idle');
+        }
         if (run.leadRelayCapture) {
           const capture = run.leadRelayCapture;
           const combined = capture.textParts.join('').trim();
@@ -1800,6 +1828,9 @@ export class TeamProvisioningService {
           run.child?.stdin?.end();
           run.child?.kill();
           this.cleanupRun(run);
+        } else if (run.provisioningComplete) {
+          // Post-provisioning error: process alive, waiting for input
+          this.setLeadActivity(run, 'idle');
         }
       }
     }
@@ -1813,6 +1844,7 @@ export class TeamProvisioningService {
   private async handleProvisioningTurnComplete(run: ProvisioningRun): Promise<void> {
     if (run.cancelRequested) return;
     run.provisioningComplete = true;
+    this.setLeadActivity(run, 'idle');
 
     // Clear provisioning timeout — no longer needed
     if (run.timeoutHandle) {
@@ -1880,6 +1912,7 @@ export class TeamProvisioningService {
    * Remove a run from tracking maps.
    */
   private cleanupRun(run: ProvisioningRun): void {
+    this.setLeadActivity(run, 'offline');
     if (run.timeoutHandle) {
       clearTimeout(run.timeoutHandle);
       run.timeoutHandle = null;

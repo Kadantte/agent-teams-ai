@@ -12,7 +12,12 @@ import { MemberMessagesTab } from './MemberMessagesTab';
 import { MemberStatsTab } from './MemberStatsTab';
 import { MemberTasksTab } from './MemberTasksTab';
 
-import type { InboxMessage, ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
+import type {
+  InboxMessage,
+  LeadActivityState,
+  ResolvedTeamMember,
+  TeamTaskWithKanban,
+} from '@shared/types';
 
 interface MemberDetailDialogProps {
   open: boolean;
@@ -22,6 +27,7 @@ interface MemberDetailDialogProps {
   messages: InboxMessage[];
   isTeamAlive?: boolean;
   isTeamProvisioning?: boolean;
+  leadActivity?: LeadActivityState;
   onClose: () => void;
   onSendMessage: () => void;
   onAssignTask: () => void;
@@ -39,6 +45,7 @@ export const MemberDetailDialog = ({
   messages,
   isTeamAlive,
   isTeamProvisioning,
+  leadActivity,
   onClose,
   onSendMessage,
   onAssignTask,
@@ -80,6 +87,7 @@ export const MemberDetailDialog = ({
               member={member}
               isTeamAlive={isTeamAlive}
               isTeamProvisioning={isTeamProvisioning}
+              leadActivity={member.agentType === 'team-lead' ? leadActivity : undefined}
               onUpdateRole={
                 onUpdateRole ? (newRole) => onUpdateRole(member.name, newRole) : undefined
               }

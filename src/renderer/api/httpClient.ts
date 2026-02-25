@@ -761,6 +761,9 @@ export class HttpAPIClient implements ElectronAPI {
     ): Promise<AttachmentFileData[]> => {
       return [];
     },
+    getLeadActivity: async (_teamName: string): Promise<'active' | 'idle' | 'offline'> => {
+      return 'offline';
+    },
     onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void): (() => void) => {
       return this.addEventListener('team-change', (data: unknown) =>
         callback(null, data as TeamChangeEvent)
@@ -775,44 +778,44 @@ export class HttpAPIClient implements ElectronAPI {
 
   // Review API stubs
   review = {
-    getAgentChanges: async (_teamName: string, _memberName: string) => {
+    getAgentChanges: async (_teamName: string, _memberName: string): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
-    getTaskChanges: async (_teamName: string, _taskId: string) => {
+    getTaskChanges: async (_teamName: string, _taskId: string): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
-    getChangeStats: async (_teamName: string, _memberName: string) => {
+    getChangeStats: async (_teamName: string, _memberName: string): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
     getFileContent: async (
       _teamName: string,
       _memberName: string | undefined,
       _filePath: string
-    ) => {
+    ): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
-    applyDecisions: async () => {
+    applyDecisions: async (): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
     // Phase 2 stubs
-    checkConflict: async () => {
+    checkConflict: async (): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
-    rejectHunks: async () => {
+    rejectHunks: async (): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
-    rejectFile: async () => {
+    rejectFile: async (): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
-    previewReject: async () => {
+    previewReject: async (): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
     // Editable diff stubs
-    saveEditedFile: async () => {
+    saveEditedFile: async (): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
     // Phase 4 stubs
-    getGitFileLog: async () => {
+    getGitFileLog: async (): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
   };

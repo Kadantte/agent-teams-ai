@@ -24,6 +24,7 @@ import {
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { AlertTriangle, Search } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
@@ -66,6 +67,7 @@ export const CreateTaskDialog = ({
   onSubmit,
   submitting = false,
 }: CreateTaskDialogProps): React.JSX.Element => {
+  const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
   const [subject, setSubject] = useState(defaultSubject);
   const descriptionDraft = useDraftPersistence({
     key: `createTask:${teamName}:description`,
@@ -103,9 +105,9 @@ export const CreateTaskDialog = ({
         id: m.name,
         name: m.name,
         subtitle: formatAgentRole(m.role) ?? formatAgentRole(m.agentType) ?? undefined,
-        color: m.color,
+        color: colorMap.get(m.name),
       })),
-    [members]
+    [members, colorMap]
   );
 
   const requiresOwner = defaultStartImmediately === true;
@@ -161,7 +163,8 @@ export const CreateTaskDialog = ({
           {!requiresOwner && <SelectItem value="__unassigned__">Unassigned</SelectItem>}
           {members.map((m) => {
             const role = formatAgentRole(m.role) ?? formatAgentRole(m.agentType);
-            const memberColor = m.color ? getTeamColorSet(m.color) : null;
+            const resolvedColor = colorMap.get(m.name);
+            const memberColor = resolvedColor ? getTeamColorSet(resolvedColor) : null;
             return (
               <SelectItem key={m.name} value={m.name}>
                 <span className="inline-flex items-center gap-1.5">

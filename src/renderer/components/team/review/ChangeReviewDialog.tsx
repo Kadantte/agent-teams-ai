@@ -74,8 +74,8 @@ export const ChangeReviewDialog = ({
     setHunkDecision,
     setCollapseUnchanged,
     fetchFileContent,
-    acceptAll,
-    rejectAll,
+    acceptAllFile,
+    rejectAllFile,
     applyReview,
     // Editable diff
     editedContents,
@@ -113,15 +113,6 @@ export const ChangeReviewDialog = ({
     progress: viewedProgress,
   } = useViewedFiles(teamName, scopeKey, allFilePaths);
 
-  // When collapseUnchanged changes, invalidate cached state for current file
-  // so the editor is recreated with the new extension config
-  useEffect(() => {
-    if (selectedReviewFilePath) {
-      editorStateCache.current.delete(selectedReviewFilePath);
-    }
-    queueMicrotask(() => setCachedInitialState(undefined));
-  }, [collapseUnchanged]); // eslint-disable-line react-hooks/exhaustive-deps -- only collapseUnchanged triggers cache invalidation
-
   // Editable diff computed values
   const editedCount = Object.keys(editedContents).length;
   const hasCurrentFileEdits = !!(
@@ -144,14 +135,14 @@ export const ChangeReviewDialog = ({
   const handleAcceptAll = useCallback(() => {
     const view = editorViewRef.current;
     if (view) acceptAllChunks(view);
-    acceptAll();
-  }, [acceptAll]);
+    if (selectedReviewFilePath) acceptAllFile(selectedReviewFilePath);
+  }, [selectedReviewFilePath, acceptAllFile]);
 
   const handleRejectAll = useCallback(() => {
     const view = editorViewRef.current;
     if (view) rejectAllChunks(view);
-    rejectAll();
-  }, [rejectAll]);
+    if (selectedReviewFilePath) rejectAllFile(selectedReviewFilePath);
+  }, [selectedReviewFilePath, rejectAllFile]);
 
   const handleSaveCurrentFile = useCallback(() => {
     if (selectedReviewFilePath) void saveEditedFile(selectedReviewFilePath);

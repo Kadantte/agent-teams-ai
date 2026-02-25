@@ -6,7 +6,7 @@ import { agentAvatarUrl, getMemberDotClass, getPresenceLabel } from '@renderer/u
 import { GitBranch, Loader2, MessageSquare, Plus } from 'lucide-react';
 
 import type { TaskStatusCounts } from '@renderer/utils/pathNormalize';
-import type { ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
+import type { LeadActivityState, ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
 
 interface MemberCardProps {
   member: ResolvedTeamMember;
@@ -14,6 +14,7 @@ interface MemberCardProps {
   taskCounts?: TaskStatusCounts | null;
   isTeamAlive?: boolean;
   isTeamProvisioning?: boolean;
+  leadActivity?: LeadActivityState;
   currentTask?: TeamTaskWithKanban | null;
   isAwaitingReply?: boolean;
   isRemoved?: boolean;
@@ -29,6 +30,7 @@ export const MemberCard = ({
   taskCounts,
   isTeamAlive,
   isTeamProvisioning,
+  leadActivity,
   currentTask,
   isAwaitingReply,
   isRemoved,
@@ -37,8 +39,8 @@ export const MemberCard = ({
   onSendMessage,
   onAssignTask,
 }: MemberCardProps): React.JSX.Element => {
-  const dotClass = getMemberDotClass(member, isTeamAlive, isTeamProvisioning);
-  const presenceLabel = getPresenceLabel(member, isTeamAlive, isTeamProvisioning);
+  const dotClass = getMemberDotClass(member, isTeamAlive, isTeamProvisioning, leadActivity);
+  const presenceLabel = getPresenceLabel(member, isTeamAlive, isTeamProvisioning, leadActivity);
   const colors = getTeamColorSet(memberColor);
   const pending = taskCounts?.pending ?? 0;
   const inProgress = taskCounts?.inProgress ?? 0;

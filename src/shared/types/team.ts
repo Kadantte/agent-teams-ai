@@ -204,8 +204,10 @@ export interface CreateTaskRequest {
   startImmediately?: boolean;
 }
 
+export type LeadActivityState = 'active' | 'idle' | 'offline';
+
 export interface TeamChangeEvent {
-  type: 'config' | 'inbox' | 'task';
+  type: 'config' | 'inbox' | 'task' | 'lead-activity';
   teamName: string;
   detail?: string;
 }

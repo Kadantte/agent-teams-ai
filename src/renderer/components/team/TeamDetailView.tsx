@@ -168,6 +168,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     launchTeam,
     provisioningError,
     isTeamProvisioning,
+    leadActivityByTeam,
     refreshTeamData,
     kanbanFilterQuery,
     clearKanbanFilter,
@@ -201,6 +202,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       isTeamProvisioning: Object.values(s.provisioningRuns).some(
         (run) => run.teamName === teamName && ACTIVE_PROVISIONING_STATES.has(run.state)
       ),
+      leadActivityByTeam: s.leadActivityByTeam,
       refreshTeamData: s.refreshTeamData,
       kanbanFilterQuery: s.kanbanFilterQuery,
       clearKanbanFilter: s.clearKanbanFilter,
@@ -792,6 +794,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
           pendingRepliesByMember={pendingRepliesByMember}
           isTeamAlive={data.isAlive}
           isTeamProvisioning={isTeamProvisioning}
+          leadActivity={leadActivityByTeam[teamName]}
           onMemberClick={setSelectedMember}
           onSendMessage={(member) => {
             setSendDialogRecipient(member.name);
@@ -1125,6 +1128,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         messages={data.messages}
         isTeamAlive={data.isAlive}
         isTeamProvisioning={isTeamProvisioning}
+        leadActivity={leadActivityByTeam[teamName]}
         onClose={() => setSelectedMember(null)}
         onSendMessage={() => {
           const name = selectedMember?.name ?? '';

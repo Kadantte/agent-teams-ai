@@ -1,9 +1,9 @@
-import { getMemberColor } from '@shared/constants/memberColors';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 
 import { MemberCard } from './MemberCard';
 
 import type { TaskStatusCounts } from '@renderer/utils/pathNormalize';
-import type { ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
+import type { LeadActivityState, ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
 
 interface MemberListProps {
   members: ResolvedTeamMember[];
@@ -12,6 +12,7 @@ interface MemberListProps {
   pendingRepliesByMember?: Record<string, number>;
   isTeamAlive?: boolean;
   isTeamProvisioning?: boolean;
+  leadActivity?: LeadActivityState;
   onMemberClick?: (member: ResolvedTeamMember) => void;
   onSendMessage?: (member: ResolvedTeamMember) => void;
   onAssignTask?: (member: ResolvedTeamMember) => void;
@@ -25,6 +26,7 @@ export const MemberList = ({
   pendingRepliesByMember,
   isTeamAlive,
   isTeamProvisioning,
+  leadActivity,
   onMemberClick,
   onSendMessage,
   onAssignTask,
@@ -32,6 +34,7 @@ export const MemberList = ({
 }: MemberListProps): React.JSX.Element => {
   const activeMembers = members.filter((m) => !m.removedAt);
   const removedMembers = members.filter((m) => m.removedAt);
+  const colorMap = buildMemberColorMap(members);
 
   if (members.length === 0) {
     return (
@@ -41,11 +44,7 @@ export const MemberList = ({
     );
   }
 
-  const renderCard = (
-    member: ResolvedTeamMember,
-    index: number,
-    isRemoved: boolean
-  ): React.JSX.Element => {
+  const renderCard = (member: ResolvedTeamMember, isRemoved: boolean): React.JSX.Element => {
     const currentTask =
       member.currentTaskId && taskMap ? (taskMap.get(member.currentTaskId) ?? null) : null;
     const awaitingReply = Boolean(pendingRepliesByMember?.[member.name]);
@@ -53,10 +52,11 @@ export const MemberList = ({
       <MemberCard
         key={member.name}
         member={member}
-        memberColor={member.color ?? getMemberColor(index)}
+        memberColor={colorMap.get(member.name) ?? 'blue'}
         taskCounts={memberTaskCounts?.get(member.name.toLowerCase())}
         isTeamAlive={isTeamAlive}
         isTeamProvisioning={isTeamProvisioning}
+        leadActivity={member.agentType === 'team-lead' ? leadActivity : undefined}
         currentTask={isRemoved ? null : currentTask}
         isAwaitingReply={isRemoved ? false : awaitingReply}
         isRemoved={isRemoved}
@@ -70,15 +70,13 @@ export const MemberList = ({
 
   return (
     <div className="flex flex-col gap-0.5">
-      {activeMembers.map((member, index) => renderCard(member, index, false))}
+      {activeMembers.map((member) => renderCard(member, false))}
       {removedMembers.length > 0 && (
         <>
           <div className="mt-2 text-[10px] text-[var(--color-text-muted)]">
             Removed ({removedMembers.length})
           </div>
-          {removedMembers.map((member, index) =>
-            renderCard(member, activeMembers.length + index, true)
-          )}
+          {removedMembers.map((member) => renderCard(member, true))}
         </>
       )}
     </div>

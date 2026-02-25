@@ -30,6 +30,7 @@ import type {
   CreateTaskRequest,
   GlobalTask,
   KanbanColumnId,
+  LeadActivityState,
   MemberFullStats,
   MemberLogSummary,
   SendMessageRequest,
@@ -425,6 +426,7 @@ export interface TeamsAPI {
   addTaskComment: (teamName: string, taskId: string, text: string) => Promise<TaskComment>;
   getProjectBranch: (projectPath: string) => Promise<string | null>;
   getAttachments: (teamName: string, messageId: string) => Promise<AttachmentFileData[]>;
+  getLeadActivity: (teamName: string) => Promise<LeadActivityState>;
   onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void) => () => void;
   onProvisioningProgress: (
     callback: (event: unknown, data: TeamProvisioningProgress) => void

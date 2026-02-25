@@ -8,12 +8,13 @@ import { Pencil } from 'lucide-react';
 
 import { MemberRoleEditor } from './MemberRoleEditor';
 
-import type { ResolvedTeamMember } from '@shared/types';
+import type { LeadActivityState, ResolvedTeamMember } from '@shared/types';
 
 interface MemberDetailHeaderProps {
   member: ResolvedTeamMember;
   isTeamAlive?: boolean;
   isTeamProvisioning?: boolean;
+  leadActivity?: LeadActivityState;
   onUpdateRole?: (newRole: string | undefined) => Promise<void> | void;
   updatingRole?: boolean;
 }
@@ -22,14 +23,15 @@ export const MemberDetailHeader = ({
   member,
   isTeamAlive,
   isTeamProvisioning,
+  leadActivity,
   onUpdateRole,
   updatingRole,
 }: MemberDetailHeaderProps): React.JSX.Element => {
   const [editing, setEditing] = useState(false);
 
   const role = member.role || formatAgentRole(member.agentType);
-  const presenceLabel = getPresenceLabel(member, isTeamAlive, isTeamProvisioning);
-  const dotClass = getMemberDotClass(member, isTeamAlive, isTeamProvisioning);
+  const presenceLabel = getPresenceLabel(member, isTeamAlive, isTeamProvisioning, leadActivity);
+  const dotClass = getMemberDotClass(member, isTeamAlive, isTeamProvisioning, leadActivity);
 
   const canEditRole =
     member.agentType !== 'team-lead' && !member.removedAt && !isTeamProvisioning && !!onUpdateRole;

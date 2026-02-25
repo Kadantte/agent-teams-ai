@@ -22,7 +22,7 @@ import { languages } from '@codemirror/language-data';
 import { goToNextChunk, goToPreviousChunk, unifiedMergeView } from '@codemirror/merge';
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
-import { EditorView, keymap } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 
 import { acceptChunk, getChunks, mergeUndoSupport, rejectChunk } from './CodeMirrorDiffUtils';
 
@@ -147,7 +147,14 @@ const diffTheme = EditorView.theme({
     backgroundColor: 'var(--color-surface)',
     borderRight: '1px solid var(--color-border)',
     color: 'var(--color-text-muted)',
-    fontSize: '12px',
+    fontSize: '11px',
+    minWidth: 'auto',
+  },
+  '.cm-lineNumbers .cm-gutterElement': {
+    padding: '0 4px 0 8px',
+    minWidth: '2ch',
+    textAlign: 'right',
+    opacity: '0.5',
   },
   '.cm-activeLineGutter': {
     backgroundColor: 'transparent',
@@ -167,51 +174,79 @@ const diffTheme = EditorView.theme({
   '.cm-selectionBackground': {
     backgroundColor: 'rgba(59, 130, 246, 0.3) !important',
   },
-  // Diff-specific styles — line-level backgrounds (no per-character underlines)
-  '.cm-changedLine': {
-    backgroundColor: 'var(--diff-added-bg, rgba(46, 160, 67, 0.22))',
+  // Diff-specific line/block backgrounds
+  '.cm-changedLine': { backgroundColor: '#1a3a1a !important' },
+  '.cm-deletedChunk': { backgroundColor: '#241517', position: 'relative', overflow: 'visible' },
+  '.cm-insertedLine': { backgroundColor: '#1a3a1a !important' },
+  '.cm-deletedLine': { backgroundColor: '#241517 !important' },
+  // Merge toolbar — absolute, Y set dynamically by mousemove handler
+  '.cm-deletedChunk .cm-chunkButtons': {
+    position: 'absolute',
+    top: '0',
+    insetInlineEnd: '8px',
+    zIndex: 10,
+    display: 'flex',
+    justifyContent: 'flex-end',
   },
-  '.cm-deletedChunk': {
-    backgroundColor: 'var(--diff-removed-bg, rgba(248, 81, 73, 0.15))',
+  '.cm-merge-toolbar': {
+    display: 'none',
+    alignItems: 'center',
+    gap: '2px',
+    '&.cm-merge-toolbar-active': {
+      display: 'flex',
+    },
   },
-  '.cm-insertedLine': {
-    backgroundColor: 'var(--diff-added-bg, rgba(46, 160, 67, 0.22))',
+  '.cm-merge-nav': {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0',
+    marginRight: '2px',
+    border: '1px solid var(--color-border)',
+    borderRadius: '6px',
+    backgroundColor: 'var(--color-surface-raised)',
+    overflow: 'hidden',
   },
-  '.cm-deletedLine': {
-    backgroundColor: 'var(--diff-removed-bg, rgba(248, 81, 73, 0.15))',
-  },
-  // Merge control buttons
-  '.cm-merge-accept': {
+  '.cm-merge-nav-btn': {
+    border: 'none',
+    background: 'transparent',
+    color: 'var(--color-text-secondary)',
     cursor: 'pointer',
-    padding: '0 4px',
-    margin: '0 2px',
-    borderRadius: '3px',
-    fontSize: '11px',
+    padding: '3px 8px',
+    fontSize: '13px',
+    lineHeight: '20px',
+    '&:hover': { background: 'rgba(255,255,255,0.08)' },
+  },
+  '.cm-merge-nav-counter': {
+    fontSize: '12px',
+    color: 'var(--color-text-secondary)',
+    padding: '0 2px',
+    whiteSpace: 'nowrap',
+  },
+  '.cm-merge-undo': {
+    cursor: 'pointer',
+    padding: '3px 10px',
+    borderRadius: '5px',
+    fontSize: '12px',
     fontWeight: '500',
-    lineHeight: '18px',
-    display: 'inline-block',
+    lineHeight: '20px',
+    color: 'var(--color-text)',
+    backgroundColor: 'var(--color-surface-raised)',
+    border: '1px solid var(--color-border)',
+    '&:hover': { backgroundColor: 'rgba(255,255,255,0.1)' },
+    '& kbd': { fontSize: '10px', color: 'var(--color-text-muted)', marginLeft: '4px' },
+  },
+  '.cm-merge-keep': {
+    cursor: 'pointer',
+    padding: '3px 10px',
+    borderRadius: '5px',
+    fontSize: '12px',
+    fontWeight: '500',
+    lineHeight: '20px',
     color: '#3fb950',
-    backgroundColor: 'rgba(46, 160, 67, 0.15)',
-    border: '1px solid rgba(46, 160, 67, 0.3)',
-    '&:hover': {
-      backgroundColor: 'rgba(46, 160, 67, 0.3)',
-    },
-  },
-  '.cm-merge-reject': {
-    cursor: 'pointer',
-    padding: '0 4px',
-    margin: '0 2px',
-    borderRadius: '3px',
-    fontSize: '11px',
-    fontWeight: '500',
-    lineHeight: '18px',
-    display: 'inline-block',
-    color: '#f85149',
-    backgroundColor: 'rgba(248, 81, 73, 0.15)',
-    border: '1px solid rgba(248, 81, 73, 0.3)',
-    '&:hover': {
-      backgroundColor: 'rgba(248, 81, 73, 0.3)',
-    },
+    backgroundColor: 'rgba(46, 160, 67, 0.25)',
+    border: '1px solid rgba(46, 160, 67, 0.4)',
+    '&:hover': { backgroundColor: 'rgba(46, 160, 67, 0.4)' },
+    '& kbd': { fontSize: '10px', color: 'rgba(63, 185, 80, 0.7)', marginLeft: '4px' },
   },
   // Collapse unchanged region marker
   '.cm-collapsedLines': {
@@ -268,10 +303,152 @@ export const CodeMirrorDiffView = ({
 
   // Compartment for lazy-injected language support
   const langCompartment = useRef(new Compartment());
+  // Compartment for merge view — allows dynamic collapse reconfigure without editor recreation
+  const mergeCompartment = useRef(new Compartment());
+
+  // Collapse as ref — used in buildExtensions (initial value) without triggering full rebuild
+  const collapseRef = useRef({ enabled: collapseUnchangedProp, margin: collapseMargin });
+  useEffect(() => {
+    collapseRef.current = { enabled: collapseUnchangedProp, margin: collapseMargin };
+  }, [collapseUnchangedProp, collapseMargin]);
+
+  /** Build unified merge view extension. Extracted for dynamic compartment reconfigure. */
+  const buildMergeExtension = useCallback(
+    (collapse: boolean, margin: number): Extension => {
+      const mergeConfig: Parameters<typeof unifiedMergeView>[0] = {
+        original,
+        highlightChanges: false,
+        gutter: true,
+        syntaxHighlightDeletions: true,
+      };
+
+      if (collapse) {
+        mergeConfig.collapseUnchanged = {
+          margin,
+          minSize: 4,
+        };
+      }
+
+      if (showMergeControls) {
+        // NOTE: We intentionally do NOT use the `action` callback from @codemirror/merge.
+        // CM's DeletionWidget caches DOM via a global WeakMap keyed by chunk.changes.
+        // When EditorView is recreated (e.g. from cached initialState), toDOM() returns
+        // the OLD cached DOM whose `action` closure references the DESTROYED view.
+        // Instead, we call acceptChunk/rejectChunk directly with viewRef.current.
+        //
+        // CM calls mergeControls twice per chunk: 'accept' first, 'reject' second.
+        // Both elements go into `.cm-chunkButtons`. We return the full toolbar for
+        // 'accept' and a hidden span for 'reject'.
+        mergeConfig.mergeControls = (type, _action) => {
+          if (type === 'reject') {
+            const empty = document.createElement('span');
+            empty.style.display = 'none';
+            return empty;
+          }
+
+          // --- Full toolbar for 'accept' ---
+          const toolbar = document.createElement('div');
+          toolbar.className = 'cm-merge-toolbar';
+
+          // Navigation section (hidden by default, shown if >1 chunks)
+          const nav = document.createElement('div');
+          nav.className = 'cm-merge-nav';
+          nav.style.display = 'none';
+
+          const prevBtn = document.createElement('button');
+          prevBtn.className = 'cm-merge-nav-btn';
+          prevBtn.textContent = '\u2227';
+          prevBtn.title = 'Previous chunk';
+          prevBtn.onmousedown = (e) => {
+            e.preventDefault();
+            const v = viewRef.current;
+            if (v) goToPreviousChunk(v);
+          };
+
+          const counter = document.createElement('span');
+          counter.className = 'cm-merge-nav-counter';
+
+          const nextBtn = document.createElement('button');
+          nextBtn.className = 'cm-merge-nav-btn';
+          nextBtn.textContent = '\u2228';
+          nextBtn.title = 'Next chunk';
+          nextBtn.onmousedown = (e) => {
+            e.preventDefault();
+            const v = viewRef.current;
+            if (v) goToNextChunk(v);
+          };
+
+          nav.append(prevBtn, counter, nextBtn);
+          toolbar.append(nav);
+
+          // Helper: create button with label + kbd shortcut
+          const makeBtn = (cls: string, label: string, shortcut: string): HTMLButtonElement => {
+            const btn = document.createElement('button');
+            btn.className = cls;
+            btn.append(document.createTextNode(label + ' '));
+            const kbd = document.createElement('kbd');
+            kbd.textContent = shortcut;
+            btn.append(kbd);
+            return btn;
+          };
+
+          // Undo button (reject action)
+          const undoBtn = makeBtn('cm-merge-undo', 'Undo', '\u2318N');
+          undoBtn.title = 'Reject change (⌘N)';
+          undoBtn.onmousedown = (e) => {
+            e.preventDefault();
+            const v = viewRef.current;
+            if (v) {
+              const pos = v.posAtDOM(toolbar);
+              const idx = computeHunkIndexAtPos(v.state, pos);
+              rejectChunk(v, pos);
+              onRejectRef.current?.(idx);
+              scrollToNextChunk();
+            }
+          };
+          toolbar.append(undoBtn);
+
+          // Keep button (accept action)
+          const keepBtn = makeBtn('cm-merge-keep', 'Keep', '\u2318Y');
+          keepBtn.title = 'Accept change (⌘Y)';
+          keepBtn.onmousedown = (e) => {
+            e.preventDefault();
+            const v = viewRef.current;
+            if (v) {
+              const pos = v.posAtDOM(toolbar);
+              const idx = computeHunkIndexAtPos(v.state, pos);
+              acceptChunk(v, pos);
+              onAcceptRef.current?.(idx);
+              scrollToNextChunk();
+            }
+          };
+          toolbar.append(keepBtn);
+
+          // Deferred: compute chunk index + show nav if >1 chunks
+          requestAnimationFrame(() => {
+            const v = viewRef.current;
+            if (!v) return;
+            const chunks = getChunks(v.state);
+            if (!chunks || chunks.chunks.length <= 1) return;
+            const pos = v.posAtDOM(toolbar);
+            const idx = computeHunkIndexAtPos(v.state, pos);
+            counter.textContent = `${idx + 1} of ${chunks.chunks.length}`;
+            nav.style.display = '';
+          });
+
+          return toolbar;
+        };
+      }
+
+      return unifiedMergeView(mergeConfig);
+    },
+    [original, showMergeControls, scrollToNextChunk]
+  );
 
   const buildExtensions = useCallback(() => {
     const extensions: Extension[] = [
       diffTheme,
+      lineNumbers(),
       syntaxHighlighting(oneDarkHighlightStyle),
       EditorView.editable.of(!readOnly),
       EditorState.readOnly.of(readOnly),
@@ -339,77 +516,152 @@ export const CodeMirrorDiffView = ({
       );
     }
 
-    // Unified merge view
-    const mergeConfig: Parameters<typeof unifiedMergeView>[0] = {
-      original,
-      highlightChanges: false,
-      gutter: true,
-      syntaxHighlightDeletions: true,
-    };
-
-    if (collapseUnchangedProp) {
-      mergeConfig.collapseUnchanged = {
-        margin: collapseMargin,
-        minSize: 4,
-      };
-    }
-
+    // Merge toolbar: always visible for nearest chunk, follows cursor when hovering on chunk
     if (showMergeControls) {
-      // NOTE: We intentionally do NOT use the `action` callback from @codemirror/merge.
-      // CM's DeletionWidget caches DOM via a global WeakMap keyed by chunk.changes.
-      // When EditorView is recreated (e.g. from cached initialState), toDOM() returns
-      // the OLD cached DOM whose `action` closure references the DESTROYED view.
-      // Instead, we call acceptChunk/rejectChunk directly with viewRef.current.
-      mergeConfig.mergeControls = (type, _action) => {
-        const btn = document.createElement('button');
-
-        if (type === 'accept') {
-          btn.textContent = '\u2713';
-          btn.title = 'Accept change';
-          btn.className = 'cm-merge-accept';
-          btn.onmousedown = (e) => {
-            e.preventDefault();
-            const view = viewRef.current;
-            if (view) {
-              const pos = view.posAtDOM(btn);
-              const hunkIndex = computeHunkIndexAtPos(view.state, pos);
-              acceptChunk(view, pos);
-              onAcceptRef.current?.(hunkIndex);
-              scrollToNextChunk();
-            }
-          };
-        } else {
-          btn.textContent = '\u2717';
-          btn.title = 'Reject change';
-          btn.className = 'cm-merge-reject';
-          btn.onmousedown = (e) => {
-            e.preventDefault();
-            const view = viewRef.current;
-            if (view) {
-              const pos = view.posAtDOM(btn);
-              const hunkIndex = computeHunkIndexAtPos(view.state, pos);
-              rejectChunk(view, pos);
-              onRejectRef.current?.(hunkIndex);
-              scrollToNextChunk();
-            }
-          };
+      // Helper: position a chunkButtons container so it's below the change block,
+      // but clamped to the visible viewport if that would be off-screen.
+      const positionAtBottom = (chunkEl: Element, scroller: Element): void => {
+        const btnContainer = chunkEl.querySelector<HTMLElement>('.cm-chunkButtons');
+        if (!btnContainer) return;
+        const parentRect = chunkEl.getBoundingClientRect();
+        const scrollerRect = scroller.getBoundingClientRect();
+        // "below block" = 100% of parent height
+        let targetY = parentRect.bottom;
+        const tbHeight = btnContainer.offsetHeight || 28;
+        // Clamp: if bottom edge would go below visible area, pin to viewport bottom
+        if (targetY + tbHeight > scrollerRect.bottom) {
+          targetY = scrollerRect.bottom - tbHeight;
         }
-
-        return btn;
+        btnContainer.style.top = `${targetY - parentRect.top}px`;
       };
+
+      const positionAtCursor = (chunkEl: Element, clientY: number, scroller: Element): void => {
+        const btnContainer = chunkEl.querySelector<HTMLElement>('.cm-chunkButtons');
+        if (!btnContainer) return;
+        const parentRect = chunkEl.getBoundingClientRect();
+        const scrollerRect = scroller.getBoundingClientRect();
+        const tbHeight = btnContainer.offsetHeight || 28;
+        let targetY = clientY - tbHeight / 2;
+        // Clamp to viewport
+        if (targetY + tbHeight > scrollerRect.bottom) {
+          targetY = scrollerRect.bottom - tbHeight;
+        }
+        if (targetY < scrollerRect.top) {
+          targetY = scrollerRect.top;
+        }
+        btnContainer.style.top = `${targetY - parentRect.top}px`;
+      };
+
+      // Find which chunk index the mouse is directly over (deleted or inserted area)
+      const findHoveredChunkIndex = (event: MouseEvent, view: EditorView): number => {
+        const el = document.elementFromPoint(event.clientX, event.clientY);
+        if (!el) return -1;
+        const deletedChunk = el.closest('.cm-deletedChunk');
+        if (deletedChunk) {
+          const all = view.dom.querySelectorAll('.cm-deletedChunk');
+          return [...all].indexOf(deletedChunk);
+        }
+        if (el.closest('.cm-changedLine, .cm-insertedLine')) {
+          const allChunks = getChunks(view.state);
+          if (!allChunks) return -1;
+          const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+          if (pos !== null) {
+            for (let i = 0; i < allChunks.chunks.length; i++) {
+              const chunk = allChunks.chunks[i];
+              if (pos >= chunk.fromB && pos <= chunk.toB) return i;
+            }
+          }
+        }
+        return -1;
+      };
+
+      // Find chunk nearest to cursor Y (for default "below block" display)
+      const findNearestChunkIndex = (clientY: number, view: EditorView): number => {
+        const allChunkEls = view.dom.querySelectorAll('.cm-deletedChunk');
+        let result = -1;
+        if (allChunkEls.length > 0) {
+          let bestIdx = 0;
+          let bestDist = Infinity;
+          allChunkEls.forEach((el, idx) => {
+            const rect = el.getBoundingClientRect();
+            const centerY = (rect.top + rect.bottom) / 2;
+            const dist = Math.abs(clientY - centerY);
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestIdx = idx;
+            }
+          });
+          result = bestIdx;
+        }
+        return result;
+      };
+
+      extensions.push(
+        EditorView.domEventHandlers({
+          mousemove(event, view) {
+            const allChunks = getChunks(view.state);
+            if (allChunks && allChunks.chunks.length > 0) {
+              const scroller = view.scrollDOM;
+              const allChunkEls = view.dom.querySelectorAll('.cm-deletedChunk');
+              const hoveredIdx = findHoveredChunkIndex(event, view);
+              const nearestIdx =
+                hoveredIdx >= 0 ? hoveredIdx : findNearestChunkIndex(event.clientY, view);
+
+              const toolbars = view.dom.querySelectorAll('.cm-merge-toolbar');
+              toolbars.forEach((tb, idx) => {
+                tb.classList.toggle('cm-merge-toolbar-active', idx === nearestIdx);
+              });
+
+              if (nearestIdx >= 0 && nearestIdx < allChunkEls.length) {
+                const chunkEl = allChunkEls[nearestIdx] as HTMLElement;
+                if (hoveredIdx >= 0) {
+                  positionAtCursor(chunkEl, event.clientY, scroller);
+                } else {
+                  positionAtBottom(chunkEl, scroller);
+                }
+              }
+            }
+            return false;
+          },
+          mouseleave(_event, view) {
+            // Keep active toolbar visible, reposition to "below block"
+            const activeToolbar = view.dom.querySelector('.cm-merge-toolbar-active');
+            if (activeToolbar) {
+              const chunkEl = activeToolbar.closest('.cm-deletedChunk');
+              if (chunkEl) positionAtBottom(chunkEl, view.scrollDOM);
+            }
+            return false;
+          },
+        })
+      );
+
+      // Ensure at least one toolbar is visible (initial load + after accept/reject)
+      extensions.push(
+        EditorView.updateListener.of((update) => {
+          if (update.view.dom.querySelector('.cm-merge-toolbar-active')) return;
+          requestAnimationFrame(() => {
+            const v = update.view;
+            if (v.dom.querySelector('.cm-merge-toolbar-active')) return;
+            const first = v.dom.querySelector('.cm-merge-toolbar');
+            if (first) {
+              first.classList.add('cm-merge-toolbar-active');
+              const chunkEl = first.closest('.cm-deletedChunk');
+              if (chunkEl) positionAtBottom(chunkEl, v.scrollDOM);
+            }
+          });
+        })
+      );
     }
 
-    extensions.push(unifiedMergeView(mergeConfig));
+    // Unified merge view (wrapped in compartment for dynamic collapse reconfigure)
+    extensions.push(
+      mergeCompartment.current.of(
+        buildMergeExtension(collapseRef.current.enabled, collapseRef.current.margin)
+      )
+    );
 
     return extensions;
-  }, [
-    original,
-    readOnly,
-    showMergeControls,
-    collapseUnchangedProp,
-    collapseMargin,
-    scrollToNextChunk,
-  ]);
+  }, [readOnly, showMergeControls, buildMergeExtension]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -476,6 +728,17 @@ export const CodeMirrorDiffView = ({
       cancelled = true;
     };
   }, [fileName, buildExtensions, initialState]);
+
+  // Dynamic collapse toggle — reconfigure compartment in-place, preserving undo history
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: mergeCompartment.current.reconfigure(
+        buildMergeExtension(collapseUnchangedProp, collapseMargin)
+      ),
+    });
+  }, [collapseUnchangedProp, collapseMargin, buildMergeExtension]);
 
   // Auto-viewed detection via IntersectionObserver
   useEffect(() => {

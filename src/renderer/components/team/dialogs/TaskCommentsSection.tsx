@@ -4,12 +4,14 @@ import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer
 import { ReplyQuoteBlock } from '@renderer/components/team/activity/ReplyQuoteBlock';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
+import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useMarkCommentsRead } from '@renderer/hooks/useMarkCommentsRead';
 import { useStore } from '@renderer/store';
 import { buildReplyBlock, parseMessageReply } from '@renderer/utils/agentMessageFormatting';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { getModifierKeyName } from '@renderer/utils/keyboardUtils';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { formatDistanceToNow } from 'date-fns';
 import { ChevronDown, ChevronUp, MessageSquare, Reply, Send, X } from 'lucide-react';
@@ -52,6 +54,7 @@ export const TaskCommentsSection = ({
   }, []);
 
   const draft = useDraftPersistence({ key: `taskComment:${teamName}:${taskId}` });
+  const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
 
   const mentionSuggestions = useMemo<MentionSuggestion[]>(
     () =>
@@ -59,9 +62,9 @@ export const TaskCommentsSection = ({
         id: m.name,
         name: m.name,
         subtitle: formatAgentRole(m.role) ?? formatAgentRole(m.agentType) ?? undefined,
-        color: m.color,
+        color: colorMap.get(m.name),
       })),
-    [members]
+    [members, colorMap]
   );
 
   const trimmed = draft.value.trim();
@@ -102,11 +105,10 @@ export const TaskCommentsSection = ({
                 <span
                   className="font-medium"
                   style={{
-                    color:
-                      comment.author === 'user'
-                        ? 'var(--color-text-secondary)'
-                        : (members.find((m) => m.name === comment.author)?.color ??
-                          'var(--color-text-secondary)'),
+                    color: (() => {
+                      const rc = colorMap.get(comment.author);
+                      return rc ? getTeamColorSet(rc).text : 'var(--color-text-secondary)';
+                    })(),
                   }}
                 >
                   {comment.author}
@@ -228,11 +230,10 @@ export const TaskCommentsSection = ({
               <span
                 className="font-semibold"
                 style={{
-                  color:
-                    replyTo.author === 'user'
-                      ? 'var(--color-text-secondary)'
-                      : (members.find((m) => m.name === replyTo.author)?.color ??
-                        'var(--color-text-secondary)'),
+                  color: (() => {
+                    const rc = colorMap.get(replyTo.author);
+                    return rc ? getTeamColorSet(rc).text : 'var(--color-text-secondary)';
+                  })(),
                 }}
               >
                 @{replyTo.author}

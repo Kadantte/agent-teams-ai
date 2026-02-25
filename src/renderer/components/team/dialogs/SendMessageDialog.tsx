@@ -24,6 +24,7 @@ import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { buildReplyBlock } from '@renderer/utils/agentMessageFormatting';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { X } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
@@ -59,6 +60,7 @@ export const SendMessageDialog = ({
   onSend,
   onClose,
 }: SendMessageDialogProps): React.JSX.Element => {
+  const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
   const [quote, setQuote] = useState<QuotedMessage | undefined>(undefined);
   const [member, setMember] = useState('');
   const textDraft = useDraftPersistence({ key: 'sendMessage:text' });
@@ -102,9 +104,9 @@ export const SendMessageDialog = ({
         id: m.name,
         name: m.name,
         subtitle: formatAgentRole(m.role) ?? formatAgentRole(m.agentType) ?? undefined,
-        color: m.color,
+        color: colorMap.get(m.name),
       })),
-    [members]
+    [members, colorMap]
   );
 
   const canSend = member.trim().length > 0 && textDraft.value.trim().length > 0 && !sending;
@@ -145,7 +147,8 @@ export const SendMessageDialog = ({
                 <SelectItem value={NO_MEMBER}>Select member...</SelectItem>
                 {members.map((m) => {
                   const role = formatAgentRole(m.role) ?? formatAgentRole(m.agentType);
-                  const memberColor = m.color ? getTeamColorSet(m.color) : null;
+                  const resolvedColor = colorMap.get(m.name);
+                  const memberColor = resolvedColor ? getTeamColorSet(resolvedColor) : null;
                   return (
                     <SelectItem key={m.name} value={m.name}>
                       <span className="inline-flex items-center gap-1.5">

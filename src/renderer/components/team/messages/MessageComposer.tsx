@@ -11,6 +11,7 @@ import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { cn } from '@renderer/lib/utils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { getModifierKeyName } from '@renderer/utils/keyboardUtils';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { AlertCircle, Check, ChevronDown, ImagePlus, Send } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
@@ -61,15 +62,17 @@ export const MessageComposer = ({
     handleDrop,
   } = useAttachments();
 
+  const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
+
   const mentionSuggestions = useMemo<MentionSuggestion[]>(
     () =>
       members.map((m) => ({
         id: m.name,
         name: m.name,
         subtitle: formatAgentRole(m.role) ?? formatAgentRole(m.agentType) ?? undefined,
-        color: m.color,
+        color: colorMap.get(m.name),
       })),
-    [members]
+    [members, colorMap]
   );
 
   const trimmed = draft.value.trim();
@@ -77,7 +80,8 @@ export const MessageComposer = ({
     recipient.length > 0 && trimmed.length > 0 && trimmed.length <= MAX_MESSAGE_LENGTH && !sending;
 
   const selectedMember = members.find((m) => m.name === recipient);
-  const selectedColorSet = selectedMember?.color ? getTeamColorSet(selectedMember.color) : null;
+  const selectedResolvedColor = selectedMember ? colorMap.get(selectedMember.name) : undefined;
+  const selectedColorSet = selectedResolvedColor ? getTeamColorSet(selectedResolvedColor) : null;
   const isLeadRecipient = selectedMember?.role === 'lead' || selectedMember?.name === 'team-lead';
   const canAttach = isLeadRecipient && isTeamAlive && canAddMore;
 
@@ -201,7 +205,8 @@ export const MessageComposer = ({
           <PopoverContent align="start" className="w-56 p-1.5">
             <div className="max-h-48 space-y-0.5 overflow-y-auto">
               {members.map((m) => {
-                const colorSet = m.color ? getTeamColorSet(m.color) : null;
+                const resolvedColor = colorMap.get(m.name);
+                const colorSet = resolvedColor ? getTeamColorSet(resolvedColor) : null;
                 const role = formatAgentRole(m.role) ?? formatAgentRole(m.agentType);
                 const isSelected = m.name === recipient;
                 return (

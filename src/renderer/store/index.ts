@@ -298,6 +298,17 @@ export function initializeNotificationListeners(): () => void {
 
   if (api.teams?.onTeamChange) {
     const cleanup = api.teams.onTeamChange((_event: unknown, event: TeamChangeEvent) => {
+      // Immediate in-memory update for lead activity — no filesystem refresh needed
+      if (event.type === 'lead-activity' && event.detail) {
+        useStore.setState((prev) => ({
+          leadActivityByTeam: {
+            ...prev.leadActivityByTeam,
+            [event.teamName]: event.detail as 'active' | 'idle' | 'offline',
+          },
+        }));
+        return;
+      }
+
       // Throttled refresh of summary list (keeps TeamListView current without flooding).
       if (!teamListRefreshTimer) {
         teamListRefreshTimer = setTimeout(() => {

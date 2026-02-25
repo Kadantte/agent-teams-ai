@@ -13,6 +13,7 @@ import type {
   CreateTaskRequest,
   GlobalTask,
   KanbanColumnId,
+  LeadActivityState,
   SendMessageRequest,
   SendMessageResult,
   TaskComment,
@@ -61,6 +62,7 @@ export interface TeamSlice {
   lastSendMessageResult: SendMessageResult | null;
   reviewActionError: string | null;
   provisioningRuns: Record<string, TeamProvisioningProgress>;
+  leadActivityByTeam: Record<string, LeadActivityState>;
   activeProvisioningRunId: string | null;
   provisioningError: string | null;
   kanbanFilterQuery: string | null;
@@ -120,6 +122,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   lastSendMessageResult: null,
   reviewActionError: null,
   provisioningRuns: {},
+  leadActivityByTeam: {},
   activeProvisioningRunId: null,
   provisioningError: null,
   kanbanFilterQuery: null,

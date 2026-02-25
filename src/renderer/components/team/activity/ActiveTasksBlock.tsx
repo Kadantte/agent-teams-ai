@@ -1,6 +1,7 @@
 import { CARD_BG, CARD_BORDER_STYLE, CARD_ICON_MUTED } from '@renderer/constants/cssVariables';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { Loader2 } from 'lucide-react';
 
 import type { ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
@@ -18,6 +19,7 @@ export const ActiveTasksBlock = ({
   onMemberClick,
   onTaskClick,
 }: ActiveTasksBlockProps): React.JSX.Element | null => {
+  const colorMap = buildMemberColorMap(members);
   const taskMap = new Map(tasks.map((t) => [t.id, t]));
   const working = members.filter((m) => m.currentTaskId != null);
   if (working.length === 0) return null;
@@ -30,7 +32,7 @@ export const ActiveTasksBlock = ({
       {working.map((member) => {
         const taskId = member.currentTaskId!;
         const task = taskMap.get(taskId);
-        const colors = getTeamColorSet(member.color ?? '');
+        const colors = getTeamColorSet(colorMap.get(member.name) ?? '');
         const roleLabel = formatAgentRole(
           member.role ?? (member.agentType !== 'general-purpose' ? member.agentType : undefined)
         );

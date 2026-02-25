@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-import { getMemberColorByName } from '@shared/constants/memberColors';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 
 import { ActivityItem } from './ActivityItem';
 
@@ -104,35 +104,27 @@ export const ActivityTimeline = ({
   onMemberClick,
   onMessageVisible,
 }: ActivityTimelineProps): React.JSX.Element => {
+  const colorMap = members ? buildMemberColorMap(members) : new Map<string, string>();
   const memberInfo = new Map<string, { role?: string; color?: string }>();
   if (members) {
     for (const m of members) {
       const info = {
         role: m.role ?? (m.agentType !== 'general-purpose' ? m.agentType : undefined),
-        color: m.color,
+        color: colorMap.get(m.name),
       };
       memberInfo.set(m.name, info);
       if (m.agentType && m.agentType !== m.name) {
         memberInfo.set(m.agentType, info);
       }
     }
+    // Map "user" to team-lead's resolved color and role
     const leadMember = members.find(
       (m) => m.agentType === 'team-lead' || m.role?.toLowerCase().includes('lead')
     );
     if (leadMember) {
       const leadInfo = memberInfo.get(leadMember.name);
       if (leadInfo) {
-        const teamLeadColor = leadInfo.color ?? getMemberColorByName('team-lead');
-        const resolvedLeadInfo = { role: leadInfo.role, color: teamLeadColor };
-        memberInfo.set('team-lead', resolvedLeadInfo);
-        memberInfo.set(leadMember.name, resolvedLeadInfo);
-        if (
-          leadMember.agentType &&
-          leadMember.agentType !== 'team-lead' &&
-          leadMember.agentType !== leadMember.name
-        ) {
-          memberInfo.set(leadMember.agentType, resolvedLeadInfo);
-        }
+        memberInfo.set('user', { role: leadInfo.role, color: colorMap.get('user') });
       }
     }
   }
@@ -157,7 +149,7 @@ export const ActivityTimeline = ({
         const info = memberInfo.get(message.from);
         const recipientInfo = message.to ? memberInfo.get(message.to) : undefined;
         const recipientColor =
-          recipientInfo?.color ?? (message.to ? getMemberColorByName(message.to) : undefined);
+          recipientInfo?.color ?? (message.to ? colorMap.get(message.to) : undefined);
         const messageKey = `${message.messageId ?? index}-${message.timestamp}-${message.from}`;
         const isUnread = readState
           ? !message.read && !readState.readSet.has(readState.getMessageKey(message))
