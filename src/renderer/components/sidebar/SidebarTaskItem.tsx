@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useUnreadCommentCount } from '@renderer/hooks/useUnreadCommentCount';
 import { useStore } from '@renderer/store';
@@ -107,14 +108,21 @@ export const SidebarTaskItem = ({
       onClick={() => openGlobalTaskDetail(task.teamName, task.id)}
     >
       {/* Row 1: status + subject */}
-      <div className="flex w-full items-center gap-1.5 overflow-hidden">
-        <StatusIcon className={`size-3 shrink-0 ${cfg.color}`} />
-        <span
-          className="truncate text-[13px] font-medium leading-tight"
-          style={{ color: 'var(--color-text-muted)' }}
-        >
-          {task.subject}
-        </span>
+      <div className="flex w-full items-start gap-1.5 overflow-hidden">
+        <StatusIcon className={`mt-0.5 size-3 shrink-0 ${cfg.color}`} />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className="line-clamp-2 text-[13px] font-medium leading-tight"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              {task.subject}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={6}>
+            {task.subject}
+          </TooltipContent>
+        </Tooltip>
         {unreadCount > 0 && (
           <span
             className="size-1.5 shrink-0 rounded-full bg-blue-400"

@@ -9,7 +9,11 @@ import {
   getTasksBasePath,
   getTeamsBasePath,
 } from '@main/utils/pathDecoder';
-import { AGENT_BLOCK_CLOSE, AGENT_BLOCK_OPEN } from '@shared/constants/agentBlocks';
+import {
+  AGENT_BLOCK_CLOSE,
+  AGENT_BLOCK_OPEN,
+  stripAgentBlocks,
+} from '@shared/constants/agentBlocks';
 import { resolveLanguageName } from '@shared/utils/agentLanguage';
 import { createLogger } from '@shared/utils/logger';
 import { execFile, spawn } from 'child_process';
@@ -351,7 +355,8 @@ ${AGENT_BLOCK_OPEN}
 (internal instructions: commands, script usage, paths, etc.)
 ${AGENT_BLOCK_CLOSE}
 - Put ONLY the internal instructions inside the agent-only block.
-- CRITICAL: Messages to "user" (the human) must NEVER contain agent-only blocks. Write them as plain readable text — the human sees these messages directly in the UI. Agent-only blocks are stripped before display, so a message containing ONLY an agent-only block will appear completely empty.`;
+- CRITICAL: Messages to "user" (the human) must NEVER contain agent-only blocks. Write them as plain readable text — the human sees these messages directly in the UI. Agent-only blocks are stripped before display, so a message containing ONLY an agent-only block will appear completely empty.
+- CRITICAL: When processing relayed inbox messages, your text output is shown to the user. Do NOT wrap your entire response in an agent-only block. If you need agent-only instructions, put them in a separate block and include a brief human-readable summary outside of it (e.g. "Delegated task to carol." or "Acknowledged, no action needed.").`;
 }
 
 function getSystemLocale(): string {
@@ -1466,6 +1471,7 @@ export class TeamProvisioningService {
         `You have new inbox messages addressed to you (team lead "${leadName}").`,
         `Process them in order (oldest first).`,
         `If action is required, delegate via task creation or SendMessage, and keep responses minimal.`,
+        `IMPORTANT: Your text response here is shown to the user. Always include a brief human-readable summary (e.g. "Delegated to carol." or "No action needed."). Do NOT respond with only an agent-only block.`,
         AGENT_BLOCK_OPEN,
         `Internal note: for task assignments, prefer teamctl.js task create --notify (avoid sending a separate SendMessage for the same assignment).`,
         AGENT_BLOCK_CLOSE,
@@ -1568,14 +1574,17 @@ export class TeamProvisioningService {
         }
       }
 
-      if (replyText) {
+      // Strip agent-only blocks — lead may respond with pure coordination content
+      // that is not meant for the human user.
+      const cleanReply = replyText ? stripAgentBlocks(replyText) : null;
+      if (cleanReply) {
         this.pushLiveLeadProcessMessage(teamName, {
           from: leadName,
           to: 'user',
-          text: replyText,
+          text: cleanReply,
           timestamp: nowIso(),
           read: true,
-          summary: 'Lead reply',
+          summary: cleanReply.length > 60 ? cleanReply.slice(0, 57) + '...' : cleanReply,
           messageId: `lead-process-${runId}-${Date.now()}`,
           source: 'lead_process',
         });
@@ -1867,11 +1876,13 @@ export class TeamProvisioningService {
           capture.resolveOnce(combined);
         } else if (run.provisioningComplete && run.directReplyParts.length > 0) {
           // Flush accumulated assistant reply from direct user→lead message
-          const replyText = run.directReplyParts.join('').trim();
+          const rawReply = run.directReplyParts.join('').trim();
           run.directReplyParts = [];
           const leadName =
             run.request.members.find((m) => m.role?.toLowerCase().includes('lead'))?.name ||
             'team-lead';
+          // Strip agent-only blocks — lead may include coordination content not meant for the user
+          const replyText = stripAgentBlocks(rawReply);
           if (replyText.length > 0) {
             const replyMsg: InboxMessage = {
               from: leadName,

@@ -19,22 +19,27 @@ import { useStore } from '@renderer/store';
 import { formatProjectPath } from '@renderer/utils/pathDisplay';
 import { buildTaskCountsByOwner } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
+import { resolveProjectIdByPath } from '@renderer/utils/projectLookup';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import {
   AlertTriangle,
   Bell,
   CheckCheck,
+  Columns3,
   FolderOpen,
   GitBranch,
   History,
+  MessageSquare,
   Pencil,
   Play,
   Plus,
   Search,
   Square,
+  Terminal,
   Trash2,
   UserPlus,
+  Users,
   X,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -153,6 +158,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     loading,
     error,
     projects,
+    repositoryGroups,
     teams,
     selectTeam,
     updateKanban,
@@ -189,6 +195,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       loading: s.selectedTeamLoading,
       error: s.selectedTeamError,
       projects: s.projects,
+      repositoryGroups: s.repositoryGroups,
       teams: s.teams,
       selectTeam: s.selectTeam,
       updateKanban: s.updateKanban,
@@ -274,10 +281,10 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
   }, [kanbanFilterQuery, clearKanbanFilter]);
 
   // Load sessions for the team's project
-  const projectId = useMemo(() => {
-    if (!data?.config.projectPath) return null;
-    return projects.find((p) => p.path === data.config.projectPath)?.id ?? null;
-  }, [projects, data?.config.projectPath]);
+  const projectId = useMemo(
+    () => resolveProjectIdByPath(data?.config.projectPath, projects, repositoryGroups),
+    [projects, repositoryGroups, data?.config.projectPath]
+  );
 
   useEffect(() => {
     if (!projectId) return;
@@ -647,7 +654,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     : nameColorSet(data.config.name);
 
   return (
-    <div className="size-full overflow-auto p-4">
+    <div className="size-full overflow-auto p-4" data-team-name={teamName}>
       <div
         className="relative mb-3 overflow-hidden rounded-lg border border-[var(--color-border)] px-4 py-3"
         style={
@@ -820,7 +827,9 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       ) : null}
 
       <CollapsibleTeamSection
+        sectionId="team"
         title="Team"
+        icon={<Users size={14} />}
         badge={activeMembers.length}
         defaultOpen
         action={
@@ -859,7 +868,12 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         />
       </CollapsibleTeamSection>
 
-      <CollapsibleTeamSection title="Sessions" defaultOpen={false}>
+      <CollapsibleTeamSection
+        sectionId="sessions"
+        title="Sessions"
+        icon={<History size={14} />}
+        defaultOpen={false}
+      >
         <TeamSessionsSection
           sessions={teamSessions}
           sessionsLoading={sessionsLoading}
@@ -872,7 +886,9 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       </CollapsibleTeamSection>
 
       <CollapsibleTeamSection
+        sectionId="kanban"
         title="Kanban"
+        icon={<Columns3 size={14} />}
         badge={filteredTasks.length}
         defaultOpen
         forceOpen={kanbanSearch.trim().length > 0}
@@ -1037,7 +1053,9 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
 
       {(data.processes?.length ?? 0) > 0 && (
         <CollapsibleTeamSection
+          sectionId="processes"
           title="CLI Processes"
+          icon={<Terminal size={14} />}
           badge={data.processes.filter((p) => !p.stoppedAt).length}
           defaultOpen
         >
@@ -1046,7 +1064,9 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       )}
 
       <CollapsibleTeamSection
+        sectionId="messages"
         title="Messages"
+        icon={<MessageSquare size={14} />}
         badge={filteredMessages.length}
         secondaryBadge={
           filteredMessages.length > 0 && messagesUnreadCount > 0 ? messagesUnreadCount : undefined

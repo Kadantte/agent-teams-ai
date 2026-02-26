@@ -1,7 +1,15 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@renderer/components/ui/badge';
 import { ChevronRight } from 'lucide-react';
+
+function scrollAfterExpand(el: HTMLElement): void {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+}
 
 interface CollapsibleTeamSectionProps {
   title: string;
@@ -15,6 +23,8 @@ interface CollapsibleTeamSectionProps {
   defaultOpen?: boolean;
   forceOpen?: boolean;
   action?: React.ReactNode;
+  /** Stable identifier used for programmatic section navigation. */
+  sectionId?: string;
   children: React.ReactNode;
 }
 
@@ -27,13 +37,31 @@ export const CollapsibleTeamSection = ({
   defaultOpen = true,
   forceOpen,
   action,
+  sectionId,
   children,
 }: CollapsibleTeamSectionProps): React.JSX.Element => {
   const [open, setOpen] = useState(defaultOpen);
   const isOpen = forceOpen ? true : open;
+  const sectionRef = useRef<HTMLElement>(null);
+
+  const handleNavigate = useCallback((): void => {
+    setOpen(true);
+    if (sectionRef.current) scrollAfterExpand(sectionRef.current);
+  }, []);
+
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    el.addEventListener('team-section-navigate', handleNavigate);
+    return () => el.removeEventListener('team-section-navigate', handleNavigate);
+  }, [handleNavigate]);
 
   return (
-    <section className="min-w-0 overflow-hidden border-b border-[var(--color-border)] pb-3 last:border-b-0">
+    <section
+      ref={sectionRef}
+      data-section-id={sectionId}
+      className="min-w-0 overflow-hidden border-b border-[var(--color-border)] pb-3 last:border-b-0"
+    >
       <div className="relative -mx-4 flex min-h-10 w-full items-stretch py-3">
         <button
           type="button"

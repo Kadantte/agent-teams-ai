@@ -90,9 +90,8 @@ export const MessageComposer = ({
 
   const handleSend = useCallback(() => {
     if (!canSend) return;
-    const autoSummary = trimmed.length > 60 ? trimmed.slice(0, 57) + '...' : trimmed;
     pendingSendRef.current = true;
-    onSend(recipient, trimmed, autoSummary, attachments.length > 0 ? attachments : undefined);
+    onSend(recipient, trimmed, trimmed, attachments.length > 0 ? attachments : undefined);
   }, [canSend, recipient, trimmed, onSend, attachments]);
 
   // Clear draft only after send completes successfully (sending: true → false, no error)

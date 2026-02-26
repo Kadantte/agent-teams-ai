@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
-import { Combobox } from '@renderer/components/ui/combobox';
 import {
   Dialog,
   DialogContent,
@@ -11,7 +10,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog';
-import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
 import {
@@ -22,12 +20,13 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
-import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { normalizePath } from '@renderer/utils/pathNormalize';
-import { AlertTriangle, Check, CheckCircle2, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
+
+import { ProjectPathSelector } from './ProjectPathSelector';
 
 import type { ActiveTeamRef } from './CreateTeamDialog';
 import type { MentionSuggestion } from '@renderer/types/mention';
@@ -47,39 +46,6 @@ interface LaunchTeamDialogProps {
   activeTeams?: ActiveTeamRef[];
   onClose: () => void;
   onLaunch: (request: TeamLaunchRequest) => Promise<void>;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function renderHighlightedText(text: string, query: string): React.JSX.Element {
-  if (!query.trim()) {
-    return <span>{text}</span>;
-  }
-
-  const pattern = new RegExp(`(${escapeRegExp(query)})`, 'ig');
-  const parts = text.split(pattern);
-
-  return (
-    <span>
-      {parts.map((part, index) => {
-        const isMatch = part.toLowerCase() === query.toLowerCase();
-        if (!isMatch) {
-          return <span key={`${part}-${index}`}>{part}</span>;
-        }
-        return (
-          <mark
-            key={`${part}-${index}`}
-            // eslint-disable-next-line tailwindcss/no-custom-classname -- Tailwind arbitrary value with CSS variable
-            className="bg-[var(--color-accent)]/25 rounded px-0.5 text-[var(--color-text)]"
-          >
-            {part}
-          </mark>
-        );
-      })}
-    </span>
-  );
 }
 
 export const LaunchTeamDialog = ({
@@ -356,110 +322,21 @@ export const LaunchTeamDialog = ({
         ) : null}
 
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs text-[var(--color-text-muted)]">Project</Label>
-            <div className="space-y-2">
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant={cwdMode === 'project' ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => setCwdMode('project')}
-                >
-                  From project list
-                </Button>
-                <Button
-                  type="button"
-                  variant={cwdMode === 'custom' ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => setCwdMode('custom')}
-                >
-                  Custom path
-                </Button>
-              </div>
-
-              {cwdMode === 'project' ? (
-                <div className="space-y-1.5">
-                  <Combobox
-                    options={projects.map((project) => ({
-                      value: project.path,
-                      label: project.name,
-                      description: project.path,
-                    }))}
-                    value={selectedProjectPath}
-                    onValueChange={setSelectedProjectPath}
-                    placeholder={projectsLoading ? 'Loading projects...' : 'Select a project...'}
-                    searchPlaceholder="Search project by name or path"
-                    emptyMessage="Nothing found"
-                    disabled={projectsLoading || projects.length === 0}
-                    renderOption={(option, isSelected, query) => (
-                      <>
-                        <Check
-                          className={cn(
-                            'mr-2 size-3.5 shrink-0',
-                            isSelected ? 'opacity-100' : 'opacity-0'
-                          )}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium text-[var(--color-text)]">
-                            {renderHighlightedText(option.label, query)}
-                          </p>
-                          <p className="truncate text-[var(--color-text-muted)]">
-                            {renderHighlightedText(option.description ?? '', query)}
-                          </p>
-                        </div>
-                      </>
-                    )}
-                  />
-                  {!selectedProjectPath ? (
-                    <p className="text-[11px] text-[var(--color-text-muted)]">
-                      Select a project from the list
-                    </p>
-                  ) : null}
-                  {projectsError ? (
-                    <p className="text-[11px] text-red-300">{projectsError}</p>
-                  ) : null}
-                  {!projectsLoading && projects.length === 0 ? (
-                    <p className="text-[11px] text-amber-300">
-                      No projects found, switch to custom path.
-                    </p>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <div className="flex gap-2">
-                    <Input
-                      className="h-8 text-xs"
-                      value={customCwd}
-                      aria-label="Custom working directory"
-                      onChange={(event) => setCustomCwd(event.target.value)}
-                      placeholder="/absolute/path/to/project"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        void (async () => {
-                          const paths = await api.config.selectFolders();
-                          if (paths.length > 0) {
-                            setCustomCwd(paths[0]);
-                          }
-                        })();
-                      }}
-                    >
-                      Browse
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <ProjectPathSelector
+            cwdMode={cwdMode}
+            onCwdModeChange={setCwdMode}
+            selectedProjectPath={selectedProjectPath}
+            onSelectedProjectPathChange={setSelectedProjectPath}
+            customCwd={customCwd}
+            onCustomCwdChange={setCustomCwd}
+            projects={projects}
+            projectsLoading={projectsLoading}
+            projectsError={projectsError}
+          />
 
           <div className="space-y-1.5">
-            <Label htmlFor="launch-prompt" className="label-optional text-xs">
-              Prompt (optional)
+            <Label htmlFor="launch-prompt" className="label-optional">
+              Prompt for team lead (optional)
             </Label>
             <MentionableTextarea
               id="launch-prompt"
@@ -479,7 +356,7 @@ export const LaunchTeamDialog = ({
           </div>
 
           <div className="space-y-1.5">
-            <Label className="label-optional text-xs">Model (optional)</Label>
+            <Label className="label-optional">Model (optional)</Label>
             <Select value={selectedModel} onValueChange={setSelectedModel}>
               <SelectTrigger className="h-8 text-xs">
                 <SelectValue placeholder="Default (account setting)" />

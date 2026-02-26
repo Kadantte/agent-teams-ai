@@ -735,12 +735,18 @@ const electronAPI: ElectronAPI = {
     getChangeStats: async (teamName: string, memberName: string) => {
       return invokeIpcWithResult<ChangeStats>(REVIEW_GET_CHANGE_STATS, teamName, memberName);
     },
-    getFileContent: async (teamName: string, memberName: string | undefined, filePath: string) => {
+    getFileContent: async (
+      teamName: string,
+      memberName: string | undefined,
+      filePath: string,
+      snippets: SnippetDiff[] = []
+    ) => {
       return invokeIpcWithResult<FileChangeWithContent>(
         REVIEW_GET_FILE_CONTENT,
         teamName,
         memberName ?? '',
-        filePath
+        filePath,
+        snippets
       );
     },
     applyDecisions: async (request: ApplyReviewRequest) => {

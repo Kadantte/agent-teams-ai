@@ -4,7 +4,6 @@ import { api } from '@renderer/api';
 import { AutoResizeTextarea } from '@renderer/components/ui/auto-resize-textarea';
 import { Button } from '@renderer/components/ui/button';
 import { Checkbox } from '@renderer/components/ui/checkbox';
-import { Combobox } from '@renderer/components/ui/combobox';
 import {
   Dialog,
   DialogContent,
@@ -28,9 +27,10 @@ import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { cn } from '@renderer/lib/utils';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { getMemberColor } from '@shared/constants/memberColors';
-import { AlertTriangle, Check, CheckCircle2, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
 import { MembersJsonEditor } from './MembersJsonEditor';
+import { ProjectPathSelector } from './ProjectPathSelector';
 
 const TEAM_COLOR_NAMES = [
   'blue',
@@ -119,39 +119,6 @@ function createMemberDraft(initial?: Partial<MemberDraft>): MemberDraft {
     roleSelection: initial?.roleSelection ?? '',
     customRole: initial?.customRole ?? '',
   };
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function renderHighlightedText(text: string, query: string): React.JSX.Element {
-  if (!query.trim()) {
-    return <span>{text}</span>;
-  }
-
-  const pattern = new RegExp(`(${escapeRegExp(query)})`, 'ig');
-  const parts = text.split(pattern);
-
-  return (
-    <span>
-      {parts.map((part, index) => {
-        const isMatch = part.toLowerCase() === query.toLowerCase();
-        if (!isMatch) {
-          return <span key={`${part}-${index}`}>{part}</span>;
-        }
-        return (
-          <mark
-            key={`${part}-${index}`}
-            // eslint-disable-next-line tailwindcss/no-custom-classname -- Tailwind arbitrary value with CSS variable
-            className="bg-[var(--color-accent)]/25 rounded px-0.5 text-[var(--color-text)]"
-          >
-            {part}
-          </mark>
-        );
-      })}
-    </span>
-  );
 }
 
 function buildMembers(members: MemberDraft[]): TeamCreateRequest['members'] {
@@ -845,120 +812,18 @@ export const CreateTeamDialog = ({
 
             {launchTeam ? (
               <div className="mt-4 space-y-4">
-                <div className="space-y-1.5">
-                  <Label>Project</Label>
-                  <div className="space-y-2">
-                    <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
-                      <button
-                        type="button"
-                        className={cn(
-                          'rounded-[3px] px-3 py-1 text-xs font-medium transition-colors',
-                          cwdMode === 'project'
-                            ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm'
-                            : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-                        )}
-                        onClick={() => setCwdMode('project')}
-                      >
-                        From project list
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(
-                          'rounded-[3px] px-3 py-1 text-xs font-medium transition-colors',
-                          cwdMode === 'custom'
-                            ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm'
-                            : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-                        )}
-                        onClick={() => setCwdMode('custom')}
-                      >
-                        Custom path
-                      </button>
-                    </div>
-
-                    {cwdMode === 'project' ? (
-                      <div className="space-y-1.5">
-                        <Combobox
-                          options={projects.map((project) => ({
-                            value: project.path,
-                            label: project.name,
-                            description: project.path,
-                          }))}
-                          value={selectedProjectPath}
-                          onValueChange={setSelectedProjectPath}
-                          placeholder={
-                            projectsLoading ? 'Loading projects...' : 'Select a project...'
-                          }
-                          searchPlaceholder="Search project by name or path"
-                          emptyMessage="Nothing found"
-                          disabled={projectsLoading || projects.length === 0}
-                          renderOption={(option, isSelected, query) => (
-                            <>
-                              <Check
-                                className={cn(
-                                  'mr-2 size-3.5 shrink-0',
-                                  isSelected ? 'opacity-100' : 'opacity-0'
-                                )}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate font-medium text-[var(--color-text)]">
-                                  {renderHighlightedText(option.label, query)}
-                                </p>
-                                <p className="truncate text-[var(--color-text-muted)]">
-                                  {renderHighlightedText(option.description ?? '', query)}
-                                </p>
-                              </div>
-                            </>
-                          )}
-                        />
-                        {!selectedProjectPath ? (
-                          <p className="text-[11px] text-[var(--color-text-muted)]">
-                            Select a project from the list
-                          </p>
-                        ) : null}
-                        {projectsError ? (
-                          <p className="text-[11px] text-red-300">{projectsError}</p>
-                        ) : null}
-                        {!projectsLoading && projects.length === 0 ? (
-                          <p className="text-[11px] text-amber-300">
-                            No projects found, switch to custom path.
-                          </p>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        <div className="flex gap-2">
-                          <Input
-                            className="h-8 text-xs"
-                            value={customCwd}
-                            aria-label="Custom working directory"
-                            onChange={(event) => setCustomCwd(event.target.value)}
-                            placeholder="/absolute/path/to/project"
-                          />
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              void (async () => {
-                                const paths = await api.config.selectFolders();
-                                if (paths.length > 0) {
-                                  setCustomCwd(paths[0]);
-                                }
-                              })();
-                            }}
-                          >
-                            Browse
-                          </Button>
-                        </div>
-                        <p className="text-[11px] text-[var(--color-text-muted)]">
-                          If the directory does not exist, it will be created automatically.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                  {fieldErrors.cwd ? (
-                    <p className="text-[11px] text-red-300">{fieldErrors.cwd}</p>
-                  ) : null}
-                </div>
+                <ProjectPathSelector
+                  cwdMode={cwdMode}
+                  onCwdModeChange={setCwdMode}
+                  selectedProjectPath={selectedProjectPath}
+                  onSelectedProjectPathChange={setSelectedProjectPath}
+                  customCwd={customCwd}
+                  onCustomCwdChange={setCustomCwd}
+                  projects={projects}
+                  projectsLoading={projectsLoading}
+                  projectsError={projectsError}
+                  fieldError={fieldErrors.cwd}
+                />
 
                 <div className="space-y-1.5">
                   <Label htmlFor="team-prompt" className="label-optional">

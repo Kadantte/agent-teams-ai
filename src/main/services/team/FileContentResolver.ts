@@ -1,4 +1,5 @@
 import { createLogger } from '@shared/utils/logger';
+import { diffLines } from 'diff';
 import { createReadStream } from 'fs';
 import { access, readFile } from 'fs/promises';
 import * as path from 'path';
@@ -28,7 +29,7 @@ interface ContentCacheEntry {
  */
 export class FileContentResolver {
   private cache = new Map<string, ContentCacheEntry>();
-  private readonly CACHE_TTL = 3 * 60 * 1000; // 3 мин (same as ChangeExtractorService)
+  private readonly cacheTtl = 3 * 60 * 1000; // 3 мин (same as ChangeExtractorService)
 
   constructor(
     private readonly logsFinder: TeamMemberLogsFinder,
@@ -123,16 +124,37 @@ export class FileContentResolver {
   async getFileContent(
     teamName: string,
     memberName: string,
-    filePath: string
+    filePath: string,
+    snippets: SnippetDiff[] = []
   ): Promise<FileChangeWithContent> {
-    const resolved = await this.resolveFileContent(teamName, memberName, filePath, []);
+    const resolved = await this.resolveFileContent(teamName, memberName, filePath, snippets);
+
+    // Compute accurate stats from full content diff
+    let linesAdded = 0;
+    let linesRemoved = 0;
+    if (resolved.original !== null && resolved.modified !== null) {
+      const changes = diffLines(resolved.original, resolved.modified);
+      for (const c of changes) {
+        if (c.added) linesAdded += c.count ?? 0;
+        if (c.removed) linesRemoved += c.count ?? 0;
+      }
+    } else if (resolved.original === null && resolved.modified !== null) {
+      // Use diffLines for consistency with ChangeExtractorService.countLines()
+      const changes = diffLines('', resolved.modified);
+      for (const c of changes) {
+        if (c.added) linesAdded += c.count ?? 0;
+      }
+    }
+
+    const isNewFile = snippets.some((s) => s.type === 'write-new');
+
     return {
       filePath,
       relativePath: filePath.split('/').slice(-3).join('/'),
-      snippets: [],
-      linesAdded: 0,
-      linesRemoved: 0,
-      isNewFile: false,
+      snippets,
+      linesAdded,
+      linesRemoved,
+      isNewFile,
       originalFullContent: resolved.original,
       modifiedFullContent: resolved.modified,
       contentSource: resolved.source,
@@ -165,12 +187,25 @@ export class FileContentResolver {
         file.filePath,
         file.snippets
       );
+      // Compute accurate stats from full content diff
+      let linesAdded = file.linesAdded;
+      let linesRemoved = file.linesRemoved;
+      if (resolved.original !== null && resolved.modified !== null) {
+        linesAdded = 0;
+        linesRemoved = 0;
+        const changes = diffLines(resolved.original, resolved.modified);
+        for (const c of changes) {
+          if (c.added) linesAdded += c.count ?? 0;
+          if (c.removed) linesRemoved += c.count ?? 0;
+        }
+      }
+
       const entry: FileChangeWithContent = {
         filePath: file.filePath,
         relativePath: file.relativePath,
         snippets: file.snippets,
-        linesAdded: file.linesAdded,
-        linesRemoved: file.linesRemoved,
+        linesAdded,
+        linesRemoved,
         isNewFile: file.isNewFile,
         originalFullContent: resolved.original,
         modifiedFullContent: resolved.modified,
@@ -352,6 +387,9 @@ export class FileContentResolver {
 
         case 'edit':
         case 'multi-edit': {
+          // Guard: empty newString means deletion — can't find position to reverse
+          if (!snippet.newString) return null;
+
           if (snippet.replaceAll) {
             // Reverse replaceAll: replace all occurrences of newString -> oldString
             if (!content.includes(snippet.newString)) {
@@ -453,7 +491,7 @@ export class FileContentResolver {
       original: result.original,
       modified: result.modified,
       source: result.source,
-      expiresAt: Date.now() + this.CACHE_TTL,
+      expiresAt: Date.now() + this.cacheTtl,
     });
   }
 }

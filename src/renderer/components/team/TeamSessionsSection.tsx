@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
+import { resolveProjectIdByPath } from '@renderer/utils/projectLookup';
 import { formatDistanceToNowStrict } from 'date-fns';
 import {
   AlertCircle,
@@ -36,18 +37,19 @@ export const TeamSessionsSection = ({
   onSelectSession,
   projectPath,
 }: TeamSessionsSectionProps): React.JSX.Element => {
-  const { openTab, selectSession, projects } = useStore(
+  const { openTab, selectSession, projects, repositoryGroups } = useStore(
     useShallow((s) => ({
       openTab: s.openTab,
       selectSession: s.selectSession,
       projects: s.projects,
+      repositoryGroups: s.repositoryGroups,
     }))
   );
 
-  const projectId = useMemo(() => {
-    if (!projectPath) return null;
-    return projects.find((p) => p.path === projectPath)?.id ?? null;
-  }, [projects, projectPath]);
+  const projectId = useMemo(
+    () => resolveProjectIdByPath(projectPath, projects, repositoryGroups),
+    [projects, repositoryGroups, projectPath]
+  );
 
   // Sort: lead session first, then by most recent
   const sortedSessions = useMemo(() => {

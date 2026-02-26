@@ -452,7 +452,8 @@ export interface ReviewAPI {
   getFileContent: (
     teamName: string,
     memberName: string | undefined,
-    filePath: string
+    filePath: string,
+    snippets?: SnippetDiff[]
   ) => Promise<FileChangeWithContent>;
   applyDecisions: (request: ApplyReviewRequest) => Promise<ApplyReviewResult>;
   // Phase 2

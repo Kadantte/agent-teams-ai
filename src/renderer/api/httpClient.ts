@@ -36,6 +36,7 @@ import type {
   SessionMetrics,
   SessionsByIdsOptions,
   SessionsPaginationOptions,
+  SnippetDiff,
   SshAPI,
   SshConfigHostEntry,
   SshConnectionConfig,
@@ -809,7 +810,8 @@ export class HttpAPIClient implements ElectronAPI {
     getFileContent: async (
       _teamName: string,
       _memberName: string | undefined,
-      _filePath: string
+      _filePath: string,
+      _snippets: SnippetDiff[] = []
     ): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },

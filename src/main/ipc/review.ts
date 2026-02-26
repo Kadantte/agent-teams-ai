@@ -241,10 +241,11 @@ async function handleGetFileContent(
   _event: IpcMainInvokeEvent,
   teamName: string,
   memberName: string,
-  filePath: string
+  filePath: string,
+  snippets: SnippetDiff[] = []
 ): Promise<IpcResult<FileChangeWithContent>> {
   return wrapReviewHandler('getFileContent', () =>
-    getContentResolver().getFileContent(teamName, memberName, filePath)
+    getContentResolver().getFileContent(teamName, memberName, filePath, snippets)
   );
 }
 

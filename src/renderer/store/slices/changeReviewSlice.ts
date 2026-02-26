@@ -355,11 +355,41 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
     }));
 
     try {
-      const content = await api.review.getFileContent(teamName, memberName, filePath);
-      set((s) => ({
-        fileContents: { ...s.fileContents, [filePath]: content },
-        fileContentsLoading: { ...s.fileContentsLoading, [filePath]: false },
-      }));
+      // Lookup snippets from activeChangeSet so backend can use them for reconstruction
+      const activeChangeSet = get().activeChangeSet;
+      const fileEntry = activeChangeSet?.files.find((f) => f.filePath === filePath);
+      const snippets = fileEntry?.snippets ?? [];
+
+      const content = await api.review.getFileContent(teamName, memberName, filePath, snippets);
+      set((s) => {
+        const result: Partial<ChangeReviewSlice> = {
+          fileContents: { ...s.fileContents, [filePath]: content },
+          fileContentsLoading: { ...s.fileContentsLoading, [filePath]: false },
+        };
+
+        // Update activeChangeSet stats if original was successfully resolved
+        if (
+          content.contentSource !== 'unavailable' &&
+          content.contentSource !== 'disk-current' &&
+          s.activeChangeSet
+        ) {
+          const updatedFiles = s.activeChangeSet.files.map((f) =>
+            f.filePath === filePath
+              ? { ...f, linesAdded: content.linesAdded, linesRemoved: content.linesRemoved }
+              : f
+          );
+          const totalLinesAdded = updatedFiles.reduce((sum, f) => sum + f.linesAdded, 0);
+          const totalLinesRemoved = updatedFiles.reduce((sum, f) => sum + f.linesRemoved, 0);
+          result.activeChangeSet = {
+            ...s.activeChangeSet,
+            files: updatedFiles,
+            totalLinesAdded,
+            totalLinesRemoved,
+          };
+        }
+
+        return result;
+      });
     } catch (error) {
       logger.error('fetchFileContent error:', error);
       set((s) => ({
@@ -375,13 +405,10 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
       // Stale check: re-fetch changes and compare content fingerprint
       const state = get();
       const current = state.activeChangeSet;
-      const fingerprint = (cs: {
-        totalFiles: number;
-        totalLinesAdded: number;
-        totalLinesRemoved: number;
-        files: { filePath: string }[];
-      }): string =>
-        `${cs.totalFiles}:${cs.totalLinesAdded}:${cs.totalLinesRemoved}:${cs.files.map((f) => f.filePath).join(',')}`;
+      // Fingerprint uses file count + file paths only (not line counts)
+      // because line counts may be corrected by lazy-loaded content resolution
+      const fingerprint = (cs: { totalFiles: number; files: { filePath: string }[] }): string =>
+        `${cs.totalFiles}:${cs.files.map((f) => f.filePath).join(',')}`;
 
       if (memberName && current) {
         const fresh = await api.review.getAgentChanges(teamName, memberName);

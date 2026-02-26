@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 
@@ -25,6 +25,7 @@ interface ActivityTimelineProps {
 }
 
 const VIEWPORT_THRESHOLD = 0.15;
+const MESSAGES_PAGE_SIZE = 30;
 
 const MessageRowWithObserver = ({
   message,
@@ -110,6 +111,13 @@ export const ActivityTimeline = ({
   onMessageVisible,
   onTaskIdClick,
 }: ActivityTimelineProps): React.JSX.Element => {
+  const [visibleCount, setVisibleCount] = useState(MESSAGES_PAGE_SIZE);
+
+  // Track whether the user was seeing ALL messages (no hidden ones).
+  // If so, auto-expand when new messages push count past the limit,
+  // so previously visible messages don't silently disappear.
+  const wasShowingAllRef = useRef(messages.length <= MESSAGES_PAGE_SIZE);
+
   const colorMap = members ? buildMemberColorMap(members) : new Map<string, string>();
   const memberInfo = new Map<string, { role?: string; color?: string }>();
   if (members) {
@@ -140,6 +148,28 @@ export const ActivityTimeline = ({
     if (member) onMemberClick?.(member);
   };
 
+  const hiddenCount = Math.max(0, messages.length - visibleCount);
+
+  useEffect(() => {
+    if (wasShowingAllRef.current && hiddenCount > 0) {
+      queueMicrotask(() => setVisibleCount(messages.length));
+    }
+    wasShowingAllRef.current = hiddenCount === 0;
+  }, [hiddenCount, messages.length]);
+
+  const visibleMessages = useMemo(
+    () => (hiddenCount > 0 ? messages.slice(0, visibleCount) : messages),
+    [messages, visibleCount, hiddenCount]
+  );
+
+  const handleShowMore = (): void => {
+    setVisibleCount((prev) => prev + MESSAGES_PAGE_SIZE);
+  };
+
+  const handleShowAll = (): void => {
+    setVisibleCount(Infinity);
+  };
+
   if (messages.length === 0) {
     return (
       <div className="rounded-md border border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
@@ -151,12 +181,13 @@ export const ActivityTimeline = ({
 
   return (
     <div className="space-y-1">
-      {messages.slice(0, 200).map((message, index) => {
+      {visibleMessages.map((message, index) => {
         const info = memberInfo.get(message.from);
         const recipientInfo = message.to ? memberInfo.get(message.to) : undefined;
         const recipientColor =
           recipientInfo?.color ?? (message.to ? colorMap.get(message.to) : undefined);
-        const messageKey = `${message.messageId ?? index}-${message.timestamp}-${message.from}`;
+        const globalIndex = index;
+        const messageKey = `${message.messageId ?? globalIndex}-${message.timestamp}-${message.from}`;
         const isUnread = readState
           ? !message.read && !readState.readSet.has(readState.getMessageKey(message))
           : !message.read;
@@ -177,6 +208,25 @@ export const ActivityTimeline = ({
           />
         );
       })}
+      {hiddenCount > 0 && (
+        <div className="flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5">
+          <span className="text-[11px] text-[var(--color-text-muted)]">+{hiddenCount} older</span>
+          <button
+            onClick={handleShowMore}
+            className="rounded px-2 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)]"
+          >
+            Show {Math.min(MESSAGES_PAGE_SIZE, hiddenCount)} more
+          </button>
+          {hiddenCount > MESSAGES_PAGE_SIZE && (
+            <button
+              onClick={handleShowAll}
+              className="rounded px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text-secondary)]"
+            >
+              Show all
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };
