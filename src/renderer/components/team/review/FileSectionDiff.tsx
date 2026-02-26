@@ -53,7 +53,7 @@ export const FileSectionDiff = ({
     if (localEditorViewRef.current) {
       onEditorViewReady(file.filePath, localEditorViewRef.current);
     }
-  }, [file.filePath, onEditorViewReady]);
+  }, [file.filePath, onEditorViewReady, discardCounter]);
 
   // Auto-viewed sentinel observer
   useEffect(() => {
