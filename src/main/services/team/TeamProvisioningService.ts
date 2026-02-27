@@ -1,5 +1,6 @@
 /* eslint-disable no-param-reassign -- ProvisioningRun object is intentionally mutated as a state tracker throughout the provisioning lifecycle */
 import { ConfigManager } from '@main/services/infrastructure/ConfigManager';
+import { spawnCli } from '@main/utils/childProcess';
 import {
   encodePath,
   extractBaseDir,
@@ -930,7 +931,7 @@ export class TeamProvisioningService {
       );
     }
     try {
-      child = spawn(
+      child = spawnCli(
         claudePath,
         [
           '--input-format',
@@ -1252,7 +1253,7 @@ export class TeamProvisioningService {
     // --resume is for existing sessions and may show an interactive picker if not found.
 
     try {
-      child = spawn(claudePath, launchArgs, {
+      child = spawnCli(claudePath, launchArgs, {
         cwd: request.cwd,
         env: {
           ...shellEnv,
@@ -3127,7 +3128,7 @@ export class TeamProvisioningService {
     timeoutMs: number
   ): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-      const child = spawn(claudePath, args, {
+      const child = spawnCli(claudePath, args, {
         cwd,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],

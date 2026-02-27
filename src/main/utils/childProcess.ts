@@ -1,15 +1,59 @@
-import { spawn, execFile, exec, SpawnOptions, ExecFileOptions } from 'child_process';
-import { promisify } from 'util';
+import {
+  exec,
+  execFile,
+  type ExecFileOptions,
+  type ExecOptions,
+  spawn,
+  type SpawnOptions,
+} from 'child_process';
 
-// re-exported helpers used throughout the codebase
-export const execFileAsync = promisify(execFile);
-export const execAsync = promisify(exec);
+/**
+ * Promise wrapper for execFile that always returns { stdout, stderr }.
+ * Unlike promisify(execFile), this works correctly with mocked execFile
+ * (promisify relies on a custom symbol that mocks don't have).
+ */
+function execFileAsync(
+  cmd: string,
+  args: string[],
+  options: ExecFileOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, options, (err, stdout, stderr) => {
+      if (err)
+        reject(
+          err instanceof Error ? err : new Error(typeof err === 'string' ? err : 'Unknown error')
+        );
+      else resolve({ stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
+}
+
+/**
+ * Promise wrapper for exec.  Used exclusively as a Windows shell fallback
+ * when execFile fails with EINVAL on non-ASCII binary paths.  The command
+ * string is built from a known binary path + args, NOT from user input.
+ */
+function execShellAsync(
+  cmd: string,
+  options: ExecOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    // eslint-disable-next-line sonarjs/os-command, security/detect-child-process -- cmd from known binaryPath+args, not user input (Windows EINVAL fallback)
+    exec(cmd, options, (err, stdout, stderr) => {
+      if (err)
+        reject(
+          err instanceof Error ? err : new Error(typeof err === 'string' ? err : 'Unknown error')
+        );
+      else resolve({ stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
+}
 
 /**
  * Returns true if the string contains any non-ASCII character.
  */
 function containsNonAscii(str: string): boolean {
-  return /[^\x00-\x7F]/.test(str);
+  return [...str].some((c) => c.charCodeAt(0) > 127);
 }
 
 /**
@@ -30,7 +74,7 @@ function needsShell(binaryPath: string): boolean {
  * the shell itself will handle most quoting rules.
  */
 function quoteArg(arg: string): string {
-  if (/[^A-Za-z0-9_\-\/.]/.test(arg)) {
+  if (/[^A-Za-z0-9_\-/.]/.test(arg)) {
     return `"${arg.replace(/"/g, '\\"')}"`;
   }
   return arg;
@@ -56,10 +100,14 @@ export async function execCli(
     try {
       const result = await execFileAsync(target, args, options);
       return { stdout: String(result.stdout), stderr: String(result.stderr) };
-    } catch (err: any) {
+    } catch (err: unknown) {
       // fall through to shell fallback only when the error matches the
       // Windows "invalid argument" problem; otherwise rethrow.
-      if (!(err && err.code === 'EINVAL')) {
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? (err as { code?: string }).code
+          : undefined;
+      if (code !== 'EINVAL') {
         throw err;
       }
     }
@@ -67,7 +115,7 @@ export async function execCli(
 
   // shell fallback (Windows only; others shouldn't reach here)
   const cmd = [target, ...args].map(quoteArg).join(' ');
-  const shellResult = await execAsync(cmd, options as unknown as import('child_process').ExecOptions);
+  const shellResult = await execShellAsync(cmd, options as unknown as ExecOptions);
   return { stdout: String(shellResult.stdout), stderr: String(shellResult.stderr) };
 }
 
@@ -81,17 +129,21 @@ export function spawnCli(
   binaryPath: string,
   args: string[],
   options: SpawnOptions = {}
-) {
+): ReturnType<typeof spawn> {
   if (process.platform === 'win32' && needsShell(binaryPath)) {
     const cmd = [binaryPath, ...args].map(quoteArg).join(' ');
+    // eslint-disable-next-line sonarjs/os-command -- cmd from known binaryPath+args, not user input (Windows EINVAL fallback)
     return spawn(cmd, { shell: true, ...options });
   }
 
   try {
     return spawn(binaryPath, args, options);
-  } catch (err: any) {
-    if (process.platform === 'win32' && err && err.code === 'EINVAL') {
+  } catch (err: unknown) {
+    const code =
+      err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : undefined;
+    if (process.platform === 'win32' && code === 'EINVAL') {
       const cmd = [binaryPath, ...args].map(quoteArg).join(' ');
+      // eslint-disable-next-line sonarjs/os-command -- cmd from known binaryPath+args, not user input (Windows EINVAL fallback)
       return spawn(cmd, { shell: true, ...options });
     }
     throw err;

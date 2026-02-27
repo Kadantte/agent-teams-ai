@@ -17,17 +17,16 @@
  * - Human-readable error messages per phase
  */
 
+import { execCli, spawnCli } from '@main/utils/childProcess';
 import { getHomeDir } from '@main/utils/pathDecoder';
 import { getErrorMessage } from '@shared/utils/errorHandling';
 import { createLogger } from '@shared/utils/logger';
-import { execFile, spawn } from 'child_process';
 import { createHash } from 'crypto';
 import { createWriteStream, existsSync, promises as fsp } from 'fs';
 import http from 'http';
 import https from 'https';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { promisify } from 'util';
 
 import { ClaudeBinaryResolver } from '../team/ClaudeBinaryResolver';
 
@@ -36,10 +35,6 @@ import type { BrowserWindow } from 'electron';
 import type { IncomingMessage } from 'http';
 
 const logger = createLogger('CliInstallerService');
-
-// Note: execFile (not exec) is used intentionally — no shell injection risk.
-// Arguments are passed as arrays, never interpolated into shell strings.
-const execFileAsync = promisify(execFile);
 
 // =============================================================================
 // Constants
@@ -222,7 +217,7 @@ export class CliInstallerService {
       result.binaryPath = binaryPath;
 
       try {
-        const { stdout } = await execFileAsync(binaryPath, ['--version'], {
+        const { stdout } = await execCli(binaryPath, ['--version'], {
           timeout: VERSION_TIMEOUT_MS,
           env: buildChildEnv(),
         });
@@ -236,7 +231,7 @@ export class CliInstallerService {
 
       // Check auth status
       try {
-        const { stdout: authStdout } = await execFileAsync(binaryPath, ['auth', 'status'], {
+        const { stdout: authStdout } = await execCli(binaryPath, ['auth', 'status'], {
           timeout: VERSION_TIMEOUT_MS,
           env: buildChildEnv(),
         });
@@ -466,7 +461,7 @@ export class CliInstallerService {
    */
   private async runInstallWithStreaming(binaryPath: string, attempt = 1): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const child = spawn(binaryPath, ['install'], {
+      const child = spawnCli(binaryPath, ['install'], {
         env: { ...buildChildEnv(), CLAUDE_SKIP_ANALYTICS: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });

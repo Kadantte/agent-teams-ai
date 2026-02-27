@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock dependencies before importing service
-vi.mock('child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('child_process')>();
+vi.mock('@main/utils/childProcess', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/utils/childProcess')>();
   return {
     ...actual,
-    execFile: vi.fn(),
+    execCli: vi.fn().mockRejectedValue(new Error('execCli not configured')),
   };
 });
 
@@ -63,6 +63,7 @@ import {
   normalizeVersion,
 } from '@main/services/infrastructure/CliInstallerService';
 import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
+import { execCli } from '@main/utils/childProcess';
 
 /**
  * Helper: allow expected console.error/warn calls in tests where service logs errors.
@@ -111,23 +112,20 @@ describe('CliInstallerService', () => {
       const fakePath = 'C:\\Users\\Алексей\\AppData\\Roaming\\npm\\claude.cmd';
       vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue(fakePath);
 
-      // mock execFile to throw EINVAL first
-      const err: any = new Error('spawn EINVAL');
-      err.code = 'EINVAL';
-      const childProcess = await import('child_process');
-      vi.spyOn(childProcess, 'execFile').mockImplementation((cmd, args, opts, cb) => {
-        cb(err, '', '');
-        return {} as any;
-      });
-      // mock exec to succeed as fallback
-      vi.spyOn(childProcess, 'exec').mockImplementation((cmd, opts, cb) => {
-        cb(null, '2.3.4', '');
-        return {} as any;
-      });
+      // execCli handles the EINVAL → shell fallback internally;
+      // here we just verify the service delegates to execCli correctly.
+      vi.mocked(execCli)
+        .mockResolvedValueOnce({ stdout: '2.3.4', stderr: '' }) // --version
+        .mockResolvedValueOnce({ stdout: '{}', stderr: '' }); // auth status
 
       const status = await service.getStatus();
       expect(status.installed).toBe(true);
       expect(status.installedVersion).toBe('2.3.4');
+      expect(execCli).toHaveBeenCalledWith(
+        fakePath,
+        ['--version'],
+        expect.objectContaining({ timeout: expect.any(Number) })
+      );
     });
   });
 
