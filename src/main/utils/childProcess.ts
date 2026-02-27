@@ -1,4 +1,5 @@
 import {
+  type ChildProcess,
   exec,
   execFile,
   type ExecFileOptions,
@@ -6,6 +7,7 @@ import {
   spawn,
   type SpawnOptions,
 } from 'child_process';
+import path from 'path';
 
 /**
  * Promise wrapper for execFile that always returns { stdout, stderr }.
@@ -155,4 +157,42 @@ export function spawnCli(
     }
     throw err;
   }
+}
+
+/**
+ * Kill a child process and its entire process tree.
+ *
+ * On Windows with `shell: true`, `child.kill()` only kills the intermediate
+ * `cmd.exe` shell, leaving the actual process (e.g. `claude.cmd`) orphaned.
+ * `taskkill /T /F /PID` recursively kills the entire process tree.
+ *
+ * On macOS/Linux, processes are killed directly (no shell wrapper), so
+ * the standard `child.kill(signal)` works correctly.
+ */
+export function killProcessTree(
+  child: ChildProcess | null | undefined,
+  signal?: NodeJS.Signals
+): void {
+  if (!child?.pid) {
+    // Process is null, never started, or already exited
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    try {
+      const taskkillPath = path.join(
+        process.env.SystemRoot ?? 'C:\\Windows',
+        'System32',
+        'taskkill.exe'
+      );
+      execFile(taskkillPath, ['/T', '/F', '/PID', String(child.pid)], () => {
+        // Best-effort — ignore errors (process may have already exited)
+      });
+      return;
+    } catch {
+      // taskkill failed, fall through to standard kill
+    }
+  }
+
+  child.kill(signal);
 }

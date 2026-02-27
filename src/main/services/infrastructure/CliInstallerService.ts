@@ -17,7 +17,7 @@
  * - Human-readable error messages per phase
  */
 
-import { execCli, spawnCli } from '@main/utils/childProcess';
+import { execCli, killProcessTree, spawnCli } from '@main/utils/childProcess';
 import { getHomeDir } from '@main/utils/pathDecoder';
 import { getErrorMessage } from '@shared/utils/errorHandling';
 import { createLogger } from '@shared/utils/logger';
@@ -467,7 +467,7 @@ export class CliInstallerService {
       });
 
       const timeout = setTimeout(() => {
-        child.kill();
+        killProcessTree(child);
         reject(
           new Error(
             `Timed out after ${INSTALL_TIMEOUT_MS / 1000}s. ` +

@@ -1,6 +1,6 @@
 /* eslint-disable no-param-reassign -- ProvisioningRun object is intentionally mutated as a state tracker throughout the provisioning lifecycle */
 import { ConfigManager } from '@main/services/infrastructure/ConfigManager';
-import { spawnCli } from '@main/utils/childProcess';
+import { killProcessTree, spawnCli } from '@main/utils/childProcess';
 import {
   encodePath,
   extractBaseDir,
@@ -1035,7 +1035,7 @@ export class TeamProvisioningService {
         void (async () => {
           const readyOnTimeout = await this.tryCompleteAfterTimeout(run);
           run.child?.stdin?.end();
-          run.child?.kill();
+          killProcessTree(run.child);
           if (readyOnTimeout) {
             return; // cleanupRun already called inside tryCompleteAfterTimeout
           }
@@ -1344,7 +1344,7 @@ export class TeamProvisioningService {
         void (async () => {
           const readyOnTimeout = await this.tryCompleteAfterTimeout(run);
           run.child?.stdin?.end();
-          run.child?.kill();
+          killProcessTree(run.child);
           if (readyOnTimeout) {
             return;
           }
@@ -1395,7 +1395,7 @@ export class TeamProvisioningService {
     run.cancelRequested = true;
     run.processKilled = true;
     run.child?.stdin?.end();
-    run.child?.kill();
+    killProcessTree(run.child);
     const progress = updateProgress(run, 'cancelled', 'Provisioning cancelled by user');
     run.onProgress(progress);
     this.cleanupRun(run);
@@ -1824,7 +1824,7 @@ export class TeamProvisioningService {
     run.processKilled = true;
     run.cancelRequested = true;
     run.child?.stdin?.end();
-    run.child?.kill();
+    killProcessTree(run.child);
     const progress = updateProgress(run, 'disconnected', 'Team stopped by user');
     run.onProgress(progress);
     this.cleanupRun(run);
@@ -1966,7 +1966,7 @@ export class TeamProvisioningService {
           // Kill the process on provisioning error
           run.processKilled = true;
           run.child?.stdin?.end();
-          run.child?.kill();
+          killProcessTree(run.child);
           this.cleanupRun(run);
         } else if (run.provisioningComplete) {
           // Post-provisioning error: process alive, waiting for input
@@ -2028,7 +2028,7 @@ export class TeamProvisioningService {
       run.onProgress(progress);
       run.processKilled = true;
       run.child?.stdin?.end();
-      run.child?.kill();
+      killProcessTree(run.child);
       this.cleanupRun(run);
       return;
     }
@@ -3137,7 +3137,7 @@ export class TeamProvisioningService {
       const stderrChunks: Buffer[] = [];
 
       const timeoutHandle = setTimeout(() => {
-        child.kill();
+        killProcessTree(child);
         reject(new Error(`Timeout running: claude ${args.join(' ')}`));
       }, timeoutMs);
 
