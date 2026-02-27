@@ -17,6 +17,7 @@
  * - Human-readable error messages per phase
  */
 
+import { getHomeDir } from '@main/utils/pathDecoder';
 import { getErrorMessage } from '@shared/utils/errorHandling';
 import { createLogger } from '@shared/utils/logger';
 import { execFile, spawn } from 'child_process';
@@ -63,6 +64,20 @@ const EBUSY_MAX_RETRIES = 3;
 
 /** Delay between EBUSY retries (multiplied by attempt number) */
 const EBUSY_RETRY_DELAY_MS = 2000;
+
+/**
+ * Build env for child processes with correct HOME.
+ * On Windows with non-ASCII usernames, process.env may have a broken HOME/USERPROFILE.
+ * getHomeDir() uses Electron's app.getPath('home') which handles Unicode correctly.
+ */
+function buildChildEnv(): NodeJS.ProcessEnv {
+  const home = getHomeDir();
+  return {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+  };
+}
 
 // =============================================================================
 // Helpers
@@ -209,6 +224,7 @@ export class CliInstallerService {
       try {
         const { stdout } = await execFileAsync(binaryPath, ['--version'], {
           timeout: VERSION_TIMEOUT_MS,
+          env: buildChildEnv(),
         });
         result.installedVersion = normalizeVersion(stdout);
         logger.info(
@@ -222,6 +238,7 @@ export class CliInstallerService {
       try {
         const { stdout: authStdout } = await execFileAsync(binaryPath, ['auth', 'status'], {
           timeout: VERSION_TIMEOUT_MS,
+          env: buildChildEnv(),
         });
         const auth = JSON.parse(authStdout.trim()) as { loggedIn?: boolean; authMethod?: string };
         result.authLoggedIn = auth.loggedIn === true;
@@ -450,7 +467,7 @@ export class CliInstallerService {
   private async runInstallWithStreaming(binaryPath: string, attempt = 1): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const child = spawn(binaryPath, ['install'], {
-        env: { ...process.env, CLAUDE_SKIP_ANALYTICS: '1' },
+        env: { ...buildChildEnv(), CLAUDE_SKIP_ANALYTICS: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
