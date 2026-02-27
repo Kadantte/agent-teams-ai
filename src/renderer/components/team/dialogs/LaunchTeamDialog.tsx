@@ -13,14 +13,8 @@ import {
 } from '@renderer/components/ui/dialog';
 import { Label } from '@renderer/components/ui/label';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@renderer/components/ui/select';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
+import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
@@ -246,7 +240,7 @@ export const LaunchTeamDialog = ({
           teamName,
           cwd: effectiveCwd,
           prompt: promptDraft.value.trim() || undefined,
-          model: selectedModel && selectedModel !== '__default__' ? selectedModel : undefined,
+          model: selectedModel || undefined,
           clearContext: clearContext || undefined,
         });
         resetFormState();
@@ -361,17 +355,28 @@ export const LaunchTeamDialog = ({
 
           <div className="space-y-1.5">
             <Label className="label-optional">Model (optional)</Label>
-            <Select value={selectedModel} onValueChange={setSelectedModel}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Default (account setting)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__default__">Default (account setting)</SelectItem>
-                <SelectItem value="opus">Opus 4.6</SelectItem>
-                <SelectItem value="sonnet">Sonnet 4.5</SelectItem>
-                <SelectItem value="haiku">Haiku 4.5</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
+              {[
+                { value: '', label: 'Default' },
+                { value: 'opus', label: 'Opus 4.6' },
+                { value: 'sonnet', label: 'Sonnet 4.5' },
+                { value: 'haiku', label: 'Haiku 4.5' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={cn(
+                    'rounded-[3px] px-3 py-1 text-xs font-medium transition-colors',
+                    selectedModel === opt.value
+                      ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm'
+                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+                  )}
+                  onClick={() => setSelectedModel(opt.value)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="space-y-2">
