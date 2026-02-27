@@ -105,6 +105,30 @@ describe('CliInstallerService', () => {
       // Version will be null because execFile is mocked to no-op
       // and latestVersion will be null because fetch is mocked
     });
+
+    it('handles spawn EINVAL when binary path contains non-ASCII by falling back', async () => {
+      allowConsoleLogs();
+      const fakePath = 'C:\\Users\\Алексей\\AppData\\Roaming\\npm\\claude.cmd';
+      vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue(fakePath);
+
+      // mock execFile to throw EINVAL first
+      const err: any = new Error('spawn EINVAL');
+      err.code = 'EINVAL';
+      const childProcess = await import('child_process');
+      vi.spyOn(childProcess, 'execFile').mockImplementation((cmd, args, opts, cb) => {
+        cb(err, '', '');
+        return {} as any;
+      });
+      // mock exec to succeed as fallback
+      vi.spyOn(childProcess, 'exec').mockImplementation((cmd, opts, cb) => {
+        cb(null, '2.3.4', '');
+        return {} as any;
+      });
+
+      const status = await service.getStatus();
+      expect(status.installed).toBe(true);
+      expect(status.installedVersion).toBe('2.3.4');
+    });
   });
 
   describe('install mutex', () => {
