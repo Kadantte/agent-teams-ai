@@ -28,7 +28,7 @@
 </p>
 
 <p align="center">
-  <sub>100% free, open source. No API keys. No configuration. Just download, open, and see everything Claude Code did.</sub>
+  <sub>100% free, open source. No API keys. No configuration.</sub>
 </p>
 
 <br />

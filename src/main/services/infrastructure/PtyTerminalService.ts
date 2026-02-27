@@ -6,8 +6,8 @@
  */
 
 import crypto from 'node:crypto';
-import os from 'node:os';
 
+import { getHomeDir } from '@main/utils/pathDecoder';
 // eslint-disable-next-line boundaries/element-types -- IPC channel constants shared between main and preload
 import { TERMINAL_DATA, TERMINAL_EXIT } from '@preload/constants/ipcChannels';
 import { createLogger } from '@shared/utils/logger';
@@ -62,7 +62,7 @@ export class PtyTerminalService {
       name: 'xterm-256color',
       cols: options?.cols ?? 80,
       rows: options?.rows ?? 24,
-      cwd: options?.cwd ?? os.homedir(),
+      cwd: options?.cwd ?? getHomeDir(),
       env: { ...process.env, ...options?.env } as Record<string, string>,
     });
 
