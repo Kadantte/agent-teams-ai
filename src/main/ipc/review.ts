@@ -4,6 +4,7 @@
  * Паттерн: module-level state + guard + wrapReviewHandler (как teams.ts)
  */
 
+import { createIpcWrapper } from '@main/ipc/ipcWrapper';
 import { ReviewDecisionStore } from '@main/services/team/ReviewDecisionStore';
 import {
   REVIEW_APPLY_DECISIONS,
@@ -22,7 +23,6 @@ import {
   REVIEW_SAVE_EDITED_FILE,
   // eslint-disable-next-line boundaries/element-types -- IPC channel constants are shared between main and preload by design
 } from '@preload/constants/ipcChannels';
-import { createLogger } from '@shared/utils/logger';
 
 import type { ChangeExtractorService } from '@main/services/team/ChangeExtractorService';
 import type { FileContentResolver } from '@main/services/team/FileContentResolver';
@@ -43,7 +43,7 @@ import type {
 } from '@shared/types/review';
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 
-const logger = createLogger('IPC:review');
+const wrapReviewHandler = createIpcWrapper('IPC:review');
 
 // --- Module-level state ---
 
@@ -126,22 +126,6 @@ export function removeReviewHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(REVIEW_LOAD_DECISIONS);
   ipcMain.removeHandler(REVIEW_SAVE_DECISIONS);
   ipcMain.removeHandler(REVIEW_CLEAR_DECISIONS);
-}
-
-// --- Локальный wrapReviewHandler ---
-
-async function wrapReviewHandler<T>(
-  operation: string,
-  handler: () => Promise<T>
-): Promise<IpcResult<T>> {
-  try {
-    const data = await handler();
-    return { success: true, data };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error(`Review handler error [${operation}]:`, message);
-    return { success: false, error: message };
-  }
 }
 
 // --- Phase 1 Handlers ---

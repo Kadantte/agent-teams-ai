@@ -63,6 +63,7 @@ import type {
   WslClaudeRootCandidate,
 } from '@shared/types';
 import type { AgentConfig } from '@shared/types/api';
+import type { EditorAPI } from '@shared/types/editor';
 import type { TerminalAPI } from '@shared/types/terminal';
 
 export class HttpAPIClient implements ElectronAPI {
@@ -902,5 +903,51 @@ export class HttpAPIClient implements ElectronAPI {
     kill: () => {},
     onData: (): (() => void) => () => {},
     onExit: (): (() => void) => () => {},
+  };
+
+  // ---------------------------------------------------------------------------
+  // Editor (not available in browser mode)
+  // ---------------------------------------------------------------------------
+
+  editor: EditorAPI = {
+    open: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    close: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    readDir: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    readFile: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    writeFile: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    createFile: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    createDir: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    deleteFile: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    moveFile: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    searchInFiles: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    gitStatus: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    watchDir: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    onEditorChange: () => {
+      return () => {};
+    },
   };
 }

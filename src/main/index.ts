@@ -32,6 +32,7 @@ import { app, BrowserWindow } from 'electron';
 import { existsSync } from 'fs';
 import { join } from 'path';
 
+import { cleanupEditorState, setEditorMainWindow } from './ipc/editor';
 import { initializeIpcHandlers, removeIpcHandlers } from './ipc/handlers';
 import { showTeamNativeNotification } from './ipc/teams';
 import { HttpServer } from './services/infrastructure/HttpServer';
@@ -562,6 +563,9 @@ function shutdownServices(): void {
     teamChangeCleanup = null;
   }
 
+  // Clean up editor state (watcher, git service)
+  cleanupEditorState();
+
   // Dispose all contexts (including local)
   if (contextRegistry) {
     contextRegistry.dispose();
@@ -731,6 +735,8 @@ function createWindow(): void {
     if (ptyTerminalService) {
       ptyTerminalService.setMainWindow(null);
     }
+    setEditorMainWindow(null);
+    cleanupEditorState();
   });
 
   // Handle renderer process crashes (render-process-gone replaces deprecated 'crashed' event)
@@ -752,6 +758,7 @@ function createWindow(): void {
   if (ptyTerminalService) {
     ptyTerminalService.setMainWindow(mainWindow);
   }
+  setEditorMainWindow(mainWindow);
 
   logger.info('Main window created');
 }

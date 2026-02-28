@@ -12,6 +12,7 @@ import { createConfigSlice } from './slices/configSlice';
 import { createConnectionSlice } from './slices/connectionSlice';
 import { createContextSlice } from './slices/contextSlice';
 import { createConversationSlice } from './slices/conversationSlice';
+import { createEditorSlice } from './slices/editorSlice';
 import { createNotificationSlice } from './slices/notificationSlice';
 import { createPaneSlice } from './slices/paneSlice';
 import { createProjectSlice } from './slices/projectSlice';
@@ -52,6 +53,7 @@ export const useStore = create<AppState>()((...args) => ({
   ...createUpdateSlice(...args),
   ...createChangeReviewSlice(...args),
   ...createCliInstallerSlice(...args),
+  ...createEditorSlice(...args),
 }));
 
 // =============================================================================
@@ -360,6 +362,19 @@ export function initializeNotificationListeners(): () => void {
           globalTasksRefreshTimer = null;
         }
       });
+    }
+  }
+
+  // Listen for editor file change events (chokidar watcher → renderer)
+  if (api.editor?.onEditorChange) {
+    const cleanup = api.editor.onEditorChange((event) => {
+      const state = useStore.getState();
+      if (state.editorProjectPath) {
+        state.handleExternalFileChange(event);
+      }
+    });
+    if (typeof cleanup === 'function') {
+      cleanupFns.push(cleanup);
     }
   }
 

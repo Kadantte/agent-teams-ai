@@ -67,7 +67,7 @@ function normalizeForCompare(input: string, isWindows: boolean): string {
   return isWindows ? normalized.toLowerCase() : normalized;
 }
 
-function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
+export function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
   return targetPath === rootPath || targetPath.startsWith(rootPath + path.sep);
 }
 
@@ -85,7 +85,7 @@ function resolveRealPathIfExists(inputPath: string): string | null {
  * @param normalizedPath - The normalized absolute path to check
  * @returns true if path matches a sensitive pattern
  */
-function matchesSensitivePattern(normalizedPath: string): boolean {
+export function matchesSensitivePattern(normalizedPath: string): boolean {
   return SENSITIVE_PATTERNS.some((pattern) => pattern.test(normalizedPath));
 }
 
@@ -302,4 +302,68 @@ export function validateOpenPath(
   }
 
   return { valid: true, normalizedPath };
+}
+
+// =============================================================================
+// Editor-specific validation utilities
+// =============================================================================
+
+const MAX_FILENAME_LENGTH = 255;
+
+/** Characters forbidden in file/directory names. */
+// eslint-disable-next-line no-control-regex, sonarjs/no-control-regex -- Intentional: validating filenames against control characters
+const INVALID_FILENAME_CHARS = /[\x00-\x1f/\\:*?"<>|]/;
+
+/**
+ * Validates a file or directory name for creation.
+ * Prevents path traversal, control chars, and OS-invalid characters.
+ */
+export function validateFileName(name: string): PathValidationResult {
+  if (!name || typeof name !== 'string') {
+    return { valid: false, error: 'Name is required' };
+  }
+
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    return { valid: false, error: 'Name cannot be empty' };
+  }
+
+  if (trimmed.length > MAX_FILENAME_LENGTH) {
+    return { valid: false, error: `Name exceeds ${MAX_FILENAME_LENGTH} characters` };
+  }
+
+  if (trimmed === '.' || trimmed === '..') {
+    return { valid: false, error: 'Invalid name' };
+  }
+
+  if (INVALID_FILENAME_CHARS.test(trimmed)) {
+    return { valid: false, error: 'Name contains invalid characters' };
+  }
+
+  return { valid: true };
+}
+
+/** Blocked device/pseudo-filesystem path prefixes. */
+const DEVICE_PATH_PREFIXES = ['/dev/', '/proc/', '/sys/'];
+const WINDOWS_DEVICE_PREFIX = '\\\\.\\';
+
+/**
+ * Returns true if the path points to a device or pseudo-filesystem
+ * (/dev/, /proc/, /sys/, \\\\.\\).
+ */
+export function isDevicePath(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  if (DEVICE_PATH_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
+    return true;
+  }
+  return filePath.startsWith(WINDOWS_DEVICE_PREFIX);
+}
+
+/**
+ * Returns true if the path contains a `.git/` segment.
+ * Used to block writes to git internals.
+ */
+export function isGitInternalPath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/');
+  return normalized.includes('/.git/') || normalized.endsWith('/.git');
 }
