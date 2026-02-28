@@ -23,20 +23,12 @@ export const App = (): React.JSX.Element => {
     }
   }, []);
 
-  // Defer IPC-heavy initialization to after the first paint.
-  // On Windows, firing 6+ IPC calls simultaneously at startup saturates the
-  // UV thread pool (4 threads by default), causing the app to freeze.
-  // Context system init is skipped here — local context is ready by default,
-  // and SSH context is initialized lazily when SSH connects (see below).
+  // Initialize IPC listeners and start sequential data fetch chain.
+  // No delay needed: UV_THREADPOOL_SIZE=16 prevents thread pool saturation,
+  // and the init chain fetches data sequentially to avoid concurrent I/O spikes.
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    const timer = setTimeout(() => {
-      cleanup = initializeNotificationListeners();
-    }, 100);
-    return () => {
-      clearTimeout(timer);
-      cleanup?.();
-    };
+    const cleanup = initializeNotificationListeners();
+    return cleanup;
   }, []);
 
   // Initialize context system lazily when SSH connection state changes.

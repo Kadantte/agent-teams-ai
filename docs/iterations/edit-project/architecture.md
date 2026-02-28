@@ -65,6 +65,7 @@ src/renderer/components/team/editor/
 ├── EditorEmptyState.tsx         # Нет открытых файлов + shortcuts шпаргалка
 ├── EditorBinaryState.tsx        # Заглушка для бинарных файлов
 ├── EditorErrorState.tsx         # Заглушка для ошибок чтения (EACCES, ENOENT)
+├── EditorErrorBoundary.tsx     # React ErrorBoundary для CM6 crashes (аналог DiffErrorBoundary)
 ├── EditorShortcutsHelp.tsx      # Модальное окно shortcuts (кнопка ?)
 └── GitStatusBadge.tsx           # M/U/A бейджи в дереве (итерация 5)
 
@@ -181,8 +182,8 @@ async function handleEditorReadFile(
     // 4. Size check
     if (stats.size > MAX_FILE_SIZE) throw new Error('File too large');
 
-    // 5. Binary check
-    const isBinary = await detectBinary(validation.normalizedPath!);
+    // 5. Binary check (isbinaryfile v5 — UTF-16, BOM, encoding hints)
+    const isBinary = await isBinaryFile(validation.normalizedPath!);
 
     // 6. Read
     const content = isBinary ? '' : await fs.readFile(validation.normalizedPath!, 'utf8');
@@ -241,7 +242,7 @@ export interface EditorSlice {
   editorOpenTabs: EditorFileTab[];
   editorActiveTabId: string | null;
 
-  openFile: (filePath: string) => Promise<void>;
+  openFile: (filePath: string) => Promise<void>;  // Dedup: если filePath уже в editorOpenTabs → setActiveTab(existing), не создавать дубликат
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
 
@@ -530,6 +531,7 @@ const MAX_DIR_DEPTH = 15;
 const MAX_FILENAME_LENGTH = 255;
 const MAX_PATH_LENGTH = 4096;
 
+// Единый набор — используется и в readDir, и в chokidar watcher (iter-5)
 const IGNORED_DIRS = ['.git', 'node_modules', '.next', 'dist', '__pycache__', '.cache', '.venv', '.tox', 'vendor'];
 const IGNORED_FILES = ['.DS_Store', 'Thumbs.db'];
 const BLOCKED_PATHS = ['/dev/', '/proc/', '/sys/', '\\\\.\\'];
@@ -546,7 +548,7 @@ const BLOCKED_PATHS = ['/dev/', '/proc/', '/sys/', '\\\\.\\'];
 
 Для preview-режима (2-5 MB): `readFile` возвращает `{ content: first100Lines, truncated: true, ... }`. CM6 открывается в `readOnly` режиме.
 
-Дополнительно: детектировать минификацию (строка > 10,000 chars) -- banner "Minified" + предложение line wrapping. Binary detection: null bytes в первых 8KB или расширение (.png, .wasm, .jpg, .zip и т.д.).
+Дополнительно: детектировать минификацию (строка > 10,000 chars) -- banner "Minified" + предложение line wrapping. Binary detection: `isBinaryFile()` из `isbinaryfile` v5.0.7 (UTF-16 без BOM, encoding hints, надёжнее ручного null-byte scan).
 
 ### Atomic write
 
@@ -692,6 +694,15 @@ interface TreeNode<T> {
 - ENOENT: "File was deleted. Create new? / Close tab"
 - EACCES: "Permission denied"
 
+### EditorErrorBoundary.tsx (~40-50 LOC)
+
+**Ответственность**: React ErrorBoundary, оборачивающий `CodeMirrorEditor`. Ловит runtime-ошибки CM6 (OOM, bad extension, corrupted EditorState) и показывает fallback UI вместо краша всего overlay.
+
+- Паттерн: аналог `DiffErrorBoundary.tsx` (уже в проекте)
+- Props: `filePath`, `onRetry` (сбросить EditorState и повторить)
+- Fallback UI: AlertTriangle + текст ошибки + [Retry] + [Close Tab]
+- `componentDidCatch`: логировать `filePath` + error для дебага
+
 ---
 
 ## File Tree
@@ -713,7 +724,7 @@ interface TreeNode<T> {
 
 ```typescript
 // flattenTree преобразует иерархию в плоский массив для виртуализации
-function flattenTree(tree: FileTreeEntry[], expandedDirs: Set<string>): FlatNode[] { ... }
+function flattenTree(tree: FileTreeEntry[], expandedDirs: Record<string, boolean>): FlatNode[] { ... }
 
 // В компоненте:
 const flatNodes = useMemo(() => flattenTree(tree, expandedDirs), [tree, expandedDirs]);

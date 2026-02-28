@@ -16,7 +16,6 @@ import { getHomeDir } from '@main/utils/pathDecoder';
 import { createLogger } from '@shared/utils/logger';
 import { type BrowserWindow, Notification } from 'electron';
 import { EventEmitter } from 'events';
-import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 
@@ -165,10 +164,11 @@ export class NotificationManager extends EventEmitter {
 
   /**
    * Loads notifications from disk (async to avoid blocking startup).
+   * Uses a single readFile instead of access() + readFile() to eliminate
+   * a redundant syscall and TOCTOU race condition.
    */
   private async loadNotifications(): Promise<void> {
     try {
-      await fsp.access(NOTIFICATIONS_PATH, fs.constants.F_OK);
       const data = await fsp.readFile(NOTIFICATIONS_PATH, 'utf8');
       const parsed = JSON.parse(data) as unknown;
 
@@ -188,20 +188,20 @@ export class NotificationManager extends EventEmitter {
   }
 
   /**
-   * Saves notifications to disk.
+   * Saves notifications to disk asynchronously.
+   * Uses async I/O to avoid blocking the main process event loop,
+   * which is critical on Windows where sync writes can freeze the UI.
    */
   private saveNotifications(): void {
-    try {
-      // Ensure directory exists
-      const dir = path.dirname(NOTIFICATIONS_PATH);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+    const data = JSON.stringify(this.notifications, null, 2);
+    const dir = path.dirname(NOTIFICATIONS_PATH);
 
-      fs.writeFileSync(NOTIFICATIONS_PATH, JSON.stringify(this.notifications, null, 2), 'utf8');
-    } catch (error) {
-      logger.error('Error saving notifications:', error);
-    }
+    fsp
+      .mkdir(dir, { recursive: true })
+      .then(() => fsp.writeFile(NOTIFICATIONS_PATH, data, 'utf8'))
+      .catch((error) => {
+        logger.error('Error saving notifications:', error);
+      });
   }
 
   /**

@@ -8,7 +8,8 @@
 
 ## Новые npm-зависимости
 
-`@codemirror/search` (`pnpm add @codemirror/search`)
+- `@codemirror/search` (`pnpm add @codemirror/search`) — встроенный Cmd+F поиск в файле
+- `isbinaryfile` v5.0.7 (`pnpm add isbinaryfile`) — binary detection (33M downloads/нед, zero deps, умнее null-byte scan: UTF-16, BOM, encoding hints)
 
 ## IPC каналы
 
@@ -39,6 +40,7 @@
 | 14 | `src/renderer/components/team/editor/EditorEmptyState.tsx` | Нет открытых файлов |
 | 15 | `src/renderer/components/team/editor/EditorBinaryState.tsx` | Заглушка для бинарных файлов |
 | 16 | `src/renderer/components/team/editor/EditorErrorState.tsx` | Заглушка для ошибок чтения |
+| 17 | `src/renderer/components/team/editor/EditorErrorBoundary.tsx` | React ErrorBoundary для CM6 (аналог DiffErrorBoundary) |
 
 ## Изменения в существующих файлах
 
@@ -53,7 +55,7 @@
 | 7 | `src/renderer/components/team/TeamDetailView.tsx` | Кнопка "Open in Editor" + state для overlay |
 | 8 | `src/renderer/components/team/review/ReviewFileTree.tsx` | Рефакторинг: использовать generic FileTree + fileTreeBuilder |
 | 9 | `src/renderer/components/team/review/CodeMirrorDiffView.tsx` | Рефакторинг: импорт из codemirrorLanguages/Theme |
-| 10 | `src/main/utils/pathValidation.ts` | Добавить `validateFileName()`, `isDevicePath()`, `isGitInternalPath()`. Экспортировать `matchesSensitivePattern()` (приватная) для `isSensitive` в readDir. **B1**: Экспортировать `isPathWithinRoot()` (приватная, строка ~30) — нужна для SEC-14 write-handler guard в iter-2 |
+| 10 | `src/main/utils/pathValidation.ts` | Добавить `validateFileName()`, `isDevicePath()`, `isGitInternalPath()`. Экспортировать `matchesSensitivePattern()` (приватная) для `isSensitive` в readDir. Экспортировать `isPathWithinRoot()` (приватная, строка ~30) — нужна для SEC-15 в `editor:open` handler уже в iter-1, а также для SEC-14 write-handler guard в iter-2 |
 | 11 | `src/main/index.ts` | Добавить базовый cleanup в `mainWindow.on('closed')`: вызвать `cleanupEditorState()` (экспорт из editor.ts, сбрасывает `activeProjectRoot = null`). Без этого при Cmd+Q на macOS state "утечёт" и `editor:open` откажет при следующем открытии окна. Полный watcher cleanup — итерация 5, но базовый reset нужен с итерации 1 |
 | 12 | `src/renderer/api/httpClient.ts` | Stub для `editor: EditorAPI` — throw "Editor is not available in browser mode" (паттерн как `review`, `terminal`, `teams`) |
 | 13 | `src/renderer/store/types.ts` | `EditorSlice` в AppState |
@@ -71,7 +73,7 @@
 
 - MAX_ENTRIES_PER_DIR = 500; при превышении -- "N more files..."
 - readFile тиерная стратегия: <256KB мгновенно, 256KB-2MB progress, 2MB-5MB preview, >5MB external
-- Binary detection: null bytes в первых 8KB
+- Binary detection: `isbinaryfile` (v5.0.7) — `isBinaryFile(filePath)` вместо ручного null-byte scan
 - Дедупликация IPC: `Map<string, Promise<ReadFileResult>>` для readFile
 
 ## UX-требования

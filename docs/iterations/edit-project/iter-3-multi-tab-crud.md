@@ -45,6 +45,7 @@
 1. `createFile`: `validateFileName()` -- запрет `.`, `..`, control chars, path separators, NUL, length > 255. Валидировать и `parentDir`, и `path.join(parentDir, name)` (SEC-7)
 2. `deleteFile`: `shell.trashItem()`, НЕ `fs.unlink()`. `validateFilePath()` обязательна
 3. Confirmation dialog перед удалением
+4. `createFile`, `createDir`, `deleteFile`: `isGitInternalPath()` блокирует операции внутри `.git/` (SEC-12, аналог writeFile из iter-2)
 
 ## Performance-требования
 

@@ -12,7 +12,7 @@
 - **State**: Zustand slice (`editorSlice.ts`)
 - **Виртуализация**: `@tanstack/react-virtual` (уже в проекте)
 - **Fuzzy search**: `cmdk` v1.0.4 (уже в зависимостях)
-- **Новые npm-зависимости**: `@codemirror/search` (~15KB gzipped), `@radix-ui/react-context-menu` (итерация 3, контекстное меню), `simple-git` v3.32+ (итерация 5, git status). Остальное уже установлено
+- **Новые npm-зависимости**: `@codemirror/search` (итерация 1), `isbinaryfile` v5 (итерация 1, binary detection), `@radix-ui/react-context-menu` (итерация 3), `simple-git` v3.32+ (итерация 5, git status), `chokidar` v4 (итерация 5, file watcher). Остальное уже установлено
 
 ## Ключевые архитектурные решения
 
@@ -43,7 +43,7 @@
 
 ## Общая статистика
 
-- **Новые файлы**: ~35
+- **Новые файлы**: ~36
 - **Модификации**: ~18 существующих файлов
 - **Тесты**: ~15 новых тестовых файлов
 - **Итерации**: 6 (PR 0 + 5 итераций)

@@ -9,6 +9,13 @@
  * - Manage application lifecycle
  */
 
+// Increase UV thread pool size BEFORE any async I/O.
+// Default is 4 threads which is far too few for startup:
+// binary resolution stat() calls, CLI subprocess spawning, fs.watch(),
+// and readFile/readdir from IPC handlers all compete for the pool.
+// On Windows this saturates all threads, blocking the event loop.
+process.env.UV_THREADPOOL_SIZE ??= '16';
+
 import { ChangeExtractorService } from '@main/services/team/ChangeExtractorService';
 import { FileContentResolver } from '@main/services/team/FileContentResolver';
 import { GitDiffFallback } from '@main/services/team/GitDiffFallback';

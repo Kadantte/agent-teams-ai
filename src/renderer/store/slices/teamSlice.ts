@@ -212,6 +212,10 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   deletedTasksLoading: false,
 
   fetchTeams: async () => {
+    // Guard: prevent concurrent fetches (component mount + centralized init chain).
+    // Only effective during initial load (when teamsLoading is set to true below).
+    // Refreshes are already serialized by the throttle timer in onTeamChange.
+    if (get().teamsLoading) return;
     // Only show loading spinner on initial load — avoids flickering when refreshing
     const isInitialLoad = get().teams.length === 0;
     if (isInitialLoad) {
@@ -236,6 +240,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   },
 
   fetchAllTasks: async () => {
+    // Guard: prevent concurrent fetches (component mount + centralized init chain)
+    if (get().globalTasksLoading) return;
     const isInitialLoad = get().globalTasks.length === 0;
     if (isInitialLoad) {
       set({ globalTasksLoading: true, globalTasksError: null });

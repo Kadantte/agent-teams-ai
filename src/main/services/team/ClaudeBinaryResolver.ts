@@ -84,24 +84,30 @@ async function resolveFromPathEnv(binaryName: string): Promise<string | null> {
   const pathParts = rawPath.split(path.delimiter);
   const binaryNames =
     process.platform === 'win32' ? expandWindowsBinaryNames(binaryName) : [binaryName];
-  for (const part of pathParts) {
-    if (!part) {
-      continue;
-    }
 
-    const cleanedPart = stripSurroundingQuotes(part);
-    if (!cleanedPart) {
-      continue;
-    }
+  // Check all PATH directories in parallel. Each directory checks all extension
+  // variants concurrently. This turns N_dirs × N_exts sequential stat() calls
+  // into a single parallel batch, dramatically reducing startup time on Windows.
+  const dirResults = await Promise.all(
+    pathParts.map(async (part) => {
+      if (!part) return null;
+      const cleanedPart = stripSurroundingQuotes(part);
+      if (!cleanedPart) return null;
 
-    for (const name of binaryNames) {
-      const candidate = path.join(cleanedPart, name);
-      if (await isExecutable(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return null;
+      const candidates = binaryNames.map((name) => path.join(cleanedPart, name));
+      const results = await Promise.all(
+        candidates.map(async (candidate) => ({
+          path: candidate,
+          ok: await isExecutable(candidate),
+        }))
+      );
+      // Return the first matching extension variant within this directory
+      return results.find((r) => r.ok)?.path ?? null;
+    })
+  );
+
+  // Return first non-null result, preserving PATH priority order
+  return dirResults.find((r) => r !== null) ?? null;
 }
 
 async function resolveFromExplicitPath(inputPath: string): Promise<string | null> {
@@ -186,11 +192,20 @@ export class ClaudeBinaryResolver {
     );
 
     const nvmCandidates = process.platform === 'win32' ? [] : await collectNvmCandidates();
-    for (const candidate of [...candidates, ...nvmCandidates]) {
-      if (await isExecutable(candidate)) {
-        cachedPath = candidate;
-        return cachedPath;
-      }
+    const allCandidates = [...candidates, ...nvmCandidates];
+
+    // Check all fallback candidates in parallel for speed
+    const results = await Promise.all(
+      allCandidates.map(async (candidate) => ({
+        path: candidate,
+        ok: await isExecutable(candidate),
+      }))
+    );
+    // Return first match, preserving candidate priority order
+    const found = results.find((r) => r.ok);
+    if (found) {
+      cachedPath = found.path;
+      return cachedPath;
     }
 
     // Don't cache null — CLI may be installed later without app restart

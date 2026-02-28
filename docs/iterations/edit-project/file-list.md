@@ -92,7 +92,7 @@ Benchmark 5: Keystroke re-renders
 
 ## Полный список файлов
 
-### Новые файлы (~30)
+### Новые файлы (~36)
 
 | # | Файл | Итерация | Описание |
 |---|------|----------|----------|
@@ -101,7 +101,7 @@ Benchmark 5: Keystroke re-renders
 | 3 | `src/main/services/editor/index.ts` | 1 | Barrel export: `{ ProjectFileService }` (расширяется в итерациях 4-5) |
 | 4 | `src/main/services/editor/FileSearchService.ts` | 4 | Search in files |
 | 5 | `src/main/services/editor/GitStatusService.ts` | 5 | git status через simple-git (~80-100 LOC) |
-| 6 | `src/main/services/editor/EditorFileWatcher.ts` | 5 | FileWatcher (~250-300 LOC, burst coalescing + ENOSPC fallback) |
+| 6 | `src/main/services/editor/EditorFileWatcher.ts` | 5 | FileWatcher через chokidar v4 (~50-70 LOC) |
 | 7 | `src/main/services/editor/conflictDetection.ts` | 5 | Утилита mtime check: сравнение mtime до/после save, conflict resolution (~40 LOC) |
 | 8 | `src/main/ipc/editor.ts` | 1 | IPC handlers |
 | 9 | `src/main/ipc/ipcWrapper.ts` | 1 | Общий `createIpcWrapper()` |
@@ -122,17 +122,18 @@ Benchmark 5: Keystroke re-renders
 | 24 | `src/renderer/components/team/editor/EditorEmptyState.tsx` | 1 | Empty state |
 | 25 | `src/renderer/components/team/editor/EditorBinaryState.tsx` | 1 | Binary файлы |
 | 26 | `src/renderer/components/team/editor/EditorErrorState.tsx` | 1 | Ошибки чтения |
-| 27 | `src/renderer/components/team/editor/EditorContextMenu.tsx` | 3 | Context menu |
-| 28 | `src/renderer/components/team/editor/NewFileDialog.tsx` | 3 | Inline-input |
-| 29 | `src/renderer/components/team/editor/QuickOpenDialog.tsx` | 4 | Cmd+P dialog |
-| 30 | `src/renderer/components/team/editor/SearchInFilesPanel.tsx` | 4 | Cmd+Shift+F |
-| 31 | `src/renderer/components/team/editor/EditorBreadcrumb.tsx` | 4 | Breadcrumb |
-| 32 | `src/renderer/components/team/editor/EditorShortcutsHelp.tsx` | 4 | Shortcuts modal |
-| 33 | `src/renderer/components/team/editor/fileIcons.ts` | 4 | Иконки файлов |
-| 34 | `src/renderer/components/team/editor/GitStatusBadge.tsx` | 5 | M/U/A/C(conflict) бейджи |
-| 35 | `src/renderer/utils/editorBridge.ts` | 2 | Module-level singleton: Store ↔ CM6 refs bridge (R3) |
+| 27 | `src/renderer/components/team/editor/EditorErrorBoundary.tsx` | 1 | React ErrorBoundary для CM6 (аналог DiffErrorBoundary) |
+| 29 | `src/renderer/components/team/editor/EditorContextMenu.tsx` | 3 | Context menu |
+| 30 | `src/renderer/components/team/editor/NewFileDialog.tsx` | 3 | Inline-input |
+| 31 | `src/renderer/components/team/editor/QuickOpenDialog.tsx` | 4 | Cmd+P dialog |
+| 32 | `src/renderer/components/team/editor/SearchInFilesPanel.tsx` | 4 | Cmd+Shift+F |
+| 33 | `src/renderer/components/team/editor/EditorBreadcrumb.tsx` | 4 | Breadcrumb |
+| 34 | `src/renderer/components/team/editor/EditorShortcutsHelp.tsx` | 4 | Shortcuts modal |
+| 35 | `src/renderer/components/team/editor/fileIcons.ts` | 4 | Иконки файлов |
+| 36 | `src/renderer/components/team/editor/GitStatusBadge.tsx` | 5 | M/U/A/C(conflict) бейджи |
+| 37 | `src/renderer/utils/editorBridge.ts` | 2 | Module-level singleton: Store ↔ CM6 refs bridge (R3) |
 
-### Модификации существующих файлов (~17)
+### Модификации существующих файлов (~18)
 
 | # | Файл | Итерация | Изменение |
 |---|------|----------|-----------|
@@ -150,7 +151,7 @@ Benchmark 5: Keystroke re-renders
 | 12 | `src/renderer/api/httpClient.ts` | 1 | Stub для editor: EditorAPI (throw "not available in browser mode") |
 | 13 | `src/main/ipc/teams.ts` | follow-up | Миграция wrapTeamHandler → createIpcWrapper (40+ замен, отдельный PR) |
 | 14 | `src/shared/types/index.ts` | 1 | +`export type * from './editor'` (barrel re-export, паттерн как team/review/terminal) |
-| 15 | `src/main/index.ts` | 5 | `mainWindow.on('closed')` → `cleanupEditorState()`. `shutdownServices()` → `cleanupEditorState()` |
+| 15 | `src/main/index.ts` | 1 (расш. 5) | `mainWindow.on('closed')` → `cleanupEditorState()` (базовый reset в iter-1, watcher cleanup в iter-5) |
 | 16 | `src/renderer/index.css` | 2 | +editor CSS-переменные |
 | 17 | `src/renderer/hooks/useKeyboardShortcuts.ts` | 4 | Guard `editorOpen` для 6 конфликтующих shortcuts (R1) |
 

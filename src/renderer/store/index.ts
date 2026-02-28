@@ -73,18 +73,41 @@ export function initializeNotificationListeners(): () => void {
   cleanupFns.push(() => {
     useStore.getState().unsubscribeProvisioningProgress();
   });
-  // Stagger IPC data fetches to avoid saturating the UV thread pool on Windows.
-  // Each fetch triggers file I/O in the main process; firing them all at once
-  // blocks all 4 default UV threads simultaneously, freezing the app.
-  void useStore
-    .getState()
-    .fetchTeams()
-    .finally(() => {
-      void useStore.getState().fetchNotifications();
-      if (api.cliInstaller) {
-        void useStore.getState().fetchCliStatus();
-      }
-    });
+  // Initial data fetches. Config loads first (needed for theme), then the rest
+  // run in parallel (no data dependencies between them). UV_THREADPOOL_SIZE=16
+  // prevents thread pool saturation even with concurrent I/O on Windows.
+  // Components also fire these from useEffect — loading guards in each action
+  // prevent duplicate IPC calls (whichever caller starts first wins).
+  void (async () => {
+    // Config: fast (in-memory read) — needed for theme before first paint.
+    await useStore.getState().fetchConfig();
+    // Remaining fetches have no data dependency on each other — run in parallel
+    // to avoid blocking teams/notifications behind a slow repository scan.
+    await Promise.all([
+      // Repository groups: heavy — full project directory scan for sidebar.
+      useStore.getState().fetchRepositoryGroups(),
+      // Global tasks: moderate — reads team task files for sidebar.
+      useStore.getState().fetchAllTasks(),
+      // Team summaries: moderate — reads team config files.
+      useStore.getState().fetchTeams(),
+      // Notification count: light — reads from in-memory store in main process.
+      useStore.getState().fetchNotifications(),
+    ]);
+  })();
+
+  // CLI status check is non-critical for initial render (spawns child processes
+  // + iterates PATH directories with stat() calls — heavy on Windows).
+  // Defer until the app is fully interactive.
+  let cliStatusTimer: ReturnType<typeof setTimeout> | null = null;
+  if (api.cliInstaller) {
+    cliStatusTimer = setTimeout(() => {
+      void useStore.getState().fetchCliStatus();
+      cliStatusTimer = null;
+    }, 5000);
+  }
+  cleanupFns.push(() => {
+    if (cliStatusTimer) clearTimeout(cliStatusTimer);
+  });
   const pendingSessionRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingProjectRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let teamRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -179,7 +202,7 @@ export function initializeNotificationListeners(): () => void {
     }
   }
 
-  // fetchNotifications() is called in the staggered init chain above (after fetchTeams).
+  // fetchNotifications() is called in the parallel init chain above.
 
   /**
    * Check if a session is visible in any pane (not just the focused pane's active tab).
@@ -373,7 +396,7 @@ export function initializeNotificationListeners(): () => void {
     }
   }
 
-  // fetchCliStatus() is called in the staggered init chain above (after fetchTeams).
+  // fetchCliStatus() is deferred 5s after app start (heavy on Windows).
 
   // Listen for CLI installer progress events from main process
   let cliCompletedRevertTimer: ReturnType<typeof setTimeout> | null = null;
