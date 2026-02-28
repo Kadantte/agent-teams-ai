@@ -28,20 +28,23 @@
 
 ## Навигация по плану
 
-| Файл | Содержимое |
-|------|------------|
-| [architecture.md](architecture.md) | Архитектура, безопасность, state, IPC API, сервисы, компоненты, CM6, shortcuts, CSS |
-| [iter-0-refactoring.md](iter-0-refactoring.md) | PR 0: Обязательные рефакторинги R1-R4 (отдельный PR) |
-| [iter-1-walking-skeleton.md](iter-1-walking-skeleton.md) | Итерация 1: Read-only файловый браузер |
-| [iter-2-editable-save.md](iter-2-editable-save.md) | Итерация 2: Editable CodeMirror + сохранение |
-| [iter-3-multi-tab-crud.md](iter-3-multi-tab-crud.md) | Итерация 3: Multi-tab + создание/удаление файлов |
-| [iter-4-search-shortcuts.md](iter-4-search-shortcuts.md) | Итерация 4: Горячие клавиши, поиск, UX polish |
-| [iter-5-git-watching.md](iter-5-git-watching.md) | Итерация 5: Git status, file watching, conflict detection |
-| [file-list.md](file-list.md) | Риски, бенчмарки, полный список файлов |
+| # | Файл | Содержимое |
+|---|------|------------|
+| — | [architecture.md](architecture.md) | Архитектура, безопасность, state, IPC API, сервисы, компоненты, CM6, shortcuts, CSS |
+| 0 | [iter-0-refactoring.md](iter-0-refactoring.md) | PR 0: Обязательные рефакторинги R1-R4 (отдельный PR) |
+| 1 | [iter-1-walking-skeleton.md](iter-1-walking-skeleton.md) | Итерация 1: Read-only файловый браузер |
+| 2 | [iter-2-editable-save.md](iter-2-editable-save.md) | Итерация 2: Editable CodeMirror + сохранение |
+| 3 | [iter-3-multi-tab-crud.md](iter-3-multi-tab-crud.md) | Итерация 3: Multi-tab + создание/удаление файлов |
+| 4 | [iter-4-search-shortcuts.md](iter-4-search-shortcuts.md) | Итерация 4: Горячие клавиши, поиск, UX polish |
+| 5 | [iter-5-git-watching.md](iter-5-git-watching.md) | Итерация 5: Git status, file watching, conflict detection |
+| — | [file-list.md](file-list.md) | Риски, бенчмарки, полный список файлов |
+| — | [research-tasks.md](research-tasks.md) | 5 исследовательских задач (все COMPLETED) |
+| — | [wireframes-draft.md](wireframes-draft.md) | ASCII wireframes (DRAFT, пересмотр позже) |
 
 ## Общая статистика
 
-- **Новые файлы**: ~30
-- **Модификации**: ~17 существующих файлов
+- **Новые файлы**: ~35
+- **Модификации**: ~18 существующих файлов
 - **Тесты**: ~15 новых тестовых файлов
 - **Итерации**: 6 (PR 0 + 5 итераций)
+- **Ресёрч**: 5/5 завершён (R1-R5, см. [research-tasks.md](research-tasks.md))

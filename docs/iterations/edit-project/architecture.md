@@ -68,6 +68,9 @@ src/renderer/components/team/editor/
 ├── EditorShortcutsHelp.tsx      # Модальное окно shortcuts (кнопка ?)
 └── GitStatusBadge.tsx           # M/U/A бейджи в дереве (итерация 5)
 
+src/renderer/utils/
+└── editorBridge.ts              # Module-level singleton: Store ↔ CM6 refs bridge (R3)
+
 src/renderer/components/common/
 └── FileTree.tsx                 # Generic FileTree<T> с render-props (рефакторинг из ReviewFileTree)
 ```
@@ -214,6 +217,8 @@ export interface EditorSlice {
   editorFileTreeLoading: boolean;
   editorFileTreeError: string | null;
 
+  editorExpandedDirs: Set<string>;       // Сохраняется при re-open (H7)
+
   openEditor: (projectPath: string) => Promise<void>;
   closeEditor: () => void;
   // closeEditor() выполняет полный cleanup:
@@ -247,7 +252,7 @@ export interface EditorSlice {
   // В store -- только dirty flags, loading и статусы сохранения.
   // ═══════════════════════════════════════════════════
   editorFileLoading: Record<string, boolean>;  // per-file loading indicator
-  editorModifiedFiles: Set<string>;      // dirty markers (НЕ содержимое!)
+  editorModifiedFiles: Record<string, boolean>;  // dirty markers (НЕ содержимое!). Record вместо Set — Zustand не отслеживает мутации Set
   editorSaving: Record<string, boolean>;
   editorSaveError: Record<string, string>;
 
@@ -259,7 +264,7 @@ export interface EditorSlice {
   saveAllFiles: (getContent: (filePath: string) => string | null) => Promise<void>;
   // CodeMirrorEditor передаёт callback: saveAllFiles((fp) => stateCache.current.get(fp)?.doc.toString() ?? null)
   discardChanges: (filePath: string) => void;
-  hasUnsavedChanges: () => boolean;                 // derived getter
+  hasUnsavedChanges: () => boolean;                 // Object.keys(editorModifiedFiles).length > 0
 
   // ═══════════════════════════════════════════════════
   // Группа 4: File operations (итерация 3)
@@ -281,6 +286,52 @@ interface EditorFileTab {
   language: string;                // Определяется по расширению
 }
 ```
+
+### Store ↔ Component Bridge (R3 — решение)
+
+`editorBridge.ts` — module-level singleton для связи Zustand store и React refs CodeMirrorEditor.
+
+```typescript
+// src/renderer/utils/editorBridge.ts
+import type { EditorState, EditorView } from '@codemirror/state';
+
+let stateCache: Map<string, EditorState> | null = null;
+let scrollTopCache: Map<string, number> | null = null;
+let activeView: EditorView | null = null;
+
+export const editorBridge = {
+  /** Вызывается CodeMirrorEditor при mount */
+  register(sc: Map<string, EditorState>, stc: Map<string, number>, view: EditorView) {
+    stateCache = sc; scrollTopCache = stc; activeView = view;
+  },
+  /** Вызывается CodeMirrorEditor при unmount */
+  unregister() { stateCache = null; scrollTopCache = null; activeView = null; },
+  /** Для saveFile() — контент из кешированного state */
+  getContent(filePath: string): string | null {
+    return stateCache?.get(filePath)?.doc.toString() ?? null;
+  },
+  /** Для saveAllFiles() — контент всех modified файлов */
+  getAllModifiedContent(modifiedFiles: Set<string>): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const fp of modifiedFiles) {
+      const content = stateCache?.get(fp)?.doc.toString();
+      if (content !== undefined) result.set(fp, content);
+    }
+    return result;
+  },
+  /** Для closeEditor() — полный cleanup */
+  destroy() {
+    activeView?.destroy();
+    stateCache?.clear();
+    scrollTopCache?.clear();
+    activeView = null;
+  },
+  /** Обновить ссылку на view (при tab switch view пересоздаётся) */
+  updateView(view: EditorView) { activeView = view; },
+};
+```
+
+Паттерн аналогичен `ConfirmDialog.tsx` (module-level `globalSetState`) и `changeReviewSlice.ts` (module-level state).
 
 ### EditorState pooling (Map в useRef)
 
@@ -396,7 +447,8 @@ interface ReadFileResult {
 
 interface GitFileStatus {
   path: string;
-  status: 'modified' | 'untracked' | 'staged' | 'deleted';
+  status: 'modified' | 'untracked' | 'staged' | 'deleted' | 'conflict';
+  // 'conflict' = merge conflicts (git porcelain codes UU, AA, DD)
 }
 
 interface SearchResult {
@@ -681,6 +733,14 @@ interface EditorExtensionOptions {
 //   const tabSizeCompartment = useRef(new Compartment());
 // Причина: useRef гарантирует изоляцию если компонент монтируется дважды (React Strict Mode).
 // Паттерн из CodeMirrorDiffView.tsx:332-336 (langCompartment/mergeCompartment/portionCompartment в useRef).
+//
+// R2 ПОДТВЕРЖДЕНИЕ: Compartment — opaque identity token, sharing между EditorState безопасен.
+// Подтверждено автором CM6 (Marijn Haverbeke): "Compartments can be shared without issue".
+// Каждый EditorState хранит свой Map<Compartment, Extension> в config.
+// reconfigure() на одном View НЕ влияет на cached states в пуле.
+// EDGE CASE: при unmount+remount компонента — cached states ссылаются на старые Compartments.
+// Решение: при remount создать новые Compartments, заново создать EditorState для АКТИВНОГО таба.
+// Evicted LRU states: теряют undo history (ожидаемо), cursor через EditorSelection.
 
 function buildEditorExtensions(options: EditorExtensionOptions): Extension[] {
   return [
@@ -774,20 +834,53 @@ Diff-специфичные стили (`.cm-changedLine`, `.cm-deletedChunk`, `
 
 ## Keyboard Shortcuts
 
-| Shortcut | Действие | Итерация |
-|----------|---------|----------|
-| `Cmd+S` | Сохранить активный файл | 2 |
-| `Cmd+Shift+S` | Сохранить все | 2 |
-| `Cmd+W` | Закрыть активный tab | 3 |
-| `Cmd+P` | Quick Open (fuzzy search файлов) | 4 |
-| `Cmd+F` | Поиск в файле (CM6 search) | 2 |
-| `Cmd+Shift+F` | Поиск по содержимому файлов | 4 |
-| `Cmd+Shift+[` / `Cmd+Shift+]` | Переключение табов влево/вправо | 4 |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Переключение табов (MRU) | 4 |
-| `Cmd+B` | Toggle file tree sidebar | 4 |
-| `Cmd+G` | Go to line (CM6 gotoLine) | 4 |
-| `Cmd+Z` / `Cmd+Shift+Z` | Undo/Redo (CM6 native) | 2 |
-| `Escape` | Закрыть overlay (с confirm при unsaved) | 1 |
+| Shortcut | Действие | Итерация | Конфликт |
+|----------|---------|----------|----------|
+| `Cmd+S` | Сохранить активный файл | 2 | — (CM6 keymap) |
+| `Cmd+Shift+S` | Сохранить все | 2 | — |
+| `Cmd+W` | Закрыть активный tab | 3 | `useKeyboardShortcuts.ts:155` |
+| `Cmd+P` | Quick Open (fuzzy search файлов) | 4 | — |
+| `Cmd+F` | Поиск в файле (CM6 search) | 2 | `useKeyboardShortcuts.ts:241` |
+| `Cmd+Shift+F` | Поиск по содержимому файлов | 4 | — |
+| `Cmd+Shift+[` / `Cmd+Shift+]` | Переключение табов влево/вправо | 4 | `useKeyboardShortcuts.ts:177` |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Переключение табов (MRU) | 4 | `useKeyboardShortcuts.ts:81` |
+| `Cmd+B` | Toggle file tree sidebar | 4 | `useKeyboardShortcuts.ts:271` |
+| `Cmd+G` | Go to line (CM6 gotoLine) | 4 | — |
+| `Cmd+Z` / `Cmd+Shift+Z` | Undo/Redo (CM6 native) | 2 | — |
+| `Escape` | Закрыть overlay (с confirm при unsaved) | 1 | — |
+
+### Scope Isolation (R1 — решение)
+
+6 из 12 шорткатов конфликтуют с глобальными в `useKeyboardShortcuts.ts`. Решение:
+
+**Approach A: Guard в глобальном handler** (надёжность 8/10)
+
+```typescript
+// useKeyboardShortcuts.ts — добавить guard
+const editorOpen = useStore(s => s.editorProjectPath !== null);
+
+// В handler (bubble phase, window.addEventListener('keydown')):
+if (editorOpen) {
+  // Early return для конфликтующих shortcuts:
+  // Cmd+W, Cmd+B, Cmd+F, Cmd+Shift+[/], Ctrl+Tab
+  const isEditorConflict = (e.metaKey && ['w','b','f'].includes(e.key))
+    || (e.metaKey && e.shiftKey && ['[',']'].includes(e.key))
+    || (e.ctrlKey && e.key === 'Tab');
+  if (isEditorConflict) return;
+}
+```
+
+**Safety net: `stopPropagation` в CM6** — все editor keybindings с `stopPropagation: true`:
+
+```typescript
+keymap.of([
+  { key: 'Mod-f', run: openSearchPanel, stopPropagation: true },
+  { key: 'Mod-s', run: () => { onSave?.(); return true; }, stopPropagation: true },
+  // ...
+]);
+```
+
+**Паттерн подтверждён**: `ChangeReviewDialog` уже использует capture-phase handler с guard (строки 379-408).
 
 Замечания:
 - `Cmd+[` / `Cmd+]` НЕ используются для табов -- это indent/outdent в CM6 и VS Code
