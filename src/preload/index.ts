@@ -16,6 +16,7 @@ import {
   EDITOR_CREATE_FILE,
   EDITOR_DELETE_FILE,
   EDITOR_GIT_STATUS,
+  EDITOR_LIST_FILES,
   EDITOR_MOVE_FILE,
   EDITOR_OPEN,
   EDITOR_READ_DIR,
@@ -200,6 +201,7 @@ import type {
   EditorFileChangeEvent,
   GitStatusResult,
   MoveFileResponse,
+  QuickOpenFile,
   ReadDirResult,
   ReadFileResult,
   SearchInFilesOptions,
@@ -974,6 +976,7 @@ const electronAPI: ElectronAPI = {
       invokeIpcWithResult<MoveFileResponse>(EDITOR_MOVE_FILE, sourcePath, destDir),
     searchInFiles: (options: SearchInFilesOptions) =>
       invokeIpcWithResult<SearchInFilesResult>(EDITOR_SEARCH_IN_FILES, options),
+    listFiles: () => invokeIpcWithResult<QuickOpenFile[]>(EDITOR_LIST_FILES),
     gitStatus: () => invokeIpcWithResult<GitStatusResult>(EDITOR_GIT_STATUS),
     watchDir: (enable: boolean) => invokeIpcWithResult<void>(EDITOR_WATCH_DIR, enable),
     onEditorChange: (callback: (event: EditorFileChangeEvent) => void): (() => void) => {

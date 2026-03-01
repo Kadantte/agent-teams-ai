@@ -14,12 +14,14 @@ export async function atomicWriteAsync(targetPath: string, data: string): Promis
     await fs.promises.mkdir(dir, { recursive: true });
     await fs.promises.writeFile(tmpPath, data, 'utf8');
 
+    let fd: fs.promises.FileHandle | null = null;
     try {
-      const fd = await fs.promises.open(tmpPath, 'r+');
+      fd = await fs.promises.open(tmpPath, 'r+');
       await fd.sync();
-      await fd.close();
     } catch {
       // fsync is best-effort.
+    } finally {
+      await fd?.close();
     }
 
     try {

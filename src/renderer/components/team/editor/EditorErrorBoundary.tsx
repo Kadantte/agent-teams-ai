@@ -39,12 +39,17 @@ export class EditorErrorBoundary extends React.Component<Props, State> {
   render(): React.ReactElement {
     if (this.state.hasError) {
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-3 text-text-muted">
-          <AlertTriangle className="size-12 text-red-400 opacity-50" />
+        <div
+          role="alert"
+          aria-live="polite"
+          className="flex h-full flex-col items-center justify-center gap-3 text-text-muted"
+        >
+          <AlertTriangle aria-hidden="true" className="size-12 text-red-400 opacity-50" />
           <p className="max-w-md text-center text-sm text-text-secondary">
             Editor crashed: {this.state.error ?? 'Unknown error'}
           </p>
           <button
+            type="button"
             onClick={this.handleRetry}
             className="rounded border border-border px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-raised"
           >

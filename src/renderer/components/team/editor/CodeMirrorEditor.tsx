@@ -470,6 +470,25 @@ export const CodeMirrorEditor = ({
     });
   }, [lineWrap]);
 
+  // Scroll to pending line (from search-in-files result click)
+  const pendingGoToLine = useStore((s) => s.editorPendingGoToLine);
+  const setPendingGoToLine = useStore((s) => s.setPendingGoToLine);
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !pendingGoToLine) return;
+
+    const lineCount = view.state.doc.lines;
+    const targetLine = Math.min(Math.max(1, pendingGoToLine), lineCount);
+    const lineInfo = view.state.doc.line(targetLine);
+
+    view.dispatch({
+      selection: { anchor: lineInfo.from },
+      effects: EditorView.scrollIntoView(lineInfo.from, { y: 'center' }),
+    });
+
+    setPendingGoToLine(null);
+  }, [pendingGoToLine, setPendingGoToLine, filePath]);
+
   // Cleanup bridge on full unmount
   useEffect(() => {
     return () => {

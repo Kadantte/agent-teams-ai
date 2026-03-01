@@ -75,6 +75,7 @@ export interface DeleteFileResponse {
 
 export interface MoveFileResponse {
   newPath: string;
+  isDirectory: boolean;
 }
 
 // =============================================================================
@@ -169,6 +170,12 @@ export interface EditorFileChangeEvent {
 // Editor API
 // =============================================================================
 
+export interface QuickOpenFile {
+  path: string;
+  name: string;
+  relativePath: string;
+}
+
 export interface EditorAPI {
   open: (projectPath: string) => Promise<void>;
   close: () => Promise<void>;
@@ -184,6 +191,7 @@ export interface EditorAPI {
   deleteFile: (filePath: string) => Promise<DeleteFileResponse>;
   moveFile: (sourcePath: string, destDir: string) => Promise<MoveFileResponse>;
   searchInFiles: (options: SearchInFilesOptions) => Promise<SearchInFilesResult>;
+  listFiles: () => Promise<QuickOpenFile[]>;
   gitStatus: () => Promise<GitStatusResult>;
   watchDir: (enable: boolean) => Promise<void>;
   /** Subscribe to file change events (main → renderer). Returns cleanup function. */

@@ -53,6 +53,20 @@ const log = createLogger('FileSearchService');
 
 export class FileSearchService {
   /**
+   * List all files in the project recursively (for Quick Open).
+   * Lightweight — no content reading, no binary checks, no stat.
+   * Returns relative paths for display and absolute paths for opening.
+   */
+  async listFiles(
+    projectRoot: string,
+    signal?: AbortSignal
+  ): Promise<{ path: string; name: string; relativePath: string }[]> {
+    const files: { path: string; name: string; relativePath: string }[] = [];
+    await this.collectFilePaths(projectRoot, projectRoot, files, signal);
+    return files;
+  }
+
+  /**
    * Search for a literal string across project files.
    *
    * @param projectRoot - Validated project root path
@@ -111,6 +125,48 @@ export class FileSearchService {
     }
 
     return { results, totalMatches, truncated };
+  }
+
+  /**
+   * Lightweight recursive file path collection (no stat, no binary check).
+   * Used by listFiles() for Quick Open — needs to be fast.
+   */
+  private async collectFilePaths(
+    projectRoot: string,
+    dirPath: string,
+    files: { path: string; name: string; relativePath: string }[],
+    signal?: AbortSignal
+  ): Promise<void> {
+    if (signal?.aborted || files.length >= MAX_FILES) return;
+
+    let entries;
+    try {
+      entries = await fs.readdir(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of sorted) {
+      if (signal?.aborted || files.length >= MAX_FILES) break;
+
+      const fullPath = path.join(dirPath, entry.name);
+
+      if (!isPathWithinRoot(fullPath, projectRoot)) continue;
+      if (isGitInternalPath(fullPath)) continue;
+
+      if (entry.isDirectory()) {
+        if (IGNORED_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
+        await this.collectFilePaths(projectRoot, fullPath, files, signal);
+      } else if (entry.isFile()) {
+        if (IGNORED_FILES.has(entry.name)) continue;
+        const relativePath = fullPath.startsWith(projectRoot)
+          ? fullPath.slice(projectRoot.length + 1)
+          : entry.name;
+        files.push({ path: fullPath, name: entry.name, relativePath });
+      }
+    }
   }
 
   /**

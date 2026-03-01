@@ -14,6 +14,7 @@ import {
   EDITOR_CREATE_FILE,
   EDITOR_DELETE_FILE,
   EDITOR_GIT_STATUS,
+  EDITOR_LIST_FILES,
   EDITOR_MOVE_FILE,
   EDITOR_OPEN,
   EDITOR_READ_DIR,
@@ -44,6 +45,7 @@ import type {
   DeleteFileResponse,
   GitStatusResult,
   MoveFileResponse,
+  QuickOpenFile,
   ReadDirResult,
   ReadFileResult,
   SearchInFilesOptions,
@@ -271,6 +273,16 @@ async function handleEditorSearchInFiles(
 }
 
 /**
+ * List all project files recursively (for Quick Open).
+ */
+async function handleEditorListFiles(): Promise<IpcResult<QuickOpenFile[]>> {
+  return wrapHandler('listFiles', async () => {
+    if (!activeProjectRoot) throw new Error('Editor not initialized');
+    return fileSearchService.listFiles(activeProjectRoot);
+  });
+}
+
+/**
  * Get git status for current project (cached 5s).
  */
 async function handleEditorGitStatus(): Promise<IpcResult<GitStatusResult>> {
@@ -333,6 +345,7 @@ export function registerEditorHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(EDITOR_DELETE_FILE, handleEditorDeleteFile);
   ipcMain.handle(EDITOR_MOVE_FILE, handleEditorMoveFile);
   ipcMain.handle(EDITOR_SEARCH_IN_FILES, handleEditorSearchInFiles);
+  ipcMain.handle(EDITOR_LIST_FILES, handleEditorListFiles);
   ipcMain.handle(EDITOR_GIT_STATUS, handleEditorGitStatus);
   ipcMain.handle(EDITOR_WATCH_DIR, handleEditorWatchDir);
 }
@@ -348,6 +361,7 @@ export function removeEditorHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(EDITOR_DELETE_FILE);
   ipcMain.removeHandler(EDITOR_MOVE_FILE);
   ipcMain.removeHandler(EDITOR_SEARCH_IN_FILES);
+  ipcMain.removeHandler(EDITOR_LIST_FILES);
   ipcMain.removeHandler(EDITOR_GIT_STATUS);
   ipcMain.removeHandler(EDITOR_WATCH_DIR);
 }

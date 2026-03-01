@@ -947,6 +947,9 @@ export class HttpAPIClient implements ElectronAPI {
     searchInFiles: async () => {
       throw new Error('Editor not available in browser mode');
     },
+    listFiles: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
     gitStatus: async () => {
       throw new Error('Editor not available in browser mode');
     },

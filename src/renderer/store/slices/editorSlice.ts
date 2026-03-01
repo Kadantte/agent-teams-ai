@@ -124,6 +124,10 @@ export interface EditorSlice {
   /** File path with active save conflict (null = no conflict) */
   editorConflictFile: string | null;
 
+  /** Pending line to scroll to after file loads (1-based). Set by search result click. */
+  editorPendingGoToLine: number | null;
+  setPendingGoToLine: (line: number | null) => void;
+
   fetchGitStatus: () => Promise<void>;
   toggleWatcher: (enable: boolean) => Promise<void>;
   toggleLineWrap: () => void;
@@ -176,6 +180,9 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
   editorExternalChanges: {},
   editorFileMtimes: {},
   editorConflictFile: null,
+  editorPendingGoToLine: null,
+
+  setPendingGoToLine: (line: number | null) => set({ editorPendingGoToLine: line }),
 
   // ═══════════════════════════════════════════════════════
   // Group 1: File tree actions
@@ -204,6 +211,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       editorExternalChanges: {},
       editorFileMtimes: {},
       editorConflictFile: null,
+      editorPendingGoToLine: null,
     });
 
     try {
@@ -264,6 +272,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       editorExternalChanges: {},
       editorFileMtimes: {},
       editorConflictFile: null,
+      editorPendingGoToLine: null,
     });
   },
 
@@ -609,15 +618,12 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
 
     try {
       const result = await api.editor.moveFile(sourcePath, destDir);
-      const newPath = result.newPath;
+      const { newPath, isDirectory } = result;
       const oldParent = sourcePath.substring(0, sourcePath.lastIndexOf('/'));
 
       // Record move timestamps for watcher cooldown
       recentMoveTimestamps.set(sourcePath, Date.now());
       recentMoveTimestamps.set(newPath, Date.now());
-
-      // Check if source was a directory (for prefix-based remapping)
-      const isDir = !sourcePath.includes('.') || sourcePath.endsWith('/');
 
       // Atomic remap of all path-keyed state
       set((s) => {
@@ -657,8 +663,8 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           editorBridge.remapState(originalPath, tab.filePath);
         }
       }
-      // Also remap for single file case
-      if (!isDir) {
+      // Also remap for single file case (directories have no direct bridge state)
+      if (!isDirectory) {
         editorBridge.remapState(sourcePath, newPath);
       }
 

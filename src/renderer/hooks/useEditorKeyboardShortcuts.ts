@@ -35,6 +35,7 @@ export interface EditorKeyHandlerDeps {
   onToggleQuickOpen: () => void;
   onToggleSearchPanel: () => void;
   onToggleSidebar: () => void;
+  onToggleLineWrap: () => void;
   getEditorView: () => { dispatch: unknown } | null;
 }
 
@@ -98,6 +99,14 @@ export function createEditorKeyHandler(deps: EditorKeyHandlerDeps): (e: Keyboard
       e.preventDefault();
       e.stopPropagation();
       if (deps.hasUnsavedChanges()) void deps.saveAllFiles();
+      return;
+    }
+
+    // Cmd+Shift+W: Toggle line wrap
+    if (e.key === 'w' && e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      deps.onToggleLineWrap();
       return;
     }
 
@@ -181,6 +190,7 @@ export function useEditorKeyboardShortcuts({
   const saveFile = useStore((s) => s.saveFile);
   const saveAllFiles = useStore((s) => s.saveAllFiles);
   const hasUnsavedChanges = useStore((s) => s.hasUnsavedChanges);
+  const toggleLineWrap = useStore((s) => s.toggleLineWrap);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -194,6 +204,7 @@ export function useEditorKeyboardShortcuts({
         onToggleQuickOpen,
         onToggleSearchPanel,
         onToggleSidebar,
+        onToggleLineWrap: toggleLineWrap,
         getEditorView: () => editorBridge.getView(),
       });
       handler(e);
@@ -208,6 +219,7 @@ export function useEditorKeyboardShortcuts({
       onToggleQuickOpen,
       onToggleSearchPanel,
       onToggleSidebar,
+      toggleLineWrap,
     ]
   );
 

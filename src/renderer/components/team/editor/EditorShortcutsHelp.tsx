@@ -102,14 +102,21 @@ export const EditorShortcutsHelp = ({ onClose }: EditorShortcutsHelpProps): Reac
   );
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center" role="presentation">
       {/* Backdrop */}
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
 
       {/* Dialog */}
-      <div className="relative z-10 w-[480px] rounded-lg border border-border-emphasis bg-surface p-6 shadow-2xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shortcuts-dialog-title"
+        className="relative z-10 w-[480px] rounded-lg border border-border-emphasis bg-surface p-6 shadow-2xl"
+      >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-text">Keyboard Shortcuts</h2>
+          <h2 id="shortcuts-dialog-title" className="text-sm font-semibold text-text">
+            Keyboard Shortcuts
+          </h2>
           <button
             onClick={onClose}
             className="rounded p-1 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"

@@ -51,6 +51,7 @@ function createMockDeps(overrides: Partial<EditorKeyHandlerDeps> = {}): EditorKe
     onToggleQuickOpen: vi.fn(),
     onToggleSearchPanel: vi.fn(),
     onToggleSidebar: vi.fn(),
+    onToggleLineWrap: vi.fn(),
     getEditorView: vi.fn().mockReturnValue(null),
     ...overrides,
   };
@@ -165,6 +166,16 @@ describe('createEditorKeyHandler', () => {
       const handler = createEditorKeyHandler(deps);
       handler(createKeyEvent('s', { shiftKey: true }));
       expect(deps.saveAllFiles).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Cmd+Shift+W — Toggle Line Wrap', () => {
+    it('calls onToggleLineWrap', () => {
+      const handler = createEditorKeyHandler(deps);
+      const event = createKeyEvent('w', { shiftKey: true });
+      handler(event);
+      expect(deps.onToggleLineWrap).toHaveBeenCalledOnce();
+      expect(event.defaultPrevented).toBe(true);
     });
   });
 

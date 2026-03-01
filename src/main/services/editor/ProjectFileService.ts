@@ -491,8 +491,9 @@ export class ProjectFileService {
       throw new Error('Cannot move files into .git/ directory');
     }
 
-    // 5. Verify source exists
-    await fs.lstat(normalizedSrc);
+    // 5. Verify source exists and determine type
+    const srcStat = await fs.lstat(normalizedSrc);
+    const isDirectory = srcStat.isDirectory();
 
     // 6. Verify destination is a directory
     const destStat = await fs.lstat(normalizedDest);
@@ -541,7 +542,7 @@ export class ProjectFileService {
     }
 
     log.info('File moved:', normalizedSrc, '→', newPath);
-    return { newPath };
+    return { newPath, isDirectory };
   }
 
   // ---------------------------------------------------------------------------

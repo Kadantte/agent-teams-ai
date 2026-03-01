@@ -576,6 +576,7 @@ describe('ProjectFileService.moveFile', () => {
     const result = await service.moveFile(PROJECT_ROOT, sourcePath, DEST_DIR);
 
     expect(result.newPath).toBe(path.join(DEST_DIR, 'index.ts'));
+    expect(result.isDirectory).toBe(false);
     expect(mockRename).toHaveBeenCalledWith(
       path.resolve(sourcePath),
       path.join(DEST_DIR, 'index.ts')
@@ -591,6 +592,7 @@ describe('ProjectFileService.moveFile', () => {
     const result = await service.moveFile(PROJECT_ROOT, sourceDir, DEST_DIR);
 
     expect(result.newPath).toBe(path.join(DEST_DIR, 'utils'));
+    expect(result.isDirectory).toBe(true);
     expect(mockRename).toHaveBeenCalled();
   });
 

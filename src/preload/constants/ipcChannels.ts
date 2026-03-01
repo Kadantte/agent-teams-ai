@@ -434,6 +434,9 @@ export const EDITOR_MOVE_FILE = 'editor:moveFile';
 /** Search in files (literal string search) */
 export const EDITOR_SEARCH_IN_FILES = 'editor:searchInFiles';
 
+/** List all project files (for Quick Open) */
+export const EDITOR_LIST_FILES = 'editor:listFiles';
+
 /** Get git status for current project */
 export const EDITOR_GIT_STATUS = 'editor:gitStatus';
 

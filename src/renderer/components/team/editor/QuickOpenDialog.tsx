@@ -2,17 +2,18 @@
  * Quick Open dialog (Cmd+P) — fuzzy file search using cmdk.
  *
  * Escape closes dialog (not the editor overlay).
- * Flatten file tree on mount, filter with cmdk built-in fuzzy matching.
+ * Loads ALL project files via backend API on mount (not limited to expanded dirs).
  */
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useStore } from '@renderer/store';
 import { Command } from 'cmdk';
+import { Loader2 } from 'lucide-react';
 
 import { getFileIcon } from './fileIcons';
 
-import type { FileTreeEntry } from '@shared/types/editor';
+import type { QuickOpenFile } from '@shared/types/editor';
 
 // =============================================================================
 // Types
@@ -31,17 +32,32 @@ export const QuickOpenDialog = ({
   onClose,
   onSelectFile,
 }: QuickOpenDialogProps): React.ReactElement => {
-  const fileTree = useStore((s) => s.editorFileTree);
   const projectPath = useStore((s) => s.editorProjectPath);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [allFiles, setAllFiles] = useState<QuickOpenFile[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Flatten file tree into searchable list
-  const flatFiles = useMemo(() => {
-    if (!fileTree) return [];
-    const files: { path: string; name: string; relativePath: string }[] = [];
-    flattenTree(fileTree, files, projectPath ?? '');
-    return files;
-  }, [fileTree, projectPath]);
+  // Load all project files on mount via backend API
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
+    window.electronAPI.editor
+      .listFiles()
+      .then((files) => {
+        if (!cancelled) {
+          setAllFiles(files);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectPath]);
 
   // Escape to close dialog (not overlay)
   const handleKeyDown = useCallback(
@@ -62,10 +78,24 @@ export const QuickOpenDialog = ({
 
   const handleSelect = useCallback(
     (value: string) => {
-      onSelectFile(value);
-      onClose();
+      // value is relativePath from cmdk — look up full path
+      const file = allFiles.find((f) => f.relativePath === value);
+      if (file) {
+        onSelectFile(file.path);
+        onClose();
+      }
     },
-    [onSelectFile, onClose]
+    [allFiles, onSelectFile, onClose]
+  );
+
+  // Memoize file icon lookups
+  const fileItems = useMemo(
+    () =>
+      allFiles.map((file) => ({
+        ...file,
+        iconInfo: getFileIcon(file.name),
+      })),
+    [allFiles]
   );
 
   return (
@@ -83,6 +113,9 @@ export const QuickOpenDialog = ({
       {/* Dialog */}
       <div
         ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Quick Open"
         className="relative z-10 w-[520px] overflow-hidden rounded-lg border border-border-emphasis bg-surface shadow-2xl"
       >
         <Command label="Quick Open" shouldFilter={true}>
@@ -92,20 +125,27 @@ export const QuickOpenDialog = ({
             autoFocus
           />
           <Command.List className="max-h-80 overflow-y-auto p-1">
-            <Command.Empty className="p-6 text-center text-sm text-text-muted">
-              No files found
-            </Command.Empty>
-            {flatFiles.map((file) => {
-              const iconInfo = getFileIcon(file.name);
-              const Icon = iconInfo.icon;
+            {loading && (
+              <div className="flex items-center justify-center gap-2 p-6 text-sm text-text-muted">
+                <Loader2 className="size-4 animate-spin" />
+                <span>Loading files...</span>
+              </div>
+            )}
+            {!loading && (
+              <Command.Empty className="p-6 text-center text-sm text-text-muted">
+                No files found
+              </Command.Empty>
+            )}
+            {fileItems.map((file) => {
+              const Icon = file.iconInfo.icon;
               return (
                 <Command.Item
                   key={file.path}
                   value={file.relativePath}
-                  onSelect={() => handleSelect(file.path)}
+                  onSelect={() => handleSelect(file.relativePath)}
                   className="flex cursor-pointer items-center gap-2 rounded px-3 py-1.5 text-sm text-text-secondary aria-selected:bg-surface-raised aria-selected:text-text"
                 >
-                  <Icon className="size-4 shrink-0" style={{ color: iconInfo.color }} />
+                  <Icon className="size-4 shrink-0" style={{ color: file.iconInfo.color }} />
                   <span className="truncate font-medium">{file.name}</span>
                   <span className="ml-auto truncate text-xs text-text-muted">
                     {file.relativePath}
@@ -119,29 +159,3 @@ export const QuickOpenDialog = ({
     </div>
   );
 };
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-function flattenTree(
-  entries: FileTreeEntry[],
-  result: { path: string; name: string; relativePath: string }[],
-  projectRoot: string
-): void {
-  for (const entry of entries) {
-    if (entry.type === 'file' && !entry.isSensitive) {
-      const relativePath = entry.path.startsWith(projectRoot)
-        ? entry.path.slice(projectRoot.length + 1)
-        : entry.name;
-      result.push({
-        path: entry.path,
-        name: entry.name,
-        relativePath,
-      });
-    }
-    if (entry.children) {
-      flattenTree(entry.children, result, projectRoot);
-    }
-  }
-}

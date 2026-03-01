@@ -395,12 +395,14 @@ export const ProjectEditorOverlay = ({
 
   // --- Iter-4: Search result selection ---
 
+  const setPendingGoToLine = useStore((s) => s.setPendingGoToLine);
+
   const handleSearchSelectMatch = useCallback(
-    (filePath: string, _line: number) => {
+    (filePath: string, line: number) => {
+      setPendingGoToLine(line);
       openFile(filePath);
-      // Future enhancement: scroll to line in CM6 after file loads
     },
-    [openFile]
+    [openFile, setPendingGoToLine]
   );
 
   // --- Keyboard shortcuts ---

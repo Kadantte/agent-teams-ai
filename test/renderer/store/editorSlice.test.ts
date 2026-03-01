@@ -724,7 +724,7 @@ describe('editorSlice', () => {
     it('moves file, updates tabs, and returns true', async () => {
       const oldPath = SRC_DIR + '/utils.ts';
       const newPath = LIB_DIR + '/utils.ts';
-      mockEditorAPI.moveFile.mockResolvedValue({ newPath });
+      mockEditorAPI.moveFile.mockResolvedValue({ newPath, isDirectory: false });
       mockEditorAPI.readDir.mockResolvedValue(makeDirResult([]));
 
       store.getState().openFile(oldPath);
@@ -749,7 +749,7 @@ describe('editorSlice', () => {
     it('remaps activeTabId when moved file is active', async () => {
       const oldPath = SRC_DIR + '/index.ts';
       const newPath = LIB_DIR + '/index.ts';
-      mockEditorAPI.moveFile.mockResolvedValue({ newPath });
+      mockEditorAPI.moveFile.mockResolvedValue({ newPath, isDirectory: false });
       mockEditorAPI.readDir.mockResolvedValue(makeDirResult([]));
 
       store.getState().openFile(oldPath);
@@ -763,7 +763,7 @@ describe('editorSlice', () => {
     it('remaps modifiedFiles and fileMtimes', async () => {
       const oldPath = SRC_DIR + '/dirty.ts';
       const newPath = LIB_DIR + '/dirty.ts';
-      mockEditorAPI.moveFile.mockResolvedValue({ newPath });
+      mockEditorAPI.moveFile.mockResolvedValue({ newPath, isDirectory: false });
       mockEditorAPI.readDir.mockResolvedValue(makeDirResult([]));
 
       store.setState({
@@ -785,7 +785,7 @@ describe('editorSlice', () => {
       const newDir = LIB_DIR + '/components';
       const oldFilePath = oldDir + '/Button.tsx';
       const newFilePath = newDir + '/Button.tsx';
-      mockEditorAPI.moveFile.mockResolvedValue({ newPath: newDir });
+      mockEditorAPI.moveFile.mockResolvedValue({ newPath: newDir, isDirectory: true });
       mockEditorAPI.readDir.mockResolvedValue(makeDirResult([]));
 
       store.getState().openFile(oldFilePath);
@@ -838,7 +838,7 @@ describe('editorSlice', () => {
     it('calls editorBridge.remapState for affected files', async () => {
       const oldPath = SRC_DIR + '/bridge.ts';
       const newPath = LIB_DIR + '/bridge.ts';
-      mockEditorAPI.moveFile.mockResolvedValue({ newPath });
+      mockEditorAPI.moveFile.mockResolvedValue({ newPath, isDirectory: false });
       mockEditorAPI.readDir.mockResolvedValue(makeDirResult([]));
 
       store.getState().openFile(oldPath);
