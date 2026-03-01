@@ -9,7 +9,6 @@ import { version as APP_VERSION } from '../../../../package.json';
 import { atomicWriteAsync } from './atomicWrite';
 
 const TOOL_FILE_NAME = 'teamctl.js';
-const TOOL_VERSION = 11;
 
 function buildTeamCtlScript(version: string): string {
   const script = String.raw`#!/usr/bin/env node
