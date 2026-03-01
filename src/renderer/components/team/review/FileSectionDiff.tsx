@@ -89,8 +89,9 @@ export const FileSectionDiff = ({
       return writeSnippets[writeSnippets.length - 1].newString;
     })();
 
-  const hasCodeMirrorContent =
-    fileContent && fileContent.contentSource !== 'unavailable' && resolvedModified !== null;
+  // Show CodeMirror whenever we have resolved modified content (including new files
+  // where contentSource may be 'unavailable' but write-new snippet provides the content)
+  const hasCodeMirrorContent = resolvedModified !== null;
 
   if (!hasCodeMirrorContent) {
     return (
@@ -105,12 +106,12 @@ export const FileSectionDiff = ({
     <div className="overflow-auto">
       <DiffErrorBoundary
         filePath={file.filePath}
-        oldString={fileContent.originalFullContent ?? ''}
+        oldString={fileContent?.originalFullContent ?? ''}
         newString={resolvedModified}
       >
         <CodeMirrorDiffView
           key={`${file.filePath}:${discardCounter}`}
-          original={fileContent.originalFullContent ?? ''}
+          original={fileContent?.originalFullContent ?? ''}
           modified={resolvedModified}
           fileName={file.relativePath}
           readOnly={false}

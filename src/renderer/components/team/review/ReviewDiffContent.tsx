@@ -81,19 +81,6 @@ export const ReviewDiffContent = ({ file }: ReviewDiffContentProps) => {
 
   return (
     <div className="space-y-4 p-4">
-      {/* Заголовок файла */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-text">{file.relativePath}</span>
-        {file.isNewFile && (
-          <span className="rounded bg-green-500/20 px-1.5 py-0.5 text-[10px] text-green-400">
-            NEW
-          </span>
-        )}
-        <span className="ml-auto text-xs text-text-muted">
-          {nonErrorSnippets.length} change{nonErrorSnippets.length !== 1 ? 's' : ''}
-        </span>
-      </div>
-
       {/* Snippets */}
       {nonErrorSnippets.map((snippet, index) => (
         <SnippetDiffView key={snippet.toolUseId} snippet={snippet} index={index} />
