@@ -10,6 +10,7 @@
 import { api } from '@renderer/api';
 import { getLanguageFromFileName } from '@renderer/utils/codemirrorLanguages';
 import { editorBridge } from '@renderer/utils/editorBridge';
+import { invalidateQuickOpenCache } from '@renderer/utils/quickOpenCache';
 import { computeDisambiguatedTabs } from '@renderer/utils/tabLabelDisambiguation';
 import { createLogger } from '@shared/utils/logger';
 
@@ -920,6 +921,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
 
     // Refresh parent directory in tree for create/delete
     if (event.type === 'create' || event.type === 'delete') {
+      invalidateQuickOpenCache();
       const parentDir = event.path.substring(0, event.path.lastIndexOf('/'));
       if (parentDir && editorProjectPath) {
         void refreshDirectory(get, set, parentDir);

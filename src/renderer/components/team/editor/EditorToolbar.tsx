@@ -9,17 +9,22 @@ import { useStore } from '@renderer/store';
 import { editorBridge } from '@renderer/utils/editorBridge';
 import { shortcutLabel } from '@renderer/utils/platformKeys';
 import { Redo2, Save, Undo2, WrapText } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 // =============================================================================
 // Component
 // =============================================================================
 
 export const EditorToolbar = (): React.ReactElement | null => {
-  const activeTabId = useStore((s) => s.editorActiveTabId);
-  const modifiedFiles = useStore((s) => s.editorModifiedFiles);
-  const saving = useStore((s) => s.editorSaving);
+  const { activeTabId, modifiedFiles, saving, lineWrap } = useStore(
+    useShallow((s) => ({
+      activeTabId: s.editorActiveTabId,
+      modifiedFiles: s.editorModifiedFiles,
+      saving: s.editorSaving,
+      lineWrap: s.editorLineWrap,
+    }))
+  );
   const saveFile = useStore((s) => s.saveFile);
-  const lineWrap = useStore((s) => s.editorLineWrap);
   const toggleLineWrap = useStore((s) => s.toggleLineWrap);
 
   if (!activeTabId) return null;

@@ -2,9 +2,12 @@
  * Status bar: cursor position, language, encoding, indent style, git branch.
  */
 
+import React from 'react';
+
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
 import { GitBranch } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 interface EditorStatusBarProps {
   line: number;
@@ -12,14 +15,18 @@ interface EditorStatusBarProps {
   language: string;
 }
 
-export const EditorStatusBar = ({
+export const EditorStatusBar = React.memo(function EditorStatusBar({
   line,
   col,
   language,
-}: EditorStatusBarProps): React.ReactElement => {
-  const gitBranch = useStore((s) => s.editorGitBranch);
-  const isGitRepo = useStore((s) => s.editorIsGitRepo);
-  const watcherEnabled = useStore((s) => s.editorWatcherEnabled);
+}: EditorStatusBarProps): React.ReactElement {
+  const { gitBranch, isGitRepo, watcherEnabled } = useStore(
+    useShallow((s) => ({
+      gitBranch: s.editorGitBranch,
+      isGitRepo: s.editorIsGitRepo,
+      watcherEnabled: s.editorWatcherEnabled,
+    }))
+  );
 
   return (
     <div className="flex h-6 shrink-0 items-center justify-between border-t border-border bg-surface-sidebar px-3 text-[11px] text-text-muted">
@@ -49,4 +56,4 @@ export const EditorStatusBar = ({
       </div>
     </div>
   );
-};
+});

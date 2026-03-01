@@ -248,10 +248,12 @@ export class FileSearchService {
       }
     }
 
-    // Recurse into subdirectories
-    for (const subdir of subdirs) {
+    // Parallel subdirectory traversal (batched)
+    const DIR_CONCURRENCY = 10;
+    for (let i = 0; i < subdirs.length; i += DIR_CONCURRENCY) {
       if (signal?.aborted || files.length >= MAX_FILES) break;
-      await this.collectFiles(projectRoot, subdir, files, signal);
+      const batch = subdirs.slice(i, i + DIR_CONCURRENCY);
+      await Promise.all(batch.map((dir) => this.collectFiles(projectRoot, dir, files, signal)));
     }
   }
 

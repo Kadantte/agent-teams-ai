@@ -5,7 +5,7 @@
  * Results are clickable to open the file at the matched line.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
@@ -315,11 +315,11 @@ interface HighlightedLineProps {
   caseSensitive: boolean;
 }
 
-const HighlightedLine = ({
+const HighlightedLine = React.memo(function HighlightedLine({
   text,
   query,
   caseSensitive,
-}: HighlightedLineProps): React.ReactElement => {
+}: HighlightedLineProps): React.ReactElement {
   if (!query) {
     return <span className="truncate text-[11px] text-text-secondary">{text}</span>;
   }
@@ -356,4 +356,4 @@ const HighlightedLine = ({
   }
 
   return <span className="truncate text-[11px]">{parts}</span>;
-};
+});

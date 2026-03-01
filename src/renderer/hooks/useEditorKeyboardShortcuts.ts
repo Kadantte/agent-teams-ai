@@ -5,12 +5,13 @@
  * CM6-internal shortcuts (Cmd+Z, Cmd+Shift+Z, Cmd+A, Cmd+D) are handled by CodeMirror directly.
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import { openSearchPanel } from '@codemirror/search';
 import { useStore } from '@renderer/store';
 import { editorBridge } from '@renderer/utils/editorBridge';
 import { physicalKey } from '@renderer/utils/keyboardUtils';
+import { useShallow } from 'zustand/react/shallow';
 
 import type { EditorFileTab } from '@shared/types/editor';
 
@@ -190,46 +191,39 @@ export function useEditorKeyboardShortcuts({
   onToggleSidebar,
   onClose: _onClose,
 }: UseEditorKeyboardShortcutsOptions): void {
-  const openTabs = useStore((s) => s.editorOpenTabs);
-  const activeTabId = useStore((s) => s.editorActiveTabId);
+  const { openTabs, activeTabId } = useStore(
+    useShallow((s) => ({
+      openTabs: s.editorOpenTabs,
+      activeTabId: s.editorActiveTabId,
+    }))
+  );
   const setActiveEditorTab = useStore((s) => s.setActiveEditorTab);
   const saveFile = useStore((s) => s.saveFile);
   const saveAllFiles = useStore((s) => s.saveAllFiles);
   const hasUnsavedChanges = useStore((s) => s.hasUnsavedChanges);
   const toggleLineWrap = useStore((s) => s.toggleLineWrap);
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      const handler = createEditorKeyHandler({
-        activeTabId,
-        openTabs,
-        setActiveEditorTab,
-        saveFile,
-        saveAllFiles,
-        hasUnsavedChanges,
-        onToggleQuickOpen,
-        onToggleSearchPanel,
-        onToggleGoToLine,
-        onToggleSidebar,
-        onToggleLineWrap: toggleLineWrap,
-        getEditorView: () => editorBridge.getView(),
-      });
-      handler(e);
-    },
-    [
-      activeTabId,
-      openTabs,
-      setActiveEditorTab,
-      saveFile,
-      saveAllFiles,
-      hasUnsavedChanges,
-      onToggleQuickOpen,
-      onToggleSearchPanel,
-      onToggleGoToLine,
-      onToggleSidebar,
-      toggleLineWrap,
-    ]
-  );
+  // Store all deps in a ref so the keydown handler has a stable identity
+  const depsRef = useRef<EditorKeyHandlerDeps>(null!);
+  depsRef.current = {
+    activeTabId,
+    openTabs,
+    setActiveEditorTab,
+    saveFile,
+    saveAllFiles,
+    hasUnsavedChanges,
+    onToggleQuickOpen,
+    onToggleSearchPanel,
+    onToggleGoToLine,
+    onToggleSidebar,
+    onToggleLineWrap: toggleLineWrap,
+    getEditorView: () => editorBridge.getView(),
+  };
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    const handler = createEditorKeyHandler(depsRef.current);
+    handler(e);
+  }, []);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown, true); // capture phase

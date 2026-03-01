@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useStore } from '@renderer/store';
+import { getQuickOpenCache, setQuickOpenCache } from '@renderer/utils/quickOpenCache';
 import { Command } from 'cmdk';
 import { Loader2 } from 'lucide-react';
 
@@ -47,14 +48,23 @@ export const QuickOpenDialog = ({
     setAllFiles([]);
   }
 
-  // Load all project files via backend API
+  // Load all project files via backend API (with module-level cache)
   useEffect(() => {
+    // Use cache if fresh and for the same project
+    const cached = projectPath ? getQuickOpenCache(projectPath) : null;
+    if (cached) {
+      setAllFiles(cached.files);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
 
     const fetchFiles = async (): Promise<void> => {
       try {
         const files = await window.electronAPI.editor.listFiles();
         if (!cancelled) {
+          if (projectPath) setQuickOpenCache(projectPath, files);
           setAllFiles(files);
           setLoading(false);
         }

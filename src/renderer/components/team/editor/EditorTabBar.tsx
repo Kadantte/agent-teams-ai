@@ -20,6 +20,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
 import { X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { EditorTabContextMenu } from './EditorTabContextMenu';
 import { FileIcon } from './FileIcon';
@@ -43,9 +44,13 @@ interface EditorTabBarProps {
 export const EditorTabBar = ({
   onRequestCloseTab,
 }: EditorTabBarProps): React.ReactElement | null => {
-  const tabs = useStore((s) => s.editorOpenTabs);
-  const activeTabId = useStore((s) => s.editorActiveTabId);
-  const modifiedFiles = useStore((s) => s.editorModifiedFiles);
+  const { tabs, activeTabId, modifiedFiles } = useStore(
+    useShallow((s) => ({
+      tabs: s.editorOpenTabs,
+      activeTabId: s.editorActiveTabId,
+      modifiedFiles: s.editorModifiedFiles,
+    }))
+  );
   const setActiveEditorTab = useStore((s) => s.setActiveEditorTab);
   const reorderEditorTabs = useStore((s) => s.reorderEditorTabs);
   const closeOtherEditorTabs = useStore((s) => s.closeOtherEditorTabs);

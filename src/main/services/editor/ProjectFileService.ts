@@ -536,8 +536,8 @@ export class ProjectFileService {
       await fs.rename(normalizedSrc, newPath);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
-        const stat = await fs.lstat(normalizedSrc);
-        if (stat.isDirectory()) {
+        // Reuse srcStat from step 5 — no need for another fs.lstat
+        if (isDirectory) {
           await fs.cp(normalizedSrc, newPath, { recursive: true });
         } else {
           await fs.copyFile(normalizedSrc, newPath);
