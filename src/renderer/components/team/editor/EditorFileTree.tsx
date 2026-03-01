@@ -74,10 +74,17 @@ const AUTO_EXPAND_DELAY_MS = 500;
 // Component
 // =============================================================================
 
+// Render counter for debugging — tracks how often the tree re-renders
+let fileTreeRenderCount = 0;
+
 export const EditorFileTree = ({
   selectedFilePath,
   onFileSelect,
 }: EditorFileTreeProps): React.ReactElement => {
+  fileTreeRenderCount++;
+  if (fileTreeRenderCount % 5 === 0) {
+    console.debug(`[perf] EditorFileTree render #${fileTreeRenderCount}`);
+  }
   // Data selectors — grouped with useShallow to prevent unnecessary re-renders
   const { fileTree, expandedDirs, loading, error, gitFiles, projectPath } = useStore(
     useShallow((s) => ({
@@ -130,14 +137,21 @@ export const EditorFileTree = ({
   // Convert hierarchical FileTreeEntry[] → TreeNode[] (respects entry.type)
   const treeNodes = useMemo(() => {
     if (!fileTree) return [];
-    return sortTreeNodes(convertEntriesToNodes(fileTree));
+    const t0 = performance.now();
+    const nodes = sortTreeNodes(convertEntriesToNodes(fileTree));
+    const ms = performance.now() - t0;
+    if (ms > 2) console.debug(`[perf] treeNodes: ${ms.toFixed(1)}ms, nodes=${nodes.length}`);
+    return nodes;
   }, [fileTree]);
 
   // Flatten tree into visible items list for virtualization
   // expandedDirs is keyed by absolute path, and node.fullPath = entry.path (absolute)
   const flatItems = useMemo(() => {
+    const t0 = performance.now();
     const items: FlatTreeItem[] = [];
     flattenVisible(treeNodes, expandedDirs, items, 0);
+    const ms = performance.now() - t0;
+    if (ms > 2) console.debug(`[perf] flatItems: ${ms.toFixed(1)}ms, items=${items.length}`);
     return items;
   }, [treeNodes, expandedDirs]);
 
@@ -176,6 +190,7 @@ export const EditorFileTree = ({
 
   // Git status lookup: absolute path → status type
   const gitStatusMap = useMemo(() => {
+    const t0 = performance.now();
     const map = new Map<string, GitFileStatusType>();
     if (!gitFiles.length || !projectPath) return map;
     for (const file of gitFiles) {
@@ -184,6 +199,8 @@ export const EditorFileTree = ({
         : `${projectPath}/${file.path}`;
       map.set(absPath, file.status);
     }
+    const ms = performance.now() - t0;
+    if (ms > 2) console.debug(`[perf] gitStatusMap: ${ms.toFixed(1)}ms, files=${gitFiles.length}`);
     return map;
   }, [gitFiles, projectPath]);
 
@@ -553,7 +570,7 @@ const RootDropZone = React.forwardRef<
   return (
     <div
       ref={combinedRef}
-      className={`h-full overflow-y-auto transition-colors ${
+      className={`scrollbar-thin h-full overflow-y-auto transition-colors ${
         isDropTarget ? 'bg-blue-400/5 ring-1 ring-inset ring-blue-400/30' : ''
       }`}
       role="tree"

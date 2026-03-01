@@ -23,6 +23,7 @@ import { isBinaryFile } from 'isbinaryfile';
 import * as path from 'path';
 
 import type {
+  BinaryPreviewResult,
   CreateDirResponse,
   CreateFileResponse,
   DeleteFileResponse,
@@ -42,6 +43,32 @@ const MAX_FILE_SIZE_PREVIEW = 5 * 1024 * 1024; // 5 MB
 const MAX_WRITE_SIZE = 2 * 1024 * 1024; // 2 MB
 const MAX_DIR_ENTRIES = 500;
 const PREVIEW_LINE_COUNT = 100;
+
+/**
+ * Extract the first N lines from text using indexOf — O(1) allocations vs split().
+ * For a 5MB file with 100k lines, avoids creating 100k string objects.
+ */
+function sliceFirstNLines(text: string, n: number): string {
+  let pos = 0;
+  for (let i = 0; i < n; i++) {
+    const next = text.indexOf('\n', pos);
+    if (next === -1) return text;
+    pos = next + 1;
+  }
+  return text.slice(0, pos > 0 ? pos - 1 : 0);
+}
+
+const PREVIEW_MIME_MAP: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+};
+const MAX_PREVIEW_SIZE = 10 * 1024 * 1024; // 10 MB
 
 const IGNORED_DIRS = new Set([
   '.git',
@@ -77,6 +104,7 @@ export class ProjectFileService {
     dirPath: string,
     maxEntries: number = MAX_DIR_ENTRIES
   ): Promise<ReadDirResult> {
+    const t0 = performance.now();
     const normalizedDir = path.resolve(dirPath);
 
     // Containment check (allow sensitive files to be listed with flag)
@@ -151,6 +179,13 @@ export class ProjectFileService {
       return a.name.localeCompare(b.name);
     });
 
+    const totalMs = performance.now() - t0;
+    if (totalMs > 50) {
+      log.info(
+        `[perf] readDir: ${totalMs.toFixed(1)}ms, entries=${entries.length}, dirents=${dirents.length}, dir=${path.basename(normalizedDir)}`
+      );
+    }
+
     return { entries, truncated: pendingEntries.length >= maxEntries };
   }
 
@@ -216,7 +251,7 @@ export class ProjectFileService {
 
     // 8. Tiered response
     const isPreview = stats.size > MAX_FILE_SIZE_FULL;
-    const content = isPreview ? raw.split('\n').slice(0, PREVIEW_LINE_COUNT).join('\n') : raw;
+    const content = isPreview ? sliceFirstNLines(raw, PREVIEW_LINE_COUNT) : raw;
 
     return {
       content,
@@ -611,6 +646,67 @@ export class ProjectFileService {
 
     log.info('File renamed:', normalizedSrc, '→', newPath);
     return { newPath, isDirectory };
+  }
+
+  /**
+   * Read a binary file as base64 for inline preview (images, etc.).
+   *
+   * Security:
+   * - validateFilePath for traversal + sensitive check (SEC-1)
+   * - Device path blocking (SEC-4)
+   * - lstat + isFile check (SEC-4)
+   * - Size limit (10MB)
+   * - Post-read TOCTOU realpath verify (SEC-3)
+   */
+  async readBinaryPreview(projectRoot: string, filePath: string): Promise<BinaryPreviewResult> {
+    // 1. Path validation
+    const validation = validateFilePath(filePath, projectRoot);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+
+    const normalizedPath = validation.normalizedPath!;
+
+    // 2. Device path block
+    if (isDevicePath(normalizedPath)) {
+      throw new Error('Cannot read device files');
+    }
+
+    // 3. File type check
+    const stats = await fs.lstat(normalizedPath);
+    if (!stats.isFile()) {
+      throw new Error('Not a regular file');
+    }
+
+    // 4. Size check
+    if (stats.size > MAX_PREVIEW_SIZE) {
+      throw new Error(
+        `File too large for preview (${(stats.size / 1024 / 1024).toFixed(1)}MB). Maximum is 10MB.`
+      );
+    }
+
+    // 5. MIME type from extension
+    const ext = path.extname(normalizedPath).toLowerCase();
+    const mimeType = PREVIEW_MIME_MAP[ext];
+    if (!mimeType) {
+      throw new Error(`Unsupported preview format: ${ext}`);
+    }
+
+    // 6. Read file as Buffer → base64
+    const buffer = await fs.readFile(normalizedPath);
+
+    // 7. Post-read TOCTOU verify
+    const realPath = await fs.realpath(normalizedPath);
+    const postValidation = validateFilePath(realPath, projectRoot);
+    if (!postValidation.valid) {
+      throw new Error('Path changed during read (TOCTOU)');
+    }
+
+    return {
+      base64: buffer.toString('base64'),
+      mimeType,
+      size: stats.size,
+    };
   }
 
   // ---------------------------------------------------------------------------

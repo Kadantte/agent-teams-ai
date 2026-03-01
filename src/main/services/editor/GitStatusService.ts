@@ -20,6 +20,7 @@ const log = createLogger('GitStatusService');
 
 const GIT_TIMEOUT_MS = 10_000;
 const CACHE_TTL_MS = 5_000;
+const GIT_STATUS_ARGS: string[] = ['--untracked-files=no'];
 
 // =============================================================================
 // Service
@@ -75,13 +76,21 @@ export class GitStatusService {
 
     // Return cached if fresh
     if (this.cachedResult && Date.now() - this.cacheTimestamp < CACHE_TTL_MS) {
+      log.info('[perf] gitStatus: cache hit');
       return this.cachedResult;
     }
 
     try {
-      const statusResult = await this.git.status();
+      const t0 = performance.now();
+      // `--untracked-files=no` is a major performance win for large repos with many untracked files.
+      // Most editors treat untracked as a separate concern; showing them can overwhelm the UI.
+      const statusResult = await this.git.status(GIT_STATUS_ARGS);
+      const gitMs = performance.now() - t0;
       const files = mapStatusResult(statusResult);
       const branch = statusResult.current ?? null;
+      log.info(
+        `[perf] gitStatus: git=${gitMs.toFixed(1)}ms, files=${files.length}, branch=${branch}, untracked=off`
+      );
 
       const result: GitStatusResult = { files, isGitRepo: true, branch };
       this.setCacheResult(result);

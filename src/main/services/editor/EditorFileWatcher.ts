@@ -24,7 +24,7 @@ const log = createLogger('EditorFileWatcher');
 
 /** Directories to ignore (regex for chokidar's `ignored` option) */
 const IGNORED_PATTERN =
-  /(node_modules|\.git|dist|__pycache__|\.cache|\.next|\.venv|\.tox|vendor|\.DS_Store)/;
+  /(node_modules|\.git|dist|build|out|coverage|__pycache__|\.cache|\.next|\.turbo|\.parcel-cache|\.vite|\.venv|\.tox|vendor|target|Pods|DerivedData|\.idea|\.vscode|\.DS_Store)/;
 
 const MAX_DEPTH = 20;
 
@@ -38,7 +38,8 @@ export class EditorFileWatcher {
   private pendingEvents = new Map<string, EditorFileChangeEvent['type']>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private onChangeCallback: ((event: EditorFileChangeEvent) => void) | null = null;
-  private readonly DEBOUNCE_MS = 150;
+  // Higher debounce = fewer IPC events during large bursts (checkout/build/format).
+  private readonly DEBOUNCE_MS = 350;
 
   /**
    * Start watching a project directory.
@@ -53,6 +54,7 @@ export class EditorFileWatcher {
     this.watcher = watch(projectRoot, {
       ignored: IGNORED_PATTERN,
       ignoreInitial: true,
+      ignorePermissionErrors: true,
       followSymlinks: false,
       depth: MAX_DEPTH,
     });

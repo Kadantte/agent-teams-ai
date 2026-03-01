@@ -4,10 +4,11 @@
  * Each segment is clickable — expands and scrolls the folder in the file tree.
  */
 
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import { useStore } from '@renderer/store';
 import { ChevronRight } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { FileIcon } from './FileIcon';
 
@@ -16,8 +17,12 @@ import { FileIcon } from './FileIcon';
 // =============================================================================
 
 export const EditorBreadcrumb = (): React.ReactElement | null => {
-  const activeTabId = useStore((s) => s.editorActiveTabId);
-  const projectPath = useStore((s) => s.editorProjectPath);
+  const { activeTabId, projectPath } = useStore(
+    useShallow((s) => ({
+      activeTabId: s.editorActiveTabId,
+      projectPath: s.editorProjectPath,
+    }))
+  );
   const expandDirectory = useStore((s) => s.expandDirectory);
 
   const segments = useMemo(() => {
@@ -34,13 +39,15 @@ export const EditorBreadcrumb = (): React.ReactElement | null => {
 
   const fileName = segments[segments.length - 1];
 
-  const handleSegmentClick = (segmentIndex: number): void => {
-    if (!projectPath) return;
-    // Build absolute path up to this segment (it's a directory)
-    const dirSegments = segments.slice(0, segmentIndex + 1);
-    const dirPath = `${projectPath}/${dirSegments.join('/')}`;
-    void expandDirectory(dirPath);
-  };
+  const handleSegmentClick = useCallback(
+    (segmentIndex: number): void => {
+      if (!projectPath) return;
+      const dirSegments = segments.slice(0, segmentIndex + 1);
+      const dirPath = `${projectPath}/${dirSegments.join('/')}`;
+      void expandDirectory(dirPath);
+    },
+    [segments, projectPath, expandDirectory]
+  );
 
   return (
     <div className="flex items-center gap-0.5 overflow-x-auto px-3 py-1 text-xs text-text-muted">

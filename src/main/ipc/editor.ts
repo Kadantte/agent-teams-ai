@@ -17,6 +17,7 @@ import {
   EDITOR_LIST_FILES,
   EDITOR_MOVE_FILE,
   EDITOR_OPEN,
+  EDITOR_READ_BINARY_PREVIEW,
   EDITOR_READ_DIR,
   EDITOR_READ_FILE,
   EDITOR_RENAME_FILE,
@@ -41,6 +42,7 @@ import {
 import { createIpcWrapper } from './ipcWrapper';
 
 import type {
+  BinaryPreviewResult,
   CreateDirResponse,
   CreateFileResponse,
   DeleteFileResponse,
@@ -308,6 +310,19 @@ async function handleEditorGitStatus(): Promise<IpcResult<GitStatusResult>> {
 }
 
 /**
+ * Read binary file as base64 for inline preview.
+ */
+async function handleEditorReadBinaryPreview(
+  _event: IpcMainInvokeEvent,
+  filePath: string
+): Promise<IpcResult<BinaryPreviewResult>> {
+  return wrapHandler('readBinaryPreview', async () => {
+    if (!activeProjectRoot) throw new Error('Editor not initialized');
+    return projectFileService.readBinaryPreview(activeProjectRoot, filePath);
+  });
+}
+
+/**
  * Enable/disable file watcher for current project.
  */
 async function handleEditorWatchDir(
@@ -319,8 +334,12 @@ async function handleEditorWatchDir(
 
     if (enable) {
       editorFileWatcher.start(activeProjectRoot, (event) => {
-        // Invalidate git cache on file changes
-        gitStatusService.invalidateCache();
+        // Git invalidation can be expensive: invalidating on every "change" causes us to
+        // re-run git status repeatedly during editor activity or build bursts.
+        // Instead, invalidate only on structural changes (create/delete).
+        if (event.type === 'create' || event.type === 'delete') {
+          gitStatusService.invalidateCache();
+        }
 
         // Forward event to renderer
         if (mainWindowRef && !mainWindowRef.isDestroyed()) {
@@ -362,6 +381,7 @@ export function registerEditorHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(EDITOR_RENAME_FILE, handleEditorRenameFile);
   ipcMain.handle(EDITOR_SEARCH_IN_FILES, handleEditorSearchInFiles);
   ipcMain.handle(EDITOR_LIST_FILES, handleEditorListFiles);
+  ipcMain.handle(EDITOR_READ_BINARY_PREVIEW, handleEditorReadBinaryPreview);
   ipcMain.handle(EDITOR_GIT_STATUS, handleEditorGitStatus);
   ipcMain.handle(EDITOR_WATCH_DIR, handleEditorWatchDir);
 }
@@ -379,6 +399,7 @@ export function removeEditorHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(EDITOR_RENAME_FILE);
   ipcMain.removeHandler(EDITOR_SEARCH_IN_FILES);
   ipcMain.removeHandler(EDITOR_LIST_FILES);
+  ipcMain.removeHandler(EDITOR_READ_BINARY_PREVIEW);
   ipcMain.removeHandler(EDITOR_GIT_STATUS);
   ipcMain.removeHandler(EDITOR_WATCH_DIR);
 }

@@ -16,6 +16,7 @@ import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
+import { createChipFromSelection } from '@renderer/utils/chipUtils';
 import { formatProjectPath } from '@renderer/utils/pathDisplay';
 import { buildTaskCountsByOwner } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
@@ -75,6 +76,7 @@ import { TeamSessionsSection } from './TeamSessionsSection';
 import type { KanbanFilterState } from './kanban/KanbanFilterPopover';
 import type { MessagesFilterState } from './messages/MessagesFilterPopover';
 import type { Session } from '@renderer/types/data';
+import type { InlineChip } from '@renderer/types/inlineChip';
 import type { InboxMessage, ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
 import type { EditorSelectionAction } from '@shared/types/editor';
 
@@ -90,6 +92,7 @@ interface CreateTaskDialogState {
   defaultDescription: string;
   defaultOwner: string;
   defaultStartImmediately?: boolean;
+  defaultChip?: InlineChip;
 }
 
 interface TimeWindow {
@@ -149,6 +152,9 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
   const [trashOpen, setTrashOpen] = useState(false);
   const [sendDialogRecipient, setSendDialogRecipient] = useState<string | undefined>(undefined);
   const [sendDialogDefaultText, setSendDialogDefaultText] = useState<string | undefined>(undefined);
+  const [sendDialogDefaultChip, setSendDialogDefaultChip] = useState<InlineChip | undefined>(
+    undefined
+  );
   const [replyQuote, setReplyQuote] = useState<{ from: string; text: string } | undefined>(
     undefined
   );
@@ -527,13 +533,26 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
 
   const handleEditorAction = useCallback(
     (action: EditorSelectionAction) => {
+      const chip = createChipFromSelection(action, []) ?? undefined;
       if (action.type === 'sendMessage') {
-        setSendDialogDefaultText(action.formattedContext);
+        setSendDialogDefaultText(chip ? undefined : action.formattedContext);
+        setSendDialogDefaultChip(chip);
         setSendDialogRecipient(undefined);
         setReplyQuote(undefined);
         setSendDialogOpen(true);
       } else if (action.type === 'createTask') {
-        openCreateTaskDialog('', action.formattedContext);
+        if (chip) {
+          setCreateTaskDialog({
+            open: true,
+            defaultSubject: '',
+            defaultDescription: '',
+            defaultOwner: '',
+            defaultStartImmediately: undefined,
+            defaultChip: chip,
+          });
+        } else {
+          openCreateTaskDialog('', action.formattedContext);
+        }
       }
     },
 
@@ -926,6 +945,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             onSendMessage={(member) => {
               setSendDialogRecipient(member.name);
               setSendDialogDefaultText(undefined);
+              setSendDialogDefaultChip(undefined);
               setReplyQuote(undefined);
               setSendDialogOpen(true);
             }}
@@ -1243,6 +1263,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             onReplyToMessage={(message) => {
               setSendDialogRecipient(message.from);
               setSendDialogDefaultText(undefined);
+              setSendDialogDefaultChip(undefined);
               setReplyQuote({ from: message.from, text: stripAgentBlocks(message.text) });
               setSendDialogOpen(true);
             }}
@@ -1293,6 +1314,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             setSelectedMember(null);
             setSendDialogRecipient(name || undefined);
             setSendDialogDefaultText(undefined);
+            setSendDialogDefaultChip(undefined);
             setReplyQuote(undefined);
             setSendDialogOpen(true);
           }}
@@ -1347,6 +1369,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
           defaultDescription={createTaskDialog.defaultDescription}
           defaultOwner={createTaskDialog.defaultOwner}
           defaultStartImmediately={createTaskDialog.defaultStartImmediately}
+          defaultChip={createTaskDialog.defaultChip}
           onClose={closeCreateTaskDialog}
           onSubmit={handleCreateTask}
           submitting={creatingTask}
@@ -1455,6 +1478,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
           members={activeMembers}
           defaultRecipient={sendDialogRecipient}
           defaultText={sendDialogDefaultText}
+          defaultChip={sendDialogDefaultChip}
           quotedMessage={replyQuote}
           sending={sendingMessage}
           sendError={sendMessageError}
@@ -1479,6 +1503,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             setSendDialogOpen(false);
             setReplyQuote(undefined);
             setSendDialogDefaultText(undefined);
+            setSendDialogDefaultChip(undefined);
           }}
         />
 

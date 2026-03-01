@@ -193,10 +193,24 @@ export interface EditorAPI {
   renameFile: (sourcePath: string, newName: string) => Promise<MoveFileResponse>;
   searchInFiles: (options: SearchInFilesOptions) => Promise<SearchInFilesResult>;
   listFiles: () => Promise<QuickOpenFile[]>;
+  readBinaryPreview: (filePath: string) => Promise<BinaryPreviewResult>;
   gitStatus: () => Promise<GitStatusResult>;
   watchDir: (enable: boolean) => Promise<void>;
   /** Subscribe to file change events (main → renderer). Returns cleanup function. */
   onEditorChange: (callback: (event: EditorFileChangeEvent) => void) => () => void;
+}
+
+// =============================================================================
+// Binary Preview
+// =============================================================================
+
+export interface BinaryPreviewResult {
+  /** Base64-encoded file content */
+  base64: string;
+  /** MIME type (e.g. 'image/png') */
+  mimeType: string;
+  /** File size in bytes */
+  size: number;
 }
 
 // =============================================================================

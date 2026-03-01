@@ -6,7 +6,7 @@
  * design language across the app.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -61,35 +61,37 @@ interface SearchToggleButtonProps {
   children: React.ReactNode;
 }
 
-const SearchToggleButton = ({
+const SearchToggleButton = React.memo(function SearchToggleButton({
   active,
   onClick,
   tooltip,
   shortcut,
   children,
-}: SearchToggleButtonProps) => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <button
-        type="button"
-        className={cn(
-          'flex size-[22px] items-center justify-center rounded transition-colors',
-          active
-            ? 'bg-blue-500/20 text-blue-400'
-            : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text-secondary)]'
-        )}
-        onClick={onClick}
-        tabIndex={-1}
-      >
-        {children}
-      </button>
-    </TooltipTrigger>
-    <TooltipContent side="bottom">
-      <span>{tooltip}</span>
-      {shortcut && <span className="ml-1.5 text-[var(--color-text-muted)]">{shortcut}</span>}
-    </TooltipContent>
-  </Tooltip>
-);
+}: SearchToggleButtonProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            'flex size-[22px] items-center justify-center rounded transition-colors',
+            active
+              ? 'bg-blue-500/20 text-blue-400'
+              : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text-secondary)]'
+          )}
+          onClick={onClick}
+          tabIndex={-1}
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <span>{tooltip}</span>
+        {shortcut && <span className="ml-1.5 text-[var(--color-text-muted)]">{shortcut}</span>}
+      </TooltipContent>
+    </Tooltip>
+  );
+});
 
 // =============================================================================
 // Match counter

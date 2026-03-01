@@ -25,8 +25,9 @@ import type { StateCreator } from 'zustand';
 
 const log = createLogger('Store:editor');
 
-/** Remove a key from a record without triggering unused-variable linting. */
+/** Remove a key from a record. Returns the same reference if key doesn't exist. */
 function omitKey<V>(record: Record<string, V>, key: string): Record<string, V> {
+  if (!(key in record)) return record;
   const result = { ...record };
   delete result[key];
   return result;
@@ -45,11 +46,53 @@ const recentSaveTimestamps = new Map<string, number>();
 const SAVE_COOLDOWN_MS = 2000;
 
 /**
+ * Throttle timers for watcher-driven updates.
+ * Keeping these module-level avoids store re-renders during bursts.
+ */
+let gitStatusThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+const GIT_STATUS_THROTTLE_MS = 1500;
+const gitStatusChangeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const GIT_STATUS_CHANGE_DEBOUNCE_MS = 6000;
+const dirRefreshDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const DIR_REFRESH_DEBOUNCE_MS = 350;
+
+// Watcher event logging can be extremely expensive during bursts.
+// Keep a lightweight aggregate counter instead of logging per event.
+let watcherEventLogTimer: ReturnType<typeof setTimeout> | null = null;
+let watcherEventCounts: Record<EditorFileChangeEvent['type'], number> = {
+  change: 0,
+  create: 0,
+  delete: 0,
+};
+
+/**
+ * Open request sequence for editor initialization.
+ * Cancels stale async work (notably React 18 StrictMode dev effect mount/unmount).
+ */
+let editorOpenSeq = 0;
+
+/**
  * Cooldown map: filePath → timestamp of last successful move.
  * Suppresses watcher events triggered by our own move operations.
  */
 const recentMoveTimestamps = new Map<string, number>();
 const MOVE_COOLDOWN_MS = 2000;
+
+function scheduleIdleWork(cb: () => void): void {
+  // Prefer requestIdleCallback when available; fall back to a short timeout.
+  // This keeps editor open responsive for large repos.
+  try {
+    const ric = (window as unknown as { requestIdleCallback?: (fn: () => void) => number })
+      .requestIdleCallback;
+    if (typeof ric === 'function') {
+      ric(cb);
+      return;
+    }
+  } catch {
+    // ignore
+  }
+  setTimeout(cb, 150);
+}
 
 // =============================================================================
 // Slice Interface
@@ -196,6 +239,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
   // ═══════════════════════════════════════════════════════
 
   openEditor: async (projectPath: string) => {
+    const openSeq = ++editorOpenSeq;
     set({
       editorProjectPath: projectPath,
       editorFileTree: null,
@@ -222,20 +266,60 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     });
 
     try {
+      const tOpen = performance.now();
       await api.editor.open(projectPath);
+      const openMs = performance.now() - tOpen;
 
-      // Parallelize: readDir + git status + watcher setup run concurrently
-      const [result] = await Promise.all([
-        api.editor.readDir(projectPath),
-        get().fetchGitStatus(),
-        get().toggleWatcher(true),
-      ]);
+      // Cancel stale opens (e.g. StrictMode effect cleanup, or rapid project switching)
+      if (editorOpenSeq !== openSeq || get().editorProjectPath !== projectPath) {
+        return;
+      }
 
+      // Load file tree first so UI becomes interactive quickly.
+      // Git status and file watching can be expensive on large projects, so they are NOT awaited here.
+      const tReadDir = performance.now();
+      const result = await api.editor.readDir(projectPath);
+      const readDirMs = performance.now() - tReadDir;
+
+      if (editorOpenSeq !== openSeq || get().editorProjectPath !== projectPath) {
+        return;
+      }
+
+      const tSet = performance.now();
       set({
         editorFileTree: result.entries,
         editorFileTreeLoading: false,
       });
+      const setMs = performance.now() - tSet;
+
+      log.info(
+        `[perf] openEditor: open=${openMs.toFixed(1)}ms, readDir=${readDirMs.toFixed(1)}ms, set=${setMs.toFixed(1)}ms, entries=${result.entries.length}`
+      );
+
+      // Enable watcher by default (like most editors), but defer startup until idle so open stays fast.
+      // Allow users to persistently disable it via localStorage toggle.
+      const watcherDesired = (() => {
+        try {
+          return localStorage.getItem('editor-watcher-enabled') !== 'false';
+        } catch {
+          return true;
+        }
+      })();
+
+      scheduleIdleWork(() => {
+        if (editorOpenSeq !== openSeq || get().editorProjectPath !== projectPath) return;
+        if (watcherDesired) void get().toggleWatcher(true);
+        // Defer initial git status a bit more — it can be expensive on large repos.
+        setTimeout(() => {
+          if (editorOpenSeq !== openSeq || get().editorProjectPath !== projectPath) return;
+          void get().fetchGitStatus();
+        }, 1200);
+      });
     } catch (error) {
+      // Ignore errors from stale opens (e.g. StrictMode cleanup during dev)
+      if (editorOpenSeq !== openSeq || get().editorProjectPath !== projectPath) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       log.error('Failed to open editor:', message);
       set({
@@ -246,6 +330,8 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
   },
 
   closeEditor: () => {
+    // Cancel any in-flight openEditor async work
+    editorOpenSeq++;
     // Clear cooldown timestamps (no stale entries across editor sessions)
     recentSaveTimestamps.clear();
     recentMoveTimestamps.clear();
@@ -288,11 +374,18 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     set({ editorFileTreeLoading: true, editorFileTreeError: null });
 
     try {
+      const t0 = performance.now();
       const result = await api.editor.readDir(dirPath);
+      const ipcMs = performance.now() - t0;
+      const t1 = performance.now();
       set({
         editorFileTree: result.entries,
         editorFileTreeLoading: false,
       });
+      const setMs = performance.now() - t1;
+      log.info(
+        `[perf] loadFileTree: IPC=${ipcMs.toFixed(1)}ms, set=${setMs.toFixed(1)}ms, entries=${result.entries.length}`
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.error('Failed to load file tree:', message);
@@ -306,15 +399,29 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
   expandDirectory: async (dirPath: string) => {
     const { editorExpandedDirs, editorFileTree } = get();
 
-    // Mark as expanded immediately for responsive UI
-    set({
-      editorExpandedDirs: { ...editorExpandedDirs, [dirPath]: true },
-    });
+    // Skip set() if already expanded — prevents unnecessary re-render
+    const wasExpanded = !!editorExpandedDirs[dirPath];
+    if (!wasExpanded) {
+      set({
+        editorExpandedDirs: { ...editorExpandedDirs, [dirPath]: true },
+      });
+    }
 
     try {
+      const t0 = performance.now();
       const result = await api.editor.readDir(dirPath);
-      const updatedTree = mergeChildrenIntoTree(editorFileTree ?? [], dirPath, result.entries);
+      const ipcMs = performance.now() - t0;
+      // Use fresh tree from store after await to avoid overwriting concurrent updates
+      const currentTree = get().editorFileTree;
+      const t1 = performance.now();
+      const updatedTree = mergeChildrenIntoTree(currentTree ?? [], dirPath, result.entries);
+      const mergeMs = performance.now() - t1;
+      const t2 = performance.now();
       set({ editorFileTree: updatedTree });
+      const setMs = performance.now() - t2;
+      log.info(
+        `[perf] expandDirectory: IPC=${ipcMs.toFixed(1)}ms, merge=${mergeMs.toFixed(1)}ms, set=${setMs.toFixed(1)}ms, entries=${result.entries.length}, wasExpanded=${wasExpanded}`
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.error('Failed to expand directory:', message);
@@ -856,13 +963,20 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
   fetchGitStatus: async () => {
     set({ editorGitLoading: true });
     try {
+      const t0 = performance.now();
       const result = await api.editor.gitStatus();
+      const ipcMs = performance.now() - t0;
+      const t1 = performance.now();
       set({
         editorGitFiles: result.files,
         editorGitBranch: result.branch,
         editorIsGitRepo: result.isGitRepo,
         editorGitLoading: false,
       });
+      const setMs = performance.now() - t1;
+      log.info(
+        `[perf] fetchGitStatus: IPC=${ipcMs.toFixed(1)}ms, set=${setMs.toFixed(1)}ms, files=${result.files.length}`
+      );
     } catch (error) {
       log.error('Failed to fetch git status:', error);
       set({ editorGitLoading: false });
@@ -873,6 +987,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     try {
       await api.editor.watchDir(enable);
       set({ editorWatcherEnabled: enable });
+      try {
+        localStorage.setItem('editor-watcher-enabled', String(enable));
+      } catch {
+        // localStorage may not be available
+      }
     } catch (error) {
       log.error('Failed to toggle watcher:', error);
     }
@@ -891,6 +1010,19 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
   },
 
   handleExternalFileChange: (event: EditorFileChangeEvent) => {
+    // Avoid per-event logging (can freeze renderer during bursts on large repos).
+    watcherEventCounts[event.type] = (watcherEventCounts[event.type] ?? 0) + 1;
+    if (!watcherEventLogTimer) {
+      watcherEventLogTimer = setTimeout(() => {
+        watcherEventLogTimer = null;
+        const counts = watcherEventCounts;
+        watcherEventCounts = { change: 0, create: 0, delete: 0 };
+        // Keep a single lightweight summary line.
+        log.info(
+          `[perf] editor watcher events (2s): change=${counts.change}, create=${counts.create}, delete=${counts.delete}`
+        );
+      }, 2000);
+    }
     const { editorOpenTabs, editorProjectPath, editorSaving } = get();
 
     // Ignore watcher events for files we are currently saving (our own write)
@@ -916,15 +1048,27 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       }));
     }
 
-    // Refresh git status on any change
-    void get().fetchGitStatus();
+    // Refresh git status on change — throttled to avoid expensive work during bursts.
+    // Main process already caches git status for 5s, but IPC + store updates still cost.
+    if (!gitStatusThrottleTimer) {
+      gitStatusThrottleTimer = setTimeout(() => {
+        gitStatusThrottleTimer = null;
+        void get().fetchGitStatus();
+      }, GIT_STATUS_THROTTLE_MS);
+    }
 
     // Refresh parent directory in tree for create/delete
     if (event.type === 'create' || event.type === 'delete') {
       invalidateQuickOpenCache();
       const parentDir = event.path.substring(0, event.path.lastIndexOf('/'));
       if (parentDir && editorProjectPath) {
-        void refreshDirectory(get, set, parentDir);
+        const existing = dirRefreshDebounceTimers.get(parentDir);
+        if (existing) clearTimeout(existing);
+        const timer = setTimeout(() => {
+          dirRefreshDebounceTimers.delete(parentDir);
+          void refreshDirectory(get, set, parentDir);
+        }, DIR_REFRESH_DEBOUNCE_MS);
+        dirRefreshDebounceTimers.set(parentDir, timer);
       }
     }
   },
@@ -1000,7 +1144,11 @@ async function refreshDirectory(
   dirPath: string
 ): Promise<void> {
   try {
+    const t0 = performance.now();
     const result = await api.editor.readDir(dirPath);
+    log.info(
+      `[perf] refreshDirectory: IPC=${(performance.now() - t0).toFixed(1)}ms, entries=${result.entries.length}, dir=${dirPath.split('/').pop()}`
+    );
     const currentTree = get().editorFileTree;
     if (!currentTree) return;
 
@@ -1074,22 +1222,27 @@ function remapRecord<V>(
 
 /**
  * Recursively merge children into the tree at the matching directory path.
+ * Returns the same array reference if nothing changed — preserves React.memo equality.
  */
 function mergeChildrenIntoTree(
   tree: FileTreeEntry[],
   targetPath: string,
   children: FileTreeEntry[]
 ): FileTreeEntry[] {
-  return tree.map((entry) => {
+  let changed = false;
+  const result = tree.map((entry) => {
     if (entry.path === targetPath && entry.type === 'directory') {
+      changed = true;
       return { ...entry, children };
     }
     if (entry.children) {
-      return {
-        ...entry,
-        children: mergeChildrenIntoTree(entry.children, targetPath, children),
-      };
+      const updated = mergeChildrenIntoTree(entry.children, targetPath, children);
+      if (updated !== entry.children) {
+        changed = true;
+        return { ...entry, children: updated };
+      }
     }
     return entry;
   });
+  return changed ? result : tree;
 }

@@ -149,13 +149,19 @@ export const ProjectEditorOverlay = ({
       setFileContent(null);
 
       try {
+        const t0 = performance.now();
         let promise = pendingReads.current.get(filePath);
+        const wasCached = !!promise;
         if (!promise) {
           promise = window.electronAPI.editor.readFile(filePath);
           pendingReads.current.set(filePath, promise);
           void promise.finally(() => pendingReads.current.delete(filePath));
         }
         const result = await promise;
+        const ipcMs = performance.now() - t0;
+        console.debug(
+          `[perf] loadFileContent: IPC=${ipcMs.toFixed(1)}ms, size=${result.size}, truncated=${result.truncated}, cached=${wasCached}, file=${filePath.split('/').pop()}`
+        );
         setFileContent(result);
 
         // Track baseline mtime for conflict detection

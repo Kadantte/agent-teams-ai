@@ -19,6 +19,7 @@ import {
   EDITOR_LIST_FILES,
   EDITOR_MOVE_FILE,
   EDITOR_OPEN,
+  EDITOR_READ_BINARY_PREVIEW,
   EDITOR_READ_DIR,
   EDITOR_READ_FILE,
   EDITOR_RENAME_FILE,
@@ -200,6 +201,7 @@ import type {
   WslClaudeRootCandidate,
 } from '@shared/types';
 import type {
+  BinaryPreviewResult,
   CreateDirResponse,
   CreateFileResponse,
   DeleteFileResponse,
@@ -1026,6 +1028,8 @@ const electronAPI: ElectronAPI = {
     searchInFiles: (options: SearchInFilesOptions) =>
       invokeIpcWithResult<SearchInFilesResult>(EDITOR_SEARCH_IN_FILES, options),
     listFiles: () => invokeIpcWithResult<QuickOpenFile[]>(EDITOR_LIST_FILES),
+    readBinaryPreview: (filePath: string) =>
+      invokeIpcWithResult<BinaryPreviewResult>(EDITOR_READ_BINARY_PREVIEW, filePath),
     gitStatus: () => invokeIpcWithResult<GitStatusResult>(EDITOR_GIT_STATUS),
     watchDir: (enable: boolean) => invokeIpcWithResult<void>(EDITOR_WATCH_DIR, enable),
     onEditorChange: (callback: (event: EditorFileChangeEvent) => void): (() => void) => {

@@ -2,6 +2,8 @@
  * Toolbar with Save, Undo, Redo buttons.
  */
 
+import React from 'react';
+
 import { redo, undo } from '@codemirror/commands';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
@@ -92,31 +94,33 @@ interface ToolbarButtonProps {
   active?: boolean;
 }
 
-const ToolbarButton = ({
+const ToolbarButton = React.memo(function ToolbarButton({
   icon,
   label,
   shortcut,
   onClick,
   disabled = false,
   active = false,
-}: ToolbarButtonProps): React.ReactElement => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <Button
-        variant="ghost"
-        onClick={onClick}
-        disabled={disabled}
-        className={`h-auto gap-1 px-1.5 py-0.5 text-xs ${
-          active ? 'bg-surface-raised text-text' : 'text-text-muted'
-        }`}
-        aria-label={`${label} (${shortcut})`}
-        aria-pressed={active}
-      >
-        {icon}
-      </Button>
-    </TooltipTrigger>
-    <TooltipContent side="bottom">
-      {label} ({shortcut})
-    </TooltipContent>
-  </Tooltip>
-);
+}: ToolbarButtonProps): React.ReactElement {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          onClick={onClick}
+          disabled={disabled}
+          className={`h-auto gap-1 px-1.5 py-0.5 text-xs ${
+            active ? 'bg-surface-raised text-text' : 'text-text-muted'
+          }`}
+          aria-label={`${label} (${shortcut})`}
+          aria-pressed={active}
+        >
+          {icon}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        {label} ({shortcut})
+      </TooltipContent>
+    </Tooltip>
+  );
+});

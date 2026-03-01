@@ -3,15 +3,24 @@ import * as React from 'react';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useMentionDetection } from '@renderer/hooks/useMentionDetection';
 import { cn } from '@renderer/lib/utils';
+import { chipToken } from '@renderer/types/inlineChip';
+import {
+  findChipBoundary,
+  reconcileChips,
+  removeChipTokenFromText,
+} from '@renderer/utils/chipUtils';
 
 import { AutoResizeTextarea } from './auto-resize-textarea';
+import { ChipInteractionLayer } from './ChipInteractionLayer';
+import { CodeChipBadge } from './CodeChipBadge';
 import { MentionSuggestionList } from './MentionSuggestionList';
 
 import type { AutoResizeTextareaProps } from './auto-resize-textarea';
+import type { InlineChip } from '@renderer/types/inlineChip';
 import type { MentionSuggestion } from '@renderer/types/mention';
 
 // ---------------------------------------------------------------------------
-// Mention segment parsing (splits text into plain text + @mention segments)
+// Segment types
 // ---------------------------------------------------------------------------
 
 interface TextSegment {
@@ -25,7 +34,17 @@ interface MentionSegment {
   suggestion: MentionSuggestion;
 }
 
-type Segment = TextSegment | MentionSegment;
+interface ChipSegment {
+  type: 'chip';
+  value: string;
+  chip: InlineChip;
+}
+
+type Segment = TextSegment | MentionSegment | ChipSegment;
+
+// ---------------------------------------------------------------------------
+// Mention segment parsing (splits text into plain text + @mention segments)
+// ---------------------------------------------------------------------------
 
 /**
  * Splits text into alternating text / @mention segments.
@@ -96,6 +115,64 @@ function parseMentionSegments(text: string, suggestions: MentionSuggestion[]): S
   return segments;
 }
 
+// ---------------------------------------------------------------------------
+// Extended segment parser: chips + mentions
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses text into segments: first extracts chip tokens, then runs mention parsing
+ * on the text fragments between chips.
+ */
+function parseSegments(
+  text: string,
+  suggestions: MentionSuggestion[],
+  chips: InlineChip[]
+): Segment[] {
+  if (!text) return [{ type: 'text', value: text }];
+  if (chips.length === 0) return parseMentionSegments(text, suggestions);
+
+  // Build a map of chip tokens for fast lookup
+  const chipTokenMap = new Map<string, InlineChip>();
+  for (const chip of chips) {
+    chipTokenMap.set(chipToken(chip), chip);
+  }
+
+  // Find all chip token positions, sorted by index
+  const chipPositions: { start: number; end: number; token: string; chip: InlineChip }[] = [];
+  for (const [token, chip] of chipTokenMap) {
+    let searchFrom = 0;
+    while (searchFrom < text.length) {
+      const idx = text.indexOf(token, searchFrom);
+      if (idx === -1) break;
+      chipPositions.push({ start: idx, end: idx + token.length, token, chip });
+      searchFrom = idx + 1;
+    }
+  }
+  chipPositions.sort((a, b) => a.start - b.start);
+
+  if (chipPositions.length === 0) return parseMentionSegments(text, suggestions);
+
+  const segments: Segment[] = [];
+  let lastEnd = 0;
+
+  for (const pos of chipPositions) {
+    // Text before this chip → parse for mentions
+    if (pos.start > lastEnd) {
+      const fragment = text.slice(lastEnd, pos.start);
+      segments.push(...parseMentionSegments(fragment, suggestions));
+    }
+    segments.push({ type: 'chip', value: pos.token, chip: pos.chip });
+    lastEnd = pos.end;
+  }
+
+  // Remaining text after last chip → parse for mentions
+  if (lastEnd < text.length) {
+    segments.push(...parseMentionSegments(text.slice(lastEnd), suggestions));
+  }
+
+  return segments;
+}
+
 // Default fallback color for mentions without a team color
 const DEFAULT_MENTION_BG = 'rgba(59, 130, 246, 0.15)';
 const DEFAULT_MENTION_TEXT = '#60a5fa';
@@ -117,6 +194,10 @@ interface MentionableTextareaProps extends Omit<
   footerRight?: React.ReactNode;
   /** Content rendered in the bottom-right corner inside the textarea (e.g. send button) */
   cornerAction?: React.ReactNode;
+  /** Inline code chips to display as badges */
+  chips?: InlineChip[];
+  /** Called when a chip is removed (by X button, backspace, or reconciliation) */
+  onChipRemove?: (chipId: string) => void;
 }
 
 export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, MentionableTextareaProps>(
@@ -129,6 +210,8 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       showHint = true,
       footerRight,
       cornerAction,
+      chips = [],
+      onChipRemove,
       style,
       className,
       ...textareaProps
@@ -137,6 +220,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
   ) => {
     const internalRef = React.useRef<HTMLTextAreaElement | null>(null);
     const backdropRef = React.useRef<HTMLDivElement>(null);
+    const [scrollTop, setScrollTop] = React.useState(0);
 
     const setRefs = React.useCallback(
       (node: HTMLTextAreaElement | null) => {
@@ -158,9 +242,9 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       selectedIndex,
       dropdownPosition,
       selectSuggestion,
-      handleKeyDown,
-      handleChange,
-      handleSelect,
+      handleKeyDown: mentionHandleKeyDown,
+      handleChange: mentionHandleChange,
+      handleSelect: mentionHandleSelect,
     } = useMentionDetection({
       suggestions,
       value,
@@ -169,8 +253,6 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
     });
 
     // Sync backdrop font with textarea computed font to prevent caret drift.
-    // Chromium UA stylesheet may apply different font-family / letter-spacing
-    // to <textarea> vs <div>, and sub-pixel differences accumulate over text length.
     React.useLayoutEffect(() => {
       const textarea = internalRef.current;
       const backdrop = backdropRef.current;
@@ -182,27 +264,174 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       backdrop.style.textIndent = cs.textIndent;
       backdrop.style.textTransform = cs.textTransform;
       backdrop.style.tabSize = cs.tabSize;
-    }, [value]); // re-sync when value changes (textarea may reflow)
+    }, [value]);
 
-    // --- Mention overlay ---
-    const hasMentionOverlay = suggestions.length > 0;
+    // --- Overlay activation ---
+    const hasOverlay = suggestions.length > 0 || chips.length > 0;
 
     const segments = React.useMemo(
-      () => (hasMentionOverlay ? parseMentionSegments(value, suggestions) : []),
-      [hasMentionOverlay, value, suggestions]
+      () => (hasOverlay ? parseSegments(value, suggestions, chips) : []),
+      [hasOverlay, value, suggestions, chips]
     );
 
-    // Sync backdrop scroll with textarea scroll
+    // Sync backdrop scroll with textarea scroll + track scrollTop for interaction layer
     const handleScroll = React.useCallback(() => {
       const textarea = internalRef.current;
       const backdrop = backdropRef.current;
-      if (textarea && backdrop) {
-        backdrop.scrollTop = textarea.scrollTop;
+      if (textarea) {
+        if (backdrop) {
+          backdrop.scrollTop = textarea.scrollTop;
+        }
+        setScrollTop(textarea.scrollTop);
       }
     }, []);
 
+    // --- Chip keyboard handling (atomic cursor / backspace / delete) ---
+    const handleChipKeyDown = React.useCallback(
+      (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (chips.length === 0 || !onChipRemove) return;
+
+        const textarea = internalRef.current;
+        if (!textarea) return;
+
+        const { selectionStart, selectionEnd } = textarea;
+        // Only act on collapsed cursor
+        if (selectionStart !== selectionEnd && !e.shiftKey) return;
+
+        const cursorPos = selectionStart;
+
+        if (e.key === 'Backspace') {
+          // If cursor is at chip end → delete entire chip
+          const boundary = findChipBoundary(value, chips, cursorPos);
+          if (cursorPos === boundary?.end) {
+            e.preventDefault();
+            const newText = removeChipTokenFromText(value, boundary.chip);
+            onValueChange(newText);
+            onChipRemove(boundary.chip.id);
+            // Set cursor to where chip started
+            requestAnimationFrame(() => {
+              textarea.setSelectionRange(boundary.start, boundary.start);
+            });
+          }
+        } else if (e.key === 'Delete') {
+          // If cursor is at chip start → delete entire chip
+          const boundary = findChipBoundary(value, chips, cursorPos);
+          if (cursorPos === boundary?.start) {
+            e.preventDefault();
+            const newText = removeChipTokenFromText(value, boundary.chip);
+            onValueChange(newText);
+            onChipRemove(boundary.chip.id);
+            requestAnimationFrame(() => {
+              textarea.setSelectionRange(boundary.start, boundary.start);
+            });
+          }
+        } else if (e.key === 'ArrowLeft' && !e.shiftKey) {
+          // If cursor is at chip end → jump to chip start
+          const boundary = findChipBoundary(value, chips, cursorPos);
+          if (cursorPos === boundary?.end) {
+            e.preventDefault();
+            textarea.setSelectionRange(boundary.start, boundary.start);
+          }
+        } else if (e.key === 'ArrowRight' && !e.shiftKey) {
+          // If cursor is at chip start → jump to chip end
+          const boundary = findChipBoundary(value, chips, cursorPos);
+          if (cursorPos === boundary?.start) {
+            e.preventDefault();
+            textarea.setSelectionRange(boundary.end, boundary.end);
+          }
+        } else if (e.key === 'ArrowLeft' && e.shiftKey) {
+          // Extend selection past chip atomically
+          const boundary = findChipBoundary(value, chips, cursorPos);
+          if (cursorPos === boundary?.end) {
+            e.preventDefault();
+            textarea.setSelectionRange(boundary.start, selectionEnd);
+          }
+        } else if (e.key === 'ArrowRight' && e.shiftKey) {
+          const boundary = findChipBoundary(value, chips, cursorPos);
+          if (cursorPos === boundary?.start) {
+            e.preventDefault();
+            textarea.setSelectionRange(selectionStart, boundary.end);
+          }
+        }
+      },
+      [chips, onChipRemove, value, onValueChange]
+    );
+
+    // Composed key handler: chip logic → mention logic
+    const composedHandleKeyDown = React.useCallback(
+      (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        handleChipKeyDown(e);
+        if (!e.defaultPrevented) {
+          mentionHandleKeyDown(e);
+        }
+      },
+      [handleChipKeyDown, mentionHandleKeyDown]
+    );
+
+    // --- Chip reconciliation on text change ---
+    const composedHandleChange = React.useCallback(
+      (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        mentionHandleChange(e);
+
+        // Reconcile chips after text changes (paste/cut/undo)
+        if (chips.length > 0 && onChipRemove) {
+          const newText = e.target.value;
+          const surviving = reconcileChips(chips, newText);
+          if (surviving.length < chips.length) {
+            const survivingIds = new Set(surviving.map((c) => c.id));
+            for (const chip of chips) {
+              if (!survivingIds.has(chip.id)) {
+                onChipRemove(chip.id);
+              }
+            }
+          }
+        }
+      },
+      [mentionHandleChange, chips, onChipRemove]
+    );
+
+    // --- Snap cursor on click/select if inside chip ---
+    const composedHandleSelect = React.useCallback(
+      (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+        mentionHandleSelect(e);
+
+        if (chips.length > 0) {
+          const textarea = internalRef.current;
+          if (!textarea) return;
+          const { selectionStart, selectionEnd } = textarea;
+          // Only snap collapsed cursor
+          if (selectionStart !== selectionEnd) return;
+
+          const boundary = findChipBoundary(value, chips, selectionStart);
+          if (boundary && selectionStart > boundary.start && selectionStart < boundary.end) {
+            // Snap to nearest boundary
+            const distToStart = selectionStart - boundary.start;
+            const distToEnd = boundary.end - selectionStart;
+            const snapTo = distToStart <= distToEnd ? boundary.start : boundary.end;
+            requestAnimationFrame(() => {
+              textarea.setSelectionRange(snapTo, snapTo);
+            });
+          }
+        }
+      },
+      [mentionHandleSelect, chips, value]
+    );
+
+    // --- Chip remove handler (from X button in interaction layer) ---
+    const handleChipRemove = React.useCallback(
+      (chipId: string) => {
+        const chip = chips.find((c) => c.id === chipId);
+        if (chip) {
+          const newText = removeChipTokenFromText(value, chip);
+          onValueChange(newText);
+        }
+        onChipRemove?.(chipId);
+      },
+      [chips, value, onValueChange, onChipRemove]
+    );
+
     // When overlay is active: textarea text is transparent, caret stays visible
-    const textareaStyle: React.CSSProperties | undefined = hasMentionOverlay
+    const textareaStyle: React.CSSProperties | undefined = hasOverlay
       ? {
           ...style,
           color: 'transparent',
@@ -219,7 +448,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       <div className="relative">
         {/* Inner wrapper for textarea + backdrop overlay */}
         <div className="relative">
-          {hasMentionOverlay ? (
+          {hasOverlay ? (
             <div
               ref={backdropRef}
               className={cn(
@@ -237,6 +466,10 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
                 if (seg.type === 'text') {
                   return <React.Fragment key={idx}>{seg.value}</React.Fragment>;
                 }
+                if (seg.type === 'chip') {
+                  return <CodeChipBadge key={idx} chip={seg.chip} tokenText={seg.value} />;
+                }
+                // mention
                 const colorSet = seg.suggestion.color
                   ? getTeamColorSet(seg.suggestion.color)
                   : null;
@@ -262,14 +495,25 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
           <AutoResizeTextarea
             ref={setRefs}
             value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            onSelect={handleSelect}
+            onChange={composedHandleChange}
+            onKeyDown={composedHandleKeyDown}
+            onSelect={composedHandleSelect}
             {...textareaProps}
             className={cn(className, cornerAction && 'pb-12 pr-[4.25rem]')}
             onScroll={handleScroll}
             style={textareaStyle}
           />
+
+          {chips.length > 0 && onChipRemove ? (
+            <ChipInteractionLayer
+              chips={chips}
+              value={value}
+              textareaRef={internalRef}
+              scrollTop={scrollTop}
+              onRemove={handleChipRemove}
+            />
+          ) : null}
+
           {cornerAction ? (
             <div className="pointer-events-none absolute bottom-2 right-2 z-20 flex items-end justify-end">
               <div className="pointer-events-auto">{cornerAction}</div>

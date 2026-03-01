@@ -75,7 +75,7 @@ export const EditorContextMenu = ({
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
-        <div ref={triggerRef} onContextMenu={handleContextMenu}>
+        <div ref={triggerRef} onContextMenu={handleContextMenu} className="h-full">
           {children}
         </div>
       </ContextMenu.Trigger>

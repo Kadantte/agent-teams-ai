@@ -41,6 +41,7 @@ import { EditorFileWatcher } from '../../../../src/main/services/editor/EditorFi
 
 describe('EditorFileWatcher', () => {
   let watcher: EditorFileWatcher;
+  const FLUSH_DEBOUNCE_MS = 350;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -61,6 +62,7 @@ describe('EditorFileWatcher', () => {
       expect(watch).toHaveBeenCalledWith('/Users/test/project', {
         ignored: expect.any(RegExp),
         ignoreInitial: true,
+        ignorePermissionErrors: true,
         followSymlinks: false,
         depth: 20,
       });
@@ -84,7 +86,7 @@ describe('EditorFileWatcher', () => {
       // Simulate chokidar 'change' event
       const changeHandler = mockOn.mock.calls.find((c) => c[0] === 'change')?.[1];
       changeHandler?.('/Users/test/project/src/index.ts');
-      vi.advanceTimersByTime(150);
+      vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
 
       expect(onChange).toHaveBeenCalledWith({
         type: 'change',
@@ -98,7 +100,7 @@ describe('EditorFileWatcher', () => {
 
       const addHandler = mockOn.mock.calls.find((c) => c[0] === 'add')?.[1];
       addHandler?.('/Users/test/project/new-file.ts');
-      vi.advanceTimersByTime(150);
+      vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
 
       expect(onChange).toHaveBeenCalledWith({
         type: 'create',
@@ -112,7 +114,7 @@ describe('EditorFileWatcher', () => {
 
       const unlinkHandler = mockOn.mock.calls.find((c) => c[0] === 'unlink')?.[1];
       unlinkHandler?.('/Users/test/project/old-file.ts');
-      vi.advanceTimersByTime(150);
+      vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
 
       expect(onChange).toHaveBeenCalledWith({
         type: 'delete',

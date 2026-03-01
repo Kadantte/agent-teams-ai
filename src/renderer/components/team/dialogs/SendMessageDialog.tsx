@@ -21,12 +21,16 @@ import {
 } from '@renderer/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
+import { chipToken, serializeChipsWithText } from '@renderer/types/inlineChip';
 import { buildReplyBlock } from '@renderer/utils/agentMessageFormatting';
+import { removeChipTokenFromText } from '@renderer/utils/chipUtils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { X } from 'lucide-react';
 
+import type { InlineChip } from '@renderer/types/inlineChip';
 import type { MentionSuggestion } from '@renderer/types/mention';
 import type { ResolvedTeamMember, SendMessageResult } from '@shared/types';
 
@@ -41,6 +45,8 @@ interface SendMessageDialogProps {
   defaultRecipient?: string;
   /** Pre-filled message text (e.g. from editor selection action) */
   defaultText?: string;
+  /** Pre-filled inline code chip (from editor selection action) */
+  defaultChip?: InlineChip;
   quotedMessage?: QuotedMessage;
   sending: boolean;
   sendError: string | null;
@@ -56,6 +62,7 @@ export const SendMessageDialog = ({
   members,
   defaultRecipient,
   defaultText,
+  defaultChip,
   quotedMessage,
   sending,
   sendError,
@@ -67,6 +74,7 @@ export const SendMessageDialog = ({
   const [quote, setQuote] = useState<QuotedMessage | undefined>(undefined);
   const [member, setMember] = useState('');
   const textDraft = useDraftPersistence({ key: 'sendMessage:text' });
+  const chipDraft = useChipDraftPersistence('sendMessage:chips');
   const [summary, setSummary] = useState('');
   const [prevOpen, setPrevOpen] = useState(false);
   const [prevResult, setPrevResult] = useState<SendMessageResult | null>(null);
@@ -77,7 +85,11 @@ export const SendMessageDialog = ({
     setSummary('');
     setQuote(quotedMessage);
     setPrevResult(lastResult);
-    if (defaultText) {
+    if (defaultChip) {
+      const token = chipToken(defaultChip);
+      textDraft.setValue(token + '\n');
+      chipDraft.setChips([defaultChip]);
+    } else if (defaultText) {
       textDraft.setValue(defaultText);
     }
   }
@@ -98,6 +110,7 @@ export const SendMessageDialog = ({
   useEffect(() => {
     if (pendingAutoClose) {
       textDraft.clearDraft();
+      chipDraft.clearChipDraft();
       setPendingAutoClose(false);
       onClose();
     }
@@ -121,12 +134,21 @@ export const SendMessageDialog = ({
     summary.trim().length > 0 &&
     !sending;
 
+  const handleChipRemove = (chipId: string): void => {
+    const chip = chipDraft.chips.find((c) => c.id === chipId);
+    if (chip) {
+      textDraft.setValue(removeChipTokenFromText(textDraft.value, chip));
+    }
+    chipDraft.setChips(chipDraft.chips.filter((c) => c.id !== chipId));
+  };
+
   const handleSubmit = (): void => {
     if (!canSend) return;
-    const rawText = textDraft.value.trim();
-    const finalText = quote ? buildReplyBlock(quote.from, quote.text, rawText) : rawText;
+    const serialized = serializeChipsWithText(textDraft.value.trim(), chipDraft.chips);
+    const finalText = quote ? buildReplyBlock(quote.from, quote.text, serialized) : serialized;
     onSend(member.trim(), finalText, summary.trim());
     textDraft.clearDraft();
+    chipDraft.clearChipDraft();
   };
 
   const handleOpenChange = (nextOpen: boolean): void => {
@@ -213,6 +235,8 @@ export const SendMessageDialog = ({
               value={textDraft.value}
               onValueChange={textDraft.setValue}
               suggestions={mentionSuggestions}
+              chips={chipDraft.chips}
+              onChipRemove={handleChipRemove}
               minRows={4}
               maxRows={12}
               footerRight={

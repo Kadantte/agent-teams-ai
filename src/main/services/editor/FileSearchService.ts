@@ -259,6 +259,8 @@ export class FileSearchService {
 
   /**
    * Search a single file for literal string matches.
+   * Uses indexOf on the full content instead of split() — avoids 50k+ string allocations
+   * for a 1MB file. Running line counter keeps O(n) total regardless of match count.
    */
   private async searchFile(
     filePath: string,
@@ -268,29 +270,38 @@ export class FileSearchService {
   ): Promise<SearchMatch[]> {
     if (signal?.aborted) return [];
 
-    const content = await fs.readFile(filePath, 'utf8');
-    const lines = content.split('\n');
+    const raw = await fs.readFile(filePath, 'utf8');
+    const content = caseSensitive ? raw : raw.toLowerCase();
     const matches: SearchMatch[] = [];
 
-    for (let i = 0; i < lines.length; i++) {
+    let searchFrom = 0;
+    let line = 1;
+    let lastCountedPos = 0;
+
+    while (true) {
       if (signal?.aborted) break;
+      const idx = content.indexOf(query, searchFrom);
+      if (idx === -1) break;
 
-      const line = lines[i];
-      const searchLine = caseSensitive ? line : line.toLowerCase();
-      let startIndex = 0;
-
-      while (true) {
-        const idx = searchLine.indexOf(query, startIndex);
-        if (idx === -1) break;
-
-        matches.push({
-          line: i + 1,
-          column: idx,
-          lineContent: line.trim(),
-        });
-
-        startIndex = idx + query.length;
+      // Running line counter — count \n from lastCountedPos to idx
+      for (let i = lastCountedPos; i < idx; i++) {
+        if (content.charCodeAt(i) === 10) line++;
       }
+      lastCountedPos = idx;
+
+      // Extract line content from raw text
+      let lineStart = raw.lastIndexOf('\n', idx);
+      lineStart = lineStart === -1 ? 0 : lineStart + 1;
+      let lineEnd = raw.indexOf('\n', idx);
+      if (lineEnd === -1) lineEnd = raw.length;
+
+      matches.push({
+        line,
+        column: idx - lineStart,
+        lineContent: raw.slice(lineStart, lineEnd).trim(),
+      });
+
+      searchFrom = idx + query.length;
     }
 
     return matches;
