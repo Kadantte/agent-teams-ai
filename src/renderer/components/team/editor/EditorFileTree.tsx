@@ -16,6 +16,15 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import { Button } from '@renderer/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@renderer/components/ui/dialog';
 import { useStore } from '@renderer/store';
 import { sortTreeNodes } from '@renderer/utils/fileTreeBuilder';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -78,11 +87,14 @@ export const EditorFileTree = ({
   const createDirInTree = useStore((s) => s.createDirInTree);
   const deleteFileFromTree = useStore((s) => s.deleteFileFromTree);
   const moveFileInTree = useStore((s) => s.moveFileInTree);
+  const renameFileInTree = useStore((s) => s.renameFileInTree);
   const openFile = useStore((s) => s.openFile);
   const gitFiles = useStore((s) => s.editorGitFiles);
   const projectPath = useStore((s) => s.editorProjectPath);
 
   const [newItemState, setNewItemState] = useState<NewItemState | null>(null);
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [deleteConfirmPath, setDeleteConfirmPath] = useState<string | null>(null);
   const [draggedItem, setDraggedItem] = useState<FlatTreeItem | null>(null);
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
   const autoExpandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -200,15 +212,36 @@ export const EditorFileTree = ({
     [projectPath, expandedDirs, expandDirectory]
   );
 
-  const handleDelete = useCallback(
-    async (path: string) => {
-      const fileName = path.split('/').pop() ?? path;
-      const confirmed = window.confirm(`Move "${fileName}" to Trash?`);
-      if (!confirmed) return;
-      await deleteFileFromTree(path);
+  const handleDelete = useCallback((path: string) => {
+    setDeleteConfirmPath(path);
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deleteConfirmPath) return;
+    await deleteFileFromTree(deleteConfirmPath);
+    setDeleteConfirmPath(null);
+  }, [deleteConfirmPath, deleteFileFromTree]);
+
+  const handleCancelDelete = useCallback(() => {
+    setDeleteConfirmPath(null);
+  }, []);
+
+  const handleRename = useCallback((path: string) => {
+    setRenamingPath(path);
+  }, []);
+
+  const handleRenameSubmit = useCallback(
+    async (newName: string) => {
+      if (!renamingPath) return;
+      await renameFileInTree(renamingPath, newName);
+      setRenamingPath(null);
     },
-    [deleteFileFromTree]
+    [renamingPath, renameFileInTree]
   );
+
+  const handleRenameCancel = useCallback(() => {
+    setRenamingPath(null);
+  }, []);
 
   const handleNewItemSubmit = useCallback(
     async (name: string) => {
@@ -360,9 +393,11 @@ export const EditorFileTree = ({
 
   return (
     <EditorContextMenu
+      projectPath={projectPath}
       onNewFile={handleNewFile}
       onNewFolder={handleNewFolder}
       onDelete={handleDelete}
+      onRename={handleRename}
     >
       <DndContext
         sensors={sensors}
@@ -424,6 +459,9 @@ export const EditorFileTree = ({
                   dropTargetPath={dropTargetPath}
                   isDragActive={!!draggedItem}
                   onClick={handleNodeClick}
+                  isRenaming={renamingPath === item.node.fullPath}
+                  onRenameSubmit={handleRenameSubmit}
+                  onRenameCancel={handleRenameCancel}
                   style={{
                     position: 'absolute',
                     top: `${virtualItem.start}px`,
@@ -444,6 +482,26 @@ export const EditorFileTree = ({
           {draggedItem && <DragOverlayFileItem item={draggedItem} />}
         </DragOverlay>
       </DndContext>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteConfirmPath} onOpenChange={(open) => !open && handleCancelDelete()}>
+        <DialogContent className="w-96 max-w-96">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Move to Trash</DialogTitle>
+            <DialogDescription>
+              Move &ldquo;{deleteConfirmPath?.split('/').pop() ?? ''}&rdquo; to Trash?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={handleCancelDelete}>
+              Cancel
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => void handleConfirmDelete()}>
+              Move to Trash
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </EditorContextMenu>
   );
 };
@@ -499,6 +557,9 @@ interface DraggableTreeItemProps {
   isDragActive: boolean;
   onClick: (node: TreeNode<FileTreeEntry>) => void;
   style: React.CSSProperties;
+  isRenaming?: boolean;
+  onRenameSubmit?: (newName: string) => void;
+  onRenameCancel?: () => void;
 }
 
 /* eslint-disable react/jsx-props-no-spreading -- dnd-kit requires prop spreading for drag attributes, listeners, and data attributes */
@@ -511,6 +572,9 @@ const DraggableTreeItem = React.memo(
     isDragActive,
     onClick,
     style,
+    isRenaming,
+    onRenameSubmit,
+    onRenameCancel,
   }: DraggableTreeItemProps): React.ReactElement => {
     const { node, depth, isExpanded } = item;
     const isSelected = activeNodePath === node.fullPath;
@@ -545,8 +609,10 @@ const DraggableTreeItem = React.memo(
       [setDragRef, setDropRef, node.isFile]
     );
 
-    // Visual: highlight drop target directory
+    // Visual: highlight drop target directory and its visible children
     const isDropTarget = !node.isFile && dropTargetPath === node.fullPath;
+    const isInsideDropTarget =
+      dropTargetPath != null && node.fullPath.startsWith(dropTargetPath + '/');
 
     const dataAttrs: Record<string, string> = {};
     if (node.data) {
@@ -589,7 +655,7 @@ const DraggableTreeItem = React.memo(
           isSelected ? 'bg-surface-raised text-text' : 'text-text-secondary'
         } ${isDragging ? 'opacity-30' : ''} ${
           isDropTarget ? 'rounded bg-blue-400/10 ring-2 ring-blue-400/50' : ''
-        }`}
+        } ${isInsideDropTarget && !isDropTarget ? 'border-l-2 border-l-blue-400/40 bg-blue-400/5' : ''}`}
         style={{
           ...style,
           paddingLeft: `${visualDepth * INDENT_PX + 8}px`,
@@ -609,8 +675,16 @@ const DraggableTreeItem = React.memo(
             <ChevronRight className="size-3 shrink-0 text-text-muted" />
           ))}
         {icon}
-        <span className="truncate">{node.name}</span>
-        {node.data && gitStatusMap.has(node.data.path) && (
+        {isRenaming ? (
+          <InlineRenameInput
+            initialName={node.name}
+            onSubmit={onRenameSubmit!}
+            onCancel={onRenameCancel!}
+          />
+        ) : (
+          <span className="truncate">{node.name}</span>
+        )}
+        {!isRenaming && node.data && gitStatusMap.has(node.data.path) && (
           <GitStatusBadge status={gitStatusMap.get(node.data.path)!} />
         )}
       </div>
@@ -640,6 +714,89 @@ const DragOverlayFileItem = ({ item }: { item: FlatTreeItem }): React.ReactEleme
       {icon}
       <span className="truncate">{node.name}</span>
     </div>
+  );
+};
+
+// =============================================================================
+// Inline rename input
+// =============================================================================
+
+const InlineRenameInput = ({
+  initialName,
+  onSubmit,
+  onCancel,
+}: {
+  initialName: string;
+  onSubmit: (newName: string) => void;
+  onCancel: () => void;
+}): React.ReactElement => {
+  const [value, setValue] = useState(initialName);
+  const submitted = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus + select on mount (delayed to survive Radix/DnD focus interference)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      const dotIdx = initialName.lastIndexOf('.');
+      if (dotIdx > 0) {
+        input.setSelectionRange(0, dotIdx);
+      } else {
+        input.select();
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [initialName]);
+
+  // Click-outside → submit (replaces unreliable onBlur)
+  useEffect(() => {
+    const handlePointerDown = (e: PointerEvent): void => {
+      if (inputRef.current && !inputRef.current.contains(e.target as Node)) {
+        doSubmit();
+      }
+    };
+    const timer = setTimeout(() => {
+      document.addEventListener('pointerdown', handlePointerDown, true);
+    }, 150);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- doSubmit reads value via ref pattern
+  }, []);
+
+  const doSubmit = (): void => {
+    if (submitted.current) return;
+    submitted.current = true;
+    const trimmed = inputRef.current?.value.trim() ?? '';
+    if (trimmed && trimmed !== initialName) {
+      onSubmit(trimmed);
+    } else {
+      onCancel();
+    }
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          doSubmit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          onCancel();
+        }
+        e.stopPropagation();
+      }}
+      onBlur={() => requestAnimationFrame(() => inputRef.current?.focus())}
+      onClick={(e) => e.stopPropagation()}
+      className="min-w-0 flex-1 rounded border border-blue-400/50 bg-surface px-1 py-0 text-xs text-text outline-none focus:ring-1 focus:ring-blue-400/50"
+    />
   );
 };
 

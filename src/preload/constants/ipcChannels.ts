@@ -431,6 +431,9 @@ export const EDITOR_DELETE_FILE = 'editor:deleteFile';
 /** Move file or directory to a new location */
 export const EDITOR_MOVE_FILE = 'editor:moveFile';
 
+/** Rename file or directory in place */
+export const EDITOR_RENAME_FILE = 'editor:renameFile';
+
 /** Search in files (literal string search) */
 export const EDITOR_SEARCH_IN_FILES = 'editor:searchInFiles';
 

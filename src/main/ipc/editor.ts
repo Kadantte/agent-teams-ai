@@ -19,6 +19,7 @@ import {
   EDITOR_OPEN,
   EDITOR_READ_DIR,
   EDITOR_READ_FILE,
+  EDITOR_RENAME_FILE,
   EDITOR_SEARCH_IN_FILES,
   EDITOR_WATCH_DIR,
   EDITOR_WRITE_FILE,
@@ -245,6 +246,20 @@ async function handleEditorMoveFile(
 }
 
 /**
+ * Rename a file or directory in place.
+ */
+async function handleEditorRenameFile(
+  _event: IpcMainInvokeEvent,
+  sourcePath: string,
+  newName: string
+): Promise<IpcResult<MoveFileResponse>> {
+  return wrapHandler('renameFile', async () => {
+    if (!activeProjectRoot) throw new Error('Editor not initialized');
+    return projectFileService.renameFile(activeProjectRoot, sourcePath, newName);
+  });
+}
+
+/**
  * Search in files (literal string search, SEC-8 timeout).
  */
 async function handleEditorSearchInFiles(
@@ -344,6 +359,7 @@ export function registerEditorHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(EDITOR_CREATE_DIR, handleEditorCreateDir);
   ipcMain.handle(EDITOR_DELETE_FILE, handleEditorDeleteFile);
   ipcMain.handle(EDITOR_MOVE_FILE, handleEditorMoveFile);
+  ipcMain.handle(EDITOR_RENAME_FILE, handleEditorRenameFile);
   ipcMain.handle(EDITOR_SEARCH_IN_FILES, handleEditorSearchInFiles);
   ipcMain.handle(EDITOR_LIST_FILES, handleEditorListFiles);
   ipcMain.handle(EDITOR_GIT_STATUS, handleEditorGitStatus);
@@ -360,6 +376,7 @@ export function removeEditorHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(EDITOR_CREATE_DIR);
   ipcMain.removeHandler(EDITOR_DELETE_FILE);
   ipcMain.removeHandler(EDITOR_MOVE_FILE);
+  ipcMain.removeHandler(EDITOR_RENAME_FILE);
   ipcMain.removeHandler(EDITOR_SEARCH_IN_FILES);
   ipcMain.removeHandler(EDITOR_LIST_FILES);
   ipcMain.removeHandler(EDITOR_GIT_STATUS);

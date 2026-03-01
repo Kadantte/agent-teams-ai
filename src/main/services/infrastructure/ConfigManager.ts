@@ -40,6 +40,10 @@ export interface NotificationConfig {
   snoozeMinutes: number; // Default snooze duration
   /** Whether to include errors from subagent sessions */
   includeSubagentErrors: boolean;
+  /** Whether to show native OS notifications for team inbox messages */
+  notifyOnInboxMessages: boolean;
+  /** Whether to show native OS notifications when a task needs user clarification */
+  notifyOnClarifications: boolean;
   /** Notification triggers - define when to generate notifications */
   triggers: NotificationTrigger[];
 }
@@ -243,6 +247,8 @@ const DEFAULT_CONFIG: AppConfig = {
     snoozedUntil: null,
     snoozeMinutes: 30,
     includeSubagentErrors: true,
+    notifyOnInboxMessages: true,
+    notifyOnClarifications: true,
     triggers: DEFAULT_TRIGGERS,
   },
   general: {

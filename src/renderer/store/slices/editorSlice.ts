@@ -83,6 +83,7 @@ export interface EditorSlice {
   closeEditorTabsToRight: (tabId: string) => void;
   closeAllEditorTabs: () => void;
   setActiveEditorTab: (tabId: string) => void;
+  reorderEditorTabs: (activeId: string, overId: string) => void;
 
   // ═══════════════════════════════════════════════════════
   // Group 3: Content + Save
@@ -111,6 +112,7 @@ export interface EditorSlice {
   createDirInTree: (parentDir: string, dirName: string) => Promise<string | null>;
   deleteFileFromTree: (filePath: string) => Promise<boolean>;
   moveFileInTree: (sourcePath: string, destDir: string) => Promise<boolean>;
+  renameFileInTree: (sourcePath: string, newName: string) => Promise<boolean>;
 
   // ═══════════════════════════════════════════════════════
   // Group 5: Git status + file watcher + line wrap (iter-5)
@@ -427,6 +429,19 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     set({ editorActiveTabId: tabId });
   },
 
+  reorderEditorTabs: (activeId: string, overId: string) => {
+    if (activeId === overId) return;
+    const { editorOpenTabs } = get();
+    const oldIndex = editorOpenTabs.findIndex((t) => t.id === activeId);
+    const newIndex = editorOpenTabs.findIndex((t) => t.id === overId);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const updated = [...editorOpenTabs];
+    const [moved] = updated.splice(oldIndex, 1);
+    updated.splice(newIndex, 0, moved);
+    set({ editorOpenTabs: updated });
+  },
+
   // ═══════════════════════════════════════════════════════
   // Group 3: Content + Save
   // ═══════════════════════════════════════════════════════
@@ -735,6 +750,99 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.error('moveFileInTree failed:', message);
+      return false;
+    }
+  },
+
+  renameFileInTree: async (sourcePath: string, newName: string) => {
+    const { editorSaving } = get();
+
+    if (editorSaving[sourcePath]) {
+      log.error('renameFileInTree: blocked — file is being saved:', sourcePath);
+      return false;
+    }
+
+    try {
+      const result = await api.editor.renameFile(sourcePath, newName);
+      const { newPath, isDirectory } = result;
+      const parentDir = sourcePath.substring(0, sourcePath.lastIndexOf('/'));
+
+      recentMoveTimestamps.set(sourcePath, Date.now());
+      recentMoveTimestamps.set(newPath, Date.now());
+
+      set((s) => {
+        const tabs = s.editorOpenTabs.map((tab) => {
+          const remapped = remapPath(tab.filePath, sourcePath, newPath);
+          if (remapped === tab.filePath) return tab;
+          const fileName = remapped.split('/').pop() ?? 'file';
+          return {
+            ...tab,
+            id: remapped,
+            filePath: remapped,
+            fileName,
+            language: getLanguageFromFileName(fileName),
+          };
+        });
+
+        return {
+          editorOpenTabs: computeDisambiguatedTabs(tabs),
+          editorActiveTabId:
+            remapPath(s.editorActiveTabId ?? '', sourcePath, newPath) || s.editorActiveTabId,
+          editorModifiedFiles: remapRecord(s.editorModifiedFiles, sourcePath, newPath),
+          editorSaving: remapRecord(s.editorSaving, sourcePath, newPath),
+          editorSaveError: remapRecord(s.editorSaveError, sourcePath, newPath),
+          editorFileLoading: remapRecord(s.editorFileLoading, sourcePath, newPath),
+          editorExternalChanges: remapRecord(s.editorExternalChanges, sourcePath, newPath),
+          editorFileMtimes: remapRecord(s.editorFileMtimes, sourcePath, newPath),
+          editorExpandedDirs: remapRecord(s.editorExpandedDirs, sourcePath, newPath),
+        };
+      });
+
+      // Remap bridge state
+      const { editorOpenTabs } = get();
+      for (const tab of editorOpenTabs) {
+        const originalPath = reverseRemapPath(tab.filePath, sourcePath, newPath);
+        if (originalPath !== tab.filePath) {
+          editorBridge.remapState(originalPath, tab.filePath);
+        }
+      }
+      if (!isDirectory) {
+        editorBridge.remapState(sourcePath, newPath);
+      }
+
+      // Remap localStorage drafts
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key?.startsWith('editor-draft:')) {
+            const draftPath = key.slice('editor-draft:'.length);
+            const remapped = remapPath(draftPath, sourcePath, newPath);
+            if (remapped !== draftPath) {
+              const value = localStorage.getItem(key);
+              localStorage.removeItem(key);
+              if (value !== null) localStorage.setItem(`editor-draft:${remapped}`, value);
+            }
+          }
+        }
+      } catch {
+        // localStorage may not be available
+      }
+
+      for (const [key, ts] of [...recentSaveTimestamps.entries()]) {
+        const remapped = remapPath(key, sourcePath, newPath);
+        if (remapped !== key) {
+          recentSaveTimestamps.delete(key);
+          recentSaveTimestamps.set(remapped, ts);
+        }
+      }
+
+      void refreshDirectory(get, set, parentDir);
+      void get().fetchGitStatus();
+
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error('renameFileInTree failed:', message);
       return false;
     }
   },

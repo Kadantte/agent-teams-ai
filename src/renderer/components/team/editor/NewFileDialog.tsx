@@ -1,7 +1,10 @@
 /**
  * Inline input for creating a new file or directory in the file tree.
  *
- * Auto-focuses, validates on the client side, submits on Enter, cancels on Escape/blur.
+ * Auto-focuses, validates on the client side, submits on Enter, cancels on Escape.
+ * Uses click-outside detection instead of onBlur for dismissal — onBlur is
+ * unreliable when the input lives inside a virtualizer + DnD context + Radix
+ * context menu (all of which can steal focus transiently).
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -48,18 +51,32 @@ export const NewFileDialog = ({
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Track whether focus has been established (prevents premature blur cancel)
-  const focusedRef = useRef(false);
-
+  // Focus input after Radix context menu finishes its focus restoration
   useEffect(() => {
-    // Defer focus to next frame — ensures Radix context menu has fully closed
-    const raf = requestAnimationFrame(() => {
+    const timer = setTimeout(() => {
       inputRef.current?.focus();
-      focusedRef.current = true;
-    });
-    return () => cancelAnimationFrame(raf);
+    }, 100);
+    return () => clearTimeout(timer);
   }, []);
+
+  // Click-outside → cancel (replaces unreliable onBlur)
+  useEffect(() => {
+    const handlePointerDown = (e: PointerEvent): void => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        onCancel();
+      }
+    };
+    // Delay listener registration so the context menu close click isn't caught
+    const timer = setTimeout(() => {
+      document.addEventListener('pointerdown', handlePointerDown, true);
+    }, 150);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [onCancel]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
@@ -80,6 +97,7 @@ export const NewFileDialog = ({
         e.preventDefault();
         onCancel();
       }
+      e.stopPropagation();
     },
     [handleSubmit, onCancel]
   );
@@ -89,17 +107,10 @@ export const NewFileDialog = ({
     setError(null);
   }, []);
 
-  const handleBlur = useCallback(() => {
-    // Only cancel if focus was already established (prevents race with RAF focus)
-    if (focusedRef.current) {
-      onCancel();
-    }
-  }, [onCancel]);
-
   const Icon = type === 'file' ? FilePlus : FolderPlus;
 
   return (
-    <div className="flex flex-col px-2 py-1">
+    <div ref={containerRef} className="flex flex-col px-2 py-1">
       <div className="flex items-center gap-1.5">
         <Icon className="size-3.5 shrink-0 text-text-muted" />
         <input
@@ -108,7 +119,7 @@ export const NewFileDialog = ({
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
+          onBlur={() => requestAnimationFrame(() => inputRef.current?.focus())}
           placeholder={type === 'file' ? 'File name...' : 'Folder name...'}
           className="min-w-0 flex-1 rounded border border-border-emphasis bg-surface px-1.5 py-0.5 text-xs text-text outline-none focus:border-blue-500"
           aria-label={type === 'file' ? 'New file name' : 'New folder name'}

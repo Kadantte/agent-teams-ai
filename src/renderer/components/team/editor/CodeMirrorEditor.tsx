@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import { defaultKeymap, history, historyKeymap, redo, undo } from '@codemirror/commands';
 import { bracketMatching, indentOnInput, syntaxHighlighting } from '@codemirror/language';
-import { search, searchKeymap } from '@codemirror/search';
+import { gotoLine, search, searchKeymap } from '@codemirror/search';
 import { Compartment, EditorState } from '@codemirror/state';
 import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
 import {
@@ -20,11 +20,16 @@ import {
   keymap,
   lineNumbers,
 } from '@codemirror/view';
+import {
+  createSearchPanel,
+  editorSearchPanelTheme,
+} from '@renderer/components/team/editor/EditorSearchPanel';
 import { useStore } from '@renderer/store';
 import {
   getAsyncLanguageDesc,
   getSyncLanguageExtension,
 } from '@renderer/utils/codemirrorLanguages';
+import { buildSelectionInfo, SELECTION_DEBOUNCE_MS } from '@renderer/utils/codemirrorSelectionInfo';
 import { baseEditorTheme } from '@renderer/utils/codemirrorTheme';
 import { editorBridge } from '@renderer/utils/editorBridge';
 
@@ -40,9 +45,6 @@ const DIRTY_DEBOUNCE_MS = 300;
 const AUTOSAVE_DELAY_MS = 30_000;
 const MAX_DRAFT_SIZE = 500 * 1024; // 500KB
 const MAX_DRAFTS = 10;
-const SELECTION_DEBOUNCE_MS = 150;
-const MAX_SELECTION_TEXT = 5000;
-
 /** Compartment for dynamic line wrap toggling */
 const lineWrapCompartment = new Compartment();
 
@@ -65,35 +67,6 @@ interface CodeMirrorEditorProps {
   onDraftRecovered?: (filePath: string) => void;
   /** Called when text selection changes (for floating action menu) */
   onSelectionChange?: (info: EditorSelectionInfo | null) => void;
-}
-
-// =============================================================================
-// Selection info helper
-// =============================================================================
-
-function buildSelectionInfo(
-  view: EditorView,
-  sel: { from: number; to: number }
-): EditorSelectionInfo | null {
-  const coords = view.coordsAtPos(sel.to);
-  if (!coords) return null; // selection end is off-screen
-
-  let text = view.state.sliceDoc(sel.from, sel.to);
-  if (text.length > MAX_SELECTION_TEXT) {
-    text = text.slice(0, MAX_SELECTION_TEXT) + '…';
-  }
-
-  return {
-    text,
-    filePath: '', // filled by parent (CodeMirrorEditor has no file context in buildEditableExtensions)
-    fromLine: view.state.doc.lineAt(sel.from).number,
-    toLine: view.state.doc.lineAt(sel.to).number,
-    screenRect: {
-      top: coords.top,
-      right: coords.right ?? coords.left,
-      bottom: coords.bottom,
-    },
-  };
 }
 
 // =============================================================================
@@ -126,8 +99,9 @@ function buildEditableExtensions(
     // History
     history(),
 
-    // Search (Cmd+F)
-    search(),
+    // Search (Cmd+F) — custom panel with UI Kit
+    search({ createPanel: createSearchPanel }),
+    editorSearchPanelTheme,
 
     // Save keymap (Cmd+S / Ctrl+S)
     keymap.of([
@@ -150,7 +124,12 @@ function buildEditableExtensions(
     ]),
 
     // Keymaps
-    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+    // Filter out built-in gotoLine (Alt-g) — replaced by custom GoToLineDialog
+    keymap.of([
+      ...defaultKeymap,
+      ...historyKeymap,
+      ...searchKeymap.filter((k) => k.run !== gotoLine),
+    ]),
 
     // Update listener for dirty flag + cursor position + selection
     EditorView.updateListener.of((update) => {

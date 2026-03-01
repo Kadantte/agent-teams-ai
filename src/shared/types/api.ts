@@ -489,7 +489,11 @@ export interface ReviewAPI {
     snippets: SnippetDiff[]
   ) => Promise<{ preview: string; hasConflicts: boolean }>;
   // Editable diff
-  saveEditedFile: (filePath: string, content: string) => Promise<{ success: boolean }>;
+  saveEditedFile: (
+    filePath: string,
+    content: string,
+    projectPath?: string
+  ) => Promise<{ success: boolean }>;
   // Decision persistence
   loadDecisions: (
     teamName: string,
@@ -497,12 +501,18 @@ export interface ReviewAPI {
   ) => Promise<{
     hunkDecisions: Record<string, HunkDecision>;
     fileDecisions: Record<string, HunkDecision>;
+    /**
+     * Optional stable hunk fingerprints persisted from the renderer.
+     * filePath -> (hunkIndex -> contextHash)
+     */
+    hunkContextHashesByFile?: Record<string, Record<number, string>>;
   } | null>;
   saveDecisions: (
     teamName: string,
     scopeKey: string,
     hunkDecisions: Record<string, HunkDecision>,
-    fileDecisions: Record<string, HunkDecision>
+    fileDecisions: Record<string, HunkDecision>,
+    hunkContextHashesByFile?: Record<string, Record<number, string>>
   ) => Promise<void>;
   clearDecisions: (teamName: string, scopeKey: string) => Promise<void>;
   onCmdN?: (callback: () => void) => (() => void) | undefined;

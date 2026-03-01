@@ -3,6 +3,7 @@
  */
 
 import { redo, undo } from '@codemirror/commands';
+import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
 import { editorBridge } from '@renderer/utils/editorBridge';
@@ -96,17 +97,18 @@ const ToolbarButton = ({
 }: ToolbarButtonProps): React.ReactElement => (
   <Tooltip>
     <TooltipTrigger asChild>
-      <button
+      <Button
+        variant="ghost"
         onClick={onClick}
         disabled={disabled}
-        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors hover:bg-surface-raised hover:text-text disabled:opacity-40 disabled:hover:bg-transparent ${
+        className={`h-auto gap-1 px-1.5 py-0.5 text-xs ${
           active ? 'bg-surface-raised text-text' : 'text-text-muted'
         }`}
         aria-label={`${label} (${shortcut})`}
         aria-pressed={active}
       >
         {icon}
-      </button>
+      </Button>
     </TooltipTrigger>
     <TooltipContent side="bottom">
       {label} ({shortcut})

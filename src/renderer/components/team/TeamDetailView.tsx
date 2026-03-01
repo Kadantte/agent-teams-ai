@@ -1529,6 +1529,8 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
           memberName={reviewDialogState.memberName}
           taskId={reviewDialogState.taskId}
           initialFilePath={reviewDialogState.initialFilePath}
+          projectPath={data.config.projectPath}
+          onEditorAction={handleEditorAction}
         />
       </div>
 

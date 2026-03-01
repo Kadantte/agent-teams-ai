@@ -5,13 +5,12 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock @codemirror/search — handler calls openSearchPanel/gotoLine when view exists
+// Mock @codemirror/search — handler calls openSearchPanel when view exists
 vi.mock('@codemirror/search', () => ({
   openSearchPanel: vi.fn(),
-  gotoLine: vi.fn(),
 }));
 
-import { gotoLine, openSearchPanel } from '@codemirror/search';
+import { openSearchPanel } from '@codemirror/search';
 import { createEditorKeyHandler } from '@renderer/hooks/useEditorKeyboardShortcuts';
 
 import type { EditorKeyHandlerDeps } from '@renderer/hooks/useEditorKeyboardShortcuts';
@@ -50,6 +49,7 @@ function createMockDeps(overrides: Partial<EditorKeyHandlerDeps> = {}): EditorKe
     hasUnsavedChanges: vi.fn().mockReturnValue(false),
     onToggleQuickOpen: vi.fn(),
     onToggleSearchPanel: vi.fn(),
+    onToggleGoToLine: vi.fn(),
     onToggleSidebar: vi.fn(),
     onToggleLineWrap: vi.fn(),
     getEditorView: vi.fn().mockReturnValue(null),
@@ -144,12 +144,10 @@ describe('createEditorKeyHandler', () => {
   });
 
   describe('Cmd+G — Go to Line', () => {
-    it('calls gotoLine when editor view exists', () => {
-      const mockView = { dispatch: vi.fn() };
-      deps = createMockDeps({ getEditorView: vi.fn().mockReturnValue(mockView) });
+    it('calls onToggleGoToLine', () => {
       const handler = createEditorKeyHandler(deps);
       handler(createKeyEvent('g'));
-      expect(gotoLine).toHaveBeenCalledWith(mockView);
+      expect(deps.onToggleGoToLine).toHaveBeenCalled();
     });
   });
 

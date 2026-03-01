@@ -3,15 +3,18 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { undo } from '@codemirror/commands';
 import { goToNextChunk, rejectChunk } from '@codemirror/merge';
 import { isElectronMode } from '@renderer/api';
+import { EditorSelectionMenu } from '@renderer/components/team/editor/EditorSelectionMenu';
 import { useContinuousScrollNav } from '@renderer/hooks/useContinuousScrollNav';
 import { isLastChunkInFile, useDiffNavigation } from '@renderer/hooks/useDiffNavigation';
 import { useViewedFiles } from '@renderer/hooks/useViewedFiles';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { getFileHunkCount, REVIEW_INSTANT_APPLY } from '@renderer/store/slices/changeReviewSlice';
+import { buildSelectionAction } from '@renderer/utils/buildSelectionAction';
+import { buildSelectionInfo, SELECTION_DEBOUNCE_MS } from '@renderer/utils/codemirrorSelectionInfo';
 import { ChevronDown, Clock, X } from 'lucide-react';
 
-import { acceptAllChunks, rejectAllChunks } from './CodeMirrorDiffUtils';
+import { acceptAllChunks, computeChunkIndexAtPos, rejectAllChunks } from './CodeMirrorDiffUtils';
 import { ContinuousScrollView } from './ContinuousScrollView';
 import { FileEditTimeline } from './FileEditTimeline';
 import { KeyboardShortcutsHelp } from './KeyboardShortcutsHelp';
@@ -22,6 +25,7 @@ import { ViewedProgressBar } from './ViewedProgressBar';
 
 import type { EditorView } from '@codemirror/view';
 import type { HunkDecision, TaskChangeSetV2 } from '@shared/types';
+import type { EditorSelectionAction, EditorSelectionInfo } from '@shared/types/editor';
 
 interface ChangeReviewDialogProps {
   open: boolean;
@@ -31,6 +35,8 @@ interface ChangeReviewDialogProps {
   memberName?: string;
   taskId?: string;
   initialFilePath?: string;
+  projectPath?: string;
+  onEditorAction?: (action: EditorSelectionAction) => void;
 }
 
 function isTaskChangeSetV2(cs: { teamName: string }): cs is TaskChangeSetV2 {
@@ -45,6 +51,8 @@ export const ChangeReviewDialog = ({
   memberName,
   taskId,
   initialFilePath,
+  projectPath,
+  onEditorAction,
 }: ChangeReviewDialogProps): React.ReactElement | null => {
   const {
     activeChangeSet,
@@ -79,6 +87,7 @@ export const ChangeReviewDialog = ({
     pushReviewUndoSnapshot,
     undoBulkReview,
     reviewUndoStack,
+    hunkContextHashesByFile,
   } = useStore();
 
   // Active file from scroll-spy (replaces selectedReviewFilePath for continuous scroll)
@@ -86,6 +95,13 @@ export const ChangeReviewDialog = ({
   const [autoViewed, setAutoViewed] = useState(true);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [discardCounters, setDiscardCounters] = useState<Record<string, number>>({});
+
+  // Selection menu state
+  const [selectionInfo, setSelectionInfo] = useState<EditorSelectionInfo | null>(null);
+  const [containerRect, setContainerRect] = useState<DOMRect>(new DOMRect());
+  const diffContentRef = useRef<HTMLDivElement>(null);
+  const selectionTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const activeSelectionFileRef = useRef<string | null>(null);
 
   // EditorView map for all visible file editors
   const editorViewMapRef = useRef(new Map<string, EditorView>());
@@ -214,9 +230,9 @@ export const ChangeReviewDialog = ({
 
   const handleSaveFile = useCallback(
     (filePath: string) => {
-      void saveEditedFile(filePath);
+      void saveEditedFile(filePath, projectPath);
     },
-    [saveEditedFile]
+    [saveEditedFile, projectPath]
   );
 
   const handleDiscardFile = useCallback(
@@ -242,10 +258,72 @@ export const ChangeReviewDialog = ({
     }
   }, [undoBulkReview, activeChangeSet]);
 
+  // Selection change handler (debounced for non-empty, immediate for clear)
+  const handleSelectionChange = useCallback((info: EditorSelectionInfo | null) => {
+    if (!info) {
+      if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
+      setSelectionInfo(null);
+      return;
+    }
+    activeSelectionFileRef.current = info.filePath;
+    if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
+    selectionTimerRef.current = setTimeout(() => {
+      setSelectionInfo(info);
+    }, SELECTION_DEBOUNCE_MS);
+  }, []);
+
+  // Scroll repositioning — re-query coords when parent scrolls (rAF-throttled)
+  const hasData = !changeSetLoading && !changeSetError && !!activeChangeSet;
+  useEffect(() => {
+    if (!hasData) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    let rafId = 0;
+    const onScroll = (): void => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const fp = activeSelectionFileRef.current;
+        if (!fp) return;
+        const view = editorViewMapRef.current.get(fp);
+        if (!view) return;
+        const sel = view.state.selection.main;
+        if (sel.empty) {
+          setSelectionInfo(null);
+          return;
+        }
+        const info = buildSelectionInfo(view, sel);
+        if (info) {
+          setSelectionInfo({ ...info, filePath: fp });
+        } else {
+          setSelectionInfo(null);
+        }
+      });
+    };
+
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(rafId);
+      container.removeEventListener('scroll', onScroll);
+    };
+  }, [hasData]);
+
+  // Track container rect for menu positioning
+  useEffect(() => {
+    const el = diffContentRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      setContainerRect(el.getBoundingClientRect());
+    });
+    observer.observe(el);
+    setContainerRect(el.getBoundingClientRect());
+    return () => observer.disconnect();
+  }, [hasData]);
+
   // Save active file (for Cmd+Enter keyboard shortcut)
   const handleSaveActiveFile = useCallback(() => {
-    if (activeFilePath) void saveEditedFile(activeFilePath);
-  }, [activeFilePath, saveEditedFile]);
+    if (activeFilePath) void saveEditedFile(activeFilePath, projectPath);
+  }, [activeFilePath, saveEditedFile, projectPath]);
 
   // Continuous navigation options for cross-file hunk navigation
   const continuousOptions = useMemo(
@@ -268,7 +346,9 @@ export const ChangeReviewDialog = ({
     handleHunkRejected,
     () => onOpenChange(false),
     handleSaveActiveFile,
-    continuousOptions
+    continuousOptions,
+    (filePath, fallbackSnippetsLength) =>
+      getFileHunkCount(filePath, fallbackSnippetsLength, fileChunkCounts)
   );
 
   // Load data on open
@@ -342,6 +422,15 @@ export const ChangeReviewDialog = ({
     });
   }, [activeChangeSet, initialFilePath, scrollToFile]);
 
+  // Clear selection state on close + cleanup timer
+  useEffect(() => {
+    if (!open) {
+      setSelectionInfo(null);
+      activeSelectionFileRef.current = null;
+      if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
+    }
+  }, [open]);
+
   // Escape to close
   useEffect(() => {
     if (!open) return;
@@ -412,20 +501,18 @@ export const ChangeReviewDialog = ({
     if (!open) return;
     const cleanup = window.electronAPI?.review.onCmdN?.(() => {
       const fp = activeFilePathRef.current;
-      const view = fp ? editorViewMapRef.current.get(fp) : null;
-      if (view) {
-        rejectChunk(view);
-        requestAnimationFrame(() => {
-          if (isLastChunkInFile(view)) {
-            diffNav.goToNextFile();
-          } else {
-            goToNextChunk(view);
-          }
-        });
-      }
+      if (!fp) return;
+      const view = editorViewMapRef.current.get(fp);
+      if (!view) return;
+
+      const cursorPos = view.state.selection.main.head;
+      const idx = computeChunkIndexAtPos(view.state, cursorPos);
+      handleHunkRejected(fp, idx);
+      rejectChunk(view);
+      requestAnimationFrame(() => diffNav.goToNextHunk());
     });
     return cleanup ?? undefined;
-  }, [open, diffNav]);
+  }, [open, diffNav, handleHunkRejected]);
 
   // Compute toolbar stats using actual CM chunk count (not snippet count)
   const reviewStats = useMemo(() => {
@@ -636,33 +723,54 @@ export const ChangeReviewDialog = ({
               )}
             </div>
 
-            {/* Continuous scroll diff content */}
-            <ContinuousScrollView
-              files={activeChangeSet.files}
-              fileContents={fileContents}
-              fileContentsLoading={fileContentsLoading}
-              viewedSet={viewedSet}
-              editedContents={editedContents}
-              hunkDecisions={hunkDecisions}
-              fileDecisions={fileDecisions}
-              collapseUnchanged={collapseUnchanged}
-              applying={applying}
-              autoViewed={autoViewed}
-              discardCounters={discardCounters}
-              onHunkAccepted={handleHunkAccepted}
-              onHunkRejected={handleHunkRejected}
-              onFullyViewed={handleFullyViewed}
-              onContentChanged={handleContentChanged}
-              onDiscard={handleDiscardFile}
-              onSave={handleSaveFile}
-              onVisibleFileChange={handleVisibleFileChange}
-              scrollContainerRef={scrollContainerRef}
-              editorViewMapRef={editorViewMapRef}
-              isProgrammaticScroll={isProgrammaticScroll}
-              teamName={teamName}
-              memberName={memberName}
-              fetchFileContent={fetchFileContent}
-            />
+            {/* Continuous scroll diff content with selection menu */}
+            <div
+              ref={diffContentRef}
+              className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
+              <ContinuousScrollView
+                files={activeChangeSet.files}
+                fileContents={fileContents}
+                fileContentsLoading={fileContentsLoading}
+                viewedSet={viewedSet}
+                editedContents={editedContents}
+                hunkDecisions={hunkDecisions}
+                fileDecisions={fileDecisions}
+                hunkContextHashesByFile={hunkContextHashesByFile}
+                collapseUnchanged={collapseUnchanged}
+                applying={applying}
+                autoViewed={autoViewed}
+                discardCounters={discardCounters}
+                onHunkAccepted={handleHunkAccepted}
+                onHunkRejected={handleHunkRejected}
+                onFullyViewed={handleFullyViewed}
+                onContentChanged={handleContentChanged}
+                onDiscard={handleDiscardFile}
+                onSave={handleSaveFile}
+                onVisibleFileChange={handleVisibleFileChange}
+                scrollContainerRef={scrollContainerRef}
+                editorViewMapRef={editorViewMapRef}
+                isProgrammaticScroll={isProgrammaticScroll}
+                teamName={teamName}
+                memberName={memberName}
+                fetchFileContent={fetchFileContent}
+                onSelectionChange={onEditorAction ? handleSelectionChange : undefined}
+              />
+              {selectionInfo && onEditorAction && (
+                <EditorSelectionMenu
+                  info={selectionInfo}
+                  containerRect={containerRect}
+                  onSendMessage={() => {
+                    onEditorAction(buildSelectionAction('sendMessage', selectionInfo));
+                    setSelectionInfo(null);
+                  }}
+                  onCreateTask={() => {
+                    onEditorAction(buildSelectionAction('createTask', selectionInfo));
+                    setSelectionInfo(null);
+                  }}
+                />
+              )}
+            </div>
           </>
         )}
 

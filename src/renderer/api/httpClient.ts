@@ -863,7 +863,13 @@ export class HttpAPIClient implements ElectronAPI {
     loadDecisions: async (): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
-    saveDecisions: async (): Promise<never> => {
+    saveDecisions: async (
+      _teamName: string,
+      _scopeKey: string,
+      _hunkDecisions: Record<string, unknown>,
+      _fileDecisions: Record<string, unknown>,
+      _hunkContextHashesByFile?: Record<string, Record<number, string>>
+    ): Promise<never> => {
       throw new Error('Review is not available in browser mode');
     },
     clearDecisions: async (): Promise<never> => {
@@ -942,6 +948,9 @@ export class HttpAPIClient implements ElectronAPI {
       throw new Error('Editor not available in browser mode');
     },
     moveFile: async () => {
+      throw new Error('Editor not available in browser mode');
+    },
+    renameFile: async () => {
       throw new Error('Editor not available in browser mode');
     },
     searchInFiles: async () => {

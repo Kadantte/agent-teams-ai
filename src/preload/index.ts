@@ -21,6 +21,7 @@ import {
   EDITOR_OPEN,
   EDITOR_READ_DIR,
   EDITOR_READ_FILE,
+  EDITOR_RENAME_FILE,
   EDITOR_SEARCH_IN_FILES,
   EDITOR_WATCH_DIR,
   EDITOR_WRITE_FILE,
@@ -858,28 +859,36 @@ const electronAPI: ElectronAPI = {
       );
     },
     // Editable diff
-    saveEditedFile: async (filePath: string, content: string) => {
-      return invokeIpcWithResult<{ success: boolean }>(REVIEW_SAVE_EDITED_FILE, filePath, content);
+    saveEditedFile: async (filePath: string, content: string, projectPath?: string) => {
+      return invokeIpcWithResult<{ success: boolean }>(
+        REVIEW_SAVE_EDITED_FILE,
+        filePath,
+        content,
+        projectPath
+      );
     },
     // Decision persistence
     loadDecisions: async (teamName: string, scopeKey: string) => {
       return invokeIpcWithResult<{
         hunkDecisions: Record<string, HunkDecision>;
         fileDecisions: Record<string, HunkDecision>;
+        hunkContextHashesByFile?: Record<string, Record<number, string>>;
       } | null>(REVIEW_LOAD_DECISIONS, teamName, scopeKey);
     },
     saveDecisions: async (
       teamName: string,
       scopeKey: string,
       hunkDecisions: Record<string, HunkDecision>,
-      fileDecisions: Record<string, HunkDecision>
+      fileDecisions: Record<string, HunkDecision>,
+      hunkContextHashesByFile?: Record<string, Record<number, string>>
     ) => {
       return invokeIpcWithResult<void>(
         REVIEW_SAVE_DECISIONS,
         teamName,
         scopeKey,
         hunkDecisions,
-        fileDecisions
+        fileDecisions,
+        hunkContextHashesByFile ?? null
       );
     },
     clearDecisions: async (teamName: string, scopeKey: string) => {
@@ -974,6 +983,8 @@ const electronAPI: ElectronAPI = {
       invokeIpcWithResult<DeleteFileResponse>(EDITOR_DELETE_FILE, filePath),
     moveFile: (sourcePath: string, destDir: string) =>
       invokeIpcWithResult<MoveFileResponse>(EDITOR_MOVE_FILE, sourcePath, destDir),
+    renameFile: (sourcePath: string, newName: string) =>
+      invokeIpcWithResult<MoveFileResponse>(EDITOR_RENAME_FILE, sourcePath, newName),
     searchInFiles: (options: SearchInFilesOptions) =>
       invokeIpcWithResult<SearchInFilesResult>(EDITOR_SEARCH_IN_FILES, options),
     listFiles: () => invokeIpcWithResult<QuickOpenFile[]>(EDITOR_LIST_FILES),

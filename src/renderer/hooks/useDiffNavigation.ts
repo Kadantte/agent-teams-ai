@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { acceptChunk, goToNextChunk, goToPreviousChunk } from '@codemirror/merge';
-import { getChunks } from '@renderer/components/team/review/CodeMirrorDiffUtils';
+import {
+  computeChunkIndexAtPos,
+  getChunks,
+} from '@renderer/components/team/review/CodeMirrorDiffUtils';
 import { physicalKey } from '@renderer/utils/keyboardUtils';
 
 import type { EditorView } from '@codemirror/view';
@@ -99,7 +102,8 @@ export function useDiffNavigation(
   onHunkRejected?: (filePath: string, hunkIndex: number) => void,
   onClose?: () => void,
   onSaveFile?: () => void,
-  continuousOptions?: ContinuousNavigationOptions
+  continuousOptions?: ContinuousNavigationOptions,
+  getHunkCountForFile?: (filePath: string, fallbackSnippetsLength: number) => number
 ): DiffNavigationState {
   const [hunkState, setHunkState] = useState<{ filePath: string | null; index: number }>({
     filePath: selectedFilePath,
@@ -109,7 +113,10 @@ export function useDiffNavigation(
 
   const activePath = getActiveFilePath(selectedFilePath, continuousOptions);
   const selectedFile = files.find((f) => f.filePath === activePath);
-  const totalHunks = selectedFile?.snippets.length ?? 0;
+  const totalHunks =
+    selectedFile && getHunkCountForFile
+      ? getHunkCountForFile(selectedFile.filePath, selectedFile.snippets.length)
+      : (selectedFile?.snippets.length ?? 0);
 
   const currentHunkIndex = hunkState.filePath === activePath ? hunkState.index : 0;
 
@@ -320,14 +327,14 @@ export function useDiffNavigation(
         event.preventDefault();
         const view = getActiveEditorView(editorViewRef, continuousOptionsRef.current);
         if (view) {
+          const filePath = getActiveFilePath(selectedFilePath, continuousOptionsRef.current);
+          if (filePath && onHunkAccepted) {
+            const cursorPos = view.state.selection.main.head;
+            const idx = computeChunkIndexAtPos(view.state, cursorPos);
+            onHunkAccepted(filePath, idx);
+          }
           acceptChunk(view);
-          requestAnimationFrame(() => {
-            if (continuousOptionsRef.current?.enabled && isLastChunkInFile(view)) {
-              goToNextFile();
-            } else {
-              goToNextChunk(view);
-            }
-          });
+          requestAnimationFrame(() => goToNextHunk());
         }
         return;
       }

@@ -7,6 +7,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { Button } from '@renderer/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@renderer/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useEditorKeyboardShortcuts } from '@renderer/hooks/useEditorKeyboardShortcuts';
 import { useStore } from '@renderer/store';
@@ -34,6 +43,7 @@ import { EditorShortcutsHelp } from './EditorShortcutsHelp';
 import { EditorStatusBar } from './EditorStatusBar';
 import { EditorTabBar } from './EditorTabBar';
 import { EditorToolbar } from './EditorToolbar';
+import { GoToLineDialog } from './GoToLineDialog';
 import { QuickOpenDialog } from './QuickOpenDialog';
 import { SearchInFilesPanel } from './SearchInFilesPanel';
 
@@ -107,6 +117,7 @@ export const ProjectEditorOverlay = ({
   // Iter-4: New state
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [searchPanelVisible, setSearchPanelVisible] = useState(false);
+  const [goToLineVisible, setGoToLineVisible] = useState(false);
   const [shortcutsHelpVisible, setShortcutsHelpVisible] = useState(false);
   const [sidebarVisible, setSidebarVisibleRaw] = useState(() => {
     try {
@@ -180,6 +191,9 @@ export const ProjectEditorOverlay = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Skip if another handler already consumed this Escape
+        // (e.g. CodeMirror search panel close, or React search input onKeyDown)
+        if (e.defaultPrevented) return;
         // Don't close overlay if a dialog is open — dialog handles its own Escape
         if (quickOpenVisible || searchPanelVisible || shortcutsHelpVisible) return;
         if (showConfirmClose || confirmCloseTabId) return;
@@ -381,6 +395,10 @@ export const ProjectEditorOverlay = ({
     setSearchPanelVisible((v) => !v);
   }, []);
 
+  const toggleGoToLine = useCallback(() => {
+    setGoToLineVisible((v) => !v);
+  }, []);
+
   const toggleSidebar = useCallback(() => {
     setSidebarVisibleRaw((v) => {
       const next = !v;
@@ -410,6 +428,7 @@ export const ProjectEditorOverlay = ({
   useEditorKeyboardShortcuts({
     onToggleQuickOpen: toggleQuickOpen,
     onToggleSearchPanel: toggleSearchPanel,
+    onToggleGoToLine: toggleGoToLine,
     onToggleSidebar: toggleSidebar,
     onClose: handleCloseRequest,
   });
@@ -437,35 +456,46 @@ export const ProjectEditorOverlay = ({
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-text-muted"
                 onClick={handleManualRefresh}
-                className="rounded p-1 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
                 aria-label="Refresh (F5)"
               >
                 <RefreshCw className="size-4" />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">Refresh git status (F5)</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-text-muted"
                 onClick={() => setShortcutsHelpVisible(true)}
-                className="rounded p-1 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
                 aria-label="Keyboard shortcuts"
               >
                 <HelpCircle className="size-4" />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">Keyboard shortcuts</TooltipContent>
           </Tooltip>
-          <button
-            onClick={handleCloseRequest}
-            className="rounded p-1 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
-            aria-label="Close editor"
-          >
-            <X className="size-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-text-muted"
+                onClick={handleCloseRequest}
+                aria-label="Close editor"
+              >
+                <X className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Close editor (Esc)</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -491,13 +521,15 @@ export const ProjectEditorOverlay = ({
               </span>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-text-muted"
                     onClick={toggleSidebar}
-                    className="rounded p-0.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
                     aria-label="Hide sidebar"
                   >
                     <PanelLeftClose className="size-3.5" />
-                  </button>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
                   Hide sidebar ({shortcutLabel('⌘ B', 'Ctrl+B')})
@@ -514,13 +546,14 @@ export const ProjectEditorOverlay = ({
         {!sidebarVisible && !searchPanelVisible && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
+              <Button
+                variant="ghost"
+                className="flex h-full w-6 shrink-0 items-start justify-center rounded-none border-r border-border bg-surface-sidebar pt-2 text-text-muted"
                 onClick={toggleSidebar}
-                className="flex h-full w-6 shrink-0 items-start justify-center border-r border-border bg-surface-sidebar pt-2 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
                 aria-label="Show sidebar"
               >
                 <PanelLeftOpen className="size-3.5" />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
               Show sidebar ({shortcutLabel('⌘ B', 'Ctrl+B')})
@@ -541,18 +574,22 @@ export const ProjectEditorOverlay = ({
             <div className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
               <RotateCcw className="size-3.5 shrink-0" />
               <span>Recovered unsaved changes from a previous session.</span>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-auto px-2 py-0.5"
                 onClick={handleDismissDraftBanner}
-                className="ml-auto rounded px-2 py-0.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
               >
                 Keep
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-auto px-2 py-0.5"
                 onClick={handleDiscardDraft}
-                className="rounded px-2 py-0.5 text-red-400 transition-colors hover:bg-red-400/10"
               >
                 Discard
-              </button>
+              </Button>
             </div>
           )}
 
@@ -561,12 +598,14 @@ export const ProjectEditorOverlay = ({
             <div className="flex shrink-0 items-center gap-2 border-b border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs text-red-300">
               <AlertTriangle className="size-3.5 shrink-0" />
               <span className="truncate">Save failed: {activeSaveError}</span>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-auto shrink-0 px-2 py-0.5"
                 onClick={() => activeTabId && void saveFile(activeTabId)}
-                className="ml-auto shrink-0 rounded px-2 py-0.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
               >
                 Retry
-              </button>
+              </Button>
             </div>
           )}
 
@@ -580,26 +619,32 @@ export const ProjectEditorOverlay = ({
                   : 'File changed on disk.'}
               </span>
               {externalChanges[activeTabId] === 'delete' ? (
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-auto px-2 py-0.5"
                   onClick={() => closeEditorTab(activeTabId)}
-                  className="ml-auto rounded px-2 py-0.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
                 >
                   Close tab
-                </button>
+                </Button>
               ) : (
                 <>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-auto px-2 py-0.5"
                     onClick={handleReloadExternalChange}
-                    className="ml-auto rounded px-2 py-0.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
                   >
                     Reload
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto px-2 py-0.5"
                     onClick={handleKeepMine}
-                    className="rounded px-2 py-0.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
                   >
                     Keep mine
-                  </button>
+                  </Button>
                 </>
               )}
             </div>
@@ -668,101 +713,80 @@ export const ProjectEditorOverlay = ({
         />
       )}
 
+      {/* Go to Line dialog */}
+      {goToLineVisible && <GoToLineDialog onClose={() => setGoToLineVisible(false)} />}
+
       {/* Shortcuts help modal */}
       {shortcutsHelpVisible && (
         <EditorShortcutsHelp onClose={() => setShortcutsHelpVisible(false)} />
       )}
 
       {/* Unsaved changes confirmation dialog — overlay close */}
-      {showConfirmClose && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
-          <div className="w-96 rounded-lg border border-border bg-surface p-6 shadow-xl">
-            <h3 className="mb-2 text-sm font-semibold text-text">Unsaved Changes</h3>
-            <p className="mb-4 text-sm text-text-secondary">
+      <Dialog open={showConfirmClose} onOpenChange={(open) => !open && handleCancelClose()}>
+        <DialogContent className="w-96 max-w-96">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Unsaved Changes</DialogTitle>
+            <DialogDescription>
               You have unsaved changes. What would you like to do?
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={handleCancelClose}
-                className="rounded px-3 py-1.5 text-sm text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDiscardAndClose}
-                className="rounded px-3 py-1.5 text-sm text-red-400 transition-colors hover:bg-red-400/10"
-              >
-                Discard & Close
-              </button>
-              <button
-                onClick={() => void handleSaveAndClose()}
-                className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-blue-500"
-              >
-                Save All & Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={handleCancelClose}>
+              Cancel
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleDiscardAndClose}>
+              Discard & Close
+            </Button>
+            <Button size="sm" onClick={() => void handleSaveAndClose()}>
+              Save All & Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Save conflict dialog */}
-      {conflictFile && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
-          <div className="w-96 rounded-lg border border-border bg-surface p-6 shadow-xl">
-            <h3 className="mb-2 text-sm font-semibold text-text">Save Conflict</h3>
-            <p className="mb-4 text-sm text-text-secondary">
+      <Dialog open={!!conflictFile} onOpenChange={(open) => !open && handleCancelConflict()}>
+        <DialogContent className="w-96 max-w-96">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Save Conflict</DialogTitle>
+            <DialogDescription>
               The file has been modified externally since you opened it. Overwrite with your
               changes?
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={handleCancelConflict}
-                className="rounded px-3 py-1.5 text-sm text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleForceOverwrite}
-                className="rounded bg-orange-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-orange-500"
-              >
-                Overwrite
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={handleCancelConflict}>
+              Cancel
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleForceOverwrite}>
+              Overwrite
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Unsaved changes confirmation dialog — single tab close */}
-      {confirmCloseTabId && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
-          <div className="w-96 rounded-lg border border-border bg-surface p-6 shadow-xl">
-            <h3 className="mb-2 text-sm font-semibold text-text">Unsaved Changes</h3>
-            <p className="mb-4 text-sm text-text-secondary">
+      <Dialog open={!!confirmCloseTabId} onOpenChange={(open) => !open && handleCancelCloseTab()}>
+        <DialogContent className="w-96 max-w-96">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Unsaved Changes</DialogTitle>
+            <DialogDescription>
               This file has unsaved changes. What would you like to do?
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={handleCancelCloseTab}
-                className="rounded px-3 py-1.5 text-sm text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDiscardAndCloseTab}
-                className="rounded px-3 py-1.5 text-sm text-red-400 transition-colors hover:bg-red-400/10"
-              >
-                Discard
-              </button>
-              <button
-                onClick={() => void handleSaveAndCloseTab()}
-                className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-blue-500"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={handleCancelCloseTab}>
+              Cancel
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleDiscardAndCloseTab}>
+              Discard
+            </Button>
+            <Button size="sm" onClick={() => void handleSaveAndCloseTab()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

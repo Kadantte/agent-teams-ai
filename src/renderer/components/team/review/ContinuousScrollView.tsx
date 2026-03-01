@@ -8,7 +8,7 @@ import {
   acceptAllChunks,
   getChunks,
   rejectAllChunks,
-  replayHunkDecisions,
+  replayHunkDecisionsSmart,
 } from './CodeMirrorDiffUtils';
 import { FileSectionDiff } from './FileSectionDiff';
 import { FileSectionHeader } from './FileSectionHeader';
@@ -16,6 +16,7 @@ import { FileSectionPlaceholder } from './FileSectionPlaceholder';
 
 import type { EditorView } from '@codemirror/view';
 import type { FileChangeWithContent, HunkDecision } from '@shared/types';
+import type { EditorSelectionInfo } from '@shared/types/editor';
 import type { FileChangeSummary } from '@shared/types/review';
 
 interface ContinuousScrollViewProps {
@@ -26,6 +27,7 @@ interface ContinuousScrollViewProps {
   editedContents: Record<string, string>;
   hunkDecisions: Record<string, HunkDecision>;
   fileDecisions: Record<string, HunkDecision>;
+  hunkContextHashesByFile: Record<string, Record<number, string>>;
   collapseUnchanged: boolean;
   applying: boolean;
   autoViewed: boolean;
@@ -47,6 +49,7 @@ interface ContinuousScrollViewProps {
     memberName: string | undefined,
     filePath: string
   ) => Promise<void>;
+  onSelectionChange?: (info: EditorSelectionInfo | null) => void;
 }
 
 export const ContinuousScrollView = ({
@@ -57,6 +60,7 @@ export const ContinuousScrollView = ({
   editedContents,
   hunkDecisions,
   fileDecisions,
+  hunkContextHashesByFile,
   collapseUnchanged,
   applying,
   autoViewed,
@@ -74,6 +78,7 @@ export const ContinuousScrollView = ({
   teamName,
   memberName,
   fetchFileContent,
+  onSelectionChange,
 }: ContinuousScrollViewProps): React.ReactElement => {
   const setFileChunkCount = useStore((s) => s.setFileChunkCount);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
@@ -126,9 +131,11 @@ export const ContinuousScrollView = ({
   // Refs to avoid stale closures — decisions change frequently
   const fileDecisionsRef = useRef(fileDecisions);
   const hunkDecisionsRef = useRef(hunkDecisions);
+  const hunkHashesRef = useRef(hunkContextHashesByFile);
   useEffect(() => {
     fileDecisionsRef.current = fileDecisions;
     hunkDecisionsRef.current = hunkDecisions;
+    hunkHashesRef.current = hunkContextHashesByFile;
   });
 
   // Track which views have already had decisions replayed to prevent
@@ -166,7 +173,12 @@ export const ContinuousScrollView = ({
         } else {
           // Replay individual per-hunk decisions persisted from previous session
           requestAnimationFrame(() => {
-            replayHunkDecisions(view, filePath, hunkDecisionsRef.current);
+            replayHunkDecisionsSmart(
+              view,
+              filePath,
+              hunkDecisionsRef.current,
+              hunkHashesRef.current[filePath]
+            );
           });
         }
       } else {
@@ -227,6 +239,7 @@ export const ContinuousScrollView = ({
                   discardCounter={discardCounters[filePath] ?? 0}
                   autoViewed={autoViewed}
                   isViewed={isViewed}
+                  onSelectionChange={onSelectionChange}
                 />
               ) : (
                 <FileSectionPlaceholder fileName={file.relativePath} />

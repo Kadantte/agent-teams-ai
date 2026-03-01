@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '@renderer/api';
+import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { Loader2, Search, X } from 'lucide-react';
 
@@ -154,13 +155,20 @@ export const SearchInFilesPanel = ({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <span className="text-xs font-medium text-text-secondary">Search in Files</span>
-        <button
-          onClick={onClose}
-          className="rounded p-0.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text"
-          aria-label="Close search"
-        >
-          <X className="size-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-text-muted"
+              onClick={onClose}
+              aria-label="Close search"
+            >
+              <X className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Close search (Esc)</TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Search input */}

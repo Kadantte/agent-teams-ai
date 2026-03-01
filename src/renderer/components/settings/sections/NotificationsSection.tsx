@@ -32,7 +32,12 @@ interface NotificationsSectionProps {
   readonly ignoredRepositoryItems: RepositoryDropdownItem[];
   readonly excludedRepositoryIds: string[];
   readonly onNotificationToggle: (
-    key: 'enabled' | 'soundEnabled' | 'includeSubagentErrors',
+    key:
+      | 'enabled'
+      | 'soundEnabled'
+      | 'includeSubagentErrors'
+      | 'notifyOnInboxMessages'
+      | 'notifyOnClarifications',
     value: boolean
   ) => void;
   readonly onSnooze: (minutes: number) => Promise<void>;
@@ -127,6 +132,26 @@ export const NotificationsSection = ({
         <SettingsToggle
           enabled={safeConfig.notifications.includeSubagentErrors}
           onChange={(v) => onNotificationToggle('includeSubagentErrors', v)}
+          disabled={saving || !safeConfig.notifications.enabled}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Team inbox notifications"
+        description="Show native OS notifications when teammates send messages to the lead"
+      >
+        <SettingsToggle
+          enabled={safeConfig.notifications.notifyOnInboxMessages}
+          onChange={(v) => onNotificationToggle('notifyOnInboxMessages', v)}
+          disabled={saving || !safeConfig.notifications.enabled}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Task clarification notifications"
+        description="Show native OS notifications when a task needs your input"
+      >
+        <SettingsToggle
+          enabled={safeConfig.notifications.notifyOnClarifications}
+          onChange={(v) => onNotificationToggle('notifyOnClarifications', v)}
           disabled={saving || !safeConfig.notifications.enabled}
         />
       </SettingRow>

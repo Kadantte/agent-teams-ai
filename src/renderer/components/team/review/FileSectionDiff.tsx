@@ -7,6 +7,7 @@ import { ReviewDiffContent } from './ReviewDiffContent';
 
 import type { EditorView } from '@codemirror/view';
 import type { FileChangeWithContent } from '@shared/types';
+import type { EditorSelectionInfo } from '@shared/types/editor';
 import type { FileChangeSummary } from '@shared/types/review';
 
 interface FileSectionDiffProps {
@@ -22,6 +23,7 @@ interface FileSectionDiffProps {
   discardCounter: number;
   autoViewed: boolean;
   isViewed: boolean;
+  onSelectionChange?: (info: EditorSelectionInfo | null) => void;
 }
 
 export const FileSectionDiff = ({
@@ -37,6 +39,7 @@ export const FileSectionDiff = ({
   discardCounter,
   autoViewed,
   isViewed,
+  onSelectionChange,
 }: FileSectionDiffProps): React.ReactElement => {
   const localEditorViewRef = useRef<EditorView | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -89,11 +92,16 @@ export const FileSectionDiff = ({
       return writeSnippets[writeSnippets.length - 1].newString;
     })();
 
-  // Show CodeMirror whenever we have resolved modified content (including new files
-  // where contentSource may be 'unavailable' but write-new snippet provides the content)
-  const hasCodeMirrorContent = resolvedModified !== null;
+  const resolvedOriginal = fileContent?.originalFullContent ?? null;
 
-  if (!hasCodeMirrorContent) {
+  // Show CodeMirror only when we have a trustworthy original baseline:
+  // - new files: original is legitimately empty
+  // - otherwise: original must be known (non-null). If original is unknown, do not
+  //   pretend it's empty — fall back to snippet-level diff.
+  const canRenderCodeMirror =
+    resolvedModified !== null && (file.isNewFile || resolvedOriginal !== null);
+
+  if (!canRenderCodeMirror) {
     return (
       <div className="overflow-auto">
         <ReviewDiffContent file={file} />
@@ -102,16 +110,18 @@ export const FileSectionDiff = ({
     );
   }
 
+  const originalForDiff = file.isNewFile ? '' : (resolvedOriginal ?? '');
+
   return (
     <div className="overflow-auto">
       <DiffErrorBoundary
         filePath={file.filePath}
-        oldString={fileContent?.originalFullContent ?? ''}
+        oldString={originalForDiff}
         newString={resolvedModified}
       >
         <CodeMirrorDiffView
           key={`${file.filePath}:${discardCounter}`}
-          original={fileContent?.originalFullContent ?? ''}
+          original={originalForDiff}
           modified={resolvedModified}
           fileName={file.relativePath}
           readOnly={false}
@@ -123,6 +133,11 @@ export const FileSectionDiff = ({
           onContentChanged={(content) => onContentChanged(file.filePath, content)}
           editorViewRef={localEditorViewRef}
           onViewChange={handleViewChange}
+          onSelectionChange={
+            onSelectionChange
+              ? (info) => onSelectionChange(info ? { ...info, filePath: file.filePath } : null)
+              : undefined
+          }
         />
       </DiffErrorBoundary>
       <div ref={sentinelRef} className="h-1 shrink-0" />

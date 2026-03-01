@@ -2,6 +2,7 @@
  * Placeholder for binary files — shows file info and "Open in System Viewer" button.
  */
 
+import { Button } from '@renderer/components/ui/button';
 import { FileQuestion } from 'lucide-react';
 
 interface EditorBinaryStateProps {
@@ -30,12 +31,9 @@ export const EditorBinaryState = ({
       <FileQuestion className="size-12 opacity-30" />
       <p className="text-sm font-medium text-text-secondary">{fileName}</p>
       <p className="text-xs">Binary file ({sizeFormatted})</p>
-      <button
-        onClick={handleOpenExternal}
-        className="mt-2 rounded border border-border px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-raised"
-      >
+      <Button variant="outline" size="sm" className="mt-2" onClick={handleOpenExternal}>
         Open in System Viewer
-      </button>
+      </Button>
     </div>
   );
 };

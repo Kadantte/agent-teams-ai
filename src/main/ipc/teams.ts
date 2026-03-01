@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { getAppIconPath } from '@main/utils/appIcon';
 import {
   TEAM_ADD_MEMBER,
   TEAM_ADD_TASK_COMMENT,
@@ -1725,11 +1726,13 @@ export function showTeamNativeNotification(opts: {
     return;
   }
 
+  const iconPath = getAppIconPath();
   const notification = new Notification({
     title: opts.title,
     subtitle: opts.subtitle,
     body: opts.body.slice(0, 300),
     sound: config.notifications.soundEnabled ? 'default' : undefined,
+    ...(iconPath ? { icon: iconPath } : {}),
   });
 
   notification.on('click', () => {

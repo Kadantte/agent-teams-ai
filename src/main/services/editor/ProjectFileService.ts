@@ -545,6 +545,67 @@ export class ProjectFileService {
     return { newPath, isDirectory };
   }
 
+  /**
+   * Rename a file or directory in place (same parent directory).
+   */
+  async renameFile(
+    projectRoot: string,
+    sourcePath: string,
+    newName: string
+  ): Promise<MoveFileResponse> {
+    // 1. Validate new name
+    const nameValidation = validateFileName(newName);
+    if (!nameValidation.valid) {
+      throw new Error(nameValidation.error);
+    }
+
+    // 2. Validate source path
+    const srcValidation = validateFilePath(sourcePath, projectRoot);
+    if (!srcValidation.valid) {
+      throw new Error(srcValidation.error);
+    }
+    const normalizedSrc = srcValidation.normalizedPath!;
+
+    // 3. Project containment
+    if (!isPathWithinRoot(normalizedSrc, projectRoot)) {
+      throw new Error('Source path is outside project root');
+    }
+
+    // 4. Block .git/ paths
+    if (isGitInternalPath(normalizedSrc)) {
+      throw new Error('Cannot rename files in .git/ directory');
+    }
+
+    // 5. Verify source exists
+    const srcStat = await fs.lstat(normalizedSrc);
+    const isDirectory = srcStat.isDirectory();
+
+    // 6. Build new path (same parent, new name)
+    const parentDir = path.dirname(normalizedSrc);
+    const newPath = path.join(parentDir, newName);
+
+    // 7. Check new path doesn't already exist
+    try {
+      await fs.access(newPath);
+      throw new Error('A file or folder with that name already exists');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw err;
+      }
+    }
+
+    // 8. Block sensitive destination
+    if (matchesSensitivePattern(newPath)) {
+      throw new Error('Cannot rename to a sensitive file name');
+    }
+
+    // 9. Perform rename
+    await fs.rename(normalizedSrc, newPath);
+
+    log.info('File renamed:', normalizedSrc, '→', newPath);
+    return { newPath, isDirectory };
+  }
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------

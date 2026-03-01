@@ -19,6 +19,19 @@
 
 <br />
 
+## What is this
+
+A new approach to task management with AI agents.
+
+- **Assemble your team** — create agent teams with different roles that work autonomously in parallel
+- **Agents talk to each other** — they communicate, create and manage their own tasks, and leave comments
+- **Sit back and watch** — tasks change status on the kanban board while agents handle everything on their own
+- **Review changes like in Cursor** — see what code each task changed, then approve, reject, or comment
+- **Full tool visibility** — inspect exactly which tools an agent used to complete each task
+- **Stay in control** — send a direct message to any agent or drop a comment on a task whenever you want to clarify something or add new work
+
+---
+
 <!--
 <p align="center">
   <video src="https://github.com/user-attachments/assets/2b420b2c-c4af-4d10-a679-c83269f8ee99">

@@ -44,6 +44,7 @@ import { initializeIpcHandlers, removeIpcHandlers } from './ipc/handlers';
 import { showTeamNativeNotification } from './ipc/teams';
 import { HttpServer } from './services/infrastructure/HttpServer';
 import { TeamInboxReader } from './services/team/TeamInboxReader';
+import { getAppIconPath } from './utils/appIcon';
 import { getProjectsBasePath, getTodosBasePath } from './utils/pathDecoder';
 import {
   CliInstallerService,
@@ -126,10 +127,20 @@ async function resolveTeamDisplayName(teamName: string): Promise<string> {
 }
 
 async function notifyNewInboxMessages(teamName: string, detail: string): Promise<void> {
+  // Check config toggle
+  const config = configManager.getConfig();
+  if (!config.notifications.enabled || !config.notifications.notifyOnInboxMessages) return;
+
   // detail is like "inboxes/carol.json" — extract member name
   const match = /^inboxes\/(.+)\.json$/.exec(detail);
   if (!match) return;
   const memberName = match[1];
+
+  // Only notify for the lead's inbox (messages addressed to the human user).
+  // CLI doesn't set msg.to, so we filter by inbox file name instead.
+  const leadName = teamDataService ? await teamDataService.getLeadMemberName(teamName) : null;
+  if (leadName !== null && memberName !== leadName && memberName !== 'user') return;
+
   const key = `${teamName}:${memberName}`;
 
   try {
@@ -154,8 +165,6 @@ async function notifyNewInboxMessages(teamName: string, detail: string): Promise
     const teamDisplayName = await resolveTeamDisplayName(teamName);
 
     for (const msg of newMessages) {
-      // Only notify for messages addressed to the human user
-      if (msg.to !== 'user') continue;
       // Skip messages sent from our own UI
       if (msg.source && suppressedSources.has(msg.source)) continue;
 
@@ -172,24 +181,6 @@ async function notifyNewInboxMessages(teamName: string, detail: string): Promise
     logger.warn(`Failed to check inbox messages for ${key}:`, error);
   }
 }
-
-// Window icon path for non-mac platforms.
-const getWindowIconPath = (): string | undefined => {
-  const isDev = process.env.NODE_ENV === 'development';
-  const candidates = isDev
-    ? [join(process.cwd(), 'resources/icon.png')]
-    : [
-        join(process.resourcesPath, 'resources/icon.png'),
-        join(__dirname, '../../resources/icon.png'),
-      ];
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return undefined;
-};
 
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled promise rejection in main process:', reason);
@@ -349,21 +340,24 @@ function wireFileWatcherEvents(context: ServiceContext): void {
       // Show native OS notification for live lead process replies.
       // These don't go through inbox files — they're held in-memory by TeamProvisioningService.
       if (detail === 'lead-process-reply' || detail === 'lead-direct-reply') {
-        const messages = teamProvisioningService.getLiveLeadProcessMessages(teamName);
-        const latest = messages.length > 0 ? messages[messages.length - 1] : undefined;
-        // Only notify for messages addressed to the human user
-        if (latest?.to === 'user') {
-          const fromLabel = latest.from || 'team-lead';
-          const summary = latest.summary || latest.text.slice(0, 60);
-          void resolveTeamDisplayName(teamName)
-            .then((displayName) => {
-              showTeamNativeNotification({
-                title: displayName,
-                subtitle: `${fromLabel}: ${summary}`,
-                body: latest.text,
-              });
-            })
-            .catch(() => undefined);
+        const cfg = configManager.getConfig();
+        if (cfg.notifications.enabled && cfg.notifications.notifyOnInboxMessages) {
+          const messages = teamProvisioningService.getLiveLeadProcessMessages(teamName);
+          const latest = messages.length > 0 ? messages[messages.length - 1] : undefined;
+          // Only notify for messages addressed to the human user
+          if (latest?.to === 'user') {
+            const fromLabel = latest.from || 'team-lead';
+            const summary = latest.summary || latest.text.slice(0, 60);
+            void resolveTeamDisplayName(teamName)
+              .then((displayName) => {
+                showTeamNativeNotification({
+                  title: displayName,
+                  subtitle: `${fromLabel}: ${summary}`,
+                  body: latest.text,
+                });
+              })
+              .catch(() => undefined);
+          }
         }
       }
     } catch {
@@ -690,7 +684,7 @@ function syncTrafficLightPosition(win: BrowserWindow): void {
  */
 function createWindow(): void {
   const isMac = process.platform === 'darwin';
-  const iconPath = isMac ? undefined : getWindowIconPath();
+  const iconPath = isMac ? undefined : getAppIconPath();
   const useNativeTitleBar = !isMac && configManager.getConfig().general.useNativeTitleBar;
   mainWindow = new BrowserWindow({
     width: DEFAULT_WINDOW_WIDTH,

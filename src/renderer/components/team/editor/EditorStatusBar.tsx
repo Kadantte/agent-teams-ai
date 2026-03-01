@@ -2,6 +2,7 @@
  * Status bar: cursor position, language, encoding, indent style, git branch.
  */
 
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
 import { GitBranch } from 'lucide-react';
 
@@ -35,9 +36,12 @@ export const EditorStatusBar = ({
       </div>
       <div className="flex items-center gap-4">
         {watcherEnabled && (
-          <span className="text-green-400" title="File watcher active">
-            watching
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="cursor-default text-green-400">watching</span>
+            </TooltipTrigger>
+            <TooltipContent side="top">File watcher active</TooltipContent>
+          </Tooltip>
         )}
         <span>{language}</span>
         <span>UTF-8</span>

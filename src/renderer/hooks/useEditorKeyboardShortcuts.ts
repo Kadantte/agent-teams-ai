@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect } from 'react';
 
-import { gotoLine, openSearchPanel } from '@codemirror/search';
+import { openSearchPanel } from '@codemirror/search';
 import { useStore } from '@renderer/store';
 import { editorBridge } from '@renderer/utils/editorBridge';
 import { physicalKey } from '@renderer/utils/keyboardUtils';
@@ -21,6 +21,7 @@ import type { EditorFileTab } from '@shared/types/editor';
 interface UseEditorKeyboardShortcutsOptions {
   onToggleQuickOpen: () => void;
   onToggleSearchPanel: () => void;
+  onToggleGoToLine: () => void;
   onToggleSidebar: () => void;
   onClose: () => void;
 }
@@ -35,6 +36,7 @@ export interface EditorKeyHandlerDeps {
   hasUnsavedChanges: () => boolean;
   onToggleQuickOpen: () => void;
   onToggleSearchPanel: () => void;
+  onToggleGoToLine: () => void;
   onToggleSidebar: () => void;
   onToggleLineWrap: () => void;
   getEditorView: () => { dispatch: unknown } | null;
@@ -85,8 +87,7 @@ export function createEditorKeyHandler(deps: EditorKeyHandlerDeps): (e: Keyboard
     if (key === 'g' && !e.shiftKey) {
       e.preventDefault();
       e.stopPropagation();
-      const view = deps.getEditorView();
-      if (view) gotoLine(view as Parameters<typeof gotoLine>[0]);
+      deps.onToggleGoToLine();
       return;
     }
 
@@ -185,6 +186,7 @@ export function createEditorKeyHandler(deps: EditorKeyHandlerDeps): (e: Keyboard
 export function useEditorKeyboardShortcuts({
   onToggleQuickOpen,
   onToggleSearchPanel,
+  onToggleGoToLine,
   onToggleSidebar,
   onClose: _onClose,
 }: UseEditorKeyboardShortcutsOptions): void {
@@ -207,6 +209,7 @@ export function useEditorKeyboardShortcuts({
         hasUnsavedChanges,
         onToggleQuickOpen,
         onToggleSearchPanel,
+        onToggleGoToLine,
         onToggleSidebar,
         onToggleLineWrap: toggleLineWrap,
         getEditorView: () => editorBridge.getView(),
@@ -222,6 +225,7 @@ export function useEditorKeyboardShortcuts({
       hasUnsavedChanges,
       onToggleQuickOpen,
       onToggleSearchPanel,
+      onToggleGoToLine,
       onToggleSidebar,
       toggleLineWrap,
     ]

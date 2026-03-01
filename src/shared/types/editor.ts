@@ -190,6 +190,7 @@ export interface EditorAPI {
   createDir: (parentDir: string, dirName: string) => Promise<CreateDirResponse>;
   deleteFile: (filePath: string) => Promise<DeleteFileResponse>;
   moveFile: (sourcePath: string, destDir: string) => Promise<MoveFileResponse>;
+  renameFile: (sourcePath: string, newName: string) => Promise<MoveFileResponse>;
   searchInFiles: (options: SearchInFilesOptions) => Promise<SearchInFilesResult>;
   listFiles: () => Promise<QuickOpenFile[]>;
   gitStatus: () => Promise<GitStatusResult>;

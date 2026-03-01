@@ -287,6 +287,8 @@ export function useSettingsHandlers({
           snoozedUntil: null,
           snoozeMinutes: 30,
           includeSubagentErrors: true,
+          notifyOnInboxMessages: true,
+          notifyOnClarifications: true,
           triggers: defaultTriggers,
         },
         general: {

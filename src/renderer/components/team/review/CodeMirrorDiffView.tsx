@@ -10,6 +10,7 @@ import {
   getAsyncLanguageDesc,
   getSyncLanguageExtension,
 } from '@renderer/utils/codemirrorLanguages';
+import { buildSelectionInfo } from '@renderer/utils/codemirrorSelectionInfo';
 import { baseEditorTheme } from '@renderer/utils/codemirrorTheme';
 
 import {
@@ -20,6 +21,8 @@ import {
   rejectChunk,
 } from './CodeMirrorDiffUtils';
 import { portionCollapseExtension } from './portionCollapse';
+
+import type { EditorSelectionInfo } from '@shared/types/editor';
 
 interface CodeMirrorDiffViewProps {
   original: string;
@@ -46,6 +49,8 @@ interface CodeMirrorDiffViewProps {
   usePortionCollapse?: boolean;
   /** Lines per "Expand N" click (only with usePortionCollapse). Default: 100 */
   portionSize?: number;
+  /** Called when text selection changes (for floating action menu) */
+  onSelectionChange?: (info: EditorSelectionInfo | null) => void;
 }
 
 /** Compute hunk index for the chunk at a given position (B-side / modified doc).
@@ -162,6 +167,17 @@ const diffSpecificTheme = EditorView.theme({
   },
 });
 
+/** When original is empty (all additions), avoid showing a stray "deleted" block at the top. */
+const emptyOriginalOverrideTheme = EditorView.theme({
+  '.cm-deletedChunk': {
+    backgroundColor: 'transparent !important',
+    paddingLeft: '0 !important',
+  },
+  '.cm-deletedLine': {
+    backgroundColor: 'transparent !important',
+  },
+});
+
 export const CodeMirrorDiffView = ({
   original,
   modified,
@@ -180,6 +196,7 @@ export const CodeMirrorDiffView = ({
   initialState,
   usePortionCollapse = false,
   portionSize = 100,
+  onSelectionChange,
 }: CodeMirrorDiffViewProps): React.ReactElement => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -192,14 +209,23 @@ export const CodeMirrorDiffView = ({
   const onRejectRef = useRef(onHunkRejected);
   const onContentChangedRef = useRef(onContentChanged);
   const onViewChangeRef = useRef(onViewChange);
+  const onSelectionChangeRef = useRef(onSelectionChange);
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     onAcceptRef.current = onHunkAccepted;
     onRejectRef.current = onHunkRejected;
     onContentChangedRef.current = onContentChanged;
     onViewChangeRef.current = onViewChange;
+    onSelectionChangeRef.current = onSelectionChange;
     externalViewRefHolder.current = externalViewRef;
-  }, [onHunkAccepted, onHunkRejected, onContentChanged, onViewChange, externalViewRef]);
+  }, [
+    onHunkAccepted,
+    onHunkRejected,
+    onContentChanged,
+    onViewChange,
+    onSelectionChange,
+    externalViewRef,
+  ]);
 
   // Auto-scroll to next chunk after accept/reject (deferred to let CM recalculate)
   const scrollToNextChunk = useCallback(() => {
@@ -358,6 +384,7 @@ export const CodeMirrorDiffView = ({
     const extensions: Extension[] = [
       baseEditorTheme,
       diffSpecificTheme,
+      ...(original.length === 0 ? [emptyOriginalOverrideTheme] : []),
       lineNumbers(),
       syntaxHighlighting(oneDarkHighlightStyle),
       EditorView.editable.of(!readOnly),
@@ -407,6 +434,20 @@ export const CodeMirrorDiffView = ({
         })
       );
     }
+
+    // Selection change listener (for floating action menu)
+    extensions.push(
+      EditorView.updateListener.of((update) => {
+        if (update.selectionSet || update.docChanged) {
+          const sel = update.state.selection.main;
+          if (sel.empty) {
+            onSelectionChangeRef.current?.(null);
+          } else {
+            onSelectionChangeRef.current?.(buildSelectionInfo(update.view, sel));
+          }
+        }
+      })
+    );
 
     // Merge toolbar: always visible for nearest chunk, follows cursor when hovering on chunk
     if (showMergeControls) {
@@ -566,7 +607,7 @@ export const CodeMirrorDiffView = ({
     );
 
     return extensions;
-  }, [readOnly, showMergeControls, buildMergeExtension, usePortionCollapse, portionSize]);
+  }, [readOnly, showMergeControls, buildMergeExtension, usePortionCollapse, portionSize, original]);
 
   useEffect(() => {
     if (!containerRef.current) return;
