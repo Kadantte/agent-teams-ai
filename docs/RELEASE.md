@@ -64,15 +64,41 @@ EOF
 
 ### Downloads
 
-| Platform | File |
-|----------|------|
-| macOS (Apple Silicon) | [Claude-Agent-Teams-UI-<VERSION>-arm64.dmg](https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude-Agent-Teams-UI-<VERSION>-arm64.dmg) |
-| macOS (Intel) | [Claude-Agent-Teams-UI-<VERSION>.dmg](https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude-Agent-Teams-UI-<VERSION>.dmg) |
-| Windows | [Claude-Agent-Teams-UI-Setup-<VERSION>.exe](https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude-Agent-Teams-UI-Setup-<VERSION>.exe) |
-| Linux (AppImage) | [Claude-Agent-Teams-UI-<VERSION>.AppImage](https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude-Agent-Teams-UI-<VERSION>.AppImage) |
-| Linux (deb) | [claude-agent-teams-ui_<VERSION>_amd64.deb](https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/claude-agent-teams-ui_<VERSION>_amd64.deb) |
-| Linux (rpm) | [claude-agent-teams-ui-<VERSION>.x86_64.rpm](https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/claude-agent-teams-ui-<VERSION>.x86_64.rpm) |
-| Linux (pacman) | [claude-agent-teams-ui-<VERSION>.pacman](https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/claude-agent-teams-ui-<VERSION>.pacman) |
+<table>
+<tr>
+<td align="center">
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude-Agent-Teams-UI-<VERSION>-arm64.dmg">
+    <img src="https://img.shields.io/badge/macOS_Apple_Silicon-.dmg-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Apple Silicon" />
+  </a>
+  <br />
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude-Agent-Teams-UI-<VERSION>.dmg">
+    <img src="https://img.shields.io/badge/macOS_Intel-.dmg-434343?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Intel" />
+  </a>
+</td>
+<td align="center">
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude-Agent-Teams-UI-Setup-<VERSION>.exe">
+    <img src="https://img.shields.io/badge/Windows-Download_.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
+  </a>
+  <br />
+  <sub>May trigger SmartScreen — click "More info" → "Run anyway"</sub>
+</td>
+<td align="center">
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/Claude-Agent-Teams-UI-<VERSION>.AppImage">
+    <img src="https://img.shields.io/badge/Linux-Download_.AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux AppImage" />
+  </a>
+  <br />
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/claude-agent-teams-ui_<VERSION>_amd64.deb">
+    <img src="https://img.shields.io/badge/.deb-E95420?style=flat-square&logo=ubuntu&logoColor=white" alt=".deb" />
+  </a>&nbsp;
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/claude-agent-teams-ui-<VERSION>.x86_64.rpm">
+    <img src="https://img.shields.io/badge/.rpm-294172?style=flat-square&logo=redhat&logoColor=white" alt=".rpm" />
+  </a>&nbsp;
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v<VERSION>/claude-agent-teams-ui-<VERSION>.pacman">
+    <img src="https://img.shields.io/badge/.pacman-1793D1?style=flat-square&logo=archlinux&logoColor=white" alt=".pacman" />
+  </a>
+</td>
+</tr>
+</table>
 ```
 
 ## Changelog Guidelines
