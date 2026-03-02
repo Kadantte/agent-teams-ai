@@ -85,7 +85,12 @@ function parseArgs(argv) {
 }
 
 function getHomeDir() {
-  return process.env.HOME || process.env.USERPROFILE || '';
+  if (process.env.HOME) return process.env.HOME;
+  if (process.env.USERPROFILE) return process.env.USERPROFILE;
+  if (process.env.HOMEDRIVE && process.env.HOMEPATH) {
+    return process.env.HOMEDRIVE + process.env.HOMEPATH;
+  }
+  try { return require('os').homedir(); } catch { return ''; }
 }
 
 function getClaudeDir(flags) {
@@ -98,7 +103,7 @@ function getClaudeDir(flags) {
   const inferred = inferClaudeDirFromScriptPath();
   if (inferred) return inferred;
   const home = getHomeDir();
-  if (!home) die('HOME is not set');
+  if (!home) die('HOME/USERPROFILE is not set');
   return path.join(home, '.claude');
 }
 
@@ -148,7 +153,26 @@ function atomicWrite(filePath, data) {
     '.' +
     String(Math.random().toString(16).slice(2));
   fs.writeFileSync(tmp, data, 'utf8');
-  fs.renameSync(tmp, filePath);
+  // On Windows, fs.renameSync can throw EPERM/EACCES when another process
+  // is concurrently renaming to the same target. Retry with backoff.
+  const maxRetries = process.platform === 'win32' ? 5 : 1;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      fs.renameSync(tmp, filePath);
+      return;
+    } catch (e) {
+      if (attempt < maxRetries - 1 && e && (e.code === 'EPERM' || e.code === 'EACCES')) {
+        // Busy wait — small random delay to reduce contention
+        const ms = Math.floor(Math.random() * 50) + 10;
+        const end = Date.now() + ms;
+        while (Date.now() < end) { /* spin */ }
+        continue;
+      }
+      // Clean up temp file on final failure
+      try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+      throw e;
+    }
+  }
 }
 
 function normalizeStatus(value) {
@@ -976,8 +1000,8 @@ async function main() {
         parts.push(
           '\n' + ${JSON.stringify(AGENT_BLOCK_OPEN)},
           'Update task status using:',
-          'node "$HOME/.claude/tools/${TOOL_FILE_NAME}" --team ' + String(teamName) + ' task start ' + String(task.id),
-          'node "$HOME/.claude/tools/${TOOL_FILE_NAME}" --team ' + String(teamName) + ' task complete ' + String(task.id),
+          'node "' + __filename + '" --team ' + String(teamName) + ' task start ' + String(task.id),
+          'node "' + __filename + '" --team ' + String(teamName) + ' task complete ' + String(task.id),
           ${JSON.stringify(AGENT_BLOCK_CLOSE)}
         );
         sendInboxMessage(paths, teamName, {
@@ -1053,8 +1077,8 @@ async function main() {
         parts.push(
           '\n' + ${JSON.stringify(AGENT_BLOCK_OPEN)},
           'Update task status using:',
-          'node "$HOME/.claude/tools/${TOOL_FILE_NAME}" --team ' + String(teamName) + ' task start ' + String(task.id),
-          'node "$HOME/.claude/tools/${TOOL_FILE_NAME}" --team ' + String(teamName) + ' task complete ' + String(task.id),
+          'node "' + __filename + '" --team ' + String(teamName) + ' task start ' + String(task.id),
+          'node "' + __filename + '" --team ' + String(teamName) + ' task complete ' + String(task.id),
           ${JSON.stringify(AGENT_BLOCK_CLOSE)}
         );
         sendInboxMessage(paths, teamName, {
