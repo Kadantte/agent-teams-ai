@@ -307,13 +307,53 @@ function wrapInAgentBlock(text: string): string {
   return `${AGENT_BLOCK_OPEN}\n${trimmed}\n${AGENT_BLOCK_CLOSE}`;
 }
 
+function indentMultiline(text: string, indent: string): string {
+  return text
+    .split(/\r?\n/g)
+    .map((line) => `${indent}${line}`)
+    .join('\n');
+}
+
+function formatWorkflowBlock(workflow: string, indent: string): string {
+  const trimmed = workflow.trim();
+  if (trimmed.length === 0) return '';
+  const body = indentMultiline(trimmed, indent);
+  return `\n${indent}---BEGIN WORKFLOW---\n${body}\n${indent}---END WORKFLOW---`;
+}
+
 function buildMembersPrompt(members: TeamCreateRequest['members']): string {
   return members
     .map((member) => {
       const rolePart = member.role?.trim() ? ` (role: ${member.role.trim()})` : '';
-      return `- ${member.name}${rolePart}`;
+      const workflowPart = member.workflow?.trim()
+        ? `\n     Workflow/instructions:${formatWorkflowBlock(member.workflow, '       ')}`
+        : '';
+      return `- ${member.name}${rolePart}${workflowPart}`;
     })
     .join('\n');
+}
+
+function buildMemberSpawnPrompt(
+  member: TeamCreateRequest['members'][number],
+  displayName: string,
+  teamName: string,
+  taskProtocol: string,
+  processRegistration: string
+): string {
+  const role = member.role?.trim() || 'team member';
+  const workflowBlock = member.workflow?.trim()
+    ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '')}`
+    : '';
+  return `You are ${member.name}, a ${role} on team "${displayName}" (${teamName}).${workflowBlock}
+
+${getAgentLanguageInstruction()}
+Introduce yourself briefly (name and role) and confirm you are ready.
+Then wait for task assignments.
+Include the following agent-only instructions verbatim in the prompt:
+
+${taskProtocol}
+
+${processRegistration}`;
 }
 
 function buildTaskStatusProtocol(teamName: string): string {
@@ -546,20 +586,18 @@ Steps (execute in this exact order):
 1) TeamCreate — create team "${request.teamName}":
    - description: "${description}"
 
-2) Spawn each member as a live teammate using the Task tool:
-   - team_name: "${request.teamName}"
-   - name: the member's name
-   - subagent_type: "general-purpose"
+2) Spawn each member as a live teammate using the Task tool. For each member below, use the exact prompt shown:
+
+${request.members
+  .map(
+    (m) => `   For "${m.name}":
    - prompt:
-     You are {name}, a {role} on team "${displayName}" (${request.teamName}).
-     ${languageInstruction}
-     Introduce yourself briefly (name and role) and confirm you are ready.
-     Then wait for task assignments.
-     Include the following agent-only instructions verbatim in the prompt:
-
-${taskProtocol}
-
-${processRegistration}
+${buildMemberSpawnPrompt(m, displayName, request.teamName, taskProtocol, processRegistration)
+  .split('\n')
+  .map((line) => `     ${line}`)
+  .join('\n')}`
+  )
+  .join('\n\n')}
 
 3) If user instructions explicitly ask to create tasks OR describe substantial/assigned work that should be tracked — create tasks on the team board.
    - Prefer fewer, broader tasks over many micro-tasks.
@@ -612,10 +650,14 @@ function buildLaunchPrompt(
     .map((m) => {
       const taskBlock = memberTaskBlocks.get(m.name) || '';
       const hasTasks = Boolean(taskBlock);
+      const workflowBlock = m.workflow?.trim()
+        ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(m.workflow, '     ')}`
+        : '';
 
       return `   For "${m.name}":
    - prompt:
-     You are ${m.name}, a ${m.role || 'team member'} on team "${request.teamName}".
+     You are ${m.name}, a ${m.role || 'team member'} on team "${request.teamName}".${workflowBlock}
+
      ${languageInstruction}
      The team has been reconnected after a restart.
      ${hasTasks ? `You have pending tasks from the previous session.` : 'You have no pending tasks currently.'}
@@ -3270,6 +3312,7 @@ export class TeamProvisioningService {
         teammateMembers.map((member, index) => ({
           name: member.name,
           role: member.role?.trim() || undefined,
+          workflow: member.workflow?.trim() || undefined,
           agentType: 'general-purpose',
           color: getMemberColor(index),
           joinedAt,
@@ -3299,11 +3342,17 @@ export class TeamProvisioningService {
         const name = member.name?.trim();
         if (!name) continue;
         const role = typeof member.role === 'string' ? member.role.trim() || undefined : undefined;
+        const workflow =
+          typeof member.workflow === 'string' ? member.workflow.trim() || undefined : undefined;
         const prev = byName.get(name);
         if (!prev) {
-          byName.set(name, { name, role });
-        } else if (!prev.role && role) {
-          byName.set(name, { ...prev, role });
+          byName.set(name, { name, role, workflow });
+        } else {
+          byName.set(name, {
+            ...prev,
+            role: prev.role || role,
+            workflow: prev.workflow || workflow,
+          });
         }
       }
       const members = Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));

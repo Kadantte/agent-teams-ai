@@ -21,6 +21,7 @@ function normalizeMember(member: TeamMember): TeamMember | null {
   return {
     name: trimmedName,
     role: typeof member.role === 'string' ? member.role.trim() || undefined : undefined,
+    workflow: typeof member.workflow === 'string' ? member.workflow.trim() || undefined : undefined,
     agentType:
       typeof member.agentType === 'string' ? member.agentType.trim() || undefined : undefined,
     color: typeof member.color === 'string' ? member.color.trim() || undefined : undefined,

@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
+import {
+  buildMembersFromDrafts,
+  createMemberDraft,
+  MembersEditorSection,
+  validateMemberNameInline,
+} from '@renderer/components/team/members/MembersEditorSection';
 import { AutoResizeTextarea } from '@renderer/components/ui/auto-resize-textarea';
 import { Button } from '@renderer/components/ui/button';
 import { Checkbox } from '@renderer/components/ui/checkbox';
@@ -15,23 +21,19 @@ import {
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@renderer/components/ui/select';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
+import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
 import { cn } from '@renderer/lib/utils';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { getMemberColor } from '@shared/constants/memberColors';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
 import { ExtendedContextCheckbox } from './ExtendedContextCheckbox';
-import { MembersJsonEditor } from './MembersJsonEditor';
 import { ProjectPathSelector } from './ProjectPathSelector';
+import { TeamModelSelector } from './TeamModelSelector';
+
+import type { MemberDraft } from '@renderer/components/team/members/membersEditorTypes';
 
 const TEAM_COLOR_NAMES = [
   'blue',
@@ -93,55 +95,11 @@ const DEV_DEFAULT_TEAM = {
   description: 'Dev test team for provisioning flow',
 } as const;
 
-interface MemberDraft {
-  id: string;
-  name: string;
-  roleSelection: string;
-  customRole: string;
-}
-
-const DEV_DEFAULT_MEMBERS: Pick<MemberDraft, 'name' | 'roleSelection'>[] = [
+const DEV_DEFAULT_MEMBERS: { name: string; roleSelection: string }[] = [
   { name: 'alice', roleSelection: 'reviewer' },
   { name: 'bob', roleSelection: 'developer' },
   { name: 'carol', roleSelection: 'developer' },
 ];
-
-function newDraftId(): string {
-  // eslint-disable-next-line sonarjs/pseudo-random -- Used for generating unique UI keys, not security
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createMemberDraft(initial?: Partial<MemberDraft>): MemberDraft {
-  return {
-    id: initial?.id ?? newDraftId(),
-    name: initial?.name ?? '',
-    roleSelection: initial?.roleSelection ?? '',
-    customRole: initial?.customRole ?? '',
-  };
-}
-
-function buildMembers(members: MemberDraft[]): TeamCreateRequest['members'] {
-  return members
-    .map((member) => {
-      const name = member.name.trim();
-      if (!name) {
-        return null;
-      }
-
-      const role =
-        member.roleSelection === CUSTOM_ROLE
-          ? member.customRole.trim() || undefined
-          : member.roleSelection === NO_ROLE
-            ? undefined
-            : member.roleSelection.trim() || undefined;
-
-      return {
-        name,
-        role,
-      };
-    })
-    .filter((member): member is NonNullable<typeof member> => member !== null);
-}
 
 /** Mirrors Claude CLI's `zuA()` sanitization: non-alphanumeric → `-`, then lowercase. */
 function sanitizeTeamName(name: string): string {
@@ -155,12 +113,6 @@ function sanitizeTeamName(name: string): string {
   return result;
 }
 
-function isValidMemberName(name: string): boolean {
-  if (name.length < 1 || name.length > 128) return false;
-  if (!/^[a-zA-Z0-9]/.test(name)) return false;
-  return /^[a-zA-Z0-9._-]+$/.test(name);
-}
-
 function validateTeamNameInline(name: string): string | null {
   const trimmed = name.trim();
   if (!trimmed) return null;
@@ -170,15 +122,6 @@ function validateTeamNameInline(name: string): string | null {
   }
   if (sanitized.length > 128) {
     return 'Name is too long (max 128 chars)';
-  }
-  return null;
-}
-
-function validateMemberNameInline(name: string): string | null {
-  const trimmed = name.trim();
-  if (!trimmed) return null;
-  if (!isValidMemberName(trimmed)) {
-    return 'Start with alphanumeric, use only [a-zA-Z0-9._-], max 128 chars';
   }
   return null;
 }
@@ -229,7 +172,7 @@ function validateRequest(
       },
     };
   }
-  if (request.members.some((member) => !isValidMemberName(member.name.trim()))) {
+  if (request.members.some((member) => validateMemberNameInline(member.name.trim()) !== null)) {
     return {
       valid: false,
       errors: {
@@ -285,15 +228,13 @@ export const CreateTeamDialog = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [launchTeam, setLaunchTeam] = useState(true);
   const [teamColor, setTeamColor] = useState('');
-  const [selectedModel, setSelectedModelRaw] = useState(
-    () => localStorage.getItem('team:lastSelectedModel') ?? ''
-  );
+  const [selectedModel, setSelectedModelRaw] = useState(() => {
+    const stored = localStorage.getItem('team:lastSelectedModel') ?? '';
+    return stored === '__default__' ? '' : stored;
+  });
   const [extendedContext, setExtendedContextRaw] = useState(
     () => localStorage.getItem('team:lastExtendedContext') === 'true'
   );
-  const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
-  const [jsonText, setJsonText] = useState('');
-  const [jsonError, setJsonError] = useState<string | null>(null);
 
   const setSelectedModel = (value: string): void => {
     setSelectedModelRaw(value);
@@ -324,9 +265,6 @@ export const CreateTeamDialog = ({
     setSelectedProjectPath('');
     setCustomCwd('');
     setLaunchTeam(true);
-    setJsonEditorOpen(false);
-    setJsonText('');
-    setJsonError(null);
     resetUIState();
   };
 
@@ -349,29 +287,29 @@ export const CreateTeamDialog = ({
     setPrepareMessage('Warming up CLI environment...');
     setPrepareWarnings([]);
 
-    void (async () => {
-      try {
-        const prepResult: TeamProvisioningPrepareResult = await api.teams.prepareProvisioning();
-        if (cancelled) {
-          return;
+    // Defer so file list fetch (triggered by project select) can run first
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const prepResult: TeamProvisioningPrepareResult = await api.teams.prepareProvisioning();
+          if (cancelled) return;
+          setPrepareState(prepResult.ready ? 'ready' : 'failed');
+          setPrepareMessage(prepResult.message);
+          setPrepareWarnings(prepResult.warnings ?? []);
+        } catch (error) {
+          if (cancelled) return;
+          setPrepareState('failed');
+          setPrepareWarnings([]);
+          setPrepareMessage(
+            error instanceof Error ? error.message : 'Failed to warm up Claude CLI environment'
+          );
         }
-        setPrepareState(prepResult.ready ? 'ready' : 'failed');
-        setPrepareMessage(prepResult.message);
-        setPrepareWarnings(prepResult.warnings ?? []);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setPrepareState('failed');
-        setPrepareWarnings([]);
-        setPrepareMessage(
-          error instanceof Error ? error.message : 'Failed to warm up Claude CLI environment'
-        );
-      }
-    })();
+      })();
+    }, 250);
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [open, canCreate, launchTeam]);
 
@@ -427,6 +365,7 @@ export const CreateTeamDialog = ({
             name: m.name,
             roleSelection: isCustom ? CUSTOM_ROLE : (m.role ?? ''),
             customRole: isCustom ? m.role : '',
+            workflow: m.workflow,
           });
         })
       );
@@ -483,59 +422,7 @@ export const CreateTeamDialog = ({
 
   const effectiveCwd = cwdMode === 'project' ? selectedProjectPath.trim() : customCwd.trim();
 
-  const membersToJsonText = (drafts: MemberDraft[]): string => {
-    const arr = drafts
-      .filter((d) => d.name.trim())
-      .map((d) => {
-        const role =
-          d.roleSelection === CUSTOM_ROLE
-            ? d.customRole.trim() || undefined
-            : d.roleSelection === NO_ROLE
-              ? undefined
-              : d.roleSelection.trim() || undefined;
-        return role ? { name: d.name.trim(), role } : { name: d.name.trim() };
-      });
-    return JSON.stringify(arr, null, 2);
-  };
-
-  const handleJsonChange = (text: string): void => {
-    setJsonText(text);
-    try {
-      const arr: unknown = JSON.parse(text);
-      if (!Array.isArray(arr)) {
-        setJsonError('Root must be an array');
-        return;
-      }
-      const drafts: MemberDraft[] = (arr as Record<string, unknown>[]).map((item) => {
-        const name = typeof item.name === 'string' ? item.name : '';
-        const role = typeof item.role === 'string' ? item.role.trim() : '';
-        const presetRoles: readonly string[] = PRESET_ROLES;
-        const isPreset = presetRoles.includes(role);
-        return createMemberDraft({
-          name,
-          roleSelection: role ? (isPreset ? role : CUSTOM_ROLE) : '',
-          customRole: role && !isPreset ? role : '',
-        });
-      });
-      setMembers(drafts);
-      setJsonError(null);
-    } catch (e) {
-      setJsonError(e instanceof Error ? e.message : 'Invalid JSON');
-    }
-  };
-
-  const toggleJsonEditor = (): void => {
-    if (!jsonEditorOpen) {
-      setJsonText(membersToJsonText(members));
-      setJsonError(null);
-    }
-    setJsonEditorOpen((prev) => !prev);
-  };
-
-  useEffect(() => {
-    if (!jsonEditorOpen || jsonError !== null) return;
-    setJsonText(membersToJsonText(members));
-  }, [members, jsonEditorOpen, jsonError]);
+  useFileListCacheWarmer(effectiveCwd || null);
 
   const description = descriptionDraft.value;
   const prompt = promptDraft.value;
@@ -559,7 +446,7 @@ export const CreateTeamDialog = ({
   );
 
   const effectiveModel = useMemo(() => {
-    const base = selectedModel && selectedModel !== '__default__' ? selectedModel : undefined;
+    const base = selectedModel || undefined;
     if (!extendedContext) return base;
     // 1M context is only supported for opus and sonnet
     if (base === 'haiku') return base;
@@ -573,7 +460,7 @@ export const CreateTeamDialog = ({
       teamName: sanitizedTeamName,
       description: description.trim() || undefined,
       color: teamColor || undefined,
-      members: buildMembers(members),
+      members: buildMembersFromDrafts(members),
       cwd: effectiveCwd,
       prompt: prompt.trim() || undefined,
       model: effectiveModel,
@@ -590,39 +477,6 @@ export const CreateTeamDialog = ({
     const norm = normalizePath(effectiveCwd);
     return activeTeams.find((t) => normalizePath(t.projectPath) === norm) ?? null;
   }, [activeTeams, effectiveCwd]);
-
-  const updateMemberName = (memberId: string, name: string): void => {
-    setMembers((prev) =>
-      prev.map((candidate) => (candidate.id === memberId ? { ...candidate, name } : candidate))
-    );
-  };
-
-  const updateMemberRole = (memberId: string, roleSelection: string): void => {
-    const resolvedRole = roleSelection === NO_ROLE ? '' : roleSelection;
-    setMembers((prev) =>
-      prev.map((candidate) =>
-        candidate.id === memberId
-          ? {
-              ...candidate,
-              roleSelection: resolvedRole,
-              customRole: resolvedRole === CUSTOM_ROLE ? candidate.customRole : '',
-            }
-          : candidate
-      )
-    );
-  };
-
-  const updateMemberCustomRole = (memberId: string, customRole: string): void => {
-    setMembers((prev) =>
-      prev.map((candidate) =>
-        candidate.id === memberId ? { ...candidate, customRole } : candidate
-      )
-    );
-  };
-
-  const removeMember = (memberId: string): void => {
-    setMembers((prev) => prev.filter((candidate) => candidate.id !== memberId));
-  };
 
   const handleSubmit = (): void => {
     if (existingTeamNames.includes(sanitizedTeamName)) {
@@ -774,116 +628,17 @@ export const CreateTeamDialog = ({
             ) : null}
           </div>
 
-          <div className="space-y-1.5 md:col-span-2">
-            <div className="flex items-center justify-between">
-              <Label>Members</Label>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setMembers((prev) => [...prev, createMemberDraft()]);
-                  }}
-                >
-                  Add member
-                </Button>
-                <Button variant="ghost" size="sm" onClick={toggleJsonEditor}>
-                  {jsonEditorOpen ? 'Hide JSON' : 'Edit as JSON'}
-                </Button>
-              </div>
-            </div>
-            <div className="space-y-2">
-              {members.map((member, index) => {
-                const memberColorSet = getTeamColorSet(getMemberColor(index));
-                return (
-                  <div
-                    key={member.id}
-                    className="grid grid-cols-1 gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-2 md:grid-cols-[1fr_220px_auto]"
-                    style={{
-                      borderLeftWidth: '3px',
-                      borderLeftColor: memberColorSet.border,
-                    }}
-                  >
-                    <div className="space-y-0.5">
-                      <Input
-                        className="h-8 text-xs"
-                        value={member.name}
-                        aria-label={`Member ${index + 1} name`}
-                        onChange={(event) => updateMemberName(member.id, event.target.value)}
-                        placeholder="member-name"
-                        style={
-                          member.name.trim()
-                            ? {
-                                color: memberColorSet.text,
-                              }
-                            : undefined
-                        }
-                      />
-                      {validateMemberNameInline(member.name) ? (
-                        <p className="text-[10px] text-red-300">
-                          {validateMemberNameInline(member.name)}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="space-y-1">
-                      <Select
-                        value={member.roleSelection || NO_ROLE}
-                        onValueChange={(roleSelection) =>
-                          updateMemberRole(member.id, roleSelection)
-                        }
-                      >
-                        <SelectTrigger
-                          className="h-8 text-xs"
-                          aria-label={`Member ${index + 1} role`}
-                        >
-                          <SelectValue placeholder="No role" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={NO_ROLE}>No role</SelectItem>
-                          {PRESET_ROLES.map((role) => (
-                            <SelectItem key={role} value={role}>
-                              {role}
-                            </SelectItem>
-                          ))}
-                          <SelectItem value={CUSTOM_ROLE}>Custom role...</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {member.roleSelection === CUSTOM_ROLE ? (
-                        <Input
-                          className="h-8 text-xs"
-                          value={member.customRole}
-                          aria-label={`Member ${index + 1} custom role`}
-                          onChange={(event) =>
-                            updateMemberCustomRole(member.id, event.target.value)
-                          }
-                          placeholder="e.g. architect"
-                        />
-                      ) : null}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-red-500/40 text-red-300 hover:bg-red-500/10 hover:text-red-200"
-                      onClick={() => removeMember(member.id)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                );
-              })}
-              {jsonEditorOpen ? (
-                <MembersJsonEditor value={jsonText} onChange={handleJsonChange} error={jsonError} />
-              ) : null}
-            </div>
-            {(() => {
-              const names = members.map((m) => m.name.trim().toLowerCase()).filter(Boolean);
-              const hasDuplicates = new Set(names).size !== names.length;
-              if (hasDuplicates)
-                return <p className="text-[11px] text-red-300">Member names must be unique</p>;
-              if (fieldErrors.members)
-                return <p className="text-[11px] text-red-300">{fieldErrors.members}</p>;
-              return null;
-            })()}
+          <div className="md:col-span-2">
+            <MembersEditorSection
+              members={members}
+              onChange={setMembers}
+              fieldError={fieldErrors.members}
+              validateMemberName={validateMemberNameInline}
+              showWorkflow
+              showJsonEditor
+              draftKeyPrefix="createTeam"
+              projectPath={effectiveCwd || null}
+            />
           </div>
 
           <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-4 md:col-span-2">
@@ -938,20 +693,11 @@ export const CreateTeamDialog = ({
                 </div>
 
                 <div>
-                  <div className="flex items-center gap-2.5">
-                    <Label className="label-optional shrink-0">Model (optional)</Label>
-                    <Select value={selectedModel} onValueChange={setSelectedModel}>
-                      <SelectTrigger className="h-8 w-auto min-w-[180px] text-xs">
-                        <SelectValue placeholder="Default (account setting)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__default__">Default (account setting)</SelectItem>
-                        <SelectItem value="opus">Opus 4.6</SelectItem>
-                        <SelectItem value="sonnet">Sonnet 4.5</SelectItem>
-                        <SelectItem value="haiku">Haiku 4.5</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <TeamModelSelector
+                    value={selectedModel}
+                    onValueChange={setSelectedModel}
+                    id="create-model"
+                  />
                   <ExtendedContextCheckbox
                     id="create-extended-context"
                     checked={extendedContext}

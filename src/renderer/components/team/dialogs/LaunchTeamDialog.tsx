@@ -15,7 +15,6 @@ import {
 import { Label } from '@renderer/components/ui/label';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
-import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
@@ -23,6 +22,7 @@ import { normalizePath } from '@renderer/utils/pathNormalize';
 import { AlertTriangle, CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
 
 import { ProjectPathSelector } from './ProjectPathSelector';
+import { TeamModelSelector } from './TeamModelSelector';
 
 import type { ActiveTeamRef } from './CreateTeamDialog';
 import type { MentionSuggestion } from '@renderer/types/mention';
@@ -66,9 +66,10 @@ export const LaunchTeamDialog = ({
   const [prepareMessage, setPrepareMessage] = useState<string | null>(null);
   const [prepareWarnings, setPrepareWarnings] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedModel, setSelectedModelRaw] = useState(
-    () => localStorage.getItem('team:lastSelectedModel') ?? ''
-  );
+  const [selectedModel, setSelectedModelRaw] = useState(() => {
+    const stored = localStorage.getItem('team:lastSelectedModel') ?? '';
+    return stored === '__default__' ? '' : stored;
+  });
   const [extendedContext, setExtendedContextRaw] = useState(
     () => localStorage.getItem('team:lastExtendedContext') === 'true'
   );
@@ -375,31 +376,11 @@ export const LaunchTeamDialog = ({
           </div>
 
           <div>
-            <div className="flex items-center gap-2.5">
-              <Label className="label-optional shrink-0">Model (optional)</Label>
-              <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
-                {[
-                  { value: '', label: 'Default' },
-                  { value: 'opus', label: 'Opus 4.6' },
-                  { value: 'sonnet', label: 'Sonnet 4.5' },
-                  { value: 'haiku', label: 'Haiku 4.5' },
-                ].map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={cn(
-                      'rounded-[3px] px-3 py-1 text-xs font-medium transition-colors',
-                      selectedModel === opt.value
-                        ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm'
-                        : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-                    )}
-                    onClick={() => setSelectedModel(opt.value)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <TeamModelSelector
+              value={selectedModel}
+              onValueChange={setSelectedModel}
+              id="launch-model"
+            />
             <ExtendedContextCheckbox
               id="launch-extended-context"
               checked={extendedContext}

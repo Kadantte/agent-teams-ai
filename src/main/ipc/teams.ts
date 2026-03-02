@@ -31,6 +31,7 @@ import {
   TEAM_PROVISIONING_STATUS,
   TEAM_REMOVE_MEMBER,
   TEAM_REMOVE_TASK_RELATIONSHIP,
+  TEAM_REPLACE_MEMBERS,
   TEAM_REQUEST_REVIEW,
   TEAM_RESTORE,
   TEAM_RESTORE_TASK,
@@ -207,6 +208,7 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_GET_ALL_TASKS, handleGetAllTasks);
   ipcMain.handle(TEAM_ADD_TASK_COMMENT, handleAddTaskComment);
   ipcMain.handle(TEAM_ADD_MEMBER, handleAddMember);
+  ipcMain.handle(TEAM_REPLACE_MEMBERS, handleReplaceMembers);
   ipcMain.handle(TEAM_REMOVE_MEMBER, handleRemoveMember);
   ipcMain.handle(TEAM_UPDATE_MEMBER_ROLE, handleUpdateMemberRole);
   ipcMain.handle(TEAM_GET_PROJECT_BRANCH, handleGetProjectBranch);
@@ -255,6 +257,7 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_GET_ALL_TASKS);
   ipcMain.removeHandler(TEAM_ADD_TASK_COMMENT);
   ipcMain.removeHandler(TEAM_ADD_MEMBER);
+  ipcMain.removeHandler(TEAM_REPLACE_MEMBERS);
   ipcMain.removeHandler(TEAM_REMOVE_MEMBER);
   ipcMain.removeHandler(TEAM_UPDATE_MEMBER_ROLE);
   ipcMain.removeHandler(TEAM_GET_PROJECT_BRANCH);
@@ -546,7 +549,15 @@ async function validateProvisioningRequest(
     if (role !== undefined && typeof role !== 'string') {
       return { valid: false, error: 'member role must be string' };
     }
-    members.push({ name: memberName, role: typeof role === 'string' ? role.trim() : undefined });
+    const workflow = (member as { workflow?: unknown }).workflow;
+    if (workflow !== undefined && typeof workflow !== 'string') {
+      return { valid: false, error: 'member workflow must be string' };
+    }
+    members.push({
+      name: memberName,
+      role: typeof role === 'string' ? role.trim() : undefined,
+      workflow: typeof workflow === 'string' ? workflow.trim() : undefined,
+    });
   }
 
   if (typeof payload.cwd !== 'string' || payload.cwd.trim().length === 0) {
@@ -1342,7 +1353,15 @@ async function handleCreateConfig(
     if (role !== undefined && typeof role !== 'string') {
       return { success: false, error: 'member role must be string' };
     }
-    members.push({ name: memberName, role: typeof role === 'string' ? role.trim() : undefined });
+    const workflow = (member as { workflow?: unknown }).workflow;
+    if (workflow !== undefined && typeof workflow !== 'string') {
+      return { success: false, error: 'member workflow must be string' };
+    }
+    members.push({
+      name: memberName,
+      role: typeof role === 'string' ? role.trim() : undefined,
+      workflow: typeof workflow === 'string' ? workflow.trim() : undefined,
+    });
   }
 
   return wrapTeamHandler('createConfig', () =>
@@ -1541,6 +1560,50 @@ async function handleAddMember(
         logger.warn(`Failed to notify lead about new member "${memberName}" in ${tn}`);
       }
     }
+  });
+}
+
+async function handleReplaceMembers(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  request: unknown
+): Promise<IpcResult<void>> {
+  const vTeam = validateTeamName(teamName);
+  if (!vTeam.valid) return { success: false, error: vTeam.error ?? 'Invalid teamName' };
+  if (!request || typeof request !== 'object') {
+    return { success: false, error: 'request must be an object' };
+  }
+  const payload = request as { members?: unknown };
+  if (!Array.isArray(payload.members) || payload.members.length === 0) {
+    return { success: false, error: 'members must contain at least one member' };
+  }
+  const seenNames = new Set<string>();
+  const members: { name: string; role?: string; workflow?: string }[] = [];
+  for (const item of payload.members) {
+    if (!item || typeof item !== 'object') {
+      return { success: false, error: 'member must be object' };
+    }
+    const m = item as { name?: unknown; role?: unknown; workflow?: unknown };
+    const vName = validateMemberName(m.name);
+    if (!vName.valid) return { success: false, error: vName.error ?? 'Invalid member name' };
+    const name = vName.value!;
+    if (seenNames.has(name)) return { success: false, error: 'member names must be unique' };
+    seenNames.add(name);
+    if (m.role !== undefined && typeof m.role !== 'string') {
+      return { success: false, error: 'member role must be string' };
+    }
+    if (m.workflow !== undefined && typeof m.workflow !== 'string') {
+      return { success: false, error: 'member workflow must be string' };
+    }
+    members.push({
+      name,
+      role: typeof m.role === 'string' ? m.role.trim() : undefined,
+      workflow: typeof m.workflow === 'string' ? m.workflow.trim() : undefined,
+    });
+  }
+
+  return wrapTeamHandler('replaceMembers', async () => {
+    await getTeamDataService().replaceMembers(vTeam.value!, { members });
   });
 }
 

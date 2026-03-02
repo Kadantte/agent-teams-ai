@@ -40,7 +40,7 @@ export class TeamMemberResolver {
 
     const configMemberMap = new Map<
       string,
-      { agentType?: string; role?: string; color?: string; cwd?: string }
+      { agentType?: string; role?: string; workflow?: string; color?: string; cwd?: string }
     >();
     if (Array.isArray(config.members)) {
       for (const m of config.members) {
@@ -48,6 +48,7 @@ export class TeamMemberResolver {
           configMemberMap.set(m.name.trim(), {
             agentType: m.agentType,
             role: m.role,
+            workflow: m.workflow,
             color: m.color,
             cwd: m.cwd,
           });
@@ -57,7 +58,7 @@ export class TeamMemberResolver {
 
     const metaMemberMap = new Map<
       string,
-      { agentType?: string; role?: string; color?: string; removedAt?: number }
+      { agentType?: string; role?: string; workflow?: string; color?: string; removedAt?: number }
     >();
     if (Array.isArray(metaMembers)) {
       for (const member of metaMembers) {
@@ -65,6 +66,7 @@ export class TeamMemberResolver {
           metaMemberMap.set(member.name.trim(), {
             agentType: member.agentType,
             role: member.role,
+            workflow: member.workflow,
             color: member.color,
             removedAt: member.removedAt,
           });
@@ -94,6 +96,7 @@ export class TeamMemberResolver {
         color: latestMessage?.color ?? configMember?.color ?? metaMember?.color,
         agentType: configMember?.agentType ?? metaMember?.agentType,
         role: configMember?.role ?? metaMember?.role,
+        workflow: configMember?.workflow ?? metaMember?.workflow,
         cwd: configMember?.cwd,
         removedAt: metaMember?.removedAt,
       });

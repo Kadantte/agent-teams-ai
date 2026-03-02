@@ -27,9 +27,7 @@ interface UseMentionDetectionResult {
   handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   handleChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   handleSelect: (e: React.SyntheticEvent<HTMLTextAreaElement>) => void;
-  /** Current @-trigger character position in text (-1 if no active trigger) */
-  triggerIndex: number;
-  /** Getter for trigger index — use at call time to avoid stale closure */
+  /** Getter for trigger index — use at call time to avoid stale closure (returns -1 if no active trigger) */
   getTriggerIndex: () => number;
 }
 
@@ -325,8 +323,6 @@ export function useMentionDetection({
     handleKeyDown,
     handleChange,
     handleSelect,
-    // eslint-disable-next-line react-hooks/refs -- expose current trigger position to caller
-    triggerIndex: triggerIndexRef.current,
     getTriggerIndex,
   };
 }

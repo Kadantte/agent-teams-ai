@@ -294,6 +294,9 @@ export const TEAM_GET_PROJECT_BRANCH = 'team:getProjectBranch';
 /** Add a new member to an existing team */
 export const TEAM_ADD_MEMBER = 'team:addMember';
 
+/** Replace all team members (bulk edit) */
+export const TEAM_REPLACE_MEMBERS = 'team:replaceMembers';
+
 /** Soft-delete a team member */
 export const TEAM_REMOVE_MEMBER = 'team:removeMember';
 

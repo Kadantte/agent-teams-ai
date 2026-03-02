@@ -359,6 +359,9 @@ async function handleEditorWatchDir(
         // Content changes: debounced (500ms) to coalesce rapid saves/builds.
         if (event.type === 'create' || event.type === 'delete') {
           gitStatusService.invalidateCache();
+          if (activeProjectRoot) {
+            fileSearchService.invalidateListFilesCache(activeProjectRoot);
+          }
         } else {
           gitStatusService.invalidateCacheDebounced();
         }

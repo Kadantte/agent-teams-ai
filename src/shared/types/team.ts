@@ -3,6 +3,8 @@ export interface TeamMember {
   agentId?: string;
   agentType?: string;
   role?: string;
+  /** Per-agent workflow/instructions injected into spawn prompt. */
+  workflow?: string;
   color?: string;
   joinedAt?: number;
   cwd?: string;
@@ -191,6 +193,7 @@ export interface ResolvedTeamMember {
   color?: string;
   agentType?: string;
   role?: string;
+  workflow?: string;
   cwd?: string;
   /** Set only when member's git branch differs from the lead's branch. */
   gitBranch?: string;
@@ -267,6 +270,8 @@ export type TeamProvisioningState =
 export interface TeamProvisioningMemberInput {
   name: string;
   role?: string;
+  /** Per-agent workflow/instructions injected into spawn prompt. */
+  workflow?: string;
 }
 
 export interface TeamCreateRequest {
@@ -393,6 +398,10 @@ export interface RemoveMemberRequest {
 export interface UpdateMemberRoleRequest {
   name: string;
   role: string | undefined;
+}
+
+export interface ReplaceMembersRequest {
+  members: TeamProvisioningMemberInput[];
 }
 
 /** Data sent from renderer to main for native OS team message notification. */

@@ -85,6 +85,7 @@ import {
   TEAM_PROVISIONING_STATUS,
   TEAM_REMOVE_MEMBER,
   TEAM_REMOVE_TASK_RELATIONSHIP,
+  TEAM_REPLACE_MEMBERS,
   TEAM_REQUEST_REVIEW,
   TEAM_RESTORE,
   TEAM_RESTORE_TASK,
@@ -740,6 +741,12 @@ const electronAPI: ElectronAPI = {
     },
     addMember: async (teamName: string, request: AddMemberRequest) => {
       return invokeIpcWithResult<void>(TEAM_ADD_MEMBER, teamName, request);
+    },
+    replaceMembers: async (
+      teamName: string,
+      request: import('@shared/types').ReplaceMembersRequest
+    ) => {
+      return invokeIpcWithResult<void>(TEAM_REPLACE_MEMBERS, teamName, request);
     },
     removeMember: async (teamName: string, memberName: string) => {
       return invokeIpcWithResult<void>(TEAM_REMOVE_MEMBER, teamName, memberName);

@@ -605,6 +605,32 @@ export class TeamDataService {
     return { oldRole, changed: true };
   }
 
+  async replaceMembers(
+    teamName: string,
+    request: { members: { name: string; role?: string; workflow?: string }[] }
+  ): Promise<void> {
+    if (!request.members.length) {
+      throw new Error('At least one member is required');
+    }
+    const existing = await this.membersMetaStore.getMembers(teamName);
+    const existingByName = new Map(existing.map((m) => [m.name.toLowerCase(), m]));
+    const joinedAt = Date.now();
+    const newMembers: TeamMember[] = request.members.map((member, index) => {
+      const name = member.name.trim();
+      if (!name) throw new Error('Member name cannot be empty');
+      const prev = existingByName.get(name.toLowerCase());
+      return {
+        name,
+        role: member.role?.trim() || undefined,
+        workflow: member.workflow?.trim() || undefined,
+        agentType: prev?.agentType ?? 'general-purpose',
+        color: prev?.color ?? getMemberColor(index),
+        joinedAt: prev?.joinedAt ?? joinedAt,
+      };
+    });
+    await this.membersMetaStore.writeMembers(teamName, newMembers);
+  }
+
   async removeMember(teamName: string, memberName: string): Promise<void> {
     const members = await this.membersMetaStore.getMembers(teamName);
     const member = members.find((m) => m.name === memberName);

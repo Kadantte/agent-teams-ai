@@ -36,6 +36,7 @@ import type {
   LeadActivityState,
   MemberFullStats,
   MemberLogSummary,
+  ReplaceMembersRequest,
   SendMessageRequest,
   SendMessageResult,
   TaskComment,
@@ -440,6 +441,7 @@ export interface TeamsAPI {
   getAllTasks: () => Promise<GlobalTask[]>;
   updateConfig: (teamName: string, updates: TeamUpdateConfigRequest) => Promise<TeamConfig>;
   addMember: (teamName: string, request: AddMemberRequest) => Promise<void>;
+  replaceMembers: (teamName: string, request: ReplaceMembersRequest) => Promise<void>;
   removeMember: (teamName: string, memberName: string) => Promise<void>;
   updateMemberRole: (
     teamName: string,

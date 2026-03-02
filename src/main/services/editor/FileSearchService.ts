@@ -10,6 +10,7 @@ import { createLogger } from '@shared/utils/logger';
 import * as fs from 'fs/promises';
 import { isBinaryFile } from 'isbinaryfile';
 import * as path from 'path';
+import { simpleGit } from 'simple-git';
 
 import type {
   SearchFileResult,
@@ -27,6 +28,7 @@ const MAX_FILE_SIZE = 1024 * 1024; // 1 MB
 const DEFAULT_MAX_RESULT_FILES = 100;
 const DEFAULT_MAX_MATCHES = 500;
 const SEARCH_TIMEOUT_MS = 5000;
+const LIST_FILES_CACHE_TTL_MS = 5 * 60_000; // 5 minutes
 
 const IGNORED_DIRS = new Set([
   '.git',
@@ -52,6 +54,26 @@ const log = createLogger('FileSearchService');
 // =============================================================================
 
 export class FileSearchService {
+  // Cache for listFiles() — avoids repeated full project walks for @file mentions / Quick Open.
+  private listFilesCache = new Map<
+    string,
+    { files: { path: string; name: string; relativePath: string }[]; timestamp: number }
+  >();
+  private listFilesInFlight = new Map<
+    string,
+    Promise<{ path: string; name: string; relativePath: string }[]>
+  >();
+
+  invalidateListFilesCache(projectRoot?: string): void {
+    if (projectRoot) {
+      this.listFilesCache.delete(projectRoot);
+      this.listFilesInFlight.delete(projectRoot);
+      return;
+    }
+    this.listFilesCache.clear();
+    this.listFilesInFlight.clear();
+  }
+
   /**
    * List all files in the project recursively (for Quick Open).
    * Lightweight — no content reading, no binary checks, no stat.
@@ -61,9 +83,117 @@ export class FileSearchService {
     projectRoot: string,
     signal?: AbortSignal
   ): Promise<{ path: string; name: string; relativePath: string }[]> {
-    const files: { path: string; name: string; relativePath: string }[] = [];
-    await this.collectFilePaths(projectRoot, projectRoot, files, signal);
-    return files;
+    if (signal?.aborted) return [];
+
+    const cached = this.listFilesCache.get(projectRoot);
+    if (cached && Date.now() - cached.timestamp < LIST_FILES_CACHE_TTL_MS) {
+      log.info(`[perf] listFiles: cache hit (${cached.files.length} files)`);
+      return cached.files;
+    }
+
+    const inFlight = this.listFilesInFlight.get(projectRoot);
+    if (inFlight) {
+      log.info('[perf] listFiles: awaiting in-flight scan');
+      return inFlight;
+    }
+
+    const promise = (async () => {
+      const t0 = performance.now();
+
+      // Prefer git for performance when available (large repos can take seconds with fs walk).
+      const gitFiles = await this.tryListFilesWithGit(projectRoot, signal);
+      const files =
+        gitFiles ??
+        (await (async () => {
+          const next: { path: string; name: string; relativePath: string }[] = [];
+          await this.collectFilePaths(projectRoot, projectRoot, next, signal);
+          return next;
+        })());
+
+      const durationMs = performance.now() - t0;
+      log.info(`[perf] listFiles: ${durationMs.toFixed(1)}ms, files=${files.length}`);
+
+      // Cache the result (even if empty) to avoid repeated work.
+      this.listFilesCache.set(projectRoot, { files, timestamp: Date.now() });
+      return files;
+    })()
+      .catch((error) => {
+        // Do not cache failures; allow retry on next call.
+        log.warn(`listFiles failed: ${error instanceof Error ? error.message : String(error)}`);
+        throw error;
+      })
+      .finally(() => {
+        this.listFilesInFlight.delete(projectRoot);
+      });
+
+    this.listFilesInFlight.set(projectRoot, promise);
+    return promise;
+  }
+
+  private shouldIgnoreRelativePath(relativePath: string): boolean {
+    const parts = relativePath.split(/[\\/]/g).filter(Boolean);
+    for (const part of parts) {
+      if (IGNORED_DIRS.has(part)) return true;
+      if (part.startsWith('.')) return true;
+    }
+    return false;
+  }
+
+  private async tryListFilesWithGit(
+    projectRoot: string,
+    signal?: AbortSignal
+  ): Promise<{ path: string; name: string; relativePath: string }[] | null> {
+    try {
+      // Fast pre-check to avoid spawning git for non-repos.
+      await fs.access(path.join(projectRoot, '.git'));
+    } catch {
+      return null;
+    }
+
+    try {
+      const git = simpleGit({
+        baseDir: projectRoot,
+        timeout: { block: 10_000 },
+      }).env('GIT_OPTIONAL_LOCKS', '0');
+
+      // Include tracked + untracked (excluding ignored) for better UX.
+      // Use -z for safe parsing of filenames.
+      const output = await git.raw([
+        'ls-files',
+        '-z',
+        '--cached',
+        '--others',
+        '--exclude-standard',
+      ]);
+      if (signal?.aborted) return [];
+
+      const relPaths = output.split('\0').filter(Boolean);
+      const files: { path: string; name: string; relativePath: string }[] = [];
+
+      for (const rel of relPaths) {
+        if (signal?.aborted || files.length >= MAX_FILES) break;
+        if (!rel) continue;
+        if (this.shouldIgnoreRelativePath(rel)) continue;
+
+        const fullPath = path.resolve(projectRoot, rel);
+        if (!isPathWithinRoot(fullPath, projectRoot)) continue;
+        if (isGitInternalPath(fullPath)) continue;
+
+        files.push({ path: fullPath, name: path.basename(rel), relativePath: rel });
+      }
+
+      // Stable ordering for UI (cheap at <= MAX_FILES)
+      files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+      return files;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('not a git repository')) {
+        return null;
+      }
+      // Unexpected git error — fall back to fs traversal.
+      log.warn(`git listFiles failed, falling back to fs: ${message}`);
+      return null;
+    }
   }
 
   /**
