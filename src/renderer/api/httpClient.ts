@@ -63,7 +63,7 @@ import type {
   WslClaudeRootCandidate,
 } from '@shared/types';
 import type { AgentConfig } from '@shared/types/api';
-import type { EditorAPI } from '@shared/types/editor';
+import type { EditorAPI, ProjectAPI } from '@shared/types/editor';
 import type { TerminalAPI } from '@shared/types/terminal';
 
 export class HttpAPIClient implements ElectronAPI {
@@ -936,6 +936,16 @@ export class HttpAPIClient implements ElectronAPI {
     kill: () => {},
     onData: (): (() => void) => () => {},
     onExit: (): (() => void) => () => {},
+  };
+
+  // ---------------------------------------------------------------------------
+  // Project (not available in browser mode)
+  // ---------------------------------------------------------------------------
+
+  project: ProjectAPI = {
+    listFiles: async () => {
+      throw new Error('Project API not available in browser mode');
+    },
   };
 
   // ---------------------------------------------------------------------------

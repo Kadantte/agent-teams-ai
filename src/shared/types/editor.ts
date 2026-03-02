@@ -211,6 +211,11 @@ export interface EditorAPI {
   onEditorChange: (callback: (event: EditorFileChangeEvent) => void) => () => void;
 }
 
+/** Editor-independent project file operations (e.g. @file mentions). */
+export interface ProjectAPI {
+  listFiles: (projectPath: string) => Promise<QuickOpenFile[]>;
+}
+
 // =============================================================================
 // Binary Preview
 // =============================================================================

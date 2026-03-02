@@ -8,15 +8,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useStore } from '@renderer/store';
-import { getQuickOpenCache, setQuickOpenCache } from '@renderer/utils/quickOpenCache';
 import { Command } from 'cmdk';
 import { Loader2 } from 'lucide-react';
 
-import { FileIcon } from './FileIcon';
+import { getFileIcon } from './fileIcons';
 
 import type { QuickOpenFile } from '@shared/types/editor';
-
-const MAX_RENDERED = 100;
 
 // =============================================================================
 // Types
@@ -40,46 +37,29 @@ export const QuickOpenDialog = ({
   const [allFiles, setAllFiles] = useState<QuickOpenFile[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Reset state when projectPath changes (React-approved setState-during-render pattern)
+  // Reset loading state when projectPath changes (React-recommended
+  // "adjusting state when props change" pattern without effects or refs)
   const [prevProjectPath, setPrevProjectPath] = useState(projectPath);
   if (prevProjectPath !== projectPath) {
     setPrevProjectPath(projectPath);
     setLoading(true);
-    setAllFiles([]);
   }
 
-  // Load all project files via backend API (with module-level cache)
+  // Load all project files on mount via backend API
   useEffect(() => {
     let cancelled = false;
 
-    // Use cache if fresh and for the same project
-    const cached = projectPath ? getQuickOpenCache(projectPath) : null;
-    if (cached) {
-      // Defer setState to avoid cascading render within the same effect cycle
-      queueMicrotask(() => {
-        if (cancelled) return;
-        setAllFiles(cached.files);
-        setLoading(false);
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const fetchFiles = async (): Promise<void> => {
-      try {
-        const files = await window.electronAPI.editor.listFiles();
+    window.electronAPI.editor
+      .listFiles()
+      .then((files) => {
         if (!cancelled) {
-          if (projectPath) setQuickOpenCache(projectPath, files);
           setAllFiles(files);
           setLoading(false);
         }
-      } catch {
+      })
+      .catch(() => {
         if (!cancelled) setLoading(false);
-      }
-    };
-
-    void fetchFiles();
+      });
 
     return () => {
       cancelled = true;
@@ -115,24 +95,15 @@ export const QuickOpenDialog = ({
     [allFiles, onSelectFile, onClose]
   );
 
-  const [search, setSearch] = useState('');
-
-  const filteredFiles = useMemo(() => {
-    if (!search.trim()) return allFiles.slice(0, MAX_RENDERED);
-    const q = search.toLowerCase();
-    const matches: QuickOpenFile[] = [];
-    for (const file of allFiles) {
-      if (file.relativePath.toLowerCase().includes(q)) {
-        matches.push(file);
-        if (matches.length >= MAX_RENDERED) break;
-      }
-    }
-    return matches;
-  }, [allFiles, search]);
-
-  const hasMore = !search.trim()
-    ? allFiles.length > MAX_RENDERED
-    : filteredFiles.length >= MAX_RENDERED;
+  // Memoize file icon lookups
+  const fileItems = useMemo(
+    () =>
+      allFiles.map((file) => ({
+        ...file,
+        iconInfo: getFileIcon(file.name),
+      })),
+    [allFiles]
+  );
 
   return (
     <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]">
@@ -154,10 +125,8 @@ export const QuickOpenDialog = ({
         aria-label="Quick Open"
         className="relative z-10 w-[520px] overflow-hidden rounded-lg border border-border-emphasis bg-surface shadow-2xl"
       >
-        <Command label="Quick Open" shouldFilter={false}>
+        <Command label="Quick Open" shouldFilter={true}>
           <Command.Input
-            value={search}
-            onValueChange={setSearch}
             placeholder="Search files by name..."
             className="w-full border-b border-border bg-transparent px-4 py-3 text-sm text-text outline-none placeholder:text-text-muted"
             autoFocus
@@ -169,10 +138,13 @@ export const QuickOpenDialog = ({
                 <span>Loading files...</span>
               </div>
             )}
-            {!loading && filteredFiles.length === 0 && (
-              <div className="p-6 text-center text-sm text-text-muted">No files found</div>
+            {!loading && (
+              <Command.Empty className="p-6 text-center text-sm text-text-muted">
+                No files found
+              </Command.Empty>
             )}
-            {filteredFiles.map((file) => {
+            {fileItems.map((file) => {
+              const Icon = file.iconInfo.icon;
               return (
                 <Command.Item
                   key={file.path}
@@ -180,7 +152,7 @@ export const QuickOpenDialog = ({
                   onSelect={() => handleSelect(file.relativePath)}
                   className="flex cursor-pointer items-center gap-2 rounded px-3 py-1.5 text-sm text-text-secondary aria-selected:bg-surface-raised aria-selected:text-text"
                 >
-                  <FileIcon fileName={file.name} className="size-4" />
+                  <Icon className="size-4 shrink-0" style={{ color: file.iconInfo.color }} />
                   <span className="truncate font-medium">{file.name}</span>
                   <span className="ml-auto truncate text-xs text-text-muted">
                     {file.relativePath}
@@ -188,13 +160,6 @@ export const QuickOpenDialog = ({
                 </Command.Item>
               );
             })}
-            {hasMore && (
-              <div className="p-2 text-center text-xs text-text-muted">
-                {search
-                  ? 'Refine search to see more...'
-                  : `Type to search ${allFiles.length} files...`}
-              </div>
-            )}
           </Command.List>
         </Command>
       </div>

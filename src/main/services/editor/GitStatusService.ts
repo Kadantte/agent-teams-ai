@@ -30,6 +30,8 @@ const GIT_STATUS_ARGS: string[] = ['--untracked-files=no'];
 export class GitStatusService {
   private git: SimpleGit | null = null;
   private projectRoot: string | null = null;
+  /** Set to true when we confirm the project is not a git repo — skip all future git calls. */
+  private notAGitRepo = false;
 
   // Cache
   private cachedResult: GitStatusResult | null = null;
@@ -42,6 +44,7 @@ export class GitStatusService {
    */
   init(projectRoot: string): void {
     this.projectRoot = projectRoot;
+    this.notAGitRepo = false;
     this.git = simpleGit({
       baseDir: projectRoot,
       timeout: { block: GIT_TIMEOUT_MS },
@@ -56,6 +59,7 @@ export class GitStatusService {
     this.clearDebounceTimer();
     this.git = null;
     this.projectRoot = null;
+    this.notAGitRepo = false;
     this.cachedResult = null;
     this.cacheTimestamp = 0;
   }
@@ -89,8 +93,10 @@ export class GitStatusService {
    * Returns cached result if within TTL.
    */
   async getStatus(): Promise<GitStatusResult> {
-    if (!this.git || !this.projectRoot) {
-      return { files: [], isGitRepo: false, branch: null };
+    const notGitResult: GitStatusResult = { files: [], isGitRepo: false, branch: null };
+
+    if (!this.git || !this.projectRoot || this.notAGitRepo) {
+      return notGitResult;
     }
 
     // Flush pending debounced invalidation — when data is actually requested,
@@ -121,11 +127,20 @@ export class GitStatusService {
       this.setCacheResult(result);
       return result;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message.includes('not a git repository')) {
+        // Expected condition — project is not a git repo. Stop all future git calls
+        // until init() is called again with a different project.
+        log.info('Project is not a git repository, disabling git status');
+        this.notAGitRepo = true;
+        return notGitResult;
+      }
+
       log.error('Failed to get git status:', error);
-      // Graceful degradation: cache negative result to avoid repeated git calls
-      const result: GitStatusResult = { files: [], isGitRepo: false, branch: null };
-      this.setCacheResult(result);
-      return result;
+      // Transient error — cache negative result to avoid hammering git, but allow retry after TTL
+      this.setCacheResult(notGitResult);
+      return notGitResult;
     }
   }
 

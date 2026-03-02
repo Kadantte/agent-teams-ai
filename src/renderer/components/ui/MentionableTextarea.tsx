@@ -1,10 +1,12 @@
 import * as React from 'react';
 
 import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { useFileSuggestions } from '@renderer/hooks/useFileSuggestions';
 import { useMentionDetection } from '@renderer/hooks/useMentionDetection';
 import { cn } from '@renderer/lib/utils';
 import { chipToken } from '@renderer/types/inlineChip';
 import {
+  createChipFromSelection,
   findChipBoundary,
   reconcileChips,
   removeChipTokenFromText,
@@ -198,6 +200,10 @@ interface MentionableTextareaProps extends Omit<
   chips?: InlineChip[];
   /** Called when a chip is removed (by X button, backspace, or reconciliation) */
   onChipRemove?: (chipId: string) => void;
+  /** Project path for @file search. When provided, enables file suggestions alongside members. */
+  projectPath?: string | null;
+  /** Called when a file chip is created via @ selection. Parent must add chip to state. */
+  onFileChipInsert?: (chip: InlineChip) => void;
 }
 
 export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, MentionableTextareaProps>(
@@ -206,12 +212,14 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       value,
       onValueChange,
       suggestions,
-      hintText = 'Use @ to mention team members',
+      hintText,
       showHint = true,
       footerRight,
       cornerAction,
       chips = [],
       onChipRemove,
+      projectPath,
+      onFileChipInsert,
       style,
       className,
       ...textareaProps
@@ -221,6 +229,9 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
     const internalRef = React.useRef<HTMLTextAreaElement | null>(null);
     const backdropRef = React.useRef<HTMLDivElement>(null);
     const [scrollTop, setScrollTop] = React.useState(0);
+
+    // --- File search activation ---
+    const enableFiles = !!projectPath;
 
     const setRefs = React.useCallback(
       (node: HTMLTextAreaElement | null) => {
@@ -238,10 +249,12 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
     const {
       isOpen,
       query,
-      filteredSuggestions,
+      filteredSuggestions: memberSuggestions,
       selectedIndex,
       dropdownPosition,
       selectSuggestion,
+      dismiss,
+      triggerIndex,
       handleKeyDown: mentionHandleKeyDown,
       handleChange: mentionHandleChange,
       handleSelect: mentionHandleSelect,
@@ -250,7 +263,104 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       value,
       onValueChange,
       textareaRef: internalRef,
+      enableTriggerAlways: enableFiles,
     });
+
+    // --- File suggestions ---
+    const fileSuggestions = useFileSuggestions(
+      enableFiles ? projectPath : null,
+      query,
+      isOpen && enableFiles
+    );
+
+    // Merged suggestion list: members first, then files
+    const allSuggestions = React.useMemo(() => {
+      if (!enableFiles) return memberSuggestions;
+      if (fileSuggestions.length === 0) return memberSuggestions;
+      return [...memberSuggestions, ...fileSuggestions];
+    }, [enableFiles, memberSuggestions, fileSuggestions]);
+
+    // When files are enabled, manage our own selectedIndex for the merged list
+    const [mergedIndex, setMergedIndex] = React.useState(0);
+
+    // Reset merged index when suggestions change or query changes
+    React.useEffect(() => {
+      setMergedIndex(0);
+    }, [query, allSuggestions.length]);
+
+    // Effective index: use merged when files enabled, hook's index otherwise
+    const effectiveIndex = enableFiles ? mergedIndex : selectedIndex;
+    const effectiveSuggestions = enableFiles ? allSuggestions : memberSuggestions;
+
+    // --- File selection handler ---
+    const handleFileSelect = React.useCallback(
+      (s: MentionSuggestion) => {
+        const textarea = internalRef.current;
+        if (!textarea || triggerIndex < 0 || !s.filePath) return;
+
+        const replaceStart = triggerIndex;
+        const replaceEnd = triggerIndex + 1 + query.length;
+        const before = value.slice(0, replaceStart);
+        const after = value.slice(replaceEnd);
+
+        if (onFileChipInsert && onChipRemove) {
+          // Chip mode: create InlineChip and insert chip token
+          const chip = createChipFromSelection(
+            {
+              type: 'sendMessage',
+              filePath: s.filePath,
+              fromLine: null,
+              toLine: null,
+              selectedText: '',
+              formattedContext: '',
+              displayPath: s.relativePath,
+            },
+            chips
+          );
+
+          if (chip) {
+            const token = chipToken(chip);
+            const newValue = before + token + after;
+            onValueChange(newValue);
+            onFileChipInsert(chip);
+            dismiss();
+
+            requestAnimationFrame(() => {
+              const cursor = before.length + token.length;
+              textarea.setSelectionRange(cursor, cursor);
+            });
+          } else {
+            // Duplicate chip — just dismiss
+            dismiss();
+          }
+        } else {
+          // Text mode: insert backtick-wrapped relative path
+          const displayPath = s.relativePath ?? s.name;
+          const insertion = `\`${displayPath}\` `;
+          const newValue = before + insertion + after;
+          onValueChange(newValue);
+          dismiss();
+
+          requestAnimationFrame(() => {
+            const cursor = before.length + insertion.length;
+            textarea.setSelectionRange(cursor, cursor);
+          });
+        }
+      },
+      [triggerIndex, query, value, chips, onValueChange, onFileChipInsert, onChipRemove, dismiss]
+    );
+
+    // --- Merged selection handler ---
+    const handleMergedSelect = React.useCallback(
+      (s: MentionSuggestion) => {
+        if (s.type === 'file') {
+          handleFileSelect(s);
+        } else {
+          selectSuggestion(s);
+        }
+      },
+      [handleFileSelect, selectSuggestion]
+    );
 
     // Sync backdrop font with textarea computed font to prevent caret drift.
     React.useLayoutEffect(() => {
@@ -357,15 +467,48 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       [chips, onChipRemove, value, onValueChange]
     );
 
-    // Composed key handler: chip logic → mention logic
+    // --- File-aware keyboard handler (replaces mention handler when files enabled) ---
+    const fileMentionHandleKeyDown = React.useCallback(
+      (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (!isOpen || allSuggestions.length === 0) return;
+
+        switch (e.key) {
+          case 'ArrowDown':
+            e.preventDefault();
+            setMergedIndex((prev) => (prev + 1) % allSuggestions.length);
+            break;
+          case 'ArrowUp':
+            e.preventDefault();
+            setMergedIndex((prev) => (prev - 1 + allSuggestions.length) % allSuggestions.length);
+            break;
+          case 'Enter':
+            e.preventDefault();
+            if (allSuggestions[mergedIndex]) {
+              handleMergedSelect(allSuggestions[mergedIndex]);
+            }
+            break;
+          case 'Escape':
+            e.preventDefault();
+            dismiss();
+            break;
+        }
+      },
+      [isOpen, allSuggestions, mergedIndex, handleMergedSelect, dismiss]
+    );
+
+    // Composed key handler: chip logic → (file-aware OR original) mention logic
     const composedHandleKeyDown = React.useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         handleChipKeyDown(e);
         if (!e.defaultPrevented) {
-          mentionHandleKeyDown(e);
+          if (enableFiles) {
+            fileMentionHandleKeyDown(e);
+          } else {
+            mentionHandleKeyDown(e);
+          }
         }
       },
-      [handleChipKeyDown, mentionHandleKeyDown]
+      [handleChipKeyDown, enableFiles, fileMentionHandleKeyDown, mentionHandleKeyDown]
     );
 
     // --- Chip reconciliation on text change ---
@@ -442,7 +585,13 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
         }
       : style;
 
-    const showFooter = (showHint && suggestions.length > 0) || footerRight;
+    // --- Hint text ---
+    const defaultHintText = enableFiles
+      ? 'Use @ to mention team members or search files'
+      : 'Use @ to mention team members';
+    const resolvedHintText = hintText ?? defaultHintText;
+    const showHintRow = showHint && (suggestions.length > 0 || enableFiles);
+    const showFooter = showHintRow || footerRight;
 
     return (
       <div className="relative">
@@ -523,8 +672,8 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
 
         {showFooter ? (
           <div className="mt-1 flex items-center justify-between">
-            {showHint && suggestions.length > 0 ? (
-              <span className="text-[10px] text-[var(--color-text-muted)]">{hintText}</span>
+            {showHintRow ? (
+              <span className="text-[10px] text-[var(--color-text-muted)]">{resolvedHintText}</span>
             ) : (
               <span />
             )}
@@ -534,10 +683,11 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
         {isOpen && dropdownPosition ? (
           <div className="absolute left-0 z-50 w-full" style={{ top: `${dropdownPosition.top}px` }}>
             <MentionSuggestionList
-              suggestions={filteredSuggestions}
-              selectedIndex={selectedIndex}
-              onSelect={selectSuggestion}
+              suggestions={effectiveSuggestions}
+              selectedIndex={effectiveIndex}
+              onSelect={enableFiles ? handleMergedSelect : selectSuggestion}
               query={query}
+              hasFileSearch={enableFiles}
             />
           </div>
         ) : null}

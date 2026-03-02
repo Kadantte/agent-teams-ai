@@ -7,6 +7,8 @@ interface UseMentionDetectionOptions {
   value: string;
   onValueChange: (v: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  /** When true, detect @-trigger even if suggestions list is empty (e.g. for file-only search) */
+  enableTriggerAlways?: boolean;
 }
 
 export interface DropdownPosition {
@@ -25,6 +27,8 @@ interface UseMentionDetectionResult {
   handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   handleChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   handleSelect: (e: React.SyntheticEvent<HTMLTextAreaElement>) => void;
+  /** Current @-trigger character position in text (-1 if no active trigger) */
+  triggerIndex: number;
 }
 
 interface MentionTrigger {
@@ -154,6 +158,7 @@ export function useMentionDetection({
   value,
   onValueChange,
   textareaRef,
+  enableTriggerAlways,
 }: UseMentionDetectionOptions): UseMentionDetectionResult {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -215,7 +220,7 @@ export function useMentionDetection({
   const detectTrigger = useCallback(
     (cursorPos: number) => {
       const trigger = findMentionTrigger(value, cursorPos);
-      if (trigger && suggestions.length > 0) {
+      if (trigger && (suggestions.length > 0 || enableTriggerAlways)) {
         triggerIndexRef.current = trigger.triggerIndex;
         setQuery(trigger.query);
         setIsOpen(true);
@@ -225,7 +230,7 @@ export function useMentionDetection({
         dismiss();
       }
     },
-    [value, suggestions.length, dismiss, computeDropdownPosition]
+    [value, suggestions.length, enableTriggerAlways, dismiss, computeDropdownPosition]
   );
 
   const handleChange = useCallback(
@@ -236,7 +241,7 @@ export function useMentionDetection({
       // Detect trigger based on cursor position after the change
       const cursorPos = e.target.selectionStart;
       const trigger = findMentionTrigger(newValue, cursorPos);
-      if (trigger && suggestions.length > 0) {
+      if (trigger && (suggestions.length > 0 || enableTriggerAlways)) {
         triggerIndexRef.current = trigger.triggerIndex;
         setQuery(trigger.query);
         setIsOpen(true);
@@ -246,7 +251,7 @@ export function useMentionDetection({
         dismiss();
       }
     },
-    [onValueChange, suggestions.length, dismiss, computeDropdownPosition]
+    [onValueChange, suggestions.length, enableTriggerAlways, dismiss, computeDropdownPosition]
   );
 
   const handleSelect = useCallback(
@@ -296,5 +301,7 @@ export function useMentionDetection({
     handleKeyDown,
     handleChange,
     handleSelect,
+    // eslint-disable-next-line react-hooks/refs -- expose current trigger position to caller
+    triggerIndex: triggerIndexRef.current,
   };
 }

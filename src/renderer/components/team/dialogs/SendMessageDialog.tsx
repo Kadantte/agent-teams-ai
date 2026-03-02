@@ -24,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
+import { useStore } from '@renderer/store';
 import { chipToken, serializeChipsWithText } from '@renderer/types/inlineChip';
 import { buildReplyBlock } from '@renderer/utils/agentMessageFormatting';
 import { removeChipTokenFromText } from '@renderer/utils/chipUtils';
@@ -74,6 +75,7 @@ export const SendMessageDialog = ({
   onClose,
 }: SendMessageDialogProps): React.JSX.Element => {
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
+  const projectPath = useStore((s) => s.selectedTeamData?.config.projectPath ?? null);
   const [quote, setQuote] = useState<QuotedMessage | undefined>(undefined);
   const [quoteExpanded, setQuoteExpanded] = useState(false);
   const [member, setMember] = useState('');
@@ -268,6 +270,8 @@ export const SendMessageDialog = ({
                 suggestions={mentionSuggestions}
                 chips={chipDraft.chips}
                 onChipRemove={handleChipRemove}
+                projectPath={projectPath}
+                onFileChipInsert={(chip) => chipDraft.setChips([...chipDraft.chips, chip])}
                 minRows={4}
                 maxRows={12}
                 footerRight={

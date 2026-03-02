@@ -10,6 +10,7 @@ import { useAttachments } from '@renderer/hooks/useAttachments';
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { cn } from '@renderer/lib/utils';
+import { useStore } from '@renderer/store';
 import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { removeChipTokenFromText } from '@renderer/utils/chipUtils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
@@ -53,6 +54,7 @@ export const MessageComposer = ({
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const projectPath = useStore((s) => s.selectedTeamData?.config.projectPath ?? null);
   const draft = useDraftPersistence({ key: `compose:${teamName}` });
   const chipDraft = useChipDraftPersistence(`compose:${teamName}:chips`);
   const {
@@ -324,6 +326,8 @@ export const MessageComposer = ({
         suggestions={mentionSuggestions}
         chips={chipDraft.chips}
         onChipRemove={handleChipRemove}
+        projectPath={projectPath}
+        onFileChipInsert={(chip) => chipDraft.setChips([...chipDraft.chips, chip])}
         minRows={2}
         maxRows={6}
         maxLength={MAX_MESSAGE_LENGTH}

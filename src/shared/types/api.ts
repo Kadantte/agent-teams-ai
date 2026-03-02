@@ -8,7 +8,7 @@
  */
 
 import type { CliInstallerAPI } from './cliInstaller';
-import type { EditorAPI } from './editor';
+import type { EditorAPI, ProjectAPI } from './editor';
 import type {
   AppConfig,
   DetectedError,
@@ -677,6 +677,9 @@ export interface ElectronAPI {
 
   // Embedded Terminal API (xterm.js + node-pty)
   terminal: TerminalAPI;
+
+  // Project file operations (editor-independent)
+  project: ProjectAPI;
 
   // Project Editor API (file browser + CodeMirror)
   editor: EditorAPI;

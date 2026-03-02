@@ -449,11 +449,18 @@ export const ChangeReviewDialog = ({
     });
   }, [activeChangeSet, initialFilePath, scrollToFile]);
 
-  // Clear selection state on close + cleanup timer.
-  // setState here is intentional: reset transient UI state when dialog closes.
-  useEffect(() => {
+  // Clear selection state on close (React-approved setState-during-render pattern)
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
     if (!open) {
       setSelectionInfo(null);
+    }
+  }
+
+  // Cleanup refs/timers on close
+  useEffect(() => {
+    if (!open) {
       activeSelectionFileRef.current = null;
       if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
     }

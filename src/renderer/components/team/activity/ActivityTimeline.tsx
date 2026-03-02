@@ -210,7 +210,7 @@ export const ActivityTimeline = ({
     }
     return newKeys;
   }, [visibleMessages, visibleCount]);
-  /* eslint-enable react-hooks/refs */
+  /* eslint-enable react-hooks/refs -- end animation tracking block */
 
   const handleShowMore = (): void => {
     setVisibleCount((prev) => prev + MESSAGES_PAGE_SIZE);

@@ -364,6 +364,7 @@ export const LaunchTeamDialog = ({
               value={promptDraft.value}
               onValueChange={promptDraft.setValue}
               suggestions={mentionSuggestions}
+              projectPath={effectiveCwd || null}
               placeholder="Instructions for team lead... Use @ to mention team members."
               footerRight={
                 promptDraft.isSaved ? (

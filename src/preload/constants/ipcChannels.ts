@@ -469,3 +469,6 @@ export const EDITOR_READ_BINARY_PREVIEW = 'editor:readBinaryPreview';
 
 /** File change event from watcher (main -> renderer) */
 export const EDITOR_CHANGE = 'editor:change';
+
+/** List project files by path (for @file mentions, independent of editor state) */
+export const PROJECT_LIST_FILES = 'project:listFiles';

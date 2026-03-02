@@ -1,10 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
 import { ReplyQuoteBlock } from '@renderer/components/team/activity/ReplyQuoteBlock';
-import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
+import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useMarkCommentsRead } from '@renderer/hooks/useMarkCommentsRead';
 import { useStore } from '@renderer/store';
@@ -14,16 +14,7 @@ import { getModifierKeyName } from '@renderer/utils/keyboardUtils';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { formatDistanceToNow } from 'date-fns';
-import {
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  MessageCircleWarning,
-  MessageSquare,
-  Reply,
-  Send,
-  X,
-} from 'lucide-react';
+import { ChevronDown, ChevronUp, MessageSquare, Reply, Send, X } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
 import type { ResolvedTeamMember, TaskComment } from '@shared/types';
@@ -63,23 +54,15 @@ export const TaskCommentsSection = ({
   const [expandedCommentIds, setExpandedCommentIds] = useState<Set<string>>(new Set());
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COMMENTS);
 
-  // Reset state when task changes (React-approved setState-during-render pattern)
-  const resetKey = teamIdKey(teamName, taskId);
-  const [prevResetKey, setPrevResetKey] = useState(resetKey);
-
-  // --- New-comment animation tracking (refs only, useMemo is after visibleComments) ---
-  const knownCommentIdsRef = useRef<Set<string>>(new Set());
-  const isCommentsInitializedRef = useRef(false);
-  const prevVisibleCountRef = useRef(visibleCount);
-
-  /* eslint-disable react-hooks/refs -- intentional ref access during render for animation tracking */
-  if (prevResetKey !== resetKey) {
-    setPrevResetKey(resetKey);
+  // Reset local state when team/task changes (React-recommended pattern for
+  // adjusting state based on props without using effects or refs during render)
+  const currentKey = teamIdKey(teamName, taskId);
+  const [prevKey, setPrevKey] = useState(currentKey);
+  if (prevKey !== currentKey) {
+    setPrevKey(currentKey);
     setVisibleCount(INITIAL_VISIBLE_COMMENTS);
     setExpandedCommentIds(new Set());
     setReplyTo(null);
-    knownCommentIdsRef.current.clear();
-    isCommentsInitializedRef.current = false;
   }
 
   const toggleCommentExpanded = useCallback((commentId: string) => {
@@ -111,46 +94,6 @@ export const TaskCommentsSection = ({
     () => sortedComments.slice(0, Math.min(visibleCount, sortedComments.length)),
     [sortedComments, visibleCount]
   );
-
-  const newCommentIds = useMemo(() => {
-    if (visibleComments.length === 0) {
-      knownCommentIdsRef.current.clear();
-      isCommentsInitializedRef.current = false;
-      return new Set<string>();
-    }
-
-    // First render: seed all known IDs, no animations
-    if (!isCommentsInitializedRef.current) {
-      isCommentsInitializedRef.current = true;
-      for (const c of visibleComments) {
-        knownCommentIdsRef.current.add(c.id);
-      }
-      prevVisibleCountRef.current = visibleCount;
-      return new Set<string>();
-    }
-
-    // Pagination expansion ("Show more"): add IDs silently, no animations
-    const isPaginationExpansion = visibleCount > prevVisibleCountRef.current;
-    prevVisibleCountRef.current = visibleCount;
-
-    if (isPaginationExpansion) {
-      for (const c of visibleComments) {
-        knownCommentIdsRef.current.add(c.id);
-      }
-      return new Set<string>();
-    }
-
-    // Normal update: unknown IDs are new comments
-    const newIds = new Set<string>();
-    for (const c of visibleComments) {
-      if (!knownCommentIdsRef.current.has(c.id)) {
-        newIds.add(c.id);
-        knownCommentIdsRef.current.add(c.id);
-      }
-    }
-    return newIds;
-  }, [visibleComments, visibleCount]);
-  /* eslint-enable react-hooks/refs */
 
   const mentionSuggestions = useMemo<MentionSuggestion[]>(
     () =>
@@ -203,34 +146,19 @@ export const TaskCommentsSection = ({
           ) : null}
 
           {visibleComments.map((comment) => (
-            <div
-              key={comment.id}
-              className={`group rounded-md p-2.5 ${newCommentIds.has(comment.id) ? 'message-enter-animate' : ''} ${
-                comment.type === 'review_approved'
-                  ? 'bg-emerald-500/8 border border-emerald-500/15'
-                  : comment.type === 'review_request'
-                    ? 'bg-amber-500/8 border border-amber-500/15'
-                    : ''
-              }`}
-            >
+            <div key={comment.id} className="group p-2.5">
               <div className="mb-1 flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
-                {comment.type === 'review_approved' && (
-                  <CheckCircle2 size={12} className="shrink-0 text-emerald-400" />
-                )}
-                {comment.type === 'review_request' && (
-                  <MessageCircleWarning size={12} className="shrink-0 text-amber-400" />
-                )}
-                <MemberBadge name={comment.author} color={colorMap.get(comment.author)} />
-                {comment.type === 'review_approved' && (
-                  <span className="rounded-full bg-emerald-500/15 px-1.5 py-px text-[9px] font-medium text-emerald-400">
-                    Approved
-                  </span>
-                )}
-                {comment.type === 'review_request' && (
-                  <span className="rounded-full bg-amber-500/15 px-1.5 py-px text-[9px] font-medium text-amber-400">
-                    Changes requested
-                  </span>
-                )}
+                <span
+                  className="font-medium"
+                  style={{
+                    color: (() => {
+                      const rc = colorMap.get(comment.author);
+                      return rc ? getTeamColorSet(rc).text : 'var(--color-text-secondary)';
+                    })(),
+                  }}
+                >
+                  {comment.author}
+                </span>
                 <span>
                   {(() => {
                     const date = new Date(comment.createdAt);
@@ -362,9 +290,19 @@ export const TaskCommentsSection = ({
           {replyTo ? (
             <div className="mb-2 flex items-start gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-2">
               <div className="min-w-0 flex-1">
-                <div className="mb-0.5 flex items-center gap-1.5 text-[10px] font-medium text-[var(--color-text-muted)]">
-                  Replying to
-                  <MemberBadge name={replyTo.author} color={colorMap.get(replyTo.author)} />
+                <div className="mb-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
+                  Replying to{' '}
+                  <span
+                    className="font-semibold"
+                    style={{
+                      color: (() => {
+                        const rc = colorMap.get(replyTo.author);
+                        return rc ? getTeamColorSet(rc).text : 'var(--color-text-secondary)';
+                      })(),
+                    }}
+                  >
+                    @{replyTo.author}
+                  </span>
                 </div>
                 <div className="line-clamp-3 text-[11px] text-[var(--color-text-muted)]">
                   {replyTo.text}

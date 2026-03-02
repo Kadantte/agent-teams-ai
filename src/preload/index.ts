@@ -31,6 +31,7 @@ import {
   HTTP_SERVER_GET_STATUS,
   HTTP_SERVER_START,
   HTTP_SERVER_STOP,
+  PROJECT_LIST_FILES,
   REVIEW_APPLY_DECISIONS,
   REVIEW_CHECK_CONFLICT,
   REVIEW_CLEAR_DECISIONS,
@@ -1011,6 +1012,12 @@ const electronAPI: ElectronAPI = {
         );
       };
     },
+  },
+
+  // ===== Project API (editor-independent) =====
+  project: {
+    listFiles: (projectPath: string) =>
+      invokeIpcWithResult<QuickOpenFile[]>(PROJECT_LIST_FILES, projectPath),
   },
 
   // ===== Editor API =====

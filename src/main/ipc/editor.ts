@@ -26,6 +26,7 @@ import {
   EDITOR_SET_WATCHED_FILES,
   EDITOR_WATCH_DIR,
   EDITOR_WRITE_FILE,
+  PROJECT_LIST_FILES,
   // eslint-disable-next-line boundaries/element-types -- IPC channel constants are shared between main and preload by design
 } from '@preload/constants/ipcChannels';
 import { createLogger } from '@shared/utils/logger';
@@ -302,6 +303,24 @@ async function handleEditorListFiles(): Promise<IpcResult<QuickOpenFile[]>> {
 }
 
 /**
+ * List project files by explicit path (for @file mentions).
+ * Independent of editor state — works without editor:open.
+ */
+async function handleProjectListFiles(
+  _event: IpcMainInvokeEvent,
+  projectPath: string
+): Promise<IpcResult<QuickOpenFile[]>> {
+  return wrapHandler('project:listFiles', async () => {
+    if (typeof projectPath !== 'string' || projectPath.length === 0) {
+      throw new Error('projectPath is required');
+    }
+    const normalized = path.resolve(projectPath);
+    await fs.access(normalized);
+    return fileSearchService.listFiles(normalized);
+  });
+}
+
+/**
  * Get git status for current project (cached 5s).
  */
 async function handleEditorGitStatus(): Promise<IpcResult<GitStatusResult>> {
@@ -415,6 +434,7 @@ export function registerEditorHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(EDITOR_WATCH_DIR, handleEditorWatchDir);
   ipcMain.handle(EDITOR_SET_WATCHED_FILES, handleEditorSetWatchedFiles);
   ipcMain.handle(EDITOR_SET_WATCHED_DIRS, handleEditorSetWatchedDirs);
+  ipcMain.handle(PROJECT_LIST_FILES, handleProjectListFiles);
 }
 
 export function removeEditorHandlers(ipcMain: IpcMain): void {
@@ -435,6 +455,7 @@ export function removeEditorHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(EDITOR_WATCH_DIR);
   ipcMain.removeHandler(EDITOR_SET_WATCHED_FILES);
   ipcMain.removeHandler(EDITOR_SET_WATCHED_DIRS);
+  ipcMain.removeHandler(PROJECT_LIST_FILES);
 }
 
 /**

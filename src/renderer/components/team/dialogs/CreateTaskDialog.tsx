@@ -24,6 +24,7 @@ import {
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
+import { useStore } from '@renderer/store';
 import { chipToken, serializeChipsWithText } from '@renderer/types/inlineChip';
 import { removeChipTokenFromText } from '@renderer/utils/chipUtils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
@@ -74,6 +75,7 @@ export const CreateTaskDialog = ({
   submitting = false,
 }: CreateTaskDialogProps): React.JSX.Element => {
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
+  const projectPath = useStore((s) => s.selectedTeamData?.config.projectPath ?? null);
   const [subject, setSubject] = useState(defaultSubject);
   const descriptionDraft = useDraftPersistence({
     key: `createTask:${teamName}:description`,
@@ -265,6 +267,8 @@ export const CreateTaskDialog = ({
               suggestions={mentionSuggestions}
               chips={descChipDraft.chips}
               onChipRemove={handleDescChipRemove}
+              projectPath={projectPath}
+              onFileChipInsert={(chip) => descChipDraft.setChips([...descChipDraft.chips, chip])}
               minRows={3}
               maxRows={12}
               footerRight={
@@ -285,6 +289,7 @@ export const CreateTaskDialog = ({
               value={promptDraft.value}
               onValueChange={promptDraft.setValue}
               suggestions={mentionSuggestions}
+              projectPath={projectPath}
               minRows={3}
               maxRows={12}
               footerRight={
