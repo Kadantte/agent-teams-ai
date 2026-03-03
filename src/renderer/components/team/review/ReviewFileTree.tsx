@@ -158,6 +158,11 @@ const TreeItem = ({
         >
           {node.name}
         </span>
+        {node.data.isNewFile && (
+          <span className="shrink-0 rounded bg-green-500/20 px-1.5 py-0.5 text-[10px] font-medium text-green-400">
+            new
+          </span>
+        )}
         <span className="ml-1 flex shrink-0 items-center gap-1">
           {node.data.linesAdded > 0 && (
             <span className="text-green-400">+{node.data.linesAdded}</span>

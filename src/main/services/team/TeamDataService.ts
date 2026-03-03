@@ -914,11 +914,14 @@ export class TeamDataService {
     const comment = await this.taskWriter.addComment(teamName, taskId, text);
 
     try {
-      const [tasks, toolPath] = await Promise.all([
+      const [tasks, toolPath, config, metaMembers] = await Promise.all([
         this.taskReader.getTasks(teamName),
         this.toolsInstaller.ensureInstalled(),
+        this.configReader.getConfig(teamName).catch(() => null),
+        this.membersMetaStore.getMembers(teamName).catch(() => []),
       ]);
       const task = tasks.find((t) => t.id === taskId);
+      const leadName = this.resolveLeadNameFromConfig(config);
 
       // Auto-clear needsClarification: "user" on UI comment
       // UI comments always have author "user" (TeamTaskWriter default)
@@ -927,6 +930,15 @@ export class TeamDataService {
       }
 
       if (task?.owner) {
+        // Solo team UX: if the user comments on a lead-owned task, don't echo the
+        // comment back as an inbox notification from the lead. The comment is already visible.
+        if (
+          this.isSoloTeamFromMembers(config, metaMembers, leadName) &&
+          this.isLeadOwner(task.owner, leadName)
+        ) {
+          return comment;
+        }
+
         const parts = [
           `Comment on task #${taskId} "${task.subject}":\n\n${text}`,
           `\n${AGENT_BLOCK_OPEN}`,
@@ -934,7 +946,6 @@ export class TeamDataService {
           `node "${toolPath}" --team ${teamName} task comment ${taskId} --text "<your reply>" --from "<your-name>"`,
           AGENT_BLOCK_CLOSE,
         ];
-        const leadName = await this.resolveLeadName(teamName);
         await this.sendMessage(teamName, {
           member: task.owner,
           from: leadName,
@@ -953,15 +964,46 @@ export class TeamDataService {
     return this.inboxWriter.sendMessage(teamName, request);
   }
 
+  private resolveLeadNameFromConfig(config: TeamConfig | null): string {
+    if (!config) return 'team-lead';
+    const lead = config.members?.find((m) => m.role?.toLowerCase().includes('lead'));
+    return lead?.name ?? config.members?.[0]?.name ?? 'team-lead';
+  }
+
   private async resolveLeadName(teamName: string): Promise<string> {
     try {
       const config = await this.configReader.getConfig(teamName);
-      if (!config) return 'team-lead';
-      const lead = config.members?.find((m) => m.role?.toLowerCase().includes('lead'));
-      return lead?.name ?? config.members?.[0]?.name ?? 'team-lead';
+      return this.resolveLeadNameFromConfig(config);
     } catch {
       return 'team-lead';
     }
+  }
+
+  private isLeadOwner(owner: string, leadName: string): boolean {
+    const normalized = owner.trim();
+    if (!normalized) return false;
+    return normalized === leadName || normalized === 'team-lead';
+  }
+
+  private isSoloTeamFromMembers(
+    config: TeamConfig | null,
+    metaMembers: TeamMember[],
+    leadName: string
+  ): boolean {
+    const configMembers = config?.members ?? [];
+    const combined = [...configMembers, ...(metaMembers ?? [])];
+
+    const activeNonLead = combined.filter((m) => {
+      const name = m.name?.trim();
+      if (!name) return false;
+      if (m.removedAt) return false;
+      if (m.agentType === 'team-lead') return false;
+      if (name === 'team-lead') return false;
+      if (name === leadName) return false;
+      return true;
+    });
+
+    return activeNonLead.length === 0;
   }
 
   async sendDirectToLead(

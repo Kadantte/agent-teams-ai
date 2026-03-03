@@ -740,10 +740,10 @@ describe('teamctl.js', () => {
       expect(String(comments[0].createdAt)).toMatch(ISO_RE);
     });
 
-    it('defaults author to "agent" when --from is not specified', () => {
+    it('defaults author to inferred lead name when --from is not specified', () => {
       run(claudeDir, ['task', 'comment', '1', '--text', 'No author']);
       const comments = readTask(claudeDir, '1').comments as Record<string, unknown>[];
-      expect(comments[0].author).toBe('agent');
+      expect(comments[0].author).toBe('alice');
     });
 
     it('sends inbox notification to owner (skip self-notification)', () => {
@@ -1899,7 +1899,7 @@ describe('teamctl.js', () => {
       // from=true → not a string → defaults to 'agent'
       expect(exitCode).toBe(0);
       const comments = readTask(claudeDir, '1').comments as { author: string; text: string }[];
-      expect(comments[0].author).toBe('agent'); // not "--text"
+      expect(comments[0].author).toBe('alice'); // not "--text"
       expect(comments[0].text).toBe('Hello');
     });
 

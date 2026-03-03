@@ -60,11 +60,12 @@ export class WorktreeGrouper {
 
     await Promise.all(
       projects.map(async (project) => {
-        const identity = await gitIdentityResolver.resolveIdentity(project.path);
+        const normalizedProjectPath = path.normalize(project.path);
+        const identity = await gitIdentityResolver.resolveIdentity(normalizedProjectPath);
         projectIdentities.set(project.id, identity);
 
         // Also get branch name for display
-        const branch = await gitIdentityResolver.getBranch(project.path);
+        const branch = await gitIdentityResolver.getBranch(normalizedProjectPath);
         projectBranches.set(project.id, branch);
       })
     );
@@ -137,19 +138,18 @@ export class WorktreeGrouper {
     for (const [groupId, group] of repoGroups) {
       const worktrees: Worktree[] = await Promise.all(
         group.projects.map(async (project) => {
+          const normalizedProjectPath = path.normalize(project.path);
           const branch = group.branches.get(project.id) ?? null;
-          const isMainWorktree = !(await gitIdentityResolver.isWorktree(project.path));
+          const isMainWorktree = !(await gitIdentityResolver.isWorktree(normalizedProjectPath));
           // Use filtered sessions instead of raw sessions
           const filteredSessions = projectFilteredSessions.get(project.id) ?? [];
           // Detect worktree source for badge display
           // project.path may use forward slashes (e.g. decodePath() returns "C:/...").
           // detectWorktreeSource splits on path.sep, so normalize to the current platform first.
-          const source = await gitIdentityResolver.detectWorktreeSource(
-            path.normalize(project.path)
-          );
+          const source = await gitIdentityResolver.detectWorktreeSource(normalizedProjectPath);
           // Use source-aware display name generation
           const displayName = await gitIdentityResolver.getWorktreeDisplayName(
-            project.path,
+            normalizedProjectPath,
             source,
             branch,
             isMainWorktree

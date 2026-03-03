@@ -427,4 +427,50 @@ describe('TeamMemberLogsFinder', () => {
       true
     );
   });
+
+  it('findLogsForTask does not auto-include owner sessions when owner is team-lead', async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-team-task-lead-owner-'));
+    setClaudeBasePathOverride(tmpDir);
+
+    const teamName = 't6';
+    const projectPath = '/Users/test/proj6';
+    const projectId = '-Users-test-proj6';
+    const leadSessionId = 's6';
+
+    await fs.mkdir(path.join(tmpDir, 'teams', teamName), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, 'teams', teamName, 'config.json'),
+      JSON.stringify({
+        name: teamName,
+        projectPath,
+        leadSessionId,
+        members: [{ name: 'team-lead', agentType: 'team-lead' }],
+      }),
+      'utf8'
+    );
+
+    const projectRoot = path.join(tmpDir, 'projects', projectId);
+    await fs.mkdir(path.join(projectRoot, leadSessionId, 'subagents'), { recursive: true });
+
+    // Lead session exists but does NOT reference taskId 42.
+    await fs.writeFile(
+      path.join(projectRoot, `${leadSessionId}.jsonl`),
+      JSON.stringify({
+        timestamp: '2026-01-01T00:00:00.000Z',
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Hello' }] },
+      }) + '\n',
+      'utf8'
+    );
+
+    const finder = new TeamMemberLogsFinder();
+    const logs = await finder.findLogsForTask(teamName, '42', {
+      owner: 'team-lead',
+      status: 'in_progress',
+      intervals: [{ startedAt: '2026-01-01T10:00:00.000Z' }],
+    });
+
+    // We only want sessions that explicitly reference the task id.
+    expect(logs).toHaveLength(0);
+  });
 });

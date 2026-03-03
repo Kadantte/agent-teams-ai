@@ -426,20 +426,22 @@ export const CreateTeamDialog = ({
 
   const mentionSuggestions = useMemo<MentionSuggestion[]>(
     () =>
-      members
-        .filter((m) => m.name.trim())
-        .map((m, index) => ({
-          id: m.id,
-          name: m.name.trim(),
-          subtitle:
-            m.roleSelection === CUSTOM_ROLE
-              ? m.customRole.trim() || undefined
-              : m.roleSelection && m.roleSelection !== NO_ROLE
-                ? m.roleSelection
-                : undefined,
-          color: getMemberColor(index),
-        })),
-    [members]
+      soloTeam
+        ? [{ id: 'team-lead', name: 'team-lead', subtitle: 'Team Lead', color: 'blue' }]
+        : members
+            .filter((m) => m.name.trim())
+            .map((m, index) => ({
+              id: m.id,
+              name: m.name.trim(),
+              subtitle:
+                m.roleSelection === CUSTOM_ROLE
+                  ? m.customRole.trim() || undefined
+                  : m.roleSelection && m.roleSelection !== NO_ROLE
+                    ? m.roleSelection
+                    : undefined,
+              color: getMemberColor(index),
+            })),
+    [members, soloTeam]
   );
 
   const effectiveModel = useMemo(
@@ -711,7 +713,7 @@ export const CreateTeamDialog = ({
                     maxRows={12}
                     value={prompt}
                     onValueChange={promptDraft.setValue}
-                    suggestions={mentionSuggestions}
+                    suggestions={soloTeam ? [] : mentionSuggestions}
                     projectPath={effectiveCwd || null}
                     chips={promptChipDraft.chips}
                     onChipRemove={promptChipDraft.removeChip}

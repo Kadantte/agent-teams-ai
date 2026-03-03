@@ -26,6 +26,8 @@ interface FileSectionHeaderProps {
   onDiscard: (filePath: string) => void;
   onSave: (filePath: string) => void;
   onRestoreMissingFile?: (filePath: string, content: string) => void;
+  onAcceptNewFile?: (filePath: string) => void;
+  onRejectNewFile?: (filePath: string) => void;
 }
 
 export const FileSectionHeader = ({
@@ -39,6 +41,8 @@ export const FileSectionHeader = ({
   onDiscard,
   onSave,
   onRestoreMissingFile,
+  onAcceptNewFile,
+  onRejectNewFile,
 }: FileSectionHeaderProps): React.ReactElement => {
   const isMissingOnDisk = fileContent?.contentSource === 'unavailable';
   const restoreContent =
@@ -141,6 +145,38 @@ export const FileSectionHeader = ({
       )}
 
       <div className="ml-auto flex items-center gap-1.5" data-no-collapse>
+        {file.isNewFile && (onAcceptNewFile || onRejectNewFile) && (
+          <div className="mr-1 flex items-center gap-1.5">
+            {onAcceptNewFile && (
+              <button
+                onClick={() => onAcceptNewFile(file.filePath)}
+                disabled={applying}
+                className={[
+                  'rounded px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50',
+                  fileDecision === 'accepted'
+                    ? 'bg-green-500/25 text-green-300'
+                    : 'bg-green-500/15 text-green-400 hover:bg-green-500/25',
+                ].join(' ')}
+              >
+                Accept
+              </button>
+            )}
+            {onRejectNewFile && (
+              <button
+                onClick={() => onRejectNewFile(file.filePath)}
+                disabled={applying}
+                className={[
+                  'rounded px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50',
+                  fileDecision === 'rejected'
+                    ? 'bg-red-500/25 text-red-300'
+                    : 'bg-red-500/15 text-red-400 hover:bg-red-500/25',
+                ].join(' ')}
+              >
+                Reject
+              </button>
+            )}
+          </div>
+        )}
         {canRestore && restoreContent != null && (
           <Tooltip>
             <TooltipTrigger asChild>

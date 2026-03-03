@@ -170,12 +170,19 @@ export class TeamMemberLogsFinder {
       }
     }
 
+    const normalizedOwner =
+      typeof options?.owner === 'string' ? options.owner.trim() : options?.owner;
+    const isLeadOwner =
+      typeof normalizedOwner === 'string' &&
+      normalizedOwner.length > 0 &&
+      normalizedOwner.toLowerCase() === leadMemberName.toLowerCase();
     const includeOwnerSessions =
       options?.status === 'in_progress' &&
-      typeof options?.owner === 'string' &&
-      options.owner.trim().length > 0;
+      typeof normalizedOwner === 'string' &&
+      normalizedOwner.length > 0 &&
+      !isLeadOwner;
     if (includeOwnerSessions) {
-      const ownerLogs = await this.findMemberLogs(teamName, options.owner!.trim());
+      const ownerLogs = await this.findMemberLogs(teamName, normalizedOwner);
 
       const TASK_LOG_INTERVAL_GRACE_MS = 10_000;
       const fallbackRecentMs = 30 * 60_000; // if caller doesn't supply intervals/since, avoid pulling in old owner history
