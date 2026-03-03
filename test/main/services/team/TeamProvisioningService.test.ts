@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,13 +20,12 @@ function allowConsoleLogs() {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 }
 
-function createFakeChild(exitCode: number): NodeJS.Process {
-  const child = new EventEmitter() as NodeJS.Process & {
-    stdout: EventEmitter;
-    stderr: EventEmitter;
-  };
-  child.stdout = new EventEmitter();
-  child.stderr = new EventEmitter();
+function createFakeChild(exitCode: number): ChildProcess {
+  const child = Object.assign(new EventEmitter(), {
+    stdout: null,
+    stderr: null,
+    stdin: null,
+  }) as unknown as ChildProcess;
   setImmediate(() => child.emit('close', exitCode));
   return child;
 }
@@ -45,7 +45,7 @@ describe('TeamProvisioningService', () => {
         if (callCount === 1) {
           throw new Error('spawn EINVAL');
         }
-        return createFakeChild(0) as ReturnType<typeof spawnCli>;
+        return createFakeChild(0);
       });
 
       const svc = new TeamProvisioningService();

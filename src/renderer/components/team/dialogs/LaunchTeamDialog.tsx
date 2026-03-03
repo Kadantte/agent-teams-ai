@@ -22,7 +22,7 @@ import { normalizePath } from '@renderer/utils/pathNormalize';
 import { AlertTriangle, CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
 
 import { ProjectPathSelector } from './ProjectPathSelector';
-import { TeamModelSelector } from './TeamModelSelector';
+import { computeEffectiveTeamModel, TeamModelSelector } from './TeamModelSelector';
 
 import type { ActiveTeamRef } from './CreateTeamDialog';
 import type { MentionSuggestion } from '@renderer/types/mention';
@@ -256,12 +256,7 @@ export const LaunchTeamDialog = ({
           teamName,
           cwd: effectiveCwd,
           prompt: promptDraft.value.trim() || undefined,
-          model: (() => {
-            if (!extendedContext) return selectedModel || undefined;
-            // 1M context is only supported for opus and sonnet
-            if (selectedModel === 'haiku') return selectedModel;
-            return selectedModel ? `${selectedModel}[1m]` : 'sonnet[1m]';
-          })(),
+          model: computeEffectiveTeamModel(selectedModel, extendedContext),
           clearContext: clearContext || undefined,
         });
         resetFormState();

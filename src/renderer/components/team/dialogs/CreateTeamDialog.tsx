@@ -31,7 +31,7 @@ import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
 import { ExtendedContextCheckbox } from './ExtendedContextCheckbox';
 import { ProjectPathSelector } from './ProjectPathSelector';
-import { TeamModelSelector } from './TeamModelSelector';
+import { computeEffectiveTeamModel, TeamModelSelector } from './TeamModelSelector';
 
 import type { MemberDraft } from '@renderer/components/team/members/membersEditorTypes';
 
@@ -445,13 +445,10 @@ export const CreateTeamDialog = ({
     [members]
   );
 
-  const effectiveModel = useMemo(() => {
-    const base = selectedModel || undefined;
-    if (!extendedContext) return base;
-    // 1M context is only supported for opus and sonnet
-    if (base === 'haiku') return base;
-    return base ? `${base}[1m]` : 'sonnet[1m]';
-  }, [selectedModel, extendedContext]);
+  const effectiveModel = useMemo(
+    () => computeEffectiveTeamModel(selectedModel, extendedContext),
+    [selectedModel, extendedContext]
+  );
 
   const sanitizedTeamName = sanitizeTeamName(teamName.trim());
 
