@@ -606,14 +606,18 @@ export const ChangeReviewDialog = ({
         // even if focus is inside a CM editor (focus often remains there after clicking buttons).
         const now = Date.now();
 
-        // Undo: recently rejected NEW file (deleted from disk + removed from review list)
-        const removedRecently = now - lastNewFileRemoveAtRef.current < 30_000;
+        // Undo: rejected NEW file (deleted from disk + removed from review list)
         const removedStack = removedNewFileUndoStackRef.current;
-        if (
-          removedRecently &&
-          removedStack.length > 0 &&
-          !document.activeElement?.closest('.cm-editor')
-        ) {
+        const lastHunkAt = Object.values(lastHunkActionAtRef.current).reduce(
+          (max, v) => Math.max(max, v),
+          0
+        );
+        const lastReviewActionAt = Math.max(lastBulkActionAtRef.current, lastHunkAt);
+        const newFileWasLastAction = lastNewFileRemoveAtRef.current >= lastReviewActionAt;
+        const isInEditor = !!document.activeElement?.closest('.cm-editor');
+        const lastViewConnected = !!lastFocusedEditorRef.current?.dom.isConnected;
+        const shouldPreferEditorUndo = isInEditor && lastViewConnected;
+        if (newFileWasLastAction && removedStack.length > 0 && !shouldPreferEditorUndo) {
           e.preventDefault();
           e.stopPropagation();
           const snap = removedStack.pop()!;
@@ -621,7 +625,7 @@ export const ChangeReviewDialog = ({
             ...snap.file,
             originalFullContent: '',
             modifiedFullContent: snap.restoreContent,
-            contentSource: 'disk-current',
+            contentSource: 'snippet-reconstruction',
           };
           addReviewFile(snap.file, { index: snap.index, content: restoredContent });
           setActiveFilePath(snap.file.filePath);

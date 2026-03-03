@@ -153,7 +153,7 @@ export const ReviewToolbar = ({
               Undo
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Undo last bulk operation (Ctrl+Z)</TooltipContent>
+          <TooltipContent side="bottom">Undo last review operation (Ctrl+Z)</TooltipContent>
         </Tooltip>
       )}
 
