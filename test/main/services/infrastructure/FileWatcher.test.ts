@@ -429,12 +429,6 @@ describe('FileWatcher', () => {
       const detectPromise = new Promise<void>((resolve) => {
         detectResolve = resolve;
       });
-      vi.mocked(errorDetector.detectErrors).mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            detectPromise.then(() => resolve([]));
-          })
-      );
 
       const watcherAny = watcher as unknown as {
         detectErrorsInSessionFile: (
@@ -444,9 +438,27 @@ describe('FileWatcher', () => {
         ) => Promise<void>;
         processingInProgress: Set<string>;
         pendingReprocess: Set<string>;
+        instanceCreatedAt: number;
       };
+      // Ensure watcher treats the file as pre-existing so first call baselines
+      watcherAny.instanceCreatedAt = Date.now() + 60_000;
 
-      // Start first call (will block on detectErrors)
+      // First call establishes baseline (skips error detection on first read)
+      vi.mocked(errorDetector.detectErrors).mockResolvedValue([]);
+      await watcherAny.detectErrorsInSessionFile('test-project', 'session-1', filePath);
+
+      // Append new data so subsequent calls have new lines to process
+      fs.appendFileSync(filePath, jsonlLine('u2', 'world'));
+
+      // Now make detectErrors slow to simulate long processing
+      vi.mocked(errorDetector.detectErrors).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            detectPromise.then(() => resolve([]));
+          })
+      );
+
+      // Start call that will block on detectErrors (not first read anymore)
       const first = watcherAny.detectErrorsInSessionFile('test-project', 'session-1', filePath);
 
       // Wait a tick so the first call enters the processing block and reaches detectErrors
@@ -512,7 +524,10 @@ describe('FileWatcher', () => {
         ) => Promise<void>;
         lastProcessedSize: Map<string, number>;
         lastProcessedLineCount: Map<string, number>;
+        instanceCreatedAt: number;
       };
+      // Treat file as new (created after watcher) so it goes through the full parse path
+      watcherAny.instanceCreatedAt = 0;
 
       // First call - fallback path (no lastProcessedLineCount)
       await watcherAny.detectErrorsInSessionFile('test-project', 'session-1', filePath);
@@ -521,6 +536,166 @@ describe('FileWatcher', () => {
       const actualSize = fs.statSync(filePath).size;
       expect(watcherAny.lastProcessedSize.get(filePath)).toBe(actualSize);
       expect(watcherAny.lastProcessedLineCount.get(filePath)).toBe(1);
+
+      watcher.stop();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+  });
+
+  // ===========================================================================
+  // First-Read Baseline Tests (prevents old session error flooding)
+  // ===========================================================================
+
+  describe('first-read baseline behavior', () => {
+    it('establishes baseline without detecting errors for pre-existing files', async () => {
+      vi.useRealTimers();
+      useRealExistsSync();
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filewatcher-baseline-'));
+      const projectsDir = path.join(tempDir, 'projects');
+      const projectDir = path.join(projectsDir, 'test-project');
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      const filePath = path.join(projectDir, 'session-1.jsonl');
+      // Write a file with multiple lines (simulating an existing session with errors)
+      fs.writeFileSync(
+        filePath,
+        jsonlLine('u1', 'hello') + jsonlLine('u2', 'world') + jsonlLine('u3', 'error line'),
+        'utf8'
+      );
+
+      const dataCache = new DataCache(50, 10, false);
+      const notificationManager = createMockNotificationManager();
+      const watcher = new FileWatcher(dataCache, projectsDir, path.join(tempDir, 'todos'));
+      watcher.setNotificationManager(notificationManager);
+
+      // Simulate watcher starting well after the file was created
+      const watcherAny = watcher as unknown as {
+        detectErrorsInSessionFile: (
+          projectId: string,
+          sessionId: string,
+          filePath: string
+        ) => Promise<void>;
+        lastProcessedLineCount: Map<string, number>;
+        lastProcessedSize: Map<string, number>;
+        instanceCreatedAt: number;
+      };
+      watcherAny.instanceCreatedAt = Date.now() + 60_000; // watcher "started" in the future
+
+      vi.mocked(errorDetector.detectErrors).mockClear();
+
+      // First read should establish baseline, NOT detect errors
+      await watcherAny.detectErrorsInSessionFile('test-project', 'session-1', filePath);
+
+      // errorDetector.detectErrors should NOT have been called
+      expect(errorDetector.detectErrors).not.toHaveBeenCalled();
+
+      // Baseline tracking should be established
+      expect(watcherAny.lastProcessedLineCount.get(filePath)).toBe(3);
+      expect(watcherAny.lastProcessedSize.get(filePath)).toBe(fs.statSync(filePath).size);
+
+      // notificationManager.addError should NOT have been called
+      expect(notificationManager.addError).not.toHaveBeenCalled();
+
+      watcher.stop();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('detects errors only in new data after baseline is established', async () => {
+      vi.useRealTimers();
+      useRealExistsSync();
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filewatcher-post-baseline-'));
+      const projectsDir = path.join(tempDir, 'projects');
+      const projectDir = path.join(projectsDir, 'test-project');
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      const filePath = path.join(projectDir, 'session-1.jsonl');
+      // Initial content (old session data)
+      fs.writeFileSync(filePath, jsonlLine('u1', 'hello') + jsonlLine('u2', 'world'), 'utf8');
+
+      const dataCache = new DataCache(50, 10, false);
+      const notificationManager = createMockNotificationManager();
+      const watcher = new FileWatcher(dataCache, projectsDir, path.join(tempDir, 'todos'));
+      watcher.setNotificationManager(notificationManager);
+
+      // Simulate watcher starting well after the file was created
+      const watcherAny = watcher as unknown as {
+        detectErrorsInSessionFile: (
+          projectId: string,
+          sessionId: string,
+          filePath: string
+        ) => Promise<void>;
+        lastProcessedLineCount: Map<string, number>;
+        instanceCreatedAt: number;
+      };
+      watcherAny.instanceCreatedAt = Date.now() + 60_000;
+
+      vi.mocked(errorDetector.detectErrors).mockClear();
+      vi.mocked(errorDetector.detectErrors).mockResolvedValue([]);
+
+      // First read: baseline only
+      await watcherAny.detectErrorsInSessionFile('test-project', 'session-1', filePath);
+      expect(errorDetector.detectErrors).not.toHaveBeenCalled();
+      expect(watcherAny.lastProcessedLineCount.get(filePath)).toBe(2);
+
+      // Append new data
+      fs.appendFileSync(filePath, jsonlLine('u3', 'new error'));
+
+      // Second read: should detect errors in new data only
+      await watcherAny.detectErrorsInSessionFile('test-project', 'session-1', filePath);
+
+      expect(errorDetector.detectErrors).toHaveBeenCalledTimes(1);
+      // Verify only the new message was passed to detectErrors
+      const callArgs = vi.mocked(errorDetector.detectErrors).mock.calls[0];
+      expect(callArgs[0]).toHaveLength(1); // only 1 new message
+
+      // Tracking should now reflect all 3 lines
+      expect(watcherAny.lastProcessedLineCount.get(filePath)).toBe(3);
+
+      watcher.stop();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('detects errors immediately for files created after watcher startup', async () => {
+      vi.useRealTimers();
+      useRealExistsSync();
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filewatcher-newfile-'));
+      const projectsDir = path.join(tempDir, 'projects');
+      const projectDir = path.join(projectsDir, 'test-project');
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      const dataCache = new DataCache(50, 10, false);
+      const notificationManager = createMockNotificationManager();
+      const watcher = new FileWatcher(dataCache, projectsDir, path.join(tempDir, 'todos'));
+      watcher.setNotificationManager(notificationManager);
+
+      vi.mocked(errorDetector.detectErrors).mockClear();
+      vi.mocked(errorDetector.detectErrors).mockResolvedValue([]);
+
+      // instanceCreatedAt is already set to "now" by the constructor,
+      // and the file created below will have birthtimeMs >= instanceCreatedAt,
+      // so it will be treated as a new file (no baseline skip)
+      const filePath = path.join(projectDir, 'session-new.jsonl');
+      fs.writeFileSync(filePath, jsonlLine('u1', 'hello') + jsonlLine('u2', 'error'), 'utf8');
+
+      const watcherAny = watcher as unknown as {
+        detectErrorsInSessionFile: (
+          projectId: string,
+          sessionId: string,
+          filePath: string
+        ) => Promise<void>;
+        lastProcessedLineCount: Map<string, number>;
+      };
+
+      // First read of a NEW file should detect errors (not baseline-skip)
+      await watcherAny.detectErrorsInSessionFile('test-project', 'session-new', filePath);
+
+      expect(errorDetector.detectErrors).toHaveBeenCalledTimes(1);
+      const callArgs = vi.mocked(errorDetector.detectErrors).mock.calls[0];
+      expect(callArgs[0]).toHaveLength(2); // all messages scanned
+      expect(watcherAny.lastProcessedLineCount.get(filePath)).toBe(2);
 
       watcher.stop();
       fs.rmSync(tempDir, { recursive: true, force: true });

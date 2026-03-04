@@ -97,6 +97,8 @@ export class FileWatcher extends EventEmitter {
   private pendingReprocess = new Set<string>();
   /** Flag to prevent reuse after disposal */
   private disposed = false;
+  /** Timestamp when this FileWatcher instance was created (used to distinguish old vs new files) */
+  private readonly instanceCreatedAt = Date.now();
 
   constructor(
     dataCache: DataCache,
@@ -751,6 +753,7 @@ export class FileWatcher extends EventEmitter {
         return;
       }
 
+      const isFirstRead = lastLineCount === 0 && lastSize === 0;
       const canUseIncrementalAppend = lastLineCount > 0 && currentSize > lastSize;
       let newMessages: ParsedMessage[] = [];
       let currentLineCount: number;
@@ -775,6 +778,22 @@ export class FileWatcher extends EventEmitter {
       if (currentLineCount <= lastLineCount) {
         this.lastProcessedSize.set(filePath, processedSize);
         return;
+      }
+
+      // On first read (after app restart), establish baseline without detecting errors
+      // for files that existed BEFORE this FileWatcher started. This prevents flooding
+      // notifications with historical errors from old sessions.
+      // Files created AFTER startup are new sessions — detect errors normally.
+      if (isFirstRead) {
+        const isPreExistingFile = fileStats.birthtimeMs < this.instanceCreatedAt;
+        if (isPreExistingFile) {
+          this.lastProcessedLineCount.set(filePath, currentLineCount);
+          this.lastProcessedSize.set(filePath, processedSize);
+          logger.info(
+            `FileWatcher: Baseline established for ${filePath} (${currentLineCount} lines, ${processedSize} bytes)`
+          );
+          return;
+        }
       }
 
       // Detect errors in new messages
