@@ -472,52 +472,86 @@ export class TeamMemberLogsFinder {
     teamName: string,
     taskId: string
   ): Promise<boolean> {
-    const escaped = taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const numericTaskId = /^\d+$/.test(taskId) ? taskId : null;
-    const teamEscaped = escapeRegex(teamName);
-    const teamPatterns: RegExp[] = [
-      // Team tool inputs often include team_name
-      new RegExp(`"team_name"\\s*:\\s*"${teamEscaped}"`, 'i'),
-      // Some variants may use teamName or team
-      new RegExp(`"teamName"\\s*:\\s*"${teamEscaped}"`, 'i'),
-      new RegExp(`"team"\\s*:\\s*"${teamEscaped}"`, 'i'),
-      // CLI usage: node ".../teamctl.js" --team team-alpha task start 9
-      new RegExp(`\\b--team\\b\\s*(?:=\\s*)?(?:"${teamEscaped}"|${teamEscaped})\\b`, 'i'),
-    ];
-    const patterns: RegExp[] = [
-      new RegExp(`"task_id"\\s*:\\s*"${escaped}"`, 'i'),
-      new RegExp(`"taskId"\\s*:\\s*"${escaped}"`, 'i'),
-    ];
-    if (numericTaskId) {
-      patterns.push(
-        new RegExp(`"task_id"\\s*:\\s*${numericTaskId}\\b`),
-        new RegExp(`"taskId"\\s*:\\s*${numericTaskId}\\b`),
-        // Support teamctl command lines (may appear in tool output).
-        // Example: node ".../teamctl.js" --team "t" task start 10
-        new RegExp(`\\bteamctl(?:\\.js)?\\b.{0,350}\\b${numericTaskId}\\b`, 'i')
-      );
-    }
+    const teamLower = teamName.trim().toLowerCase();
+    const taskIdStr = taskId.trim();
+
+    const extractTaskIdFromUnknown = (raw: unknown): string | null => {
+      if (typeof raw === 'string') return raw.trim();
+      if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw);
+      return null;
+    };
+
+    const extractTeamFromInput = (input: Record<string, unknown>): string | null => {
+      const raw =
+        typeof input.team_name === 'string'
+          ? input.team_name
+          : typeof input.teamName === 'string'
+            ? input.teamName
+            : typeof input.team === 'string'
+              ? input.team
+              : null;
+      return typeof raw === 'string' ? raw.trim() : null;
+    };
+
+    const matchesTeamctlCommand = (command: string): boolean => {
+      if (!/\bteamctl(?:\.js)?\b/i.test(command)) return false;
+
+      const teamMatch = /\s--team(?:\s+|=)(?:"([^"]+)"|'([^']+)'|([^\s]+))/i.exec(command);
+      const cmdTeam = (teamMatch?.[1] ?? teamMatch?.[2] ?? teamMatch?.[3])?.trim();
+      if (cmdTeam?.toLowerCase() !== teamLower) return false;
+
+      const taskMatch = /\btask\s+(?:start|complete|set-status)\s+(\d+)\b/i.exec(command);
+      const cmdTaskId = taskMatch?.[1];
+      return Boolean(cmdTaskId && cmdTaskId === taskIdStr);
+    };
+
     try {
       const stream = createReadStream(filePath, { encoding: 'utf8' });
       const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-      let foundTask = false;
-      let foundTeam = false;
       for await (const line of rl) {
-        // We require BOTH taskId and teamName to avoid cross-team collisions when multiple
-        // teams share the same projectPath (task IDs are only unique per team).
-        //
-        // But they often appear on different lines (e.g. team_name is in Task tool input, while
-        // taskId appears in a tool result or CLI output). So we track them independently.
-        if (!foundTask && patterns.some((re) => re.test(line))) {
-          foundTask = true;
-        }
-        if (!foundTeam && teamPatterns.some((re) => re.test(line))) {
-          foundTeam = true;
-        }
-        if (foundTask && foundTeam) {
-          rl.close();
-          stream.destroy();
-          return true;
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const entry = JSON.parse(trimmed) as Record<string, unknown>;
+          const content = this.extractEntryContent(entry);
+          if (!Array.isArray(content)) continue;
+
+          for (const block of content) {
+            if (!block || typeof block !== 'object') continue;
+            const b = block as Record<string, unknown>;
+            if (b.type !== 'tool_use') continue;
+
+            const rawName = typeof b.name === 'string' ? b.name : '';
+            const toolName = rawName.replace(/^proxy_/, '');
+            const input = b.input as Record<string, unknown> | undefined;
+            if (!input) continue;
+
+            // Deterministic structured match: any tool whose input references this task+team.
+            const inputTeam = extractTeamFromInput(input);
+            const rawTaskId = input.taskId ?? input.task_id;
+            const inputTaskId = extractTaskIdFromUnknown(rawTaskId);
+            if (
+              inputTeam?.toLowerCase() === teamLower &&
+              inputTaskId &&
+              inputTaskId === taskIdStr
+            ) {
+              rl.close();
+              stream.destroy();
+              return true;
+            }
+
+            // Deterministic CLI match: teamctl command line (Bash tool).
+            if (toolName === 'Bash') {
+              const command = typeof input.command === 'string' ? input.command : '';
+              if (command && matchesTeamctlCommand(command)) {
+                rl.close();
+                stream.destroy();
+                return true;
+              }
+            }
+          }
+        } catch {
+          // ignore parse errors
         }
       }
       rl.close();
@@ -526,6 +560,13 @@ export class TeamMemberLogsFinder {
       // ignore
     }
     return false;
+  }
+
+  private extractEntryContent(entry: Record<string, unknown>): unknown[] | null {
+    const message = entry.message as Record<string, unknown> | undefined;
+    if (message && Array.isArray(message.content)) return message.content as unknown[];
+    if (Array.isArray(entry.content)) return entry.content as unknown[];
+    return null;
   }
 
   private async listSessionDirs(projectDir: string): Promise<string[]> {

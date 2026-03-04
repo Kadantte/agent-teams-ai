@@ -139,8 +139,46 @@ export class ChangeExtractorService {
       }
     }
 
-    // Если scope не найден — fallback на весь файл
+    // Если scope не найден — try deterministic interval scoping, else fallback to whole file
     if (allScopes.length === 0) {
+      const intervals = options?.intervals ?? taskMeta?.intervals;
+      if (Array.isArray(intervals) && intervals.length > 0) {
+        const { files, toolUseIds, startTimestamp, endTimestamp } =
+          await this.extractIntervalScopedChanges(logRefs, intervals, projectPath);
+
+        const intervalScope: TaskChangeScope = {
+          taskId,
+          memberName: taskMeta?.owner ?? logRefs[0]?.memberName ?? '',
+          startLine: 0,
+          endLine: 0,
+          startTimestamp,
+          endTimestamp,
+          toolUseIds,
+          filePaths: files.map((f) => f.filePath),
+          confidence: {
+            tier: 2,
+            label: 'medium',
+            reason: 'Scoped by persisted task workIntervals (timestamp-based)',
+          },
+        };
+
+        return {
+          teamName,
+          taskId,
+          files,
+          totalLinesAdded: files.reduce((sum, f) => sum + f.linesAdded, 0),
+          totalLinesRemoved: files.reduce((sum, f) => sum + f.linesRemoved, 0),
+          totalFiles: files.length,
+          confidence: 'medium',
+          computedAt: new Date().toISOString(),
+          scope: intervalScope,
+          warnings:
+            files.length === 0
+              ? ['No file edits found within persisted workIntervals.']
+              : ['Task boundaries missing — scoped by workIntervals timestamps.'],
+        };
+      }
+
       return this.fallbackSingleTaskScope(teamName, taskId, logRefs, projectPath);
     }
 
@@ -203,10 +241,46 @@ export class ChangeExtractorService {
                 typeof (i as Record<string, unknown>).completedAt === 'string')
           )
         : undefined;
+
+      const derivedIntervals = (() => {
+        if (Array.isArray(intervals) && intervals.length > 0) return intervals;
+        const rawHistory = parsed.statusHistory;
+        if (!Array.isArray(rawHistory)) return undefined;
+
+        const transitions = rawHistory
+          .map((h) => (h && typeof h === 'object' ? (h as Record<string, unknown>) : null))
+          .filter((h): h is Record<string, unknown> => h !== null)
+          .map((h) => ({
+            to: typeof h.to === 'string' ? h.to : null,
+            timestamp: typeof h.timestamp === 'string' ? h.timestamp : null,
+          }))
+          .filter(
+            (t): t is { to: string; timestamp: string } => t.to !== null && t.timestamp !== null
+          )
+          .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+
+        if (transitions.length === 0) return undefined;
+
+        const derived: { startedAt: string; completedAt?: string }[] = [];
+        let currentStart: string | null = null;
+        for (const t of transitions) {
+          if (t.to === 'in_progress') {
+            if (!currentStart) currentStart = t.timestamp;
+            continue;
+          }
+          if (currentStart) {
+            derived.push({ startedAt: currentStart, completedAt: t.timestamp });
+            currentStart = null;
+          }
+        }
+        if (currentStart) derived.push({ startedAt: currentStart });
+
+        return derived.length > 0 ? derived : undefined;
+      })();
       return {
         owner: typeof parsed.owner === 'string' ? parsed.owner : undefined,
         status: typeof parsed.status === 'string' ? parsed.status : undefined,
-        intervals,
+        intervals: derivedIntervals,
       };
     } catch {
       return null;
@@ -221,6 +295,74 @@ export class ChangeExtractorService {
     } catch {
       return undefined;
     }
+  }
+
+  private async extractIntervalScopedChanges(
+    logRefs: LogFileRef[],
+    intervals: { startedAt: string; completedAt?: string }[],
+    projectPath?: string
+  ): Promise<{
+    files: FileChangeSummary[];
+    toolUseIds: string[];
+    startTimestamp: string;
+    endTimestamp: string;
+  }> {
+    const normalized: {
+      startMs: number;
+      endMs: number | null;
+      startedAt: string;
+      completedAt?: string;
+    }[] = [];
+
+    for (const i of intervals) {
+      const startMs = Date.parse(i.startedAt);
+      if (!Number.isFinite(startMs)) continue;
+      const endMsRaw = typeof i.completedAt === 'string' ? Date.parse(i.completedAt) : Number.NaN;
+      const endMs = Number.isFinite(endMsRaw) ? endMsRaw : null;
+      normalized.push({ startMs, endMs, startedAt: i.startedAt, completedAt: i.completedAt });
+    }
+
+    normalized.sort((a, b) => a.startMs - b.startMs);
+    const startTimestamp = normalized[0]?.startedAt ?? '';
+
+    const maxEnd = normalized.reduce<{ endMs: number; endTimestamp: string } | null>((acc, it) => {
+      if (it.endMs == null || typeof it.completedAt !== 'string') return acc;
+      if (!acc || it.endMs > acc.endMs) return { endMs: it.endMs, endTimestamp: it.completedAt };
+      return acc;
+    }, null);
+    const endTimestamp = maxEnd?.endTimestamp ?? '';
+
+    const inAnyInterval = (ts: string): boolean => {
+      const ms = Date.parse(ts);
+      if (!Number.isFinite(ms)) return false;
+      for (const it of normalized) {
+        if (ms < it.startMs) continue;
+        if (it.endMs == null) return true;
+        if (ms <= it.endMs) return true;
+      }
+      return false;
+    };
+
+    const allowedSnippets: SnippetDiff[] = [];
+    const toolUseIdsSet = new Set<string>();
+
+    for (const ref of logRefs) {
+      const snippets = await this.parseJSONLFile(ref.filePath);
+      for (const s of snippets) {
+        if (s.isError) continue;
+        if (!inAnyInterval(s.timestamp)) continue;
+        allowedSnippets.push(s);
+        if (s.toolUseId) toolUseIdsSet.add(s.toolUseId);
+      }
+    }
+
+    const files = this.aggregateByFile(allowedSnippets, projectPath);
+    return {
+      files,
+      toolUseIds: [...toolUseIdsSet],
+      startTimestamp,
+      endTimestamp,
+    };
   }
 
   /**
