@@ -20,12 +20,11 @@ import {
 import { getMemberColor } from '@shared/constants/memberColors';
 import { resolveLanguageName } from '@shared/utils/agentLanguage';
 import { createLogger } from '@shared/utils/logger';
-import { execFile, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { promisify } from 'util';
 
 import { atomicWriteAsync } from './atomicWrite';
 import { ClaudeBinaryResolver } from './ClaudeBinaryResolver';
@@ -63,7 +62,6 @@ const PROBE_CACHE_TTL_MS = 60_000;
 const PREFLIGHT_TIMEOUT_MS = 30000;
 const PREFLIGHT_AUTH_RETRY_DELAY_MS = 2000;
 const PREFLIGHT_AUTH_MAX_RETRIES = 2;
-const KEYCHAIN_TIMEOUT_MS = 5000;
 const FS_MONITOR_POLL_MS = 2000;
 const TASK_WAIT_FALLBACK_MS = 15_000;
 const TEAM_JSON_READ_TIMEOUT_MS = 5_000;
@@ -72,8 +70,6 @@ const TEAM_INBOX_MAX_BYTES = 2 * 1024 * 1024;
 const PREFLIGHT_PING_PROMPT = 'Reply with the single word PONG and nothing else';
 const PREFLIGHT_PING_ARGS = ['-p', PREFLIGHT_PING_PROMPT, '--output-format', 'text'] as const;
 const PREFLIGHT_EXPECTED = 'PONG';
-
-const execFileAsync = promisify(execFile);
 
 type TeamsBaseLocation = 'configured' | 'default';
 
@@ -170,12 +166,7 @@ interface ProvisioningRun {
 
 type LeadActivityState = 'active' | 'idle' | 'offline';
 
-type ProvisioningAuthSource =
-  | 'anthropic_api_key'
-  | 'anthropic_auth_token'
-  | 'claude_code_oauth_token_env'
-  | 'claude_code_oauth_token_credentials'
-  | 'none';
+type ProvisioningAuthSource = 'anthropic_api_key' | 'anthropic_auth_token' | 'none';
 
 interface ProvisioningEnvResolution {
   env: NodeJS.ProcessEnv;
@@ -945,8 +936,7 @@ function buildCliExitError(code: number | null, stdoutText: string, stderrText: 
       return (
         'Claude CLI reports it is not authenticated ("Please run /login"). ' +
         'Run `claude auth login` (or start `claude` and run `/login`) to authenticate, then retry. ' +
-        'For automation/headless use, prefer `claude setup-token` and export `CLAUDE_CODE_OAUTH_TOKEN`, ' +
-        'or set `ANTHROPIC_API_KEY` for `-p` mode.'
+        'For automation/headless use, set `ANTHROPIC_API_KEY` for `-p` mode.'
       );
     }
     return trimmed.slice(-4000);
@@ -1101,7 +1091,7 @@ export class TeamProvisioningService {
       // authenticate through a mechanism we don't know about (e.g. a
       // managed apiKeyHelper, SSO, or a future auth flow).
       warnings.push(
-        'No explicit auth env var found (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN). ' +
+        'No explicit auth env var found (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN). ' +
           'Attempting preflight check to verify if CLI can authenticate on its own.'
       );
     }
@@ -1185,7 +1175,7 @@ export class TeamProvisioningService {
       const progress = updateProgress(run, 'failed', 'Authentication failed — CLI requires login', {
         error:
           'Claude CLI is not authenticated. Run `claude auth login` (or start `claude` and run `/login`) ' +
-          'to authenticate, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN and try again.',
+          'to authenticate, or set ANTHROPIC_API_KEY and try again.',
         cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
       });
       run.onProgress(progress);
@@ -1235,7 +1225,7 @@ export class TeamProvisioningService {
       return;
     }
 
-    // Respawn
+    // Respawn with saved context — CLI handles its own auth refresh.
     let child: ReturnType<typeof spawn>;
     try {
       child = spawnCli(ctx.claudePath, ctx.args, {
@@ -3278,103 +3268,12 @@ export class TeamProvisioningService {
       return { env, authSource: 'anthropic_auth_token' };
     }
 
-    // 3. CLAUDE_CODE_OAUTH_TOKEN already in env (e.g. from `claude setup-token`)
-    if (
-      typeof env.CLAUDE_CODE_OAUTH_TOKEN === 'string' &&
-      env.CLAUDE_CODE_OAUTH_TOKEN.trim().length > 0
-    ) {
-      return { env, authSource: 'claude_code_oauth_token_env' };
-    }
-
-    // 4. Try reading OAuth token from platform credential storage.
-    //    macOS: Keychain (service "Claude Code-credentials")
-    //    Linux: ~/.claude/.credentials.json
-    //    Note: keychain tokens may be stale — Claude Code refreshes in-memory
-    //    but does not always write back. We still try as best-effort.
-    const oauthToken = await this.readOAuthTokenFromStorage(home);
-    if (oauthToken) {
-      env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
-      return { env, authSource: 'claude_code_oauth_token_credentials' };
-    }
-
+    // 3. No explicit API key — let the CLI handle its own OAuth auth.
+    //    Claude CLI reads credentials from its own storage and refreshes
+    //    tokens in-memory. Injecting CLAUDE_CODE_OAUTH_TOKEN from the
+    //    credentials file causes 401 errors because the stored token is
+    //    often stale (CLI refreshes in-memory but rarely writes back).
     return { env, authSource: 'none' };
-  }
-
-  /**
-   * Attempts to read the OAuth access token from platform-specific storage.
-   *
-   * On macOS: reads from the encrypted Keychain (service "Claude Code-credentials").
-   * On Linux: reads from ~/.claude/.credentials.json.
-   *
-   * Warning: the token retrieved here may be expired. Claude Code refreshes
-   * tokens in-memory but does not always persist the refreshed value back to
-   * the credential store. A subsequent preflight check (`claude -p "ping"`)
-   * will detect if the token is actually usable.
-   */
-  private async readOAuthTokenFromStorage(home: string): Promise<string | null> {
-    const claudeBasePath = getClaudeBasePath();
-    if (process.platform === 'darwin') {
-      const keychainToken = await this.readOAuthTokenFromKeychain();
-      if (keychainToken) {
-        return keychainToken;
-      }
-      // Fallback: ~/.claude/.credentials.json (or overridden Claude root)
-      return this.readOAuthTokenFromCredentialsFile(claudeBasePath, home);
-    }
-    return this.readOAuthTokenFromCredentialsFile(claudeBasePath, home);
-  }
-
-  private async readOAuthTokenFromKeychain(): Promise<string | null> {
-    try {
-      const { stdout } = await execFileAsync(
-        'security',
-        ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
-        { timeout: KEYCHAIN_TIMEOUT_MS }
-      );
-      const parsed = JSON.parse(stdout.trim()) as unknown;
-      return this.extractOAuthAccessToken(parsed);
-    } catch {
-      return null;
-    }
-  }
-
-  private async readOAuthTokenFromCredentialsFile(
-    claudeBasePath: string,
-    homeFallback: string
-  ): Promise<string | null> {
-    // Preferred: current Claude root (supports claudeRootPath override)
-    const primaryPath = path.join(claudeBasePath, '.credentials.json');
-    // Back-compat: legacy location under HOME
-    const legacyPath = path.join(homeFallback, '.claude', '.credentials.json');
-    try {
-      const raw = await fs.promises.readFile(primaryPath, 'utf8');
-      const parsed = JSON.parse(raw) as unknown;
-      return this.extractOAuthAccessToken(parsed);
-    } catch {
-      try {
-        const raw = await fs.promises.readFile(legacyPath, 'utf8');
-        const parsed = JSON.parse(raw) as unknown;
-        return this.extractOAuthAccessToken(parsed);
-      } catch {
-        return null;
-      }
-    }
-  }
-
-  private extractOAuthAccessToken(parsed: unknown): string | null {
-    if (!parsed || typeof parsed !== 'object') {
-      return null;
-    }
-    const root = parsed as { claudeAiOauth?: unknown };
-    if (!root.claudeAiOauth || typeof root.claudeAiOauth !== 'object') {
-      return null;
-    }
-    const oauth = root.claudeAiOauth as { accessToken?: unknown };
-    if (typeof oauth.accessToken !== 'string') {
-      return null;
-    }
-    const token = oauth.accessToken.trim();
-    return token.length > 0 ? token : null;
   }
 
   /**
@@ -4076,8 +3975,7 @@ export class TeamProvisioningService {
         const hint = isAuthFailure
           ? 'Claude CLI `-p` mode is not authenticated. ' +
             'Run `claude auth login` (or start `claude` and run `/login`) to authenticate. ' +
-            'For automation/headless use, set ANTHROPIC_API_KEY or run `claude setup-token` ' +
-            'and export CLAUDE_CODE_OAUTH_TOKEN.' +
+            'For automation/headless use, set ANTHROPIC_API_KEY.' +
             (attempt > 1 ? ` (failed after ${attempt} attempts)` : '')
           : `Claude CLI preflight check failed (exit code ${pingProbe.exitCode ?? 'unknown'}).`;
         return { warning: hint };
