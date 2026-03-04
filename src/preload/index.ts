@@ -905,8 +905,22 @@ const electronAPI: ElectronAPI = {
     getAgentChanges: async (teamName: string, memberName: string) => {
       return invokeIpcWithResult<AgentChangeSet>(REVIEW_GET_AGENT_CHANGES, teamName, memberName);
     },
-    getTaskChanges: async (teamName: string, taskId: string) => {
-      return invokeIpcWithResult<TaskChangeSetV2>(REVIEW_GET_TASK_CHANGES, teamName, taskId);
+    getTaskChanges: async (
+      teamName: string,
+      taskId: string,
+      options?: {
+        owner?: string;
+        status?: string;
+        intervals?: { startedAt: string; completedAt?: string }[];
+        since?: string;
+      }
+    ) => {
+      return invokeIpcWithResult<TaskChangeSetV2>(
+        REVIEW_GET_TASK_CHANGES,
+        teamName,
+        taskId,
+        options
+      );
     },
     getChangeStats: async (teamName: string, memberName: string) => {
       return invokeIpcWithResult<ChangeStats>(REVIEW_GET_CHANGE_STATS, teamName, memberName);

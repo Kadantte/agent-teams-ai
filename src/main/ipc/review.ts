@@ -146,10 +146,39 @@ async function handleGetAgentChanges(
 async function handleGetTaskChanges(
   _event: IpcMainInvokeEvent,
   teamName: string,
-  taskId: string
+  taskId: string,
+  options?: unknown
 ): Promise<IpcResult<TaskChangeSetV2>> {
+  const opts =
+    options && typeof options === 'object'
+      ? {
+          owner:
+            typeof (options as Record<string, unknown>).owner === 'string'
+              ? ((options as Record<string, unknown>).owner as string)
+              : undefined,
+          status:
+            typeof (options as Record<string, unknown>).status === 'string'
+              ? ((options as Record<string, unknown>).status as string)
+              : undefined,
+          since:
+            typeof (options as Record<string, unknown>).since === 'string'
+              ? ((options as Record<string, unknown>).since as string)
+              : undefined,
+          intervals: Array.isArray((options as Record<string, unknown>).intervals)
+            ? (((options as Record<string, unknown>).intervals as unknown[]).filter(
+                (i): i is { startedAt: string; completedAt?: string } =>
+                  Boolean(i) &&
+                  typeof i === 'object' &&
+                  typeof (i as Record<string, unknown>).startedAt === 'string' &&
+                  ((i as Record<string, unknown>).completedAt === undefined ||
+                    typeof (i as Record<string, unknown>).completedAt === 'string')
+              ) as { startedAt: string; completedAt?: string }[])
+            : undefined,
+        }
+      : undefined;
+
   return wrapReviewHandler('getTaskChanges', () =>
-    getChangeExtractor().getTaskChanges(teamName, taskId)
+    getChangeExtractor().getTaskChanges(teamName, taskId, opts)
   );
 }
 

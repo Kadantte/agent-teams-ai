@@ -14,7 +14,8 @@ import { describe, expect, it } from 'vitest';
 
 import { SubagentResolver } from '../../../../src/main/services/discovery/SubagentResolver';
 
-import type { ParsedMessage, Process } from '../../../../src/main/types';
+import type { ParsedMessage, Process, ToolCall } from '../../../../src/main/types';
+import type { ProjectScanner } from '../../../../src/main/services/discovery/ProjectScanner';
 
 // =============================================================================
 // Helpers
@@ -57,12 +58,22 @@ function subagent(overrides: Partial<Process> & { id: string }): Process {
   };
 }
 
+function extractTaskCalls(messages: ParsedMessage[]): ToolCall[] {
+  const calls: ToolCall[] = [];
+  for (const m of messages) {
+    for (const tc of m.toolCalls) {
+      if (tc.isTask) calls.push(tc);
+    }
+  }
+  return calls;
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
 
 describe('SubagentResolver.linkType', () => {
-  const resolver = new SubagentResolver();
+  const resolver = new SubagentResolver({} as ProjectScanner);
 
   // Access private method via prototype for testing
   const linkToTaskCalls = (
@@ -97,14 +108,14 @@ describe('SubagentResolver.linkType', () => {
           type: 'user',
           isMeta: true,
           content: [{ type: 'tool_result', tool_use_id: taskCallId, content: 'done' }],
-          toolResults: [{ toolUseId: taskCallId, content: 'done' }],
+          toolResults: [{ toolUseId: taskCallId, content: 'done', isError: false }],
           sourceToolUseID: taskCallId,
           toolUseResult: { agentId: subagentId },
         }),
       ];
 
       const sub = subagent({ id: subagentId });
-      linkToTaskCalls([sub], messages);
+      linkToTaskCalls([sub], extractTaskCalls(messages), messages);
 
       expect(sub.linkType).toBe('agent-id');
       expect(sub.parentTaskId).toBe(taskCallId);
@@ -150,7 +161,7 @@ describe('SubagentResolver.linkType', () => {
         ],
       });
 
-      linkToTaskCalls([sub], messages);
+      linkToTaskCalls([sub], extractTaskCalls(messages), messages);
 
       expect(sub.linkType).toBe('team-member-id');
       expect(sub.parentTaskId).toBe(taskCallId);
@@ -194,7 +205,7 @@ describe('SubagentResolver.linkType', () => {
         ],
       });
 
-      linkToTaskCalls([sub], messages);
+      linkToTaskCalls([sub], extractTaskCalls(messages), messages);
 
       expect(sub.linkType).toBe('team-member-id');
       expect(sub.parentTaskId).toBe(taskCallId);
@@ -233,7 +244,7 @@ describe('SubagentResolver.linkType', () => {
         messages: [msg({ type: 'user', content: 'plain message without teammate tag' })],
       });
 
-      linkToTaskCalls([sub], messages);
+      linkToTaskCalls([sub], extractTaskCalls(messages), messages);
 
       expect(sub.linkType).toBe('unlinked');
       expect(sub.parentTaskId).toBeUndefined();
@@ -288,7 +299,7 @@ describe('SubagentResolver.linkType', () => {
         startTime: new Date('2026-01-01T00:00:20Z'),
       });
 
-      linkToTaskCalls([sub1, sub2], messages);
+      linkToTaskCalls([sub1, sub2], extractTaskCalls(messages), messages);
 
       // In the old code, sub1 would get task-1 and sub2 would get task-2 by position.
       // Now both should be unlinked.

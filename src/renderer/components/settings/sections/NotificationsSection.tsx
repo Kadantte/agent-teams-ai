@@ -103,15 +103,6 @@ export const NotificationsSection = ({
         </button>
       </div>
 
-      {/* Notification Triggers */}
-      <NotificationTriggerSettings
-        triggers={safeConfig.notifications.triggers || []}
-        saving={saving}
-        onUpdateTrigger={onUpdateTrigger}
-        onAddTrigger={onAddTrigger}
-        onRemoveTrigger={onRemoveTrigger}
-      />
-
       {/* Notification Settings */}
       <SettingsSectionHeader title="Notification Settings" />
       <SettingRow
@@ -172,40 +163,6 @@ export const NotificationsSection = ({
         />
       </SettingRow>
       <SettingRow
-        label="Task status change notifications"
-        description="Show native OS notifications when a task's status changes"
-      >
-        <SettingsToggle
-          enabled={safeConfig.notifications.notifyOnStatusChange}
-          onChange={(v) => onNotificationToggle('notifyOnStatusChange', v)}
-          disabled={saving || !safeConfig.notifications.enabled}
-        />
-      </SettingRow>
-      {safeConfig.notifications.notifyOnStatusChange && safeConfig.notifications.enabled ? (
-        <>
-          <SettingRow
-            label="Only in Solo mode"
-            description="Only notify when the team has no teammates (lead works alone)"
-          >
-            <SettingsToggle
-              enabled={safeConfig.notifications.statusChangeOnlySolo}
-              onChange={(v) => onNotificationToggle('statusChangeOnlySolo', v)}
-              disabled={saving}
-            />
-          </SettingRow>
-          <SettingRow
-            label="Notify on these statuses"
-            description="Select which status transitions trigger notifications"
-          >
-            <StatusCheckboxGroup
-              selected={safeConfig.notifications.statusChangeStatuses}
-              onChange={onStatusChangeStatusesUpdate}
-              disabled={saving}
-            />
-          </SettingRow>
-        </>
-      ) : null}
-      <SettingRow
         label="Snooze notifications"
         description={
           isSnoozed
@@ -233,6 +190,83 @@ export const NotificationsSection = ({
           )}
         </div>
       </SettingRow>
+
+      {/* Task Status Change Notifications — grouped section */}
+      <div className="border-b py-3" style={{ borderColor: 'var(--color-border-subtle)' }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+              Task status change notifications
+            </div>
+            <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              Show native OS notifications when a task&apos;s status changes
+            </div>
+          </div>
+          <div className="shrink-0">
+            <SettingsToggle
+              enabled={safeConfig.notifications.notifyOnStatusChange}
+              onChange={(v) => onNotificationToggle('notifyOnStatusChange', v)}
+              disabled={saving || !safeConfig.notifications.enabled}
+            />
+          </div>
+        </div>
+        {safeConfig.notifications.notifyOnStatusChange && safeConfig.notifications.enabled ? (
+          <div
+            className="mt-3 flex flex-col gap-3 border-t pt-3"
+            style={{ borderColor: 'var(--color-border-subtle)', paddingLeft: 15 }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div
+                  className="text-sm font-medium"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  Only in Solo mode
+                </div>
+                <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  Notify only when the team has no teammates
+                </div>
+              </div>
+              <div className="shrink-0">
+                <SettingsToggle
+                  enabled={safeConfig.notifications.statusChangeOnlySolo}
+                  onChange={(v) => onNotificationToggle('statusChangeOnlySolo', v)}
+                  disabled={saving}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <div
+                  className="text-sm font-medium"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  Notify on these statuses
+                </div>
+                <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  Which target statuses trigger a notification
+                </div>
+              </div>
+              <div className="shrink-0">
+                <StatusCheckboxGroup
+                  selected={safeConfig.notifications.statusChangeStatuses}
+                  onChange={onStatusChangeStatusesUpdate}
+                  disabled={saving}
+                />
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Custom Triggers */}
+      <NotificationTriggerSettings
+        triggers={safeConfig.notifications.triggers || []}
+        saving={saving}
+        onUpdateTrigger={onUpdateTrigger}
+        onAddTrigger={onAddTrigger}
+        onRemoveTrigger={onRemoveTrigger}
+      />
 
       <SettingsSectionHeader title="Ignored Repositories" />
       <p className="mb-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>

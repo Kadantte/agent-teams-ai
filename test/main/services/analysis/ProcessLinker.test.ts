@@ -34,7 +34,8 @@ const baseMetrics: SessionMetrics = {
 
 function makeChunk(taskIds: string[]): EnhancedAIChunk {
   return {
-    type: 'ai',
+    id: 'chunk-1',
+    chunkType: 'ai',
     responses: [
       {
         uuid: 'resp-1',
@@ -56,6 +57,10 @@ function makeChunk(taskIds: string[]): EnhancedAIChunk {
       },
     ],
     processes: [],
+    sidechainMessages: [],
+    toolExecutions: [],
+    semanticSteps: [],
+    rawMessages: [],
     startTime: new Date('2026-01-01T00:00:00Z'),
     endTime: new Date('2026-01-01T00:01:00Z'),
     durationMs: 60_000,

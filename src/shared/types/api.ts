@@ -487,7 +487,18 @@ export interface TeamsAPI {
 export interface ReviewAPI {
   // Phase 1
   getAgentChanges: (teamName: string, memberName: string) => Promise<AgentChangeSet>;
-  getTaskChanges: (teamName: string, taskId: string) => Promise<TaskChangeSetV2>;
+  getTaskChanges: (
+    teamName: string,
+    taskId: string,
+    options?: {
+      owner?: string;
+      status?: string;
+      /** Persisted work intervals (preferred for reliable owner-log attribution). */
+      intervals?: { startedAt: string; completedAt?: string }[];
+      /** Back-compat: single since timestamp (deprecated). */
+      since?: string;
+    }
+  ) => Promise<TaskChangeSetV2>;
   getChangeStats: (teamName: string, memberName: string) => Promise<ChangeStats>;
   getFileContent: (
     teamName: string,

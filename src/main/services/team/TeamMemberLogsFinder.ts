@@ -500,13 +500,21 @@ export class TeamMemberLogsFinder {
     try {
       const stream = createReadStream(filePath, { encoding: 'utf8' });
       const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+      let foundTask = false;
+      let foundTeam = false;
       for await (const line of rl) {
-        // Require both taskId and teamName to avoid cross-team collisions when multiple
+        // We require BOTH taskId and teamName to avoid cross-team collisions when multiple
         // teams share the same projectPath (task IDs are only unique per team).
-        const hasTaskId = patterns.some((re) => re.test(line));
-        if (!hasTaskId) continue;
-        const hasTeam = teamPatterns.some((re) => re.test(line));
-        if (hasTeam) {
+        //
+        // But they often appear on different lines (e.g. team_name is in Task tool input, while
+        // taskId appears in a tool result or CLI output). So we track them independently.
+        if (!foundTask && patterns.some((re) => re.test(line))) {
+          foundTask = true;
+        }
+        if (!foundTeam && teamPatterns.some((re) => re.test(line))) {
+          foundTeam = true;
+        }
+        if (foundTask && foundTeam) {
           rl.close();
           stream.destroy();
           return true;

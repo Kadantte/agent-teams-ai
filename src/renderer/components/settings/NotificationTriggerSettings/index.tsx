@@ -33,7 +33,7 @@ export const NotificationTriggerSettings = ({
   const customTriggers = triggers.filter((t) => !t.isBuiltin);
 
   return (
-    <div className="space-y-8">
+    <div className="mt-6 space-y-8">
       {/* Builtin Triggers */}
       {builtinTriggers.length > 0 && (
         <div>

@@ -105,11 +105,22 @@ export class ChangeExtractorService {
   }
 
   /** Получить изменения для конкретной задачи (Phase 3: per-task scoping) */
-  async getTaskChanges(teamName: string, taskId: string): Promise<TaskChangeSetV2> {
+  async getTaskChanges(
+    teamName: string,
+    taskId: string,
+    options?: {
+      owner?: string;
+      status?: string;
+      intervals?: { startedAt: string; completedAt?: string }[];
+      since?: string;
+    }
+  ): Promise<TaskChangeSetV2> {
     const taskMeta = await this.readTaskMeta(teamName, taskId);
     const logs = await this.logsFinder.findLogsForTask(teamName, taskId, {
-      owner: taskMeta?.owner,
-      status: taskMeta?.status,
+      owner: options?.owner ?? taskMeta?.owner,
+      status: options?.status ?? taskMeta?.status,
+      intervals: options?.intervals ?? taskMeta?.intervals,
+      since: options?.since,
     });
     const logRefs = await this.resolveLogFileRefs(teamName, logs);
     if (logRefs.length === 0) {
@@ -173,14 +184,29 @@ export class ChangeExtractorService {
   private async readTaskMeta(
     teamName: string,
     taskId: string
-  ): Promise<{ owner?: string; status?: string } | null> {
+  ): Promise<{
+    owner?: string;
+    status?: string;
+    intervals?: { startedAt: string; completedAt?: string }[];
+  } | null> {
     try {
       const taskPath = path.join(getTasksBasePath(), teamName, `${taskId}.json`);
       const raw = await readFile(taskPath, 'utf8');
       const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const intervals = Array.isArray(parsed.workIntervals)
+        ? (parsed.workIntervals as unknown[]).filter(
+            (i): i is { startedAt: string; completedAt?: string } =>
+              Boolean(i) &&
+              typeof i === 'object' &&
+              typeof (i as Record<string, unknown>).startedAt === 'string' &&
+              ((i as Record<string, unknown>).completedAt === undefined ||
+                typeof (i as Record<string, unknown>).completedAt === 'string')
+          )
+        : undefined;
       return {
         owner: typeof parsed.owner === 'string' ? parsed.owner : undefined,
         status: typeof parsed.status === 'string' ? parsed.status : undefined,
+        intervals,
       };
     } catch {
       return null;

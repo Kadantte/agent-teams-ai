@@ -201,7 +201,7 @@ export const KanbanTaskCard = ({
   const checkTaskHasChanges = useStore((s) => s.checkTaskHasChanges);
 
   useEffect(() => {
-    if (showChangesColumn && task.status === 'completed' && taskHasChanges == null) {
+    if (showChangesColumn && task.status === 'completed' && taskHasChanges !== true) {
       void checkTaskHasChanges(teamName, task.id);
     }
   }, [showChangesColumn, task.status, task.id, teamName, taskHasChanges, checkTaskHasChanges]);
