@@ -253,6 +253,12 @@ export interface AppConfig {
     notifyOnUserInbox: boolean;
     /** Whether to show native OS notifications when a task needs user clarification */
     notifyOnClarifications: boolean;
+    /** Whether to show native OS notifications when a task status changes */
+    notifyOnStatusChange: boolean;
+    /** Only notify on status changes in solo teams (no teammates) */
+    statusChangeOnlySolo: boolean;
+    /** Which target statuses to notify about (e.g. ['in_progress', 'completed']) */
+    statusChangeStatuses: string[];
     /** Notification triggers - define when to generate notifications */
     triggers: NotificationTrigger[];
   };

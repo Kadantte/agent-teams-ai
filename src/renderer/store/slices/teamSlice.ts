@@ -62,6 +62,7 @@ async function pollProvisioningStatus(
 }
 
 import type { AppState } from '../types';
+import type { AppConfig } from '@renderer/types/data';
 import type {
   AddMemberRequest,
   CreateTaskRequest,
@@ -87,6 +88,7 @@ import type { StateCreator } from 'zustand';
 // (main/index.ts → notifyNewInboxMessages). This renderer-side tracking only
 // handles clarification-specific logic (e.g., marking tasks as needing user input).
 const notifiedClarificationTaskKeys = new Set<string>();
+const notifiedStatusChangeKeys = new Set<string>();
 
 let isFirstFetchAllTasks = true;
 
@@ -123,6 +125,61 @@ function fireClarificationNotification(task: GlobalTask): void {
       to: 'user',
       summary: `Clarification needed — Task #${task.id}`,
       body,
+    })
+    .catch(() => undefined);
+}
+
+function detectStatusChangeNotifications(
+  oldTasks: GlobalTask[],
+  newTasks: GlobalTask[],
+  config: AppConfig | null,
+  teamByName: Record<string, TeamSummary>
+): void {
+  if (!config?.notifications?.notifyOnStatusChange) return;
+  if (!config.notifications.enabled) return;
+
+  const statuses = config.notifications.statusChangeStatuses ?? ['in_progress', 'completed'];
+  if (statuses.length === 0) return;
+
+  const onlySolo = config.notifications.statusChangeOnlySolo ?? true;
+
+  for (const task of newTasks) {
+    const oldTask = oldTasks.find((t) => t.teamName === task.teamName && t.id === task.id);
+    if (!oldTask) continue;
+    if (oldTask.status === task.status) continue;
+
+    if (onlySolo) {
+      const team = teamByName[task.teamName];
+      if (team && team.memberCount > 0) continue;
+    }
+
+    if (!statuses.includes(task.status)) continue;
+
+    const key = `${task.teamName}:${task.id}:${task.status}`;
+    if (notifiedStatusChangeKeys.has(key)) continue;
+    notifiedStatusChangeKeys.add(key);
+
+    fireStatusChangeNotification(task, oldTask.status);
+  }
+}
+
+function fireStatusChangeNotification(task: GlobalTask, fromStatus: string): void {
+  const statusLabels: Record<string, string> = {
+    pending: 'Pending',
+    in_progress: 'In Progress',
+    completed: 'Completed',
+    deleted: 'Deleted',
+  };
+  const from = statusLabels[fromStatus] ?? fromStatus;
+  const to = statusLabels[task.status] ?? task.status;
+
+  void api.teams
+    ?.showMessageNotification({
+      teamDisplayName: task.teamDisplayName,
+      from: task.owner ?? 'system',
+      to: 'user',
+      summary: `Task #${task.id}: ${from} → ${to}`,
+      body: task.subject,
     })
     .catch(() => undefined);
 }
@@ -380,12 +437,14 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         const notifyOnClarifications =
           get().appConfig?.notifications?.notifyOnClarifications ?? true;
         detectClarificationNotifications(oldTasks, tasks, notifyOnClarifications);
+        detectStatusChangeNotifications(oldTasks, tasks, get().appConfig, get().teamByName);
       } else {
-        // Initial load — seed the Set to prevent false notifications on next update
+        // Initial load — seed the Sets to prevent false notifications on next update
         for (const task of tasks) {
           if (task.needsClarification === 'user') {
             notifiedClarificationTaskKeys.add(`${task.teamName}:${task.id}`);
           }
+          notifiedStatusChangeKeys.add(`${task.teamName}:${task.id}:${task.status}`);
         }
       }
 

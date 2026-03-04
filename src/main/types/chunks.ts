@@ -46,6 +46,8 @@ export interface Process {
   isParallel: boolean;
   /** The tool_use ID of the Task call that spawned this */
   parentTaskId?: string;
+  /** How this process was linked to its parent Task call */
+  linkType?: 'agent-id' | 'team-member-id' | 'parent-chain' | 'unlinked';
   /** Whether this subagent is still in progress */
   isOngoing?: boolean;
   /**

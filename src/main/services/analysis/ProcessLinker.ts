@@ -1,23 +1,18 @@
 /**
  * ProcessLinker service - Links subagent processes to AI chunks.
  *
- * Uses a two-tier linking strategy:
- * 1. Primary: parentTaskId matching - Links subagents to chunks containing the Task tool call
- *    that spawned them. This is reliable even when the response is still in progress.
- * 2. Fallback: Timing-based - For orphaned subagents without parentTaskId, falls back to
- *    checking if the subagent's startTime falls within the chunk's time range.
+ * Uses deterministic parentTaskId matching only. If a subagent has no parentTaskId
+ * or it doesn't match any Task call in the chunk, the subagent is NOT linked.
+ * No timing-based or positional fallbacks — avoids false positives.
  */
 
 import { type EnhancedAIChunk, type Process } from '@main/types';
 
 /**
- * Link processes to a single AI chunk.
+ * Link processes to a single AI chunk via deterministic parentTaskId matching.
  *
- * Uses a two-tier linking strategy:
- * 1. Primary: parentTaskId matching - Links subagents to chunks containing the Task tool call
- *    that spawned them. This is reliable even when the response is still in progress.
- * 2. Fallback: Timing-based - For orphaned subagents without parentTaskId, falls back to
- *    checking if the subagent's startTime falls within the chunk's time range.
+ * Only links subagents whose parentTaskId matches a Task tool_use ID in the chunk.
+ * Subagents without parentTaskId or with non-matching parentTaskId are skipped.
  */
 export function linkProcessesToAIChunk(chunk: EnhancedAIChunk, subagents: Process[]): void {
   // Build set of Task tool IDs from this chunk's responses
@@ -30,30 +25,10 @@ export function linkProcessesToAIChunk(chunk: EnhancedAIChunk, subagents: Proces
     }
   }
 
-  // Track which subagents have been linked
-  const linkedSubagentIds = new Set<string>();
-
-  // Primary linking: Match subagents to Task calls by parentTaskId
+  // Deterministic linking: Match subagents to Task calls by parentTaskId only
   for (const subagent of subagents) {
     if (subagent.parentTaskId && chunkTaskIds.has(subagent.parentTaskId)) {
       chunk.processes.push(subagent);
-      linkedSubagentIds.add(subagent.id);
-    }
-  }
-
-  // Fallback linking: For orphaned subagents, use timing-based matching
-  // This handles edge cases where parentTaskId might not be set
-  for (const subagent of subagents) {
-    if (linkedSubagentIds.has(subagent.id)) {
-      continue; // Already linked via parentTaskId
-    }
-
-    // Only use timing fallback if subagent has no parentTaskId
-    // (If it has parentTaskId but didn't match, it belongs to a different chunk)
-    if (!subagent.parentTaskId) {
-      if (subagent.startTime >= chunk.startTime && subagent.startTime <= chunk.endTime) {
-        chunk.processes.push(subagent);
-      }
     }
   }
 

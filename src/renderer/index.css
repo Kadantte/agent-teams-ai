@@ -173,6 +173,7 @@
 
   /* Subagent/Card styling */
   --card-bg: #0f1018;
+  --card-bg-zebra: #14151f;
   --card-border: #1c1d26;
   --card-header-bg: #151620;
   --card-header-hover: #1a1b26;
@@ -380,6 +381,7 @@
 
   /* Subagent/Card styling - Warm light mode */
   --card-bg: #f9f9f7;
+  --card-bg-zebra: #f2f1ee;
   --card-border: #d5d3cf;
   --card-header-bg: #f0efed;
   --card-header-hover: #eae9e6;

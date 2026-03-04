@@ -25,6 +25,8 @@ interface CollapsibleTeamSectionProps {
   action?: React.ReactNode;
   /** Stable identifier used for programmatic section navigation. */
   sectionId?: string;
+  /** Extra classes applied to the content wrapper (e.g. padding). */
+  contentClassName?: string;
   children: React.ReactNode;
 }
 
@@ -38,6 +40,7 @@ export const CollapsibleTeamSection = ({
   forceOpen,
   action,
   sectionId,
+  contentClassName,
   children,
 }: CollapsibleTeamSectionProps): React.JSX.Element => {
   const [open, setOpen] = useState(defaultOpen);
@@ -93,7 +96,11 @@ export const CollapsibleTeamSection = ({
         </div>
         {action && <div className="relative z-10 flex shrink-0 items-center">{action}</div>}
       </div>
-      {isOpen && <div className="mt-1.5 min-w-0 overflow-x-hidden pb-2 pl-2.5">{children}</div>}
+      {isOpen && (
+        <div className={`mt-1.5 min-w-0 overflow-x-hidden pb-2 ${contentClassName ?? ''}`}>
+          {children}
+        </div>
+      )}
     </section>
   );
 };

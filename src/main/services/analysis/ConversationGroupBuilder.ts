@@ -47,8 +47,8 @@ export function buildGroups(messages: ParsedMessage[], subagents: Process[]): Co
       subagents
     );
 
-    // Link subagents to this group
-    const groupSubagents = linkSubagentsToGroup(userMsg, nextUserMsg, subagents);
+    // Link subagents to this group via deterministic parentTaskId matching
+    const groupSubagents = linkSubagentsToGroup(aiResponses, subagents);
 
     // Calculate metrics
     const { startTime, endTime, durationMs } = calculateGroupTiming(userMsg, aiResponses);
@@ -168,25 +168,21 @@ function separateTaskExecutions(
 }
 
 /**
- * Link subagents to a conversation group based on timing.
+ * Link subagents to a conversation group via deterministic parentTaskId matching.
+ * Only includes subagents whose parentTaskId matches a Task tool_use ID in the AI responses.
  */
-function linkSubagentsToGroup(
-  userMsg: ParsedMessage,
-  nextUserMsg: ParsedMessage | undefined,
-  allSubagents: Process[]
-): Process[] {
-  const groupSubagents: Process[] = [];
-  const startTime = userMsg.timestamp;
-  const endTime = nextUserMsg?.timestamp ?? new Date(Date.now() + 1000 * 60 * 60 * 24); // Far future if no next message
-
-  // Collect subagents that start within this group's time range
-  for (const subagent of allSubagents) {
-    if (subagent.startTime >= startTime && subagent.startTime < endTime) {
-      groupSubagents.push(subagent);
+function linkSubagentsToGroup(aiResponses: ParsedMessage[], allSubagents: Process[]): Process[] {
+  const groupTaskIds = new Set<string>();
+  for (const msg of aiResponses) {
+    for (const toolCall of msg.toolCalls) {
+      if (toolCall.isTask) {
+        groupTaskIds.add(toolCall.id);
+      }
     }
   }
-
-  return groupSubagents;
+  return allSubagents
+    .filter((s) => s.parentTaskId && groupTaskIds.has(s.parentTaskId))
+    .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
 }
 
 /**

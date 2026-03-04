@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { parseStructuredAgentMessage } from '@renderer/utils/agentMessageFormatting';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 
-import { ActivityItem } from './ActivityItem';
+import { ActivityItem, isNoiseMessage } from './ActivityItem';
 
 import type { InboxMessage, ResolvedTeamMember } from '@shared/types';
 
@@ -35,6 +36,7 @@ const MessageRowWithObserver = ({
   recipientColor,
   isUnread,
   isNew,
+  zebraShade,
   onMemberNameClick,
   onCreateTask,
   onReply,
@@ -48,6 +50,7 @@ const MessageRowWithObserver = ({
   recipientColor?: string;
   isUnread?: boolean;
   isNew?: boolean;
+  zebraShade?: boolean;
   onMemberNameClick?: (name: string) => void;
   onCreateTask?: (subject: string, description: string) => void;
   onReply?: (message: InboxMessage) => void;
@@ -93,6 +96,7 @@ const MessageRowWithObserver = ({
         memberColor={memberColor}
         recipientColor={recipientColor}
         isUnread={isUnread}
+        zebraShade={zebraShade}
         onMemberNameClick={onMemberNameClick}
         onCreateTask={onCreateTask}
         onReply={onReply}
@@ -171,6 +175,18 @@ export const ActivityTimeline = ({
     () => (hiddenCount > 0 ? messages.slice(0, visibleCount) : messages),
     [messages, visibleCount, hiddenCount]
   );
+
+  // Zebra striping: alternate shade on non-noise (full card) messages only.
+  const zebraShadeSet = useMemo(() => {
+    const result = new Set<number>();
+    let cardCount = 0;
+    for (let i = 0; i < visibleMessages.length; i++) {
+      if (isNoiseMessage(visibleMessages[i].text)) continue;
+      if (cardCount % 2 === 1) result.add(i);
+      cardCount++;
+    }
+    return result;
+  }, [visibleMessages]);
 
   // Determine which messages are "new" (should animate).
 
@@ -251,6 +267,7 @@ export const ActivityTimeline = ({
             recipientColor={recipientColor}
             isUnread={isUnread}
             isNew={newMessageKeys.has(messageKey)}
+            zebraShade={zebraShadeSet.has(index)}
             onMemberNameClick={onMemberClick ? handleMemberNameClick : undefined}
             onCreateTask={onCreateTaskFromMessage}
             onReply={onReplyToMessage}

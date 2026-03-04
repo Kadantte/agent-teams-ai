@@ -169,6 +169,9 @@ export const WORKTREE_BADGE_TEXT = '#a1a1aa';
 /** Card background */
 export const CARD_BG = 'var(--card-bg)';
 
+/** Card background — zebra-striped alternate row */
+export const CARD_BG_ZEBRA = 'var(--card-bg-zebra)';
+
 /** Card border color */
 const CARD_BORDER = 'var(--card-border)';
 

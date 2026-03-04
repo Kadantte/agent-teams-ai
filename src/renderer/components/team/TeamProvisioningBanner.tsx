@@ -55,13 +55,12 @@ export const TeamProvisioningBanner = ({
     return null;
   }
 
-  if (progress.state === 'cancelled') {
+  if (progress.state === 'cancelled' || progress.state === 'disconnected') {
     return null;
   }
 
   const isReady = progress.state === 'ready';
   const isFailed = progress.state === 'failed';
-  const isDisconnected = progress.state === 'disconnected';
   const isActive =
     progress.state === 'validating' ||
     progress.state === 'spawning' ||
@@ -102,22 +101,6 @@ export const TeamProvisioningBanner = ({
           defaultLiveOutputOpen
           onCancel={null}
         />
-      </div>
-    );
-  }
-
-  if (isDisconnected) {
-    return (
-      <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-        <p className="flex-1 text-xs text-amber-200">Team offline</p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-6 shrink-0 border-amber-500/40 px-2 text-xs text-amber-300 hover:bg-amber-500/10 hover:text-amber-200"
-          onClick={() => setDismissed(true)}
-        >
-          <X size={12} />
-        </Button>
       </div>
     );
   }

@@ -453,7 +453,12 @@ export const TaskDetailDialog = ({
         ) : null}
 
         {/* Description */}
-        <CollapsibleTeamSection title="Description" icon={<AlignLeft size={14} />} defaultOpen>
+        <CollapsibleTeamSection
+          title="Description"
+          icon={<AlignLeft size={14} />}
+          contentClassName="pl-2.5"
+          defaultOpen
+        >
           {editingDescription ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -563,6 +568,7 @@ export const TaskDetailDialog = ({
             title="Changes"
             icon={<FileDiff size={14} />}
             badge={taskChangesFiles ? taskChangesFiles.length : undefined}
+            contentClassName="pl-2.5"
             defaultOpen={taskKnownHasChanges}
           >
             {changeSetLoading || (!taskChangesFiles && taskKnownHasChanges) ? (
@@ -616,6 +622,7 @@ export const TaskDetailDialog = ({
                 </span>
               ) : null
             }
+            contentClassName="pl-2.5"
             defaultOpen
           >
             <div className="min-w-0 overflow-hidden">
@@ -766,6 +773,7 @@ export const TaskDetailDialog = ({
             title="Status History"
             icon={<History size={14} />}
             badge={currentTask.statusHistory.length}
+            contentClassName="pl-2.5"
             defaultOpen={false}
           >
             <StatusHistoryTimeline history={currentTask.statusHistory} />
@@ -781,6 +789,7 @@ export const TaskDetailDialog = ({
               ? (currentTask.comments?.length ?? 0)
               : undefined
           }
+          contentClassName="pl-2.5"
           defaultOpen
         >
           <TaskCommentInput

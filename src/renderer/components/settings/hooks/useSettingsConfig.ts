@@ -10,6 +10,7 @@ import { useStore } from '@renderer/store';
 import { useShallow } from 'zustand/react/shallow';
 
 import type { AppConfig } from '@renderer/types/data';
+import type { TeamTaskStatus } from '@shared/types';
 
 // Get the setState function from the store to update appConfig globally
 const setStoreState = useStore.setState;
@@ -45,6 +46,9 @@ export interface SafeConfig {
     notifyOnLeadInbox: boolean;
     notifyOnUserInbox: boolean;
     notifyOnClarifications: boolean;
+    notifyOnStatusChange: boolean;
+    statusChangeOnlySolo: boolean;
+    statusChangeStatuses: TeamTaskStatus[];
     triggers: AppConfig['notifications']['triggers'];
   };
   display: {
@@ -175,6 +179,11 @@ export function useSettingsConfig(): UseSettingsConfigReturn {
         notifyOnLeadInbox: displayConfig?.notifications?.notifyOnLeadInbox ?? false,
         notifyOnUserInbox: displayConfig?.notifications?.notifyOnUserInbox ?? true,
         notifyOnClarifications: displayConfig?.notifications?.notifyOnClarifications ?? true,
+        notifyOnStatusChange: displayConfig?.notifications?.notifyOnStatusChange ?? true,
+        statusChangeOnlySolo: displayConfig?.notifications?.statusChangeOnlySolo ?? true,
+        statusChangeStatuses: (displayConfig?.notifications?.statusChangeStatuses as
+          | TeamTaskStatus[]
+          | undefined) ?? ['in_progress', 'completed'],
         triggers: displayConfig?.notifications?.triggers ?? [],
       },
       display: {

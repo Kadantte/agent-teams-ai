@@ -151,6 +151,7 @@ export const SettingsView = (): React.JSX.Element | null => {
               onAddTrigger={handlers.handleAddTrigger}
               onUpdateTrigger={handlers.handleUpdateTrigger}
               onRemoveTrigger={handlers.handleRemoveTrigger}
+              onStatusChangeStatusesUpdate={handlers.handleStatusChangeStatusesUpdate}
             />
           )}
 

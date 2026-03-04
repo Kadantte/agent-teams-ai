@@ -153,16 +153,16 @@ export class SubagentResolver {
   }
 
   /**
-   * Extract the summary attribute from the first <teammate-message> tag in a subagent's messages.
-   * Returns the summary string if found, undefined otherwise.
-   * Used to match team member files to their spawning Task calls.
+   * Extract the teammate_id attribute from the first <teammate-message> tag in a subagent's messages.
+   * Returns the teammate_id string if found, undefined otherwise.
+   * Used for deterministic matching of team member files to their spawning Task calls.
    */
-  private extractTeamMessageSummary(messages: ParsedMessage[]): string | undefined {
+  private extractTeammateId(messages: ParsedMessage[]): string | undefined {
     const firstUserMessage = messages.find((m) => m.type === 'user');
     if (!firstUserMessage) return undefined;
 
     const text = typeof firstUserMessage.content === 'string' ? firstUserMessage.content : '';
-    const match = /<teammate-message[^>]*\bsummary="([^"]+)"/.exec(text);
+    const match = /<teammate-message\s+[^>]*\bteammate_id="([^"]+)"/.exec(text);
     return match?.[1];
   }
 
@@ -250,38 +250,41 @@ export class SubagentResolver {
       if (!taskCall) continue;
 
       this.enrichSubagentFromTask(subagent, taskCall);
+      subagent.linkType = 'agent-id';
       matchedSubagentIds.add(subagent.id);
       matchedTaskIds.add(taskCallId);
     }
 
-    // Phase 2: Description-based matching for team members
+    // Phase 2: Deterministic teammate_id matching for team members
     // Team spawns use agent_id = "name@team_name" (not a file UUID), so Phase 1 can't match them.
-    // Instead, match by comparing the Task description to the summary attribute in the
-    // subagent file's first <teammate-message> tag.
+    // Instead, match by comparing Task call input.name to the teammate_id XML attribute
+    // in the subagent file's first <teammate-message> tag.
     const teamTaskCalls = taskCallsOnly.filter(
-      (tc) => !matchedTaskIds.has(tc.id) && tc.input?.team_name && tc.input?.name
+      (tc) =>
+        !matchedTaskIds.has(tc.id) &&
+        typeof tc.input?.team_name === 'string' &&
+        typeof tc.input?.name === 'string'
     );
 
     if (teamTaskCalls.length > 0) {
-      // Pre-extract summaries from unmatched subagent files
-      const subagentSummaries = new Map<string, string>();
+      // Pre-extract teammate_ids from unmatched subagent files
+      const subagentTeammateIds = new Map<string, string>();
       for (const subagent of subagents) {
         if (matchedSubagentIds.has(subagent.id)) continue;
-        const summary = this.extractTeamMessageSummary(subagent.messages);
-        if (summary) {
-          subagentSummaries.set(subagent.id, summary);
+        const teammateId = this.extractTeammateId(subagent.messages);
+        if (teammateId) {
+          subagentTeammateIds.set(subagent.id, teammateId);
         }
       }
 
-      // Match each team Task call to the earliest subagent file with matching summary
+      // Match each team Task call to the earliest subagent file with matching teammate_id
       for (const taskCall of teamTaskCalls) {
-        const description = taskCall.taskDescription;
-        if (!description) continue;
+        const inputName = taskCall.input?.name as string;
 
         let bestMatch: Process | undefined;
         for (const subagent of subagents) {
           if (matchedSubagentIds.has(subagent.id)) continue;
-          if (subagentSummaries.get(subagent.id) !== description) continue;
+          if (subagentTeammateIds.get(subagent.id) !== inputName) continue;
           if (!bestMatch || subagent.startTime < bestMatch.startTime) {
             bestMatch = subagent;
           }
@@ -289,22 +292,18 @@ export class SubagentResolver {
 
         if (bestMatch) {
           this.enrichSubagentFromTask(bestMatch, taskCall);
+          bestMatch.linkType = 'team-member-id';
           matchedSubagentIds.add(bestMatch.id);
           matchedTaskIds.add(taskCall.id);
         }
       }
     }
 
-    // Phase 3: Positional fallback for remaining unmatched non-team subagents (no wrap-around)
-    const unmatchedSubagents = [...subagents]
-      .filter((s) => !matchedSubagentIds.has(s.id))
-      .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
-    const unmatchedTasks = taskCallsOnly.filter(
-      (tc) => !matchedTaskIds.has(tc.id) && !(tc.input?.team_name && tc.input?.name)
-    );
-
-    for (let i = 0; i < unmatchedSubagents.length && i < unmatchedTasks.length; i++) {
-      this.enrichSubagentFromTask(unmatchedSubagents[i], unmatchedTasks[i]);
+    // Mark remaining unmatched subagents as unlinked (no Phase 3 positional fallback)
+    for (const subagent of subagents) {
+      if (!matchedSubagentIds.has(subagent.id) && !subagent.linkType) {
+        subagent.linkType = 'unlinked';
+      }
     }
   }
 
@@ -398,6 +397,7 @@ export class SubagentResolver {
         subagent.parentTaskId = subagent.parentTaskId ?? ancestor.parentTaskId;
         subagent.description = subagent.description ?? ancestor.description;
         subagent.subagentType = subagent.subagentType ?? ancestor.subagentType;
+        subagent.linkType = subagent.linkType ?? (ancestor.linkType ? 'parent-chain' : undefined);
       }
     }
   }

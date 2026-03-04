@@ -109,33 +109,76 @@ describe('configValidation', () => {
     }
   });
 
-  it.each(['notifyOnLeadInbox', 'notifyOnUserInbox', 'notifyOnClarifications'] as const)(
-    'accepts boolean %s toggle',
-    (key) => {
-      const resultOn = validateConfigUpdatePayload('notifications', { [key]: true });
-      expect(resultOn.valid).toBe(true);
-      if (resultOn.valid) {
-        expect(resultOn.data).toEqual({ [key]: true });
-      }
-
-      const resultOff = validateConfigUpdatePayload('notifications', { [key]: false });
-      expect(resultOff.valid).toBe(true);
-      if (resultOff.valid) {
-        expect(resultOff.data).toEqual({ [key]: false });
-      }
+  it.each([
+    'notifyOnLeadInbox',
+    'notifyOnUserInbox',
+    'notifyOnClarifications',
+    'notifyOnStatusChange',
+    'statusChangeOnlySolo',
+  ] as const)('accepts boolean %s toggle', (key) => {
+    const resultOn = validateConfigUpdatePayload('notifications', { [key]: true });
+    expect(resultOn.valid).toBe(true);
+    if (resultOn.valid) {
+      expect(resultOn.data).toEqual({ [key]: true });
     }
-  );
 
-  it.each(['notifyOnLeadInbox', 'notifyOnUserInbox', 'notifyOnClarifications'] as const)(
-    'rejects non-boolean %s',
-    (key) => {
-      const result = validateConfigUpdatePayload('notifications', { [key]: 'yes' });
-      expect(result.valid).toBe(false);
-      if (!result.valid) {
-        expect(result.error).toContain('boolean');
-      }
+    const resultOff = validateConfigUpdatePayload('notifications', { [key]: false });
+    expect(resultOff.valid).toBe(true);
+    if (resultOff.valid) {
+      expect(resultOff.data).toEqual({ [key]: false });
     }
-  );
+  });
+
+  it.each([
+    'notifyOnLeadInbox',
+    'notifyOnUserInbox',
+    'notifyOnClarifications',
+    'notifyOnStatusChange',
+    'statusChangeOnlySolo',
+  ] as const)('rejects non-boolean %s', (key) => {
+    const result = validateConfigUpdatePayload('notifications', { [key]: 'yes' });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain('boolean');
+    }
+  });
+
+  it('accepts valid statusChangeStatuses string array', () => {
+    const result = validateConfigUpdatePayload('notifications', {
+      statusChangeStatuses: ['completed', 'in_progress'],
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.data).toEqual({ statusChangeStatuses: ['completed', 'in_progress'] });
+    }
+  });
+
+  it('accepts empty statusChangeStatuses array', () => {
+    const result = validateConfigUpdatePayload('notifications', {
+      statusChangeStatuses: [],
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects non-array statusChangeStatuses', () => {
+    const result = validateConfigUpdatePayload('notifications', {
+      statusChangeStatuses: true,
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain('string[]');
+    }
+  });
+
+  it('rejects statusChangeStatuses with non-string items', () => {
+    const result = validateConfigUpdatePayload('notifications', {
+      statusChangeStatuses: [42],
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain('string[]');
+    }
+  });
 
   it('rejects out-of-range snoozeMinutes', () => {
     const result = validateConfigUpdatePayload('notifications', { snoozeMinutes: 0 });

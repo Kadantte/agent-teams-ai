@@ -35,6 +35,7 @@ interface SettingsHandlers {
 
   // Notification handlers
   handleNotificationToggle: (key: keyof AppConfig['notifications'], value: boolean) => void;
+  handleStatusChangeStatusesUpdate: (statuses: string[]) => void;
   handleSnooze: (minutes: number) => Promise<void>;
   handleClearSnooze: () => Promise<void>;
   handleAddIgnoredRepository: (item: RepositoryDropdownItem) => Promise<void>;
@@ -100,6 +101,13 @@ export function useSettingsHandlers({
   const handleNotificationToggle = useCallback(
     (key: keyof AppConfig['notifications'], value: boolean) => {
       void updateConfig('notifications', { [key]: value });
+    },
+    [updateConfig]
+  );
+
+  const handleStatusChangeStatusesUpdate = useCallback(
+    (statuses: string[]) => {
+      void updateConfig('notifications', { statusChangeStatuses: statuses });
     },
     [updateConfig]
   );
@@ -290,6 +298,9 @@ export function useSettingsHandlers({
           notifyOnLeadInbox: false,
           notifyOnUserInbox: true,
           notifyOnClarifications: true,
+          notifyOnStatusChange: true,
+          statusChangeOnlySolo: true,
+          statusChangeStatuses: ['in_progress', 'completed'],
           triggers: defaultTriggers,
         },
         general: {
@@ -390,6 +401,7 @@ export function useSettingsHandlers({
     handleLanguageChange,
     handleDefaultTabChange,
     handleNotificationToggle,
+    handleStatusChangeStatusesUpdate,
     handleSnooze,
     handleClearSnooze,
     handleAddIgnoredRepository,

@@ -176,8 +176,10 @@ export class TeamMemberLogsFinder {
       typeof normalizedOwner === 'string' &&
       normalizedOwner.length > 0 &&
       normalizedOwner.toLowerCase() === leadMemberName.toLowerCase();
+    const ownerRelevantStatus =
+      options?.status === 'in_progress' || options?.status === 'completed';
     const includeOwnerSessions =
-      options?.status === 'in_progress' &&
+      ownerRelevantStatus &&
       typeof normalizedOwner === 'string' &&
       normalizedOwner.length > 0 &&
       !isLeadOwner;

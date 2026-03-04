@@ -112,6 +112,9 @@ function validateNotificationsSection(
     'ignoredRepositories',
     'snoozedUntil',
     'snoozeMinutes',
+    'notifyOnStatusChange',
+    'statusChangeOnlySolo',
+    'statusChangeStatuses',
     'triggers',
   ];
 
@@ -161,6 +164,24 @@ function validateNotificationsSection(
           return { valid: false, error: `notifications.${key} must be a boolean` };
         }
         result.notifyOnClarifications = value;
+        break;
+      case 'notifyOnStatusChange':
+        if (typeof value !== 'boolean') {
+          return { valid: false, error: `notifications.${key} must be a boolean` };
+        }
+        result.notifyOnStatusChange = value;
+        break;
+      case 'statusChangeOnlySolo':
+        if (typeof value !== 'boolean') {
+          return { valid: false, error: `notifications.${key} must be a boolean` };
+        }
+        result.statusChangeOnlySolo = value;
+        break;
+      case 'statusChangeStatuses':
+        if (!isStringArray(value)) {
+          return { valid: false, error: `notifications.${key} must be a string[]` };
+        }
+        result.statusChangeStatuses = value;
         break;
       case 'ignoredRegex':
         if (!isStringArray(value)) {

@@ -14,6 +14,7 @@ import { NotificationTriggerSettings } from '../NotificationTriggerSettings';
 
 import type { RepositoryDropdownItem, SafeConfig } from '../hooks/useSettingsConfig';
 import type { NotificationTrigger } from '@renderer/types/data';
+import type { TeamTaskStatus } from '@shared/types';
 
 // Snooze duration options
 const SNOOZE_OPTIONS = [
@@ -38,9 +39,12 @@ interface NotificationsSectionProps {
       | 'includeSubagentErrors'
       | 'notifyOnLeadInbox'
       | 'notifyOnUserInbox'
-      | 'notifyOnClarifications',
+      | 'notifyOnClarifications'
+      | 'notifyOnStatusChange'
+      | 'statusChangeOnlySolo',
     value: boolean
   ) => void;
+  readonly onStatusChangeStatusesUpdate: (statuses: TeamTaskStatus[]) => void;
   readonly onSnooze: (minutes: number) => Promise<void>;
   readonly onClearSnooze: () => Promise<void>;
   readonly onAddIgnoredRepository: (item: RepositoryDropdownItem) => Promise<void>;
@@ -67,6 +71,7 @@ export const NotificationsSection = ({
   onAddTrigger,
   onUpdateTrigger,
   onRemoveTrigger,
+  onStatusChangeStatusesUpdate,
 }: NotificationsSectionProps): React.JSX.Element => {
   return (
     <div>
@@ -167,6 +172,40 @@ export const NotificationsSection = ({
         />
       </SettingRow>
       <SettingRow
+        label="Task status change notifications"
+        description="Show native OS notifications when a task's status changes"
+      >
+        <SettingsToggle
+          enabled={safeConfig.notifications.notifyOnStatusChange}
+          onChange={(v) => onNotificationToggle('notifyOnStatusChange', v)}
+          disabled={saving || !safeConfig.notifications.enabled}
+        />
+      </SettingRow>
+      {safeConfig.notifications.notifyOnStatusChange && safeConfig.notifications.enabled ? (
+        <>
+          <SettingRow
+            label="Only in Solo mode"
+            description="Only notify when the team has no teammates (lead works alone)"
+          >
+            <SettingsToggle
+              enabled={safeConfig.notifications.statusChangeOnlySolo}
+              onChange={(v) => onNotificationToggle('statusChangeOnlySolo', v)}
+              disabled={saving}
+            />
+          </SettingRow>
+          <SettingRow
+            label="Notify on these statuses"
+            description="Select which status transitions trigger notifications"
+          >
+            <StatusCheckboxGroup
+              selected={safeConfig.notifications.statusChangeStatuses}
+              onChange={onStatusChangeStatusesUpdate}
+              disabled={saving}
+            />
+          </SettingRow>
+        </>
+      ) : null}
+      <SettingRow
         label="Snooze notifications"
         description={
           isSnoozed
@@ -230,3 +269,46 @@ export const NotificationsSection = ({
     </div>
   );
 };
+
+const STATUS_OPTIONS: { value: TeamTaskStatus; label: string }[] = [
+  { value: 'in_progress', label: 'Started' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'deleted', label: 'Deleted' },
+];
+
+const StatusCheckboxGroup = ({
+  selected,
+  onChange,
+  disabled,
+}: {
+  selected: TeamTaskStatus[];
+  onChange: (statuses: TeamTaskStatus[]) => void;
+  disabled: boolean;
+}) => (
+  <div className="flex flex-wrap gap-2">
+    {STATUS_OPTIONS.map((opt) => {
+      const checked = selected.includes(opt.value);
+      return (
+        <button
+          key={opt.value}
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            const next = checked
+              ? selected.filter((s) => s !== opt.value)
+              : [...selected, opt.value];
+            onChange(next);
+          }}
+          className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+            checked
+              ? 'bg-indigo-500/20 text-indigo-400'
+              : 'bg-[var(--color-surface-raised)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+          } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
+        >
+          {opt.label}
+        </button>
+      );
+    })}
+  </div>
+);

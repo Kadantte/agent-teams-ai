@@ -154,7 +154,7 @@ export const TaskCommentsSection = ({
             </div>
           ) : null}
 
-          {visibleComments.map((comment) => (
+          {visibleComments.map((comment, index) => (
             <div
               key={comment.id}
               className={[
@@ -165,6 +165,11 @@ export const TaskCommentsSection = ({
                     ? 'border border-blue-500/20 bg-blue-500/5'
                     : '',
               ].join(' ')}
+              style={
+                !comment.type && index % 2 === 1
+                  ? { backgroundColor: 'var(--card-bg-zebra)' }
+                  : undefined
+              }
             >
               <div className="mb-1 flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
                 <MemberBadge name={comment.author} color={colorMap.get(comment.author)} />

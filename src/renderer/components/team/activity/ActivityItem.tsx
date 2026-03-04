@@ -6,6 +6,7 @@ import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import {
   CARD_BG,
+  CARD_BG_ZEBRA,
   CARD_BORDER_STYLE,
   CARD_ICON_MUTED,
   CARD_TEXT_LIGHT,
@@ -43,11 +44,19 @@ interface ActivityItemProps {
   onReply?: (message: InboxMessage) => void;
   /** Called when a task ID link (e.g. #10) is clicked in message text. */
   onTaskIdClick?: (taskId: string) => void;
+  /** When true, apply a subtle lighter background for zebra-striped lists. */
+  zebraShade?: boolean;
 }
 
 function getStringField(obj: StructuredMessage, key: string): string | null {
   const value = obj[key];
   return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+/** Check if a message renders as a compact noise row (idle, shutdown, etc.). */
+export function isNoiseMessage(text: string): boolean {
+  const parsed = parseStructuredAgentMessage(text);
+  return parsed !== null && getNoiseLabel(parsed) !== null;
 }
 
 function getNoiseLabel(parsed: StructuredMessage): string | null {
@@ -165,6 +174,7 @@ export const ActivityItem = ({
   onCreateTask,
   onReply,
   onTaskIdClick,
+  zebraShade,
 }: ActivityItemProps): React.JSX.Element => {
   const colors = getTeamColorSet(memberColor ?? message.color ?? '');
   const formattedRole = formatAgentRole(memberRole);
@@ -227,7 +237,12 @@ export const ActivityItem = ({
     <article
       className="group overflow-hidden rounded-md"
       style={{
-        backgroundColor: rateLimited || isApiError ? 'var(--tool-result-error-bg)' : CARD_BG,
+        backgroundColor:
+          rateLimited || isApiError
+            ? 'var(--tool-result-error-bg)'
+            : zebraShade
+              ? CARD_BG_ZEBRA
+              : CARD_BG,
         border:
           rateLimited || isApiError
             ? '1px solid var(--tool-result-error-border)'

@@ -1,6 +1,8 @@
+import { getTasksBasePath } from '@main/utils/pathDecoder';
 import { createLogger } from '@shared/utils/logger';
 import { createReadStream } from 'fs';
-import { stat } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
+import * as path from 'path';
 import * as readline from 'readline';
 
 import { TeamConfigReader } from './TeamConfigReader';
@@ -104,7 +106,11 @@ export class ChangeExtractorService {
 
   /** Получить изменения для конкретной задачи (Phase 3: per-task scoping) */
   async getTaskChanges(teamName: string, taskId: string): Promise<TaskChangeSetV2> {
-    const logs = await this.logsFinder.findLogsForTask(teamName, taskId);
+    const taskMeta = await this.readTaskMeta(teamName, taskId);
+    const logs = await this.logsFinder.findLogsForTask(teamName, taskId, {
+      owner: taskMeta?.owner,
+      status: taskMeta?.status,
+    });
     const logRefs = await this.resolveLogFileRefs(teamName, logs);
     if (logRefs.length === 0) {
       return this.emptyTaskChangeSet(teamName, taskId);
@@ -162,6 +168,24 @@ export class ChangeExtractorService {
   }
 
   // ---- Private methods ----
+
+  /** Read task metadata (owner, status) from the task JSON file */
+  private async readTaskMeta(
+    teamName: string,
+    taskId: string
+  ): Promise<{ owner?: string; status?: string } | null> {
+    try {
+      const taskPath = path.join(getTasksBasePath(), teamName, `${taskId}.json`);
+      const raw = await readFile(taskPath, 'utf8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return {
+        owner: typeof parsed.owner === 'string' ? parsed.owner : undefined,
+        status: typeof parsed.status === 'string' ? parsed.status : undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
 
   /** Получить projectPath из конфига команды */
   private async resolveProjectPath(teamName: string): Promise<string | undefined> {

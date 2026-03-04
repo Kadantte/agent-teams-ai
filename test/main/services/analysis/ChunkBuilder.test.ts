@@ -385,6 +385,50 @@ describe('ChunkBuilder', () => {
           expect(chunks[0].processes[0].id).toBe(subagent.id);
         }
       });
+
+      it('should NOT link subagent without parentTaskId (no timing fallback)', () => {
+        const taskId = 'task-456';
+        const messages = [
+          createMessage({
+            type: 'assistant',
+            timestamp: new Date('2026-01-01T00:00:00Z'),
+            content: [
+              { type: 'text', text: 'Spawning' },
+              {
+                type: 'tool_use',
+                id: taskId,
+                name: 'Task',
+                input: { prompt: 'Do something' },
+              },
+            ],
+            toolCalls: [
+              {
+                id: taskId,
+                name: 'Task',
+                input: { prompt: 'Do something' },
+                isTask: true,
+                taskDescription: 'Do something',
+                taskSubagentType: 'explore',
+              },
+            ],
+          }),
+        ];
+
+        // Subagent with NO parentTaskId — should NOT be linked even if time overlaps
+        const orphan = createSubagent({
+          parentTaskId: undefined,
+          startTime: new Date('2026-01-01T00:00:01Z'),
+          endTime: new Date('2026-01-01T00:00:30Z'),
+        });
+
+        const chunks = builder.buildChunks(messages, [orphan]);
+        expect(chunks).toHaveLength(1);
+        expect(isAIChunk(chunks[0])).toBe(true);
+
+        if (isAIChunk(chunks[0])) {
+          expect(chunks[0].processes).toHaveLength(0);
+        }
+      });
     });
   });
 
