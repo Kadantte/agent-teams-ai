@@ -157,8 +157,17 @@ export const GlobalTaskList = ({
       variant: 'danger',
     });
     if (confirmed) {
-      await softDeleteTask(teamName, taskId);
-      await fetchAllTasks();
+      try {
+        await softDeleteTask(teamName, taskId);
+        await fetchAllTasks();
+      } catch (err) {
+        void confirm({
+          title: 'Failed to delete task',
+          message: err instanceof Error ? err.message : 'An unexpected error occurred',
+          confirmLabel: 'OK',
+          variant: 'danger',
+        });
+      }
     }
   };
 

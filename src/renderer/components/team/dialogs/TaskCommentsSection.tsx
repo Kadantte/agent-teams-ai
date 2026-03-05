@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
 import { ReplyQuoteBlock } from '@renderer/components/team/activity/ReplyQuoteBlock';
 import { MemberBadge } from '@renderer/components/team/MemberBadge';
+import { ImageLightbox } from '@renderer/components/team/attachments/ImageLightbox';
 import { ExpandableContent } from '@renderer/components/ui/ExpandableContent';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
@@ -305,22 +306,14 @@ export const TaskCommentsSection = ({
         </div>
       ) : null}
 
-      {/* Full-size image preview overlay */}
+      {/* Image lightbox */}
       {previewImageUrl ? (
-        <div className="relative mb-3 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-          <button
-            type="button"
-            className="absolute right-2 top-2 rounded p-0.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)]"
-            onClick={() => setPreviewImageUrl(null)}
-          >
-            <X size={14} />
-          </button>
-          <img
-            src={previewImageUrl}
-            alt="Attachment preview"
-            className="max-h-[400px] max-w-full rounded object-contain"
-          />
-        </div>
+        <ImageLightbox
+          open
+          onClose={() => setPreviewImageUrl(null)}
+          src={previewImageUrl}
+          alt="Attachment preview"
+        />
       ) : null}
 
       {!hideInput && (
@@ -416,6 +409,7 @@ const CommentAttachmentThumbnail = ({
   const getTaskAttachmentData = useStore((s) => s.getTaskAttachmentData);
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -441,58 +435,76 @@ const CommentAttachmentThumbnail = ({
   }, [teamName, taskId, attachment.id, attachment.mimeType, getTaskAttachmentData]);
 
   return (
-    <div
-      className="group relative flex size-14 cursor-pointer items-center justify-center overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors hover:border-[var(--color-border-emphasis)]"
-      onClick={() => {
-        if (isImageMimeType(attachment.mimeType)) {
-          if (thumbUrl) onPreview(thumbUrl);
-          return;
-        }
-        void (async () => {
-          setDownloading(true);
-          try {
-            const base64 = await getTaskAttachmentData(
-              teamName,
-              taskId,
-              attachment.id,
-              attachment.mimeType
-            );
-            if (!base64) return;
-            const mime =
-              attachment.mimeType && typeof attachment.mimeType === 'string'
-                ? attachment.mimeType
-                : 'application/octet-stream';
-            const dataUrl = `data:${mime};base64,${base64}`;
-            const blob = await fetch(dataUrl).then((r) => r.blob());
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = attachment.filename || 'attachment';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-          } finally {
-            setDownloading(false);
-          }
-        })();
-      }}
-    >
-      {isImageMimeType(attachment.mimeType) ? (
-        thumbUrl ? (
-          <img src={thumbUrl} alt={attachment.filename} className="size-full object-cover" />
-        ) : (
-          <Loader2 size={12} className="animate-spin text-[var(--color-text-muted)]" />
-        )
-      ) : downloading ? (
-        <Loader2 size={12} className="animate-spin text-[var(--color-text-muted)]" />
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          className={`group relative flex size-14 cursor-pointer items-center justify-center overflow-hidden rounded border bg-[var(--color-surface)] transition-colors ${
+            downloadError
+              ? 'border-red-500/60'
+              : 'border-[var(--color-border)] hover:border-[var(--color-border-emphasis)]'
+          }`}
+          onClick={() => {
+            if (isImageMimeType(attachment.mimeType)) {
+              if (thumbUrl) onPreview(thumbUrl);
+              return;
+            }
+            void (async () => {
+              setDownloading(true);
+              setDownloadError(null);
+              try {
+                const base64 = await getTaskAttachmentData(
+                  teamName,
+                  taskId,
+                  attachment.id,
+                  attachment.mimeType
+                );
+                if (!base64) return;
+                const mime =
+                  attachment.mimeType && typeof attachment.mimeType === 'string'
+                    ? attachment.mimeType
+                    : 'application/octet-stream';
+                const dataUrl = `data:${mime};base64,${base64}`;
+                const blob = await fetch(dataUrl).then((r) => r.blob());
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = attachment.filename || 'attachment';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+              } catch (err) {
+                setDownloadError(err instanceof Error ? err.message : 'Download failed');
+              } finally {
+                setDownloading(false);
+              }
+            })();
+          }}
+        >
+          {isImageMimeType(attachment.mimeType) ? (
+            thumbUrl ? (
+              <img src={thumbUrl} alt={attachment.filename} className="size-full object-cover" />
+            ) : (
+              <Loader2 size={12} className="animate-spin text-[var(--color-text-muted)]" />
+            )
+          ) : downloading ? (
+            <Loader2 size={12} className="animate-spin text-[var(--color-text-muted)]" />
+          ) : (
+            <File size={14} className="text-[var(--color-text-muted)]" />
+          )}
+          <div className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-0.5 py-px text-center text-[7px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+            {attachment.filename}
+          </div>
+        </div>
+      </TooltipTrigger>
+      {downloadError ? (
+        <TooltipContent side="top" className="text-red-400">
+          {downloadError}
+        </TooltipContent>
       ) : (
-        <File size={14} className="text-[var(--color-text-muted)]" />
+        <TooltipContent side="top">{attachment.filename}</TooltipContent>
       )}
-      <div className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-0.5 py-px text-center text-[7px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-        {attachment.filename}
-      </div>
-    </div>
+    </Tooltip>
   );
 };
 

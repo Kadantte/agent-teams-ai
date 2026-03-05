@@ -126,10 +126,10 @@ export const EditorImagePreview = ({
       </div>
 
       <ImageLightbox
-        src={dataUrl}
-        alt={fileName}
         open={lightboxOpen}
         onClose={() => setLightboxOpen(false)}
+        src={dataUrl}
+        alt={fileName}
       />
     </div>
   );

@@ -14,10 +14,9 @@ import {
 } from '@renderer/components/ui/dialog';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
+import { MemberSelect } from '@renderer/components/ui/MemberSelect';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
-import { Combobox, type ComboboxOption } from '@renderer/components/ui/combobox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useAttachments } from '@renderer/hooks/useAttachments';
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
@@ -28,7 +27,7 @@ import { removeChipTokenFromText } from '@renderer/utils/chipUtils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { getModifierKeyName } from '@renderer/utils/keyboardUtils';
-import { AlertCircle, Check, ImagePlus, Send, X } from 'lucide-react';
+import { AlertCircle, ImagePlus, Send, X } from 'lucide-react';
 
 import { MemberBadge } from '../MemberBadge';
 
@@ -82,15 +81,6 @@ export const SendMessageDialog = ({
   onClose,
 }: SendMessageDialogProps): React.JSX.Element => {
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
-  const recipientOptions = useMemo<ComboboxOption[]>(
-    () =>
-      members.map((m) => ({
-        value: m.name,
-        label: m.name,
-        description: formatAgentRole(m.role) ?? formatAgentRole(m.agentType) ?? undefined,
-      })),
-    [members]
-  );
   const projectPath = useStore((s) => s.selectedTeamData?.config.projectPath ?? null);
   const [quote, setQuote] = useState<QuotedMessage | undefined>(undefined);
   const [quoteExpanded, setQuoteExpanded] = useState(false);
@@ -286,43 +276,12 @@ export const SendMessageDialog = ({
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
             <Label htmlFor="smd-recipient">Recipient</Label>
-            <Combobox
-              value={member}
-              onValueChange={setMember}
+            <MemberSelect
+              members={members}
+              value={member || null}
+              onChange={(v) => setMember(v ?? '')}
               placeholder="Select member..."
-              searchPlaceholder="Search members..."
-              emptyMessage="No members found."
-              options={recipientOptions}
-              renderOption={(option, isSelected) => {
-                const resolvedColor = colorMap.get(option.value);
-                const optionColorSet = resolvedColor ? getTeamColorSet(resolvedColor) : null;
-                return (
-                  <>
-                    {optionColorSet ? (
-                      <span
-                        className="mr-2 inline-block size-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: optionColorSet.border }}
-                      />
-                    ) : (
-                      <span className="mr-2 inline-block size-2 shrink-0 rounded-full bg-[var(--color-text-muted)]" />
-                    )}
-                    <span
-                      className="min-w-0 truncate font-medium"
-                      style={optionColorSet ? { color: optionColorSet.text } : undefined}
-                    >
-                      {option.label}
-                    </span>
-                    {option.description ? (
-                      <span className="ml-1 shrink-0 text-[10px] text-[var(--color-text-muted)]">
-                        {option.description}
-                      </span>
-                    ) : null}
-                    {isSelected ? (
-                      <Check size={12} className="ml-auto shrink-0 text-blue-400" />
-                    ) : null}
-                  </>
-                );
-              }}
+              size="sm"
             />
           </div>
 

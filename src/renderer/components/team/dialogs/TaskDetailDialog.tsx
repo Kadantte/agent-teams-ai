@@ -7,6 +7,7 @@ import { MemberLogsTab } from '@renderer/components/team/members/MemberLogsTab';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
 import { ExpandableContent } from '@renderer/components/ui/ExpandableContent';
+import { MemberSelect } from '@renderer/components/ui/MemberSelect';
 import {
   Dialog,
   DialogContent,
@@ -16,19 +17,10 @@ import {
   DialogTitle,
 } from '@renderer/components/ui/dialog';
 import { Input } from '@renderer/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@renderer/components/ui/select';
 import { Textarea } from '@renderer/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { markAsRead } from '@renderer/services/commentReadStorage';
 import { useStore } from '@renderer/store';
-import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import {
   buildMemberColorMap,
   KANBAN_COLUMN_DISPLAY,
@@ -350,42 +342,14 @@ export const TaskDetailDialog = ({
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
           <div className="flex min-w-0 items-center gap-2">
             {canReassign ? (
-              <Select
-                value={currentTask.owner ?? '__unassigned__'}
-                onValueChange={(v) => {
-                  onOwnerChange(currentTask.id, v === '__unassigned__' ? null : v);
-                }}
-              >
-                <SelectTrigger className="h-8 w-auto min-w-[140px] text-xs">
-                  <SelectValue placeholder="Unassigned" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                  {members.map((m) => {
-                    const role = formatAgentRole(m.role) ?? formatAgentRole(m.agentType);
-                    const resolvedColor = colorMap.get(m.name);
-                    const memberColor = resolvedColor ? getTeamColorSet(resolvedColor) : null;
-                    return (
-                      <SelectItem key={m.name} value={m.name}>
-                        <span className="inline-flex items-center gap-1.5">
-                          {memberColor ? (
-                            <span
-                              className="inline-block size-2 shrink-0 rounded-full"
-                              style={{ backgroundColor: memberColor.border }}
-                            />
-                          ) : null}
-                          <span style={memberColor ? { color: memberColor.text } : undefined}>
-                            {m.name}
-                          </span>
-                          {role ? (
-                            <span className="text-[var(--color-text-muted)]">({role})</span>
-                          ) : null}
-                        </span>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
+              <MemberSelect
+                members={members}
+                value={currentTask.owner ?? null}
+                onChange={(v) => onOwnerChange(currentTask.id, v)}
+                allowUnassigned
+                size="sm"
+                className="min-w-[160px]"
+              />
             ) : currentTask.owner ? (
               <MemberBadge
                 name={currentTask.owner}

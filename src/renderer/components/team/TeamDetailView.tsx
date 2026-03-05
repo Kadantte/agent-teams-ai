@@ -220,6 +220,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     clearProvisioningError,
     isTeamProvisioning,
     leadActivityByTeam,
+    leadContextByTeam,
     refreshTeamData,
     kanbanFilterQuery,
     clearKanbanFilter,
@@ -262,6 +263,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         (run) => run.teamName === teamName && ACTIVE_PROVISIONING_STATES.has(run.state)
       ),
       leadActivityByTeam: s.leadActivityByTeam,
+      leadContextByTeam: s.leadContextByTeam,
       refreshTeamData: s.refreshTeamData,
       kanbanFilterQuery: s.kanbanFilterQuery,
       clearKanbanFilter: s.clearKanbanFilter,
@@ -377,6 +379,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     const total = processes.reduce((sum, p) => sum + (p.metrics.costUsd ?? 0), 0);
     return total > 0 ? total : undefined;
   }, [leadSessionDetail?.processes]);
+  const leadContextPercent = leadContextByTeam[teamName]?.percent;
 
   const { allContextInjections, lastAiGroupTotalTokens } = useMemo(() => {
     if (!leadSessionLoaded || !leadSessionContextStats || !leadConversation?.items.length) {
@@ -430,6 +433,15 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
 
     return { allContextInjections: injections, lastAiGroupTotalTokens: totalTokens };
   }, [leadSessionLoaded, leadSessionContextStats, leadConversation, selectedContextPhase, leadSessionPhaseInfo]);
+
+  const visibleContextTokens = useMemo(() => {
+    return allContextInjections.reduce((sum, inj) => sum + (inj.estimatedTokens ?? 0), 0);
+  }, [allContextInjections]);
+
+  const visibleContextPercentOfTotal = useMemo(() => {
+    if (lastAiGroupTotalTokens === undefined || lastAiGroupTotalTokens <= 0) return null;
+    return Math.min((visibleContextTokens / lastAiGroupTotalTokens) * 100, 100);
+  }, [visibleContextTokens, lastAiGroupTotalTokens]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -715,7 +727,11 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
           variant: 'danger',
         });
         if (confirmed) {
-          void softDeleteTask(teamName, taskId);
+          try {
+            await softDeleteTask(teamName, taskId);
+          } catch {
+            // error via store
+          }
         }
       })();
     },
@@ -844,12 +860,12 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       <div className="flex size-full overflow-hidden">
         <div
           ref={contentRef}
-          className="size-full flex-1 overflow-auto p-4"
+          className="relative size-full flex-1 overflow-auto p-4"
           data-team-name={teamName}
         >
-          {/* Sticky Context button (same interaction as Session view) */}
+          {/* Sticky context button in top-right while scrolling */}
           {leadSessionId && (
-            <div className="pointer-events-none sticky top-0 z-10 flex justify-end pb-0 pt-3">
+            <div className="pointer-events-none sticky top-0 z-20 ml-auto w-fit pb-2">
               <button
                 onClick={() => {
                   const next = !isContextPanelVisible;
@@ -879,7 +895,11 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
                       : leadSessionId
                 }
               >
-                {leadSessionLoaded ? `Context (${allContextInjections.length})` : 'Context'}
+                {visibleContextPercentOfTotal !== null
+                  ? `${visibleContextPercentOfTotal.toFixed(1)}% of total`
+                  : typeof leadContextPercent === 'number'
+                    ? `${Math.round(leadContextPercent)}%`
+                    : 'Context'}
               </button>
             </div>
           )}
@@ -1192,18 +1212,34 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
               </div>
             }
             onRequestReview={(taskId) => {
-              void requestReview(teamName, taskId);
+              void (async () => {
+                try {
+                  await requestReview(teamName, taskId);
+                } catch {
+                  // error via store
+                }
+              })();
             }}
             onApprove={(taskId) => {
-              void updateKanban(teamName, taskId, { op: 'set_column', column: 'approved' });
+              void (async () => {
+                try {
+                  await updateKanban(teamName, taskId, { op: 'set_column', column: 'approved' });
+                } catch {
+                  // error via store
+                }
+              })();
             }}
             onRequestChanges={(taskId) => {
               setRequestChangesTaskId(taskId);
             }}
             onMoveBackToDone={(taskId) => {
               void (async () => {
-                await updateKanban(teamName, taskId, { op: 'remove' });
-                await updateTaskStatus(teamName, taskId, 'completed');
+                try {
+                  await updateKanban(teamName, taskId, { op: 'remove' });
+                  await updateTaskStatus(teamName, taskId, 'completed');
+                } catch {
+                  // error via store
+                }
               })();
             }}
             onStartTask={(taskId) => {
@@ -1237,7 +1273,13 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
               })();
             }}
             onCompleteTask={(taskId) => {
-              void updateTaskStatus(teamName, taskId, 'completed');
+              void (async () => {
+                try {
+                  await updateTaskStatus(teamName, taskId, 'completed');
+                } catch {
+                  // error via store
+                }
+              })();
             }}
             onCancelTask={(taskId) => {
               void (async () => {

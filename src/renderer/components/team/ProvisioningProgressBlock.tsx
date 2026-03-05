@@ -191,7 +191,7 @@ export const ProvisioningProgressBlock = ({
           {message}
         </p>
       ) : null}
-      <div className="mt-2 flex items-center gap-1 overflow-x-auto pb-0.5">
+      <div className="mt-2 flex items-center justify-center gap-1 overflow-x-auto pb-0.5">
         {STEP_ORDER.filter((s): s is ProvisioningStep => s !== 'ready').map((step, index) => {
           const isDone = currentStepIndex >= 0 && index < currentStepIndex;
           const isCurrent = currentStepIndex >= 0 && index === currentStepIndex;

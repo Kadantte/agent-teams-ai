@@ -270,9 +270,7 @@ export const KanbanTaskCard = ({
         <div className="flex items-center gap-1">
           {task.owner ? (
             <MemberBadge name={task.owner} color={colorMap.get(task.owner)} />
-          ) : (
-            <span className="text-xs text-[var(--color-text-muted)]">Unassigned</span>
-          )}
+          ) : null}
           {!compact && <TruncatedTitle text={task.subject} className="min-w-0" />}
         </div>
         {task.needsClarification ? (

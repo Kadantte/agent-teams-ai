@@ -1516,7 +1516,11 @@ export class TeamAgentToolsInstaller {
     }
 
     if (current?.includes(`TOOL_VERSION = '${APP_VERSION}'`)) {
-      return toolPath;
+      // Even when app version is unchanged, the generated script can evolve.
+      // Keep the installed tool idempotent by content, not only by version.
+      if (current === desired) {
+        return toolPath;
+      }
     }
 
     await atomicWriteAsync(toolPath, desired);

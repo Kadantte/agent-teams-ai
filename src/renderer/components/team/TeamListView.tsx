@@ -382,7 +382,11 @@ export const TeamListView = (): React.JSX.Element => {
           variant: 'danger',
         });
         if (confirmed) {
-          void deleteTeam(teamName);
+          try {
+            await deleteTeam(teamName);
+          } catch {
+            // error via store
+          }
         }
       })();
     },
@@ -392,7 +396,13 @@ export const TeamListView = (): React.JSX.Element => {
   const handleRestoreTeam = useCallback(
     (teamName: string, e: React.MouseEvent) => {
       e.stopPropagation();
-      void restoreTeam(teamName);
+      void (async () => {
+        try {
+          await restoreTeam(teamName);
+        } catch {
+          // error via store
+        }
+      })();
     },
     [restoreTeam]
   );
@@ -409,7 +419,11 @@ export const TeamListView = (): React.JSX.Element => {
           variant: 'danger',
         });
         if (confirmed) {
-          void permanentlyDeleteTeam(teamName);
+          try {
+            await permanentlyDeleteTeam(teamName);
+          } catch {
+            // error via store
+          }
         }
       })();
     },

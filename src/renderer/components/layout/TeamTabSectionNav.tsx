@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { ChevronDown, Columns3, History, MessageSquare, Users } from 'lucide-react';
+import { ChevronDown, Columns3, History, MessageSquare, Terminal, Users } from 'lucide-react';
 
 import type { LucideIcon } from 'lucide-react';
 
@@ -14,6 +14,7 @@ const SECTIONS: readonly { id: string; label: string; icon: LucideIcon }[] = [
   { id: 'team', label: 'Team', icon: Users },
   { id: 'sessions', label: 'Sessions', icon: History },
   { id: 'kanban', label: 'Kanban', icon: Columns3 },
+  { id: 'claude-logs', label: 'Claude Logs', icon: Terminal },
   { id: 'messages', label: 'Messages', icon: MessageSquare },
 ];
 
