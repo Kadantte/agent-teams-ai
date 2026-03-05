@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { MemberExecutionLog } from '@renderer/components/team/members/MemberExecutionLog';
+import {
+  SubagentRecentMessagesPreview,
+  type SubagentPreviewMessage,
+} from '@renderer/components/team/members/SubagentRecentMessagesPreview';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { formatDuration } from '@renderer/utils/formatters';
 import {
@@ -13,6 +17,9 @@ import {
   Loader2,
   MessageSquare,
 } from 'lucide-react';
+
+import { enhanceAIGroup } from '@renderer/utils/aiGroupEnhancer';
+import { transformChunksToConversation } from '@renderer/utils/groupTransformer';
 
 import type { EnhancedChunk } from '@renderer/types/data';
 import type { MemberLogSummary } from '@shared/types';
@@ -28,6 +35,10 @@ interface MemberLogsTabProps {
   taskWorkIntervals?: { startedAt: string; completedAt?: string }[];
   /** Notifies parent when a background refresh starts/ends. */
   onRefreshingChange?: (isRefreshing: boolean) => void;
+  /** Show last few subagent messages as a quick "where are we?" preview (task view only). */
+  showSubagentPreview?: boolean;
+  /** Notifies parent when preview looks "online" (recent output). */
+  onPreviewOnlineChange?: (isOnline: boolean) => void;
 }
 
 export const MemberLogsTab = ({
@@ -38,6 +49,8 @@ export const MemberLogsTab = ({
   taskStatus,
   taskWorkIntervals,
   onRefreshingChange,
+  showSubagentPreview = false,
+  onPreviewOnlineChange,
 }: MemberLogsTabProps): React.JSX.Element => {
   const intervalsKey = useMemo(
     () => (taskWorkIntervals ? JSON.stringify(taskWorkIntervals) : ''),
@@ -52,6 +65,7 @@ export const MemberLogsTab = ({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailChunks, setDetailChunks] = useState<EnhancedChunk[] | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [previewChunks, setPreviewChunks] = useState<EnhancedChunk[] | null>(null);
 
   const getRowId = useCallback((log: MemberLogSummary): string => {
     return log.kind === 'subagent'
@@ -82,6 +96,35 @@ export const MemberLogsTab = ({
     return withIndex.map((x) => x.log);
   }, [logs]);
 
+  const previewLog = useMemo((): MemberLogSummary | null => {
+    if (!showSubagentPreview || taskId == null) return null;
+
+    const candidates = sortedLogs.filter((l) => l.kind === 'subagent');
+    if (candidates.length === 0) return null;
+
+    if (taskOwner) {
+      const target = taskOwner.trim().toLowerCase();
+      const match = candidates.find((l) => (l.memberName ?? '').trim().toLowerCase() === target);
+      // When viewing task logs, this preview is intended to show the assigned owner's progress.
+      // If we can't confidently match a subagent log to the owner, don't show anything
+      // rather than risk showing a different member's activity (or a lead-attributed log).
+      return match ?? null;
+    }
+
+    return candidates[0] ?? null;
+  }, [showSubagentPreview, sortedLogs, taskId, taskOwner]);
+
+  const previewMessages = useMemo((): SubagentPreviewMessage[] => {
+    if (!previewChunks || previewChunks.length === 0) return [];
+    return extractSubagentPreviewMessages(previewChunks, 4);
+  }, [previewChunks]);
+
+  const previewOnline = useMemo((): boolean => {
+    const newest = previewMessages[0];
+    if (!newest) return false;
+    return Date.now() - newest.timestamp.getTime() <= 10_000;
+  }, [previewMessages]);
+
   const expandedLogSummary = useMemo(() => {
     if (!expandedId) return null;
     return logs.find((log) => getRowId(log) === expandedId) ?? null;
@@ -91,6 +134,14 @@ export const MemberLogsTab = ({
     onRefreshingChange?.(refreshing);
     return () => onRefreshingChange?.(false);
   }, [refreshing, onRefreshingChange]);
+
+  useEffect(() => {
+    onPreviewOnlineChange?.(previewOnline);
+  }, [onPreviewOnlineChange, previewOnline]);
+
+  useEffect(() => {
+    return () => onPreviewOnlineChange?.(false);
+  }, [onPreviewOnlineChange]);
 
   useEffect(() => {
     if (!expandedId) return;
@@ -152,14 +203,68 @@ export const MemberLogsTab = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intervalsKey drives refresh; deps intentionally minimal to avoid refetch loops
   }, [teamName, memberName, taskId, taskOwner, taskStatus, intervalsKey]);
 
-  const fetchDetailForLog = useCallback(async (log: MemberLogSummary): Promise<EnhancedChunk[] | null> => {
-    if (log.kind === 'subagent') {
-      const d = await api.getSubagentDetail(log.projectId, log.sessionId, log.subagentId);
-      return (d?.chunks ?? null) as EnhancedChunk[] | null;
+  const fetchDetailForLog = useCallback(
+    async (log: MemberLogSummary): Promise<EnhancedChunk[] | null> => {
+      if (log.kind === 'subagent') {
+        const d = await api.getSubagentDetail(log.projectId, log.sessionId, log.subagentId);
+        return (d?.chunks ?? null) as EnhancedChunk[] | null;
+      }
+      const d = await api.getSessionDetail(log.projectId, log.sessionId);
+      return (d?.chunks ?? null) as unknown as EnhancedChunk[] | null;
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!showSubagentPreview || taskId == null) {
+      setPreviewChunks(null);
+      return;
     }
-    const d = await api.getSessionDetail(log.projectId, log.sessionId);
-    return (d?.chunks ?? null) as unknown as EnhancedChunk[] | null;
-  }, []);
+    if (!previewLog) {
+      setPreviewChunks(null);
+      return;
+    }
+
+    let cancelled = false;
+    const run = async (): Promise<void> => {
+      try {
+        const next = await fetchDetailForLog(previewLog);
+        if (cancelled) return;
+        setPreviewChunks(next ? [...next] : null);
+      } catch {
+        if (cancelled) return;
+        setPreviewChunks(null);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchDetailForLog, previewLog, showSubagentPreview, taskId]);
+
+  useEffect(() => {
+    if (!showSubagentPreview || taskId == null) return;
+    if (!previewLog) return;
+
+    const shouldAutoRefreshPreview = taskStatus === 'in_progress' || previewLog.isOngoing;
+    if (!shouldAutoRefreshPreview) return;
+
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const next = await fetchDetailForLog(previewLog);
+        if (cancelled) return;
+        setPreviewChunks(next ? [...next] : null);
+      } catch {
+        // keep last successful preview
+      }
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [fetchDetailForLog, previewLog, showSubagentPreview, taskId, taskStatus]);
 
   useEffect(() => {
     const shouldAutoRefreshSummary = taskId != null && taskStatus === 'in_progress';
@@ -245,17 +350,19 @@ export const MemberLogsTab = ({
 
   return (
     <div className="w-full min-w-0 space-y-1.5">
+      {showSubagentPreview && previewLog && previewMessages.length > 0 ? (
+        <SubagentRecentMessagesPreview
+          messages={previewMessages}
+          memberName={previewLog.memberName ?? undefined}
+        />
+      ) : null}
       {sortedLogs.map((log) => (
         <LogCard
           key={getRowId(log)}
           log={log}
           expanded={expandedId === getRowId(log)}
-          detailChunks={
-            expandedId === getRowId(log) ? detailChunks : null
-          }
-          detailLoading={
-            expandedId === getRowId(log) && detailLoading
-          }
+          detailChunks={expandedId === getRowId(log) ? detailChunks : null}
+          detailLoading={expandedId === getRowId(log) && detailLoading}
           onToggle={() => void handleExpand(log)}
         />
       ))}
@@ -357,4 +464,55 @@ function formatRelativeTime(isoString: string): string {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString();
+}
+
+function extractSubagentPreviewMessages(
+  chunks: EnhancedChunk[],
+  limit: number
+): SubagentPreviewMessage[] {
+  const conversation = transformChunksToConversation(chunks, [], false);
+
+  const out: SubagentPreviewMessage[] = [];
+
+  // Collect newest-first and stop as soon as we have enough.
+  for (let i = conversation.items.length - 1; i >= 0 && out.length < limit; i--) {
+    const item = conversation.items[i];
+    if (item.type === 'ai') {
+      const enhanced = enhanceAIGroup(item.group);
+      const items = enhanced.displayItems ?? [];
+      for (let j = items.length - 1; j >= 0 && out.length < limit; j--) {
+        const di = items[j];
+        if (di.type === 'output' && di.content.trim()) {
+          out.push({
+            id: `${item.group.id}:output:${di.timestamp.toISOString()}:${j}`,
+            timestamp: di.timestamp,
+            kind: 'output',
+            label: 'Output',
+            content: di.content,
+          });
+        } else if (di.type === 'teammate_message') {
+          out.push({
+            id: `${item.group.id}:teammate:${di.teammateMessage.id}`,
+            timestamp: di.teammateMessage.timestamp,
+            kind: 'teammate_message',
+            label: `Message — ${di.teammateMessage.teammateId}`,
+            content: di.teammateMessage.content || di.teammateMessage.summary,
+          });
+        }
+      }
+    } else if (item.type === 'user') {
+      const text = item.group.content.rawText ?? item.group.content.text ?? '';
+      if (text.trim()) {
+        out.push({
+          id: `${item.group.id}:user:${item.group.timestamp.toISOString()}`,
+          timestamp: item.group.timestamp,
+          kind: 'user',
+          label: 'User',
+          content: text,
+        });
+      }
+    }
+  }
+
+  return out;
 }

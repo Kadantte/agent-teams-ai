@@ -204,7 +204,7 @@ interface MentionableTextareaProps extends Omit<
   projectPath?: string | null;
   /** Called when a file chip is created via @ selection. Parent must add chip to state. */
   onFileChipInsert?: (chip: InlineChip) => void;
-  /** Called when Cmd+Enter (Mac) / Ctrl+Enter (Win/Linux) is pressed. */
+  /** Called when Enter (without Shift) is pressed. */
   onModEnter?: () => void;
 }
 
@@ -503,8 +503,8 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
     // Composed key handler: Mod+Enter submit → chip logic → mention logic
     const composedHandleKeyDown = React.useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        // Mod+Enter (Cmd on Mac, Ctrl on Win/Linux) → submit
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && onModEnter) {
+        // Enter (without Shift) → submit; Shift+Enter → newline
+        if (e.key === 'Enter' && !e.shiftKey && onModEnter) {
           e.preventDefault();
           onModEnter();
           return;

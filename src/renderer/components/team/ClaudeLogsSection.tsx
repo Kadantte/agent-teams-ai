@@ -3,14 +3,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
 import { cn } from '@renderer/lib/utils';
+import { useStore } from '@renderer/store';
 import { Search, Terminal, X } from 'lucide-react';
 
 import { CollapsibleTeamSection } from './CollapsibleTeamSection';
 import { CliLogsRichView } from './CliLogsRichView';
-import {
-  ClaudeLogsFilterPopover,
-  DEFAULT_CLAUDE_LOGS_FILTER,
-} from './ClaudeLogsFilterPopover';
+import { ClaudeLogsFilterPopover, DEFAULT_CLAUDE_LOGS_FILTER } from './ClaudeLogsFilterPopover';
 
 import type { TeamClaudeLogsResponse } from '@shared/types';
 import type { ClaudeLogsFilterState } from './ClaudeLogsFilterPopover';
@@ -108,7 +106,10 @@ function filterStreamJsonText(
     return null;
   };
 
-  const writeBlocks = (parsed: Record<string, unknown>, blocks: AssistantContentBlock[]): Record<string, unknown> => {
+  const writeBlocks = (
+    parsed: Record<string, unknown>,
+    blocks: AssistantContentBlock[]
+  ): Record<string, unknown> => {
     if (Array.isArray(parsed.content)) {
       return { ...parsed, content: blocks };
     }
@@ -188,6 +189,7 @@ function filterStreamJsonText(
 }
 
 export const ClaudeLogsSection = ({ teamName }: ClaudeLogsSectionProps): React.JSX.Element => {
+  const isAlive = useStore((s) => s.selectedTeamData?.isAlive ?? false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [data, setData] = useState<TeamClaudeLogsResponse>({ lines: [], total: 0, hasMore: false });
   const [pending, setPending] = useState<TeamClaudeLogsResponse | null>(null);
@@ -233,12 +235,16 @@ export const ClaudeLogsSection = ({ teamName }: ClaudeLogsSectionProps): React.J
   useEffect(() => {
     let cancelled = false;
 
-    const computeNewCount = (committed: TeamClaudeLogsResponse, latest: TeamClaudeLogsResponse): number => {
+    const computeNewCount = (
+      committed: TeamClaudeLogsResponse,
+      latest: TeamClaudeLogsResponse
+    ): number => {
       if (committed.lines.length === 0) return latest.lines.length;
       const marker = committed.lines[0];
       const idx = latest.lines.indexOf(marker);
       if (idx >= 0) return idx;
-      const diff = (latest.total ?? latest.lines.length) - (committed.total ?? committed.lines.length);
+      const diff =
+        (latest.total ?? latest.lines.length) - (committed.total ?? committed.lines.length);
       return Math.max(0, diff);
     };
 
@@ -331,8 +337,10 @@ export const ClaudeLogsSection = ({ teamName }: ClaudeLogsSectionProps): React.J
               Showing <span className="font-mono">{Math.min(data.total, visibleCount)}</span> of{' '}
               <span className="font-mono">{data.total}</span>
             </>
-          ) : (
+          ) : isAlive ? (
             'No logs yet.'
+          ) : (
+            'Team is not running.'
           )}
         </span>
         <div className="flex items-center gap-2">
@@ -366,7 +374,7 @@ export const ClaudeLogsSection = ({ teamName }: ClaudeLogsSectionProps): React.J
             <Button
               variant="outline"
               size="sm"
-              className="h-7 px-2 text-xs"
+              className="h-7 border-blue-500/30 bg-blue-600 px-2 text-xs text-white hover:bg-blue-500"
               onClick={applyPending}
               title="Show newest logs"
             >
@@ -386,12 +394,7 @@ export const ClaudeLogsSection = ({ teamName }: ClaudeLogsSectionProps): React.J
         </div>
       </div>
 
-      <div
-        className={cn(
-          'rounded',
-          loading && 'opacity-80'
-        )}
-      >
+      <div className={cn('rounded', loading && 'opacity-80')}>
         {error ? <p className="p-2 text-xs text-red-300">{error}</p> : null}
         {!error && filteredText.trim().length > 0 ? (
           <CliLogsRichView
@@ -414,16 +417,13 @@ export const ClaudeLogsSection = ({ teamName }: ClaudeLogsSectionProps): React.J
         ) : null}
         {!error && data.lines.length === 0 ? (
           <p className="p-2 text-xs text-[var(--color-text-muted)]">
-            {loading ? 'Loading…' : 'No logs captured.'}
+            {loading ? 'Loading…' : isAlive ? 'No logs captured.' : 'Team is not running.'}
           </p>
         ) : null}
         {!error && data.lines.length > 0 && filteredText.trim().length === 0 ? (
-          <p className="p-2 text-xs text-[var(--color-text-muted)]">
-            No matching logs.
-          </p>
+          <p className="p-2 text-xs text-[var(--color-text-muted)]">No matching logs.</p>
         ) : null}
       </div>
     </CollapsibleTeamSection>
   );
 };
-

@@ -100,6 +100,7 @@ export const TaskDetailDialog = ({
   const updateTaskFields = useStore((s) => s.updateTaskFields);
 
   const [logsRefreshing, setLogsRefreshing] = useState(false);
+  const [executionPreviewOnline, setExecutionPreviewOnline] = useState(false);
 
   // Inline editing: subject
   const [editingSubject, setEditingSubject] = useState(false);
@@ -289,6 +290,11 @@ export const TaskDetailDialog = ({
     .map((t) => t.id);
   const isTodo = status === 'pending' && !kanbanColumn;
   const canReassign = isTodo && onOwnerChange;
+  const leadName =
+    members.find((m) => m.agentType === 'team-lead' || m.name === 'team-lead')?.name ?? 'team-lead';
+  const isLeadOwnedTask =
+    (currentTask.owner ?? '').trim().toLowerCase() === leadName.trim().toLowerCase() ||
+    (currentTask.owner ?? '').trim().toLowerCase() === 'team-lead';
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -647,10 +653,23 @@ export const TaskDetailDialog = ({
             title="Execution Logs"
             icon={<ScrollText size={14} />}
             headerExtra={
-              logsRefreshing ? (
-                <span className="flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
-                  <Loader2 size={10} className="animate-spin" />
-                  Updating...
+              logsRefreshing || executionPreviewOnline ? (
+                <span className="flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
+                  {executionPreviewOnline ? (
+                    <span
+                      className="pointer-events-none relative inline-flex size-2 shrink-0"
+                      title="Online"
+                    >
+                      <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50" />
+                      <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
+                    </span>
+                  ) : null}
+                  {logsRefreshing ? (
+                    <span className="flex items-center gap-1">
+                      <Loader2 size={10} className="animate-spin" />
+                      Updating...
+                    </span>
+                  ) : null}
                 </span>
               ) : null
             }
@@ -667,6 +686,11 @@ export const TaskDetailDialog = ({
                 taskStatus={currentTask.status}
                 taskWorkIntervals={currentTask.workIntervals}
                 onRefreshingChange={setLogsRefreshing}
+                // Only show a "latest messages" preview when this task is owned by a subagent.
+                // For lead-owned tasks, the lead session is a mixed stream (lead + multiple agents),
+                // so filtering to "just the member messages" is unreliable and easy to mislead.
+                showSubagentPreview={Boolean(currentTask.owner) && !isLeadOwnedTask}
+                onPreviewOnlineChange={setExecutionPreviewOnline}
               />
             </div>
           </CollapsibleTeamSection>

@@ -26,7 +26,6 @@ import { buildReplyBlock } from '@renderer/utils/agentMessageFormatting';
 import { removeChipTokenFromText } from '@renderer/utils/chipUtils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
-import { getModifierKeyName } from '@renderer/utils/keyboardUtils';
 import { AlertCircle, ImagePlus, Send, X } from 'lucide-react';
 
 import { MemberBadge } from '../MemberBadge';
@@ -129,7 +128,16 @@ export const SendMessageDialog = ({
       }
     }
     prevOpenRef.current = open;
-  }, [open, defaultRecipient, defaultText, defaultChip, quotedMessage, lastResult, textDraft, chipDraft]);
+  }, [
+    open,
+    defaultRecipient,
+    defaultText,
+    defaultChip,
+    quotedMessage,
+    lastResult,
+    textDraft,
+    chipDraft,
+  ]);
 
   // Track whether auto-close is needed (avoid setState in render)
   useEffect(() => {
@@ -381,7 +389,7 @@ export const SendMessageDialog = ({
               <MentionableTextarea
                 id="smd-message"
                 className={quote ? 'rounded-t-none' : undefined}
-                placeholder={`Write your message... (${getModifierKeyName()}+Enter to send)`}
+                placeholder="Write your message... (Enter to send)"
                 value={textDraft.value}
                 onValueChange={textDraft.setValue}
                 suggestions={mentionSuggestions}
@@ -421,7 +429,9 @@ export const SendMessageDialog = ({
                       </span>
                     ) : null}
                     {textDraft.isSaved ? (
-                      <span className="text-[10px] text-[var(--color-text-muted)]">Draft saved</span>
+                      <span className="text-[10px] text-[var(--color-text-muted)]">
+                        Draft saved
+                      </span>
                     ) : null}
                   </div>
                 }
@@ -442,7 +452,6 @@ export const SendMessageDialog = ({
               Shown as notification preview. Team lead also sees this for peer messages.
             </p>
           </div>
-
         </div>
 
         <DialogFooter>

@@ -13,7 +13,6 @@ import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
-import { getModifierKeyName } from '@renderer/utils/keyboardUtils';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { AlertCircle, Check, ChevronDown, ImagePlus, Mic, Search, Send } from 'lucide-react';
 
@@ -49,7 +48,10 @@ const ContextRing = ({ ctx }: { ctx: LeadContextUsage }): React.JSX.Element => {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="relative flex shrink-0 cursor-default items-center justify-center" style={{ width: size, height: size }}>
+        <div
+          className="relative flex shrink-0 cursor-default items-center justify-center"
+          style={{ width: size, height: size }}
+        >
           <svg width={size} height={size} className="-rotate-90">
             <circle
               cx={size / 2}
@@ -189,7 +191,7 @@ export const MessageComposer = ({
 
   const handleKeyDownCapture = useCallback(
     (e: React.KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
         handleSend();
@@ -290,7 +292,10 @@ export const MessageComposer = ({
           >
             {members.length > 5 && (
               <div className="relative mb-1">
-                <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
+                <Search
+                  size={12}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+                />
                 <input
                   ref={recipientSearchRef}
                   type="text"
@@ -392,7 +397,9 @@ export const MessageComposer = ({
         ) : null}
 
         {!isTeamAlive ? (
-          <span className="ml-auto text-[10px]" style={{ color: 'var(--warning-text)' }}>Team offline</span>
+          <span className="ml-auto text-[10px]" style={{ color: 'var(--warning-text)' }}>
+            Team offline
+          </span>
         ) : null}
       </div>
 
@@ -406,7 +413,7 @@ export const MessageComposer = ({
 
       <MentionableTextarea
         id={`compose-${teamName}`}
-        placeholder={`Write a message... (${getModifierKeyName()}+Enter to send)`}
+        placeholder="Write a message... (Enter to send)"
         value={draft.value}
         onValueChange={draft.setValue}
         suggestions={mentionSuggestions}

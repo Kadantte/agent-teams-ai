@@ -7,7 +7,6 @@ import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useStore } from '@renderer/store';
 import { buildReplyBlock } from '@renderer/utils/agentMessageFormatting';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
-import { getModifierKeyName } from '@renderer/utils/keyboardUtils';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { ImagePlus, Mic, Send, Trash2, X } from 'lucide-react';
 
@@ -71,50 +70,45 @@ export const TaskCommentInput = ({
     trimmed.length <= MAX_COMMENT_LENGTH &&
     !addingComment;
 
-  const addFiles = useCallback(
-    (files: FileList | File[]) => {
-      setAttachError(null);
-      const fileArray = Array.from(files);
-      for (const file of fileArray) {
-        if (!ACCEPTED_TYPES.has(file.type)) {
-          setAttachError(`Unsupported type: ${file.type}`);
-          continue;
-        }
-        if (file.size > MAX_FILE_SIZE) {
-          setAttachError(
-            `File too large: ${(file.size / (1024 * 1024)).toFixed(1)} MB (max 20 MB)`
-          );
-          continue;
-        }
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          const base64 = result.split(',')[1];
-          if (!base64) return;
-          const id = crypto.randomUUID();
-          setPendingAttachments((prev) => {
-            if (prev.length >= MAX_ATTACHMENTS) {
-              setAttachError(`Maximum ${MAX_ATTACHMENTS} attachments per comment`);
-              return prev;
-            }
-            return [
-              ...prev,
-              {
-                id,
-                filename: file.name,
-                mimeType: file.type,
-                base64Data: base64,
-                previewUrl: result,
-                size: file.size,
-              },
-            ];
-          });
-        };
-        reader.readAsDataURL(file);
+  const addFiles = useCallback((files: FileList | File[]) => {
+    setAttachError(null);
+    const fileArray = Array.from(files);
+    for (const file of fileArray) {
+      if (!ACCEPTED_TYPES.has(file.type)) {
+        setAttachError(`Unsupported type: ${file.type}`);
+        continue;
       }
-    },
-    []
-  );
+      if (file.size > MAX_FILE_SIZE) {
+        setAttachError(`File too large: ${(file.size / (1024 * 1024)).toFixed(1)} MB (max 20 MB)`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        if (!base64) return;
+        const id = crypto.randomUUID();
+        setPendingAttachments((prev) => {
+          if (prev.length >= MAX_ATTACHMENTS) {
+            setAttachError(`Maximum ${MAX_ATTACHMENTS} attachments per comment`);
+            return prev;
+          }
+          return [
+            ...prev,
+            {
+              id,
+              filename: file.name,
+              mimeType: file.type,
+              base64Data: base64,
+              previewUrl: result,
+              size: file.size,
+            },
+          ];
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  }, []);
 
   const removeAttachment = useCallback((id: string) => {
     setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
@@ -250,7 +244,7 @@ export const TaskCommentInput = ({
         />
         <MentionableTextarea
           id={`task-comment-${taskId}`}
-          placeholder={`Add a comment... (${getModifierKeyName()}+Enter to send)`}
+          placeholder="Add a comment... (Enter to send)"
           value={draft.value}
           onValueChange={draft.setValue}
           suggestions={mentionSuggestions}

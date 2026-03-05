@@ -62,7 +62,7 @@ const UI_LOGS_TAIL_LIMIT = 128 * 1024;
 const SHELL_ENV_TIMEOUT_MS = 12000;
 // const CLI_PREPARE_TIMEOUT_MS = 10000;
 const PROBE_CACHE_TTL_MS = 10 * 60_000;
-const PREFLIGHT_TIMEOUT_MS = 30000;
+const PREFLIGHT_TIMEOUT_MS = 60000;
 const PREFLIGHT_AUTH_RETRY_DELAY_MS = 2000;
 const PREFLIGHT_AUTH_MAX_RETRIES = 2;
 const FS_MONITOR_POLL_MS = 2000;
@@ -70,8 +70,20 @@ const TASK_WAIT_FALLBACK_MS = 15_000;
 const TEAM_JSON_READ_TIMEOUT_MS = 5_000;
 const TEAM_CONFIG_MAX_BYTES = 10 * 1024 * 1024;
 const TEAM_INBOX_MAX_BYTES = 2 * 1024 * 1024;
-const PREFLIGHT_PING_PROMPT = 'Reply with the single word PONG and nothing else';
-const PREFLIGHT_PING_ARGS = ['-p', PREFLIGHT_PING_PROMPT, '--output-format', 'text'] as const;
+const PREFLIGHT_PING_PROMPT = 'Output only the single word PONG.';
+const PREFLIGHT_PING_ARGS = [
+  '-p',
+  PREFLIGHT_PING_PROMPT,
+  '--output-format',
+  'text',
+  '--model',
+  'haiku',
+  '--max-turns',
+  '1',
+  '--max-budget-usd',
+  '0.05',
+  '--no-session-persistence',
+] as const;
 const PREFLIGHT_EXPECTED = 'PONG';
 
 type TeamsBaseLocation = 'configured' | 'default';
@@ -1008,8 +1020,23 @@ interface CachedProbeResult {
 }
 
 let cachedProbeResult: CachedProbeResult | null = null;
-let probeInFlight: Promise<{ claudePath: string; authSource: ProvisioningAuthSource; warning?: string } | null> | null =
-  null;
+let probeInFlight: Promise<{
+  claudePath: string;
+  authSource: ProvisioningAuthSource;
+  warning?: string;
+} | null> | null = null;
+
+function isTransientProbeWarning(warning: string): boolean {
+  const lower = warning.toLowerCase();
+  return (
+    lower.includes('timeout running:') ||
+    lower.includes('did not complete') ||
+    lower.includes('timed out') ||
+    lower.includes('etimedout') ||
+    lower.includes('econnreset') ||
+    lower.includes('eai_again')
+  );
+}
 
 export class TeamProvisioningService {
   private static readonly CLAUDE_LOG_LINES_LIMIT = 50_000;
@@ -1046,7 +1073,9 @@ export class TeamProvisioningService {
     const offsetRaw = query?.offset ?? 0;
     const limitRaw = query?.limit ?? 100;
     const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
-    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, Math.floor(limitRaw))) : 100;
+    const limit = Number.isFinite(limitRaw)
+      ? Math.max(1, Math.min(1000, Math.floor(limitRaw)))
+      : 100;
 
     const total = run.claudeLogLines.length;
     if (total === 0) {
@@ -1057,8 +1086,10 @@ export class TeamProvisioningService {
     const oldestInclusive = Math.max(0, newestExclusive - limit);
     const normalizeLine = (line: string): string => {
       // Back-compat: older builds prefixed every line with "[stdout] " / "[stderr] "
-      if (line.startsWith('[stdout] ') && line !== '[stdout]') return line.slice('[stdout] '.length);
-      if (line.startsWith('[stderr] ') && line !== '[stderr]') return line.slice('[stderr] '.length);
+      if (line.startsWith('[stdout] ') && line !== '[stdout]')
+        return line.slice('[stdout] '.length);
+      if (line.startsWith('[stderr] ') && line !== '[stderr]')
+        return line.slice('[stderr] '.length);
       return line;
     };
 
@@ -1201,7 +1232,8 @@ export class TeamProvisioningService {
 
   async warmup(): Promise<void> {
     try {
-      if (cachedProbeResult && Date.now() - cachedProbeResult.cachedAtMs < PROBE_CACHE_TTL_MS) return;
+      if (cachedProbeResult && Date.now() - cachedProbeResult.cachedAtMs < PROBE_CACHE_TTL_MS)
+        return;
       const result = await this.getCachedOrProbeResult(process.cwd());
       if (!result) return;
       logger.info('CLI warmup completed');
@@ -1226,7 +1258,11 @@ export class TeamProvisioningService {
       const ready = !warning || authSource !== 'none' || !isAuthFailure;
       return {
         ready,
-        message: ready ? 'CLI is warmed up and ready to launch' : warning || 'CLI is not ready',
+        message: ready
+          ? warnings.length > 0
+            ? 'CLI is ready to launch (see notes)'
+            : 'CLI is warmed up and ready to launch'
+          : warning || 'CLI is not ready',
         warnings: warnings.length > 0 ? warnings : undefined,
       };
     }
@@ -1267,7 +1303,10 @@ export class TeamProvisioningService {
 
     return {
       ready: true,
-      message: 'CLI is warmed up and ready to launch',
+      message:
+        warnings.length > 0
+          ? 'CLI is ready to launch (see notes)'
+          : 'CLI is warmed up and ready to launch',
       warnings: warnings.length > 0 ? warnings : undefined,
     };
   }
@@ -1287,7 +1326,11 @@ export class TeamProvisioningService {
   ): Promise<{ claudePath: string; authSource: ProvisioningAuthSource; warning?: string } | null> {
     const cached = this.getFreshCachedProbeResult();
     if (cached) {
-      return { claudePath: cached.claudePath, authSource: cached.authSource, warning: cached.warning };
+      return {
+        claudePath: cached.claudePath,
+        authSource: cached.authSource,
+        warning: cached.warning,
+      };
     }
 
     if (probeInFlight) {
@@ -1300,12 +1343,20 @@ export class TeamProvisioningService {
 
       const { env, authSource } = await this.buildProvisioningEnv();
       const probe = await this.probeClaudeRuntime(claudePath, cwd, env);
-      const result = { claudePath, authSource, ...(probe.warning ? { warning: probe.warning } : {}) };
+      const result = {
+        claudePath,
+        authSource,
+        ...(probe.warning ? { warning: probe.warning } : {}),
+      };
 
-      if (!probe.warning || !this.isAuthFailureWarning(probe.warning)) {
+      const shouldCache =
+        !probe.warning ||
+        (!this.isAuthFailureWarning(probe.warning) && !isTransientProbeWarning(probe.warning));
+
+      if (shouldCache) {
         cachedProbeResult = { ...result, cachedAtMs: Date.now() };
       } else {
-        // Don't pin auth failures in cache — user may log in externally and retry.
+        // Don't pin auth failures / transient failures in cache — user may fix and retry.
         cachedProbeResult = null;
       }
 
@@ -2819,7 +2870,6 @@ export class TeamProvisioningService {
               'team-lead';
             const leadMsg: InboxMessage = {
               from: leadName,
-              to: 'user',
               text: cleanText,
               timestamp: nowIso(),
               read: true,
@@ -2831,7 +2881,10 @@ export class TeamProvisioningService {
             run.leadTextPushedInCurrentTurn = true;
 
             const now = Date.now();
-            if (now - run.lastLeadTextEmitMs >= TeamProvisioningService.LEAD_TEXT_EMIT_THROTTLE_MS) {
+            if (
+              now - run.lastLeadTextEmitMs >=
+              TeamProvisioningService.LEAD_TEXT_EMIT_THROTTLE_MS
+            ) {
               run.lastLeadTextEmitMs = now;
               this.teamChangeEmitter?.({
                 type: 'inbox',
@@ -3126,9 +3179,7 @@ export class TeamProvisioningService {
           | undefined;
         const trigger = typeof meta?.trigger === 'string' ? meta.trigger : 'auto';
         const preTokens = typeof meta?.pre_tokens === 'number' ? meta.pre_tokens : null;
-        const tokenInfo = preTokens
-          ? ` (was ~${(preTokens / 1000).toFixed(0)}k tokens)`
-          : '';
+        const tokenInfo = preTokens ? ` (was ~${(preTokens / 1000).toFixed(0)}k tokens)` : '';
 
         const compactMsg: InboxMessage = {
           from: 'system',
@@ -3160,7 +3211,12 @@ export class TeamProvisioningService {
   private async handleProvisioningTurnComplete(run: ProvisioningRun): Promise<void> {
     // Guard: must be set synchronously BEFORE any await to prevent
     // double-invocation from filesystem monitor + stream-json racing.
-    if (run.provisioningComplete || run.cancelRequested || run.processKilled || run.progress.state === 'failed')
+    if (
+      run.provisioningComplete ||
+      run.cancelRequested ||
+      run.processKilled ||
+      run.progress.state === 'failed'
+    )
       return;
 
     // Prevent false "ready" when auth failure was printed as assistant text or logs
@@ -3172,7 +3228,11 @@ export class TeamProvisioningService {
       .filter(Boolean)
       .join('\n')
       .trim();
-    if (preCompleteText && this.hasApiError(preCompleteText) && !this.isAuthFailureWarning(preCompleteText)) {
+    if (
+      preCompleteText &&
+      this.hasApiError(preCompleteText) &&
+      !this.isAuthFailureWarning(preCompleteText)
+    ) {
       this.failProvisioningWithApiError(run, preCompleteText);
       return;
     }
@@ -3976,7 +4036,9 @@ export class TeamProvisioningService {
         if (membersRaw.length > 0) {
           const teammateNames = membersRaw
             .map((m) => (typeof m.name === 'string' ? m.name.trim() : ''))
-            .filter((n) => n.length > 0 && n.toLowerCase() !== 'team-lead' && n.toLowerCase() !== 'user');
+            .filter(
+              (n) => n.length > 0 && n.toLowerCase() !== 'team-lead' && n.toLowerCase() !== 'user'
+            );
 
           const keepName = createCliAutoSuffixNameGuard(teammateNames);
           const nextMembers: Record<string, unknown>[] = [];
@@ -4015,7 +4077,9 @@ export class TeamProvisioningService {
         const activeNames = metaMembers
           .filter((m) => !m.removedAt)
           .map((m) => m.name.trim())
-          .filter((n) => n.length > 0 && n.toLowerCase() !== 'team-lead' && n.toLowerCase() !== 'user');
+          .filter(
+            (n) => n.length > 0 && n.toLowerCase() !== 'team-lead' && n.toLowerCase() !== 'user'
+          );
 
         const keepName = createCliAutoSuffixNameGuard(activeNames);
         const removedFromMeta: string[] = [];
@@ -4042,7 +4106,9 @@ export class TeamProvisioningService {
           nextMeta
             .filter((m) => !m.removedAt)
             .map((m) => m.name.trim())
-            .filter((n) => n.length > 0 && n.toLowerCase() !== 'team-lead' && n.toLowerCase() !== 'user')
+            .filter(
+              (n) => n.length > 0 && n.toLowerCase() !== 'team-lead' && n.toLowerCase() !== 'user'
+            )
         );
       }
     } catch {
@@ -4658,7 +4724,13 @@ export class TeamProvisioningService {
           [...PREFLIGHT_PING_ARGS],
           cwd,
           env,
-          PREFLIGHT_TIMEOUT_MS
+          PREFLIGHT_TIMEOUT_MS,
+          {
+            resolveOnOutputMatch: ({ stdout, stderr }) => {
+              const combined = `${stdout}\n${stderr}`.trim();
+              return /\bPONG\b/i.test(combined);
+            },
+          }
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -4705,7 +4777,7 @@ export class TeamProvisioningService {
       }
 
       const pongCandidate = pingProbe.stdout.trim() || pingProbe.stderr.trim();
-      const isPong = pongCandidate.toUpperCase() === PREFLIGHT_EXPECTED;
+      const isPong = new RegExp(`\\b${PREFLIGHT_EXPECTED}\\b`, 'i').test(pongCandidate);
       if (!isPong) {
         return {
           warning:
@@ -4730,7 +4802,15 @@ export class TeamProvisioningService {
     args: string[],
     cwd: string,
     env: NodeJS.ProcessEnv,
-    timeoutMs: number
+    timeoutMs: number,
+    options?: {
+      /**
+       * Optional early success predicate. If this returns true based on
+       * buffered stdout/stderr, the probe resolves immediately (and the process
+       * is best-effort terminated) instead of waiting for `close`.
+       */
+      resolveOnOutputMatch?: (ctx: { stdout: string; stderr: string }) => boolean;
+    }
   ): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       const child = spawnCli(claudePath, args, {
@@ -4738,26 +4818,52 @@ export class TeamProvisioningService {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      const stdoutChunks: Buffer[] = [];
-      const stderrChunks: Buffer[] = [];
+      let stdoutText = '';
+      let stderrText = '';
+      let settled = false;
 
       const timeoutHandle = setTimeout(() => {
+        settled = true;
         killProcessTree(child);
         reject(new Error(`Timeout running: claude ${args.join(' ')}`));
       }, timeoutMs);
 
-      child.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-      child.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+      const maybeResolveEarly = (): void => {
+        if (settled) return;
+        if (!options?.resolveOnOutputMatch) return;
+        const ctx = { stdout: stdoutText.trim(), stderr: stderrText.trim() };
+        if (!options.resolveOnOutputMatch(ctx)) return;
+
+        settled = true;
+        clearTimeout(timeoutHandle);
+        // If the process printed the match but hangs during teardown, don't
+        // block the UI; terminate best-effort and resolve.
+        killProcessTree(child);
+        resolve({ exitCode: 0, stdout: ctx.stdout, stderr: ctx.stderr });
+      };
+
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdoutText += chunk.toString('utf8');
+        maybeResolveEarly();
+      });
+      child.stderr?.on('data', (chunk: Buffer) => {
+        stderrText += chunk.toString('utf8');
+        maybeResolveEarly();
+      });
       child.once('error', (error) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timeoutHandle);
         reject(error);
       });
       child.once('close', (exitCode) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timeoutHandle);
         resolve({
           exitCode,
-          stdout: Buffer.concat(stdoutChunks).toString('utf8').trim(),
-          stderr: Buffer.concat(stderrChunks).toString('utf8').trim(),
+          stdout: stdoutText.trim(),
+          stderr: stderrText.trim(),
         });
       });
     });
