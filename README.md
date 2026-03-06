@@ -38,8 +38,9 @@ A new approach to task management with AI agents.
 
 - **Recent tasks across projects** — browse the latest completed tasks from all your projects in one place
 - **Deep session analysis** — detailed breakdown of what happened in each Claude session: bash commands, reasoning, subprocesses
+- **Solo mode** — a one-member team: a single agent (regular claude process) that creates its own tasks, leaves comments, and shows live progress on the kanban board — saves tokens compared to a full team and can be expanded to a full team at any time
+- **Advanced context monitoring system** — comprehensive breakdown of what consumes tokens at every step: user messages, Claude.md instructions, tool outputs, thinking text, and team coordination. Token usage, percentage of context window, and session cost are displayed for each category, with detailed views by category or size.
 - **Smart task-to-log matching** — automatically links Claude session logs to specific tasks based on status change timestamps, even when a task moves back and forth between states
-- **Solo mode** — a one-member team: a single agent that creates its own tasks, leaves comments, and shows live progress on the kanban board — saves tokens compared to a full team and can be expanded to a full team at any time
 - **Zero-setup onboarding** — built-in Claude Code installation and authentication, ready to go out of the box
 - **Built-in code editor** — edit project files with Git support and other essential features without leaving the app
 - **Branch strategy control** — choose via prompt whether all agents work on a single branch or each gets its own git worktree
@@ -204,8 +205,11 @@ pnpm dist            # macOS + Windows + Linux
 
 - [ ] CLI runtime: Run not only on a local PC but in any headless/console environment (web UI), e.g. VPS, remote server, etc.
 - [ ] Visual workflow editor ([@xyflow/react](https://github.com/xyflow/xyflow)) for building and orchestrating agent pipelines with drag & drop
-- [ ] Context management: control and curate what context each agent sees (files, docs, MCP servers, skills)
+- [ ] Install skills, MCP, and integrations via an intuitive UI, and only for selected agents
+- [ ] Planning mode to organize agent plans before execution
+- [ ] Сurate what context each agent sees (files, docs, MCP servers, skills)
 - [ ] Multi-model support: proxy layer to use other popular LLMs (GPT, Gemini, DeepSeek, Llama, etc.), including offline/local models
+- [ ] 
 
 ---
 

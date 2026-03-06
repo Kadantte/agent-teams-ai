@@ -199,6 +199,8 @@ export interface InboxMessage {
   attachments?: AttachmentMeta[];
   /** Lead session ID that produced this message (for session boundary detection). */
   leadSessionId?: string;
+  /** Tool usage summary from assistant message, e.g. "3 tools (2 Read, Bash)" */
+  toolSummary?: string;
 }
 
 export interface SendMessageRequest {

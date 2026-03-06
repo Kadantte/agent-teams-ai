@@ -76,6 +76,7 @@ export class TeamSentMessagesStore {
         attachments: Array.isArray(row.attachments) ? row.attachments : undefined,
         source: typeof row.source === 'string' ? (row.source as InboxMessage['source']) : undefined,
         leadSessionId: typeof row.leadSessionId === 'string' ? row.leadSessionId : undefined,
+        toolSummary: typeof row.toolSummary === 'string' ? row.toolSummary : undefined,
       });
     }
 

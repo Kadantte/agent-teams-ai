@@ -11,6 +11,7 @@ import {
 } from '@renderer/constants/cssVariables';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useStore } from '@renderer/store';
+import { formatToolSummary, parseToolSummary } from '@shared/utils/toolSummary';
 
 import type { InboxMessage } from '@shared/types';
 
@@ -131,6 +132,22 @@ export const LeadThoughtsGroupRow = ({
   // Chronological order for rendering (oldest at top, newest at bottom)
   const chronologicalThoughts = useMemo(() => [...thoughts].reverse(), [thoughts]);
 
+  // Aggregate tool usage across all thoughts in this group
+  const totalToolSummary = useMemo(() => {
+    const merged: Record<string, number> = {};
+    let total = 0;
+    for (const t of thoughts) {
+      const parsed = parseToolSummary(t.toolSummary);
+      if (!parsed) continue;
+      total += parsed.total;
+      for (const [name, count] of Object.entries(parsed.byName)) {
+        merged[name] = (merged[name] ?? 0) + count;
+      }
+    }
+    if (total === 0) return null;
+    return formatToolSummary({ total, byName: merged });
+  }, [thoughts]);
+
   // Live = process alive AND (lead is in active turn OR context recently updated OR fresh thought)
   const computeIsLive = useCallback(
     () =>
@@ -225,6 +242,11 @@ export const LeadThoughtsGroupRow = ({
               ? formatTime(oldest.timestamp)
               : `${formatTime(oldest.timestamp)}–${formatTime(newest.timestamp)}`}
           </span>
+          {totalToolSummary && (
+            <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
+              {totalToolSummary}
+            </span>
+          )}
         </div>
 
         {/* Scrollable body — fixed height, always visible */}

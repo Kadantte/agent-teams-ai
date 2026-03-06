@@ -21,6 +21,7 @@ import { getMemberColor } from '@shared/constants/memberColors';
 import { resolveLanguageName } from '@shared/utils/agentLanguage';
 import { isInboxNoiseMessage } from '@shared/utils/inboxNoise';
 import { createLogger } from '@shared/utils/logger';
+import { buildToolSummary } from '@shared/utils/toolSummary';
 import { createCliAutoSuffixNameGuard } from '@shared/utils/teamMemberName';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -2913,12 +2914,13 @@ export class TeamProvisioningService {
           // captureSendMessageToUser() handles it separately.
           if (!run.silentUserDmForward && !hasSendMessageToUser) {
             const cleanText = stripAgentBlocks(text).trim();
-            if (cleanText.length >= TeamProvisioningService.LEAD_TEXT_MIN_LENGTH) {
+            if (cleanText.length > 0) {
               run.leadMsgSeq += 1;
               const leadName =
                 run.request.members.find((m) => m.role?.toLowerCase().includes('lead'))?.name ||
                 'team-lead';
               const messageId = `lead-turn-${run.runId}-${run.leadMsgSeq}`;
+              const toolSummary = buildToolSummary(content ?? []);
               const leadMsg: InboxMessage = {
                 from: leadName,
                 text: cleanText,
@@ -2927,6 +2929,7 @@ export class TeamProvisioningService {
                 summary: cleanText.length > 60 ? cleanText.slice(0, 57) + '...' : cleanText,
                 messageId,
                 source: 'lead_process',
+                toolSummary,
               };
               this.pushLiveLeadProcessMessage(run.teamName, leadMsg);
 

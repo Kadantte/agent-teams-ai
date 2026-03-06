@@ -17,6 +17,7 @@ import {
 import { getMemberColor } from '@shared/constants/memberColors';
 import { createLogger } from '@shared/utils/logger';
 import { parseNumericSuffixName } from '@shared/utils/teamMemberName';
+import { buildToolSummary } from '@shared/utils/toolSummary';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1486,6 +1487,8 @@ export class TeamDataService {
           const combined = stripAgentBlocks(textParts.join('\n')).trim();
           if (combined.length < MIN_TEXT_LENGTH) continue;
 
+          const toolSummary = buildToolSummary(content as Record<string, unknown>[]);
+
           // Stable messageId: timestamp + text prefix (survives tail-scan range changes)
           const textPrefix = combined
             .slice(0, 50)
@@ -1500,6 +1503,7 @@ export class TeamDataService {
             source: 'lead_session',
             leadSessionId: config.leadSessionId,
             messageId: `lead-session-${timestamp}-${textPrefix}`,
+            toolSummary,
           });
           if (textsReversed.length >= MAX_LEAD_TEXTS) break;
         }
