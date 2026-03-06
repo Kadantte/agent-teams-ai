@@ -14,7 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { useStore } from '@renderer/store';
 import { formatToolSummary, parseToolSummary } from '@shared/utils/toolSummary';
 
-import type { InboxMessage } from '@shared/types';
+import type { InboxMessage, ToolCallMeta } from '@shared/types';
 
 export interface LeadThoughtGroup {
   type: 'lead-thoughts';
@@ -102,25 +102,50 @@ function isRecentTimestamp(timestamp: string): boolean {
   return Date.now() - t <= LIVE_WINDOW_MS;
 }
 
-function ToolSummaryTooltipContent({ summary }: { summary: string }): JSX.Element {
-  const parsed = parseToolSummary(summary);
-  if (!parsed) return <span>{summary}</span>;
-
-  const sorted = Object.entries(parsed.byName).sort((a, b) => b[1] - a[1]);
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      <div className="mb-0.5 text-[10px] text-text-secondary">
-        {parsed.total} {parsed.total === 1 ? 'tool call' : 'tool calls'}
-      </div>
-      {sorted.map(([name, count]) => (
-        <div key={name} className="flex justify-between gap-3">
-          <span>{name}</span>
-          <span className="text-text-secondary">{count}</span>
+function ToolSummaryTooltipContent({
+  toolCalls,
+  toolSummary,
+}: {
+  toolCalls?: ToolCallMeta[];
+  toolSummary?: string;
+}): JSX.Element {
+  if (toolCalls && toolCalls.length > 0) {
+    return (
+      <div className="flex max-h-[300px] flex-col gap-0.5 overflow-y-auto">
+        <div className="mb-0.5 text-[10px] text-text-secondary">
+          {toolCalls.length} {toolCalls.length === 1 ? 'tool call' : 'tool calls'}
         </div>
-      ))}
-    </div>
-  );
+        {toolCalls.map((tc, i) => (
+          <div key={i} className="flex items-baseline gap-2">
+            <span className="shrink-0 font-semibold">{tc.name}</span>
+            {tc.preview && <span className="truncate text-text-secondary">{tc.preview}</span>}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (toolSummary) {
+    const parsed = parseToolSummary(toolSummary);
+    if (parsed) {
+      const sorted = Object.entries(parsed.byName).sort((a, b) => b[1] - a[1]);
+      return (
+        <div className="flex flex-col gap-0.5">
+          <div className="mb-0.5 text-[10px] text-text-secondary">
+            {parsed.total} {parsed.total === 1 ? 'tool call' : 'tool calls'}
+          </div>
+          {sorted.map(([name, count]) => (
+            <div key={name} className="flex justify-between gap-3">
+              <span>{name}</span>
+              <span className="text-text-secondary">×{count}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+  }
+
+  return <span>{toolSummary ?? ''}</span>;
 }
 
 export const LeadThoughtsGroupRow = ({
@@ -168,6 +193,15 @@ export const LeadThoughtsGroupRow = ({
     }
     if (total === 0) return null;
     return formatToolSummary({ total, byName: merged });
+  }, [thoughts]);
+
+  // Aggregate all toolCalls across thoughts for header tooltip
+  const allToolCalls = useMemo(() => {
+    const calls: ToolCallMeta[] = [];
+    for (const t of thoughts) {
+      if (t.toolCalls) calls.push(...t.toolCalls);
+    }
+    return calls.length > 0 ? calls : undefined;
   }, [thoughts]);
 
   // Live = process alive AND (lead is in active turn OR context recently updated OR fresh thought)
@@ -273,7 +307,10 @@ export const LeadThoughtsGroupRow = ({
                 </span>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="font-mono text-[11px]">
-                <ToolSummaryTooltipContent summary={totalToolSummary} />
+                <ToolSummaryTooltipContent
+                  toolCalls={allToolCalls}
+                  toolSummary={totalToolSummary}
+                />
               </TooltipContent>
             </Tooltip>
           )}
@@ -337,8 +374,11 @@ export const LeadThoughtsGroupRow = ({
                       🔧 {thought.toolSummary}
                     </div>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="font-mono text-[11px]">
-                    <ToolSummaryTooltipContent summary={thought.toolSummary} />
+                  <TooltipContent side="top" align="start" className="font-mono text-[11px]">
+                    <ToolSummaryTooltipContent
+                      toolCalls={thought.toolCalls}
+                      toolSummary={thought.toolSummary}
+                    />
                   </TooltipContent>
                 </Tooltip>
               )}

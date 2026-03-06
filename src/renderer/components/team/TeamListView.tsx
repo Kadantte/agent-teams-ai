@@ -561,9 +561,7 @@ export const TeamListView = (): React.JSX.Element => {
               void fetchTeams();
             }}
           >
-            {teamsLoading ? (
-              <RotateCcw className="size-3.5 animate-spin" />
-            ) : null}
+            {teamsLoading ? <RotateCcw className="size-3.5 animate-spin" /> : null}
             Refresh
           </Button>
         </div>
@@ -671,7 +669,7 @@ export const TeamListView = (): React.JSX.Element => {
                 key={team.teamName}
                 role="button"
                 tabIndex={0}
-                className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-[var(--color-surface)] p-4 hover:bg-[var(--color-surface-raised)] ${
+                className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-[var(--color-surface)] p-4 hover:bg-[var(--color-surface-raised)] ${
                   matchesCurrentProject
                     ? 'border-emerald-500/70 ring-1 ring-emerald-500/30'
                     : 'border-[var(--color-border)]'
@@ -695,7 +693,11 @@ export const TeamListView = (): React.JSX.Element => {
                     style={{ backgroundColor: teamColorSet.badge }}
                   />
                 ) : null}
-                <div className={teamColorSet ? 'relative z-10' : undefined}>
+                <div
+                  className={
+                    teamColorSet ? 'relative z-10 flex flex-1 flex-col' : 'flex flex-1 flex-col'
+                  }
+                >
                   <div className="flex items-start justify-between">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                       <h3 className="truncate text-sm font-semibold text-[var(--color-text)]">
@@ -779,6 +781,8 @@ export const TeamListView = (): React.JSX.Element => {
                         Members: {team.memberCount}
                       </Badge>
                     )}
+                  </div>
+                  <div className="mt-auto">
                     {(() => {
                       const tc = taskCountsByTeam.get(team.teamName);
                       const pending = tc?.pending ?? 0;
@@ -831,8 +835,8 @@ export const TeamListView = (): React.JSX.Element => {
                         </div>
                       );
                     })()}
+                    {renderTeamRecentPaths(team, status)}
                   </div>
-                  {renderTeamRecentPaths(team, status)}
                 </div>
               </div>
             );

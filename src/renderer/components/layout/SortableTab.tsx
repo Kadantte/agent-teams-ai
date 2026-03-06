@@ -8,6 +8,7 @@ import { useCallback, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { nameColorSet } from '@renderer/utils/projectColor';
 import { useStore } from '@renderer/store';
 import {
   Activity,
@@ -67,17 +68,17 @@ export const SortableTab = ({
     )
   );
 
-  const teamColor = useStore((s) => {
+  const teamColorSet = useStore((s) => {
     if (tab.type !== 'team' || !tab.teamName) return null;
     const team = s.teamByName[tab.teamName];
-    if (team?.color) return team.color;
-    // Fallback: selectedTeamData may be available before teamByName is populated
-    if (s.selectedTeamName === tab.teamName && s.selectedTeamData?.config.color) {
-      return s.selectedTeamData.config.color;
-    }
-    return null;
+    const explicitColor =
+      team?.color ??
+      (s.selectedTeamName === tab.teamName ? s.selectedTeamData?.config.color : undefined);
+    if (explicitColor) return getTeamColorSet(explicitColor);
+    // Fallback: deterministic color derived from display name
+    const displayName = team?.displayName ?? tab.label;
+    return nameColorSet(displayName);
   });
-  const teamColorSet = teamColor ? getTeamColorSet(teamColor) : null;
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: tab.id,

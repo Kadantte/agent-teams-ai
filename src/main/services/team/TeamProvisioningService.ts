@@ -21,7 +21,7 @@ import { getMemberColor } from '@shared/constants/memberColors';
 import { resolveLanguageName } from '@shared/utils/agentLanguage';
 import { isInboxNoiseMessage } from '@shared/utils/inboxNoise';
 import { createLogger } from '@shared/utils/logger';
-import { formatToolSummaryFromMap } from '@shared/utils/toolSummary';
+import { extractToolPreview, formatToolSummaryFromCalls } from '@shared/utils/toolSummary';
 import { createCliAutoSuffixNameGuard } from '@shared/utils/teamMemberName';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -50,6 +50,7 @@ import type {
   TeamProvisioningProgress,
   TeamProvisioningState,
   TeamTask,
+  ToolCallMeta,
 } from '@shared/types';
 
 const logger = createLogger('Service:TeamProvisioning');
@@ -164,8 +165,8 @@ interface ProvisioningRun {
   } | null;
   /** Monotonic counter for individual lead assistant messages. */
   leadMsgSeq: number;
-  /** Accumulated tool_use counts between text messages (tool name → count). */
-  pendingToolCounts: Map<string, number>;
+  /** Accumulated tool_use details between text messages. */
+  pendingToolCalls: ToolCallMeta[];
   /** Throttle timestamp for emitting inbox refresh events for lead text. */
   lastLeadTextEmitMs: number;
   /**
@@ -1747,7 +1748,7 @@ export class TeamProvisioningService {
         fsPhase: 'waiting_config',
         leadRelayCapture: null,
         leadMsgSeq: 0,
-        pendingToolCounts: new Map(),
+        pendingToolCalls: [],
         lastLeadTextEmitMs: 0,
         silentUserDmForward: null,
         silentUserDmForwardClearHandle: null,
@@ -2047,7 +2048,7 @@ export class TeamProvisioningService {
         fsPhase: 'waiting_members',
         leadRelayCapture: null,
         leadMsgSeq: 0,
-        pendingToolCounts: new Map(),
+        pendingToolCalls: [],
         lastLeadTextEmitMs: 0,
         silentUserDmForward: null,
         silentUserDmForwardClearHandle: null,
@@ -2924,12 +2925,11 @@ export class TeamProvisioningService {
                 run.request.members.find((m) => m.role?.toLowerCase().includes('lead'))?.name ||
                 'team-lead';
               const messageId = `lead-turn-${run.runId}-${run.leadMsgSeq}`;
-              // Attach accumulated tool counts from preceding tool_use messages, then reset.
-              const toolSummary =
-                run.pendingToolCounts.size > 0
-                  ? formatToolSummaryFromMap(run.pendingToolCounts)
-                  : undefined;
-              run.pendingToolCounts.clear();
+              // Attach accumulated tool call details from preceding tool_use messages, then reset.
+              const toolCalls =
+                run.pendingToolCalls.length > 0 ? [...run.pendingToolCalls] : undefined;
+              const toolSummary = toolCalls ? formatToolSummaryFromCalls(toolCalls) : undefined;
+              run.pendingToolCalls = [];
               const leadMsg: InboxMessage = {
                 from: leadName,
                 text: cleanText,
@@ -2939,6 +2939,7 @@ export class TeamProvisioningService {
                 messageId,
                 source: 'lead_process',
                 toolSummary,
+                toolCalls,
               };
               this.pushLiveLeadProcessMessage(run.teamName, leadMsg);
 
@@ -2959,8 +2960,8 @@ export class TeamProvisioningService {
         }
       }
 
-      // Accumulate tool_use counts from tool-only messages (text + tool_use are separate in stream-json).
-      // These counts will be attached to the next text message as toolSummary.
+      // Accumulate tool_use details from tool-only messages (text + tool_use are separate in stream-json).
+      // These details will be attached to the next text message as toolCalls/toolSummary.
       if (run.provisioningComplete) {
         for (const block of content ?? []) {
           if (
@@ -2968,10 +2969,11 @@ export class TeamProvisioningService {
             typeof block.name === 'string' &&
             block.name !== 'SendMessage'
           ) {
-            run.pendingToolCounts.set(
-              block.name as string,
-              (run.pendingToolCounts.get(block.name as string) ?? 0) + 1
-            );
+            const input = (block.input ?? {}) as Record<string, unknown>;
+            run.pendingToolCalls.push({
+              name: block.name as string,
+              preview: extractToolPreview(block.name as string, input),
+            });
           }
         }
       }

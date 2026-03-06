@@ -1,3 +1,5 @@
+import type { ToolCallMeta } from '@shared/types';
+
 export interface ToolSummaryData {
   total: number;
   byName: Record<string, number>;
@@ -54,4 +56,64 @@ export function formatToolSummaryFromMap(counts: Map<string, number>): string | 
     .map(([name, count]) => (count === 1 ? name : `${count} ${name}`))
     .join(', ');
   return `${total} ${total === 1 ? 'tool' : 'tools'} (${parts})`;
+}
+
+/** Format tool summary from an array of ToolCallMeta. */
+export function formatToolSummaryFromCalls(calls: ToolCallMeta[]): string | undefined {
+  if (calls.length === 0) return undefined;
+  const counts = new Map<string, number>();
+  for (const c of calls) counts.set(c.name, (counts.get(c.name) ?? 0) + 1);
+  return formatToolSummaryFromMap(counts);
+}
+
+function baseName(filePath: string): string {
+  return filePath.split(/[/\\]/).pop() ?? filePath;
+}
+
+function truncateStr(str: string, max: number): string {
+  return str.length <= max ? str : str.slice(0, max) + '...';
+}
+
+/** Extract a short human-readable preview from tool_use input arguments. */
+export function extractToolPreview(
+  name: string,
+  input: Record<string, unknown>
+): string | undefined {
+  switch (name) {
+    case 'Read':
+    case 'Edit':
+    case 'Write':
+      return typeof input.file_path === 'string' ? baseName(input.file_path) : undefined;
+    case 'Bash':
+      return typeof input.description === 'string'
+        ? truncateStr(input.description, 60)
+        : typeof input.command === 'string'
+          ? truncateStr(input.command, 60)
+          : undefined;
+    case 'Grep':
+    case 'Glob':
+      return typeof input.pattern === 'string' ? truncateStr(input.pattern, 40) : undefined;
+    case 'Agent':
+    case 'TaskCreate':
+      return typeof input.prompt === 'string'
+        ? truncateStr(input.prompt, 60)
+        : typeof input.description === 'string'
+          ? truncateStr(input.description, 60)
+          : undefined;
+    case 'WebFetch':
+      if (typeof input.url === 'string') {
+        try {
+          return new URL(input.url).hostname;
+        } catch {
+          return truncateStr(input.url, 40);
+        }
+      }
+      return undefined;
+    case 'WebSearch':
+      return typeof input.query === 'string' ? truncateStr(input.query, 40) : undefined;
+    default: {
+      const v = input.name ?? input.path ?? input.file ?? input.query ?? input.command;
+      return typeof v === 'string' ? truncateStr(v, 50) : undefined;
+    }
+  }
 }

@@ -17,7 +17,7 @@ import {
 import { getMemberColor } from '@shared/constants/memberColors';
 import { createLogger } from '@shared/utils/logger';
 import { parseNumericSuffixName } from '@shared/utils/teamMemberName';
-import { formatToolSummaryFromMap } from '@shared/utils/toolSummary';
+import { extractToolPreview, formatToolSummaryFromCalls } from '@shared/utils/toolSummary';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -60,6 +60,7 @@ import type {
   TeamTaskStatus,
   TeamTaskWithKanban,
   UpdateKanbanPatch,
+  ToolCallMeta,
 } from '@shared/types';
 
 const logger = createLogger('Service:TeamDataService');
@@ -1504,9 +1505,9 @@ export class TeamDataService {
           const combined = stripAgentBlocks(textParts.join('\n')).trim();
           if (combined.length < MIN_TEXT_LENGTH) continue;
 
-          // Count tool_use blocks from following lines (text and tool_use are separate in JSONL).
+          // Collect tool_use details from following lines (text and tool_use are separate in JSONL).
           // tool_result (type=user) lines are interleaved between tool_use lines — skip them.
-          const toolCounts = new Map<string, number>();
+          const toolCallsList: ToolCallMeta[] = [];
           const lookaheadLimit = Math.min(i + 200, lines.length);
           for (let j = i + 1; j < lookaheadLimit; j++) {
             const tLine = lines[j]?.trim();
@@ -1525,11 +1526,16 @@ export class TeamDataService {
             if (tBlocks.some((b) => b.type === 'text')) break; // next text = stop
             for (const b of tBlocks) {
               if (b.type === 'tool_use' && typeof b.name === 'string' && b.name !== 'SendMessage') {
-                toolCounts.set(b.name, (toolCounts.get(b.name) ?? 0) + 1);
+                const input = (b.input ?? {}) as Record<string, unknown>;
+                toolCallsList.push({
+                  name: b.name as string,
+                  preview: extractToolPreview(b.name as string, input),
+                });
               }
             }
           }
-          const toolSummary = formatToolSummaryFromMap(toolCounts);
+          const toolCalls = toolCallsList.length > 0 ? toolCallsList : undefined;
+          const toolSummary = toolCalls ? formatToolSummaryFromCalls(toolCalls) : undefined;
 
           // Stable messageId: timestamp + text prefix (survives tail-scan range changes)
           const textPrefix = combined
@@ -1550,6 +1556,7 @@ export class TeamDataService {
             leadSessionId: config.leadSessionId,
             messageId,
             toolSummary,
+            toolCalls,
           });
           if (textsReversed.length >= MAX_LEAD_TEXTS) break;
         }
