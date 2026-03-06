@@ -274,7 +274,6 @@ describe('ipc teams handlers', () => {
       messages: [
         {
           from: 'team-lead',
-          to: 'user',
           text: 'Hello there',
           timestamp: '2026-02-23T10:00:00.000Z',
           read: true,
@@ -287,7 +286,6 @@ describe('ipc teams handlers', () => {
     provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce([
       {
         from: 'team-lead',
-        to: 'user',
         text: 'Hello there',
         timestamp: '2026-02-23T10:00:01.000Z',
         read: true,

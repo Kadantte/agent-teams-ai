@@ -1,6 +1,49 @@
 import { describe, expect, it } from 'vitest';
 
-import { estimateBashLinesChanged } from '../../../../src/main/services/team/MemberStatsComputer';
+import {
+  estimateBashLinesChanged,
+  isValidFilePath,
+} from '../../../../src/main/services/team/MemberStatsComputer';
+
+describe('isValidFilePath', () => {
+  it('rejects null-like values', () => {
+    expect(isValidFilePath('null')).toBe(false);
+    expect(isValidFilePath('null;')).toBe(false);
+    expect(isValidFilePath('null;,')).toBe(false);
+    expect(isValidFilePath('undefined')).toBe(false);
+    expect(isValidFilePath('None')).toBe(false);
+    expect(isValidFilePath('false')).toBe(false);
+    expect(isValidFilePath('true')).toBe(false);
+    expect(isValidFilePath('')).toBe(false);
+  });
+
+  it('rejects paths without slash', () => {
+    expect(isValidFilePath('somefile')).toBe(false);
+    expect(isValidFilePath('a')).toBe(false);
+  });
+
+  it('rejects very short paths', () => {
+    expect(isValidFilePath('/')).toBe(false);
+  });
+
+  it('accepts valid file paths', () => {
+    expect(isValidFilePath('/tmp/file.txt')).toBe(true);
+    expect(isValidFilePath('/Users/dev/project/src/main.ts')).toBe(true);
+    expect(isValidFilePath('./src/index.ts')).toBe(true);
+    expect(isValidFilePath('src/utils/helper.ts')).toBe(true);
+  });
+
+  it('strips trailing punctuation before validation', () => {
+    expect(isValidFilePath('/tmp/file.txt;')).toBe(true);
+    expect(isValidFilePath('/tmp/file.txt,')).toBe(true);
+    expect(isValidFilePath('/tmp/file.txt.')).toBe(true);
+  });
+
+  it('handles whitespace', () => {
+    expect(isValidFilePath('  /tmp/file.txt  ')).toBe(true);
+    expect(isValidFilePath('  null  ')).toBe(false);
+  });
+});
 
 describe('estimateBashLinesChanged', () => {
   it('returns zero for simple non-writing commands', () => {

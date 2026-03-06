@@ -16,6 +16,8 @@ const SCROLL_THRESHOLD = 300;
 /** Must match the `w-80` (320px) context panel width used in the layout below. */
 const CONTEXT_PANEL_WIDTH_PX = 320;
 
+import { formatPercentOfTotal, sumContextInjectionTokens } from '@renderer/utils/contextMath';
+
 import { ChatHistoryEmptyState } from './ChatHistoryEmptyState';
 import { ChatHistoryItem } from './ChatHistoryItem';
 import { ChatHistoryLoadingState } from './ChatHistoryLoadingState';
@@ -189,6 +191,11 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
 
     return { allContextInjections: injections, lastAiGroupTotalTokens: totalTokens };
   }, [sessionContextStats, conversation, selectedContextPhase, sessionPhaseInfo]);
+
+  const visibleContextPercentLabel = useMemo(() => {
+    const visibleTokens = sumContextInjectionTokens(allContextInjections);
+    return formatPercentOfTotal(visibleTokens, lastAiGroupTotalTokens);
+  }, [allContextInjections, lastAiGroupTotalTokens]);
 
   // State for navigation highlight (blue, used for Turn navigation from CLAUDE.md panel)
   const [isNavigationHighlight, setIsNavigationHighlight] = useState(false);
@@ -828,7 +835,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
                     : 'var(--color-text-secondary)',
                 }}
               >
-                Context ({allContextInjections.length})
+                {visibleContextPercentLabel ?? `Context (${allContextInjections.length})`}
               </button>
             </div>
           )}

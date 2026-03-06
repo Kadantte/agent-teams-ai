@@ -23,6 +23,7 @@ interface UseAttachmentsReturn {
   addFiles: (files: FileList | File[]) => Promise<void>;
   removeAttachment: (id: string) => void;
   clearAttachments: () => void;
+  clearError: () => void;
   handlePaste: (event: React.ClipboardEvent) => void;
   handleDrop: (event: React.DragEvent) => void;
 }
@@ -110,7 +111,6 @@ export function useAttachments(options?: UseAttachmentsOptions): UseAttachmentsR
       // Transitioning to non-persistent context: flush pending save and clear stale state
       flushPending();
       attachmentsRef.current = [];
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync reset on key transition
       setAttachments([]);
       return;
     }
@@ -120,7 +120,6 @@ export function useAttachments(options?: UseAttachmentsOptions): UseAttachmentsR
     flushPending();
     // Clear stale attachments from previous persistenceKey before loading
     attachmentsRef.current = [];
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync reset before async load
     setAttachments([]);
     void (async () => {
       const raw = await draftStorage.loadDraft(persistenceKey);
@@ -221,6 +220,10 @@ export function useAttachments(options?: UseAttachmentsOptions): UseAttachmentsR
     [schedulePersist]
   );
 
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
+
   const clearAttachments = useCallback(() => {
     if (timerRef.current != null) {
       clearTimeout(timerRef.current);
@@ -282,6 +285,7 @@ export function useAttachments(options?: UseAttachmentsOptions): UseAttachmentsR
     addFiles,
     removeAttachment,
     clearAttachments,
+    clearError,
     handlePaste,
     handleDrop,
   };

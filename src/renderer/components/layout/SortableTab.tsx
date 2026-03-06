@@ -9,6 +9,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useStore } from '@renderer/store';
+import { nameColorSet } from '@renderer/utils/projectColor';
 import {
   Activity,
   Bell,
@@ -67,12 +68,17 @@ export const SortableTab = ({
     )
   );
 
-  const teamColor = useStore((s) => {
+  const teamColorSet = useStore((s) => {
     if (tab.type !== 'team' || !tab.teamName) return null;
     const team = s.teamByName[tab.teamName];
-    return team?.color ?? null;
+    const explicitColor =
+      team?.color ??
+      (s.selectedTeamName === tab.teamName ? s.selectedTeamData?.config.color : undefined);
+    if (explicitColor) return getTeamColorSet(explicitColor);
+    // Fallback: deterministic color derived from display name
+    const displayName = team?.displayName ?? tab.label;
+    return nameColorSet(displayName);
   });
-  const teamColorSet = teamColor ? getTeamColorSet(teamColor) : null;
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: tab.id,
@@ -96,8 +102,15 @@ export const SortableTab = ({
         ? teamColorSet
           ? teamColorSet.badge
           : 'var(--color-surface-overlay)'
-        : 'transparent',
-    color: isActive || isHovered ? 'var(--color-text)' : 'var(--color-text-muted)',
+        : teamColorSet
+          ? teamColorSet.badge
+          : 'transparent',
+    color:
+      isActive || isHovered
+        ? 'var(--color-text)'
+        : teamColorSet
+          ? teamColorSet.text
+          : 'var(--color-text-muted)',
     outline: isSelected ? '1px solid var(--color-border-emphasis)' : 'none',
     outlineOffset: '-1px',
     borderLeft: isActive && teamColorSet ? `2px solid ${teamColorSet.border}` : undefined,
@@ -125,7 +138,7 @@ export const SortableTab = ({
       role="tab"
       tabIndex={0}
       aria-selected={isActive}
-      className="group flex min-w-0 max-w-[200px] shrink-0 cursor-grab items-center gap-2 rounded-md px-3 py-1.5"
+      className="group flex shrink-0 cursor-grab items-center gap-2 rounded-md px-3 py-1.5"
       style={style}
       onClick={(e) => onTabClick(tab.id, e)}
       onMouseDown={(e) => onMouseDown(tab.id, e)}
@@ -150,7 +163,11 @@ export const SortableTab = ({
           <Pin className="size-3 shrink-0 text-blue-400" />
         </span>
       )}
-      <span className="truncate text-sm">{tab.label}</span>
+      <span
+        className={`${tab.label.length > 20 ? 'max-w-[200px] truncate' : ''} whitespace-nowrap text-sm`}
+      >
+        {tab.label}
+      </span>
       {isTeamTab && (
         <TeamTabSectionNav
           teamName={tab.teamName!}
@@ -188,7 +205,7 @@ export const DragOverlayTab = ({ tab }: { tab: Tab }): React.JSX.Element => {
 
   return (
     <div
-      className="flex min-w-0 max-w-[200px] items-center gap-2 rounded-md border-2 px-3 py-1.5"
+      className="flex shrink-0 items-center gap-2 rounded-md border-2 px-3 py-1.5"
       style={{
         backgroundColor: 'var(--color-surface-raised)',
         borderColor: 'var(--color-accent, #6366f1)',
@@ -198,7 +215,11 @@ export const DragOverlayTab = ({ tab }: { tab: Tab }): React.JSX.Element => {
       }}
     >
       <Icon className="size-4 shrink-0" />
-      <span className="truncate text-sm">{tab.label}</span>
+      <span
+        className={`${tab.label.length > 20 ? 'max-w-[200px] truncate' : ''} whitespace-nowrap text-sm`}
+      >
+        {tab.label}
+      </span>
     </div>
   );
 };

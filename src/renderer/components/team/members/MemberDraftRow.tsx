@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { TeamModelSelector } from '@renderer/components/team/dialogs/TeamModelSelector';
 import { RoleSelect } from '@renderer/components/team/RoleSelect';
 import { Button } from '@renderer/components/ui/button';
 import { Input } from '@renderer/components/ui/input';
@@ -9,7 +10,7 @@ import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
 import { reconcileChips, removeChipTokenFromText } from '@renderer/utils/chipUtils';
 import { getMemberColor } from '@shared/constants/memberColors';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info } from 'lucide-react';
 
 import type { MemberDraft } from './membersEditorTypes';
 import type { InlineChip } from '@renderer/types/inlineChip';
@@ -48,6 +49,7 @@ export const MemberDraftRow = ({
 }: MemberDraftRowProps): React.JSX.Element => {
   const memberColorSet = getTeamColorSet(getMemberColor(index));
   const [workflowExpanded, setWorkflowExpanded] = useState(false);
+  const [modelExpanded, setModelExpanded] = useState(false);
 
   // Pre-warm file list cache when workflow section is expanded
   useFileListCacheWarmer(workflowExpanded && projectPath ? projectPath : null);
@@ -165,6 +167,19 @@ export const MemberDraftRow = ({
         <Button
           variant="outline"
           size="sm"
+          className="h-8 shrink-0 gap-1"
+          onClick={() => setModelExpanded((prev) => !prev)}
+        >
+          {modelExpanded ? (
+            <ChevronDown className="size-3.5" />
+          ) : (
+            <ChevronRight className="size-3.5" />
+          )}
+          Model
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           className="h-8 shrink-0 border-red-500/40 text-red-300 hover:bg-red-500/10 hover:text-red-200"
           onClick={() => onRemove(member.id)}
         >
@@ -200,6 +215,20 @@ export const MemberDraftRow = ({
           />
         </div>
       ) : null}
+      {modelExpanded && (
+        <div className="space-y-2 md:col-span-3">
+          <div className="pointer-events-none opacity-40">
+            <TeamModelSelector value="" onValueChange={() => {}} />
+          </div>
+          <div className="flex items-start gap-2 rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2">
+            <Info className="mt-0.5 size-3.5 shrink-0 text-sky-400" />
+            <p className="text-[11px] leading-relaxed text-sky-300">
+              Claude Code doesn&apos;t support per-member model selection yet &mdash; all teammates
+              inherit the team launch model. We plan to solve this via a local proxy.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

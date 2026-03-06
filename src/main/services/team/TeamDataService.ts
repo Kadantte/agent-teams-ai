@@ -9,10 +9,15 @@ import {
 } from '@main/utils/pathDecoder';
 import { isProcessAlive } from '@main/utils/processHealth';
 import { killProcessByPid } from '@main/utils/processKill';
-import { AGENT_BLOCK_CLOSE, AGENT_BLOCK_OPEN } from '@shared/constants/agentBlocks';
+import {
+  AGENT_BLOCK_CLOSE,
+  AGENT_BLOCK_OPEN,
+  stripAgentBlocks,
+} from '@shared/constants/agentBlocks';
 import { getMemberColor } from '@shared/constants/memberColors';
 import { createLogger } from '@shared/utils/logger';
 import { parseNumericSuffixName } from '@shared/utils/teamMemberName';
+import { extractToolPreview, formatToolSummaryFromCalls } from '@shared/utils/toolSummary';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -54,13 +59,14 @@ import type {
   TeamTask,
   TeamTaskStatus,
   TeamTaskWithKanban,
+  ToolCallMeta,
   UpdateKanbanPatch,
 } from '@shared/types';
 
 const logger = createLogger('Service:TeamDataService');
 
 const MIN_TEXT_LENGTH = 30;
-const MAX_LEAD_TEXTS = 50;
+const MAX_LEAD_TEXTS = 150;
 const PROCESS_HEALTH_INTERVAL_MS = 2_000;
 const MAX_PROCESSES_FILE_BYTES = 2 * 1024 * 1024;
 const TASK_MAP_YIELD_EVERY = 250;
@@ -283,6 +289,7 @@ export class TeamDataService {
 
     // Dedup: if a lead_process message text is also present in lead_session, prefer lead_session.
     // This avoids double-rendering when we persist lead process messages and later load the lead JSONL.
+    // Exception: lead_process messages with `to` field are captured SendMessage — never dedup those.
     if (leadTexts.length > 0 && sentMessages.length > 0) {
       const normalizeText = (text: string): string => text.trim().replace(/\r\n/g, '\n');
       const leadSessionFingerprints = new Set<string>();
@@ -292,17 +299,67 @@ export class TeamDataService {
       }
       messages = messages.filter((m) => {
         if (m.source !== 'lead_process') return true;
+        // Captured SendMessage messages (with recipient) are real messages — never dedup
+        if (m.to) return true;
         const fp = `${m.from}\0${normalizeText(m.text ?? '')}`;
         return !leadSessionFingerprints.has(fp);
       });
     }
 
-    // Enrich messages without leadSessionId: assign current session for lead_process/user_sent.
-    // lead_process messages surviving dedup are from the current session;
-    // user_sent messages written before this feature lack the field.
-    if (config.leadSessionId) {
-      for (const msg of messages) {
-        if (!msg.leadSessionId && (msg.source === 'lead_process' || msg.source === 'user_sent')) {
+    // Enrich inbox messages without leadSessionId by assigning the nearest neighbor's
+    // session ID (by timestamp).  This avoids the old forward-only propagation bug where
+    // messages between two sessions always inherited the *earlier* session, causing a
+    // spurious "New session" divider even when the message is chronologically closer to
+    // the later session.
+    if (config.leadSessionId || messages.some((m) => m.leadSessionId)) {
+      messages.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+
+      // Collect indices of messages that already have a leadSessionId (anchors).
+      const anchors: { index: number; time: number; sessionId: string }[] = [];
+      for (let i = 0; i < messages.length; i++) {
+        if (messages[i].leadSessionId) {
+          anchors.push({
+            index: i,
+            time: Date.parse(messages[i].timestamp),
+            sessionId: messages[i].leadSessionId!,
+          });
+        }
+      }
+
+      if (anchors.length > 0) {
+        // For each message without leadSessionId, find the closest anchor by timestamp
+        // and inherit its sessionId.
+        let anchorIdx = 0;
+        for (let i = 0; i < messages.length; i++) {
+          if (messages[i].leadSessionId) {
+            // Advance anchorIdx to track current position for efficient lookup
+            while (anchorIdx < anchors.length - 1 && anchors[anchorIdx].index < i) {
+              anchorIdx++;
+            }
+            continue;
+          }
+
+          const msgTime = Date.parse(messages[i].timestamp);
+
+          // Find closest anchor by timestamp (binary-search-like scan from current position)
+          let bestAnchor = anchors[0];
+          let bestDist = Math.abs(msgTime - bestAnchor.time);
+          for (const anchor of anchors) {
+            const dist = Math.abs(msgTime - anchor.time);
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestAnchor = anchor;
+            } else if (dist > bestDist && anchor.time > msgTime) {
+              // Anchors are sorted by index (asc time) — once distance grows past the
+              // message time, further anchors will only be farther.
+              break;
+            }
+          }
+          messages[i].leadSessionId = bestAnchor.sessionId;
+        }
+      } else if (config.leadSessionId) {
+        // No anchors at all — fall back to config.leadSessionId for everything.
+        for (const msg of messages) {
           msg.leadSessionId = config.leadSessionId;
         }
       }
@@ -1103,7 +1160,19 @@ export class TeamDataService {
   }
 
   async sendMessage(teamName: string, request: SendMessageRequest): Promise<SendMessageResult> {
-    return this.inboxWriter.sendMessage(teamName, request);
+    // Enrich with leadSessionId so session boundary separators work
+    let enrichedRequest = request;
+    if (!enrichedRequest.leadSessionId) {
+      try {
+        const config = await this.configReader.getConfig(teamName);
+        if (config?.leadSessionId) {
+          enrichedRequest = { ...enrichedRequest, leadSessionId: config.leadSessionId };
+        }
+      } catch {
+        // non-critical
+      }
+    }
+    return this.inboxWriter.sendMessage(teamName, enrichedRequest);
   }
 
   private resolveLeadNameFromConfig(config: TeamConfig | null): string {
@@ -1357,13 +1426,29 @@ export class TeamDataService {
 
     const projectId = encodePath(config.projectPath);
     const baseDir = extractBaseDir(projectId);
-    const jsonlPath = path.join(getProjectsBasePath(), baseDir, `${config.leadSessionId}.jsonl`);
+    let jsonlPath = path.join(getProjectsBasePath(), baseDir, `${config.leadSessionId}.jsonl`);
 
     try {
       await fs.promises.access(jsonlPath, fs.constants.F_OK);
     } catch {
-      logger.debug(`Lead session JSONL not found: ${jsonlPath}`);
-      return [];
+      // Claude Code encodes underscores as hyphens in project directory names;
+      // our encodePath only handles slashes. Try the underscore-to-hyphen variant.
+      const altBaseDir = baseDir.replace(/_/g, '-');
+      if (altBaseDir !== baseDir) {
+        const altPath = path.join(
+          getProjectsBasePath(),
+          altBaseDir,
+          `${config.leadSessionId}.jsonl`
+        );
+        try {
+          await fs.promises.access(altPath, fs.constants.F_OK);
+          jsonlPath = altPath;
+        } catch {
+          return [];
+        }
+      } else {
+        return [];
+      }
     }
 
     const leadName = config.members?.find((m) => m.agentType === 'team-lead')?.name ?? 'team-lead';
@@ -1374,6 +1459,7 @@ export class TeamDataService {
     const INITIAL_SCAN_BYTES = 256 * 1024; // 256KB
 
     const textsReversed: InboxMessage[] = [];
+    const seenMessageIds = new Set<string>();
     const handle = await fs.promises.open(jsonlPath, 'r');
     try {
       const stat = await handle.stat();
@@ -1410,20 +1496,69 @@ export class TeamDataService {
           const timestamp =
             typeof msg.timestamp === 'string' ? msg.timestamp : new Date().toISOString();
 
+          const textParts: string[] = [];
           for (const block of content as Record<string, unknown>[]) {
             if (block.type !== 'text' || typeof block.text !== 'string') continue;
-            const text = block.text.trim();
-            if (text.length < MIN_TEXT_LENGTH) continue;
-            textsReversed.push({
-              from: leadName,
-              text,
-              timestamp,
-              read: true,
-              source: 'lead_session',
-              leadSessionId: config.leadSessionId,
-            });
-            if (textsReversed.length >= MAX_LEAD_TEXTS) break;
+            textParts.push(block.text);
           }
+          if (textParts.length === 0) continue;
+
+          const combined = stripAgentBlocks(textParts.join('\n')).trim();
+          if (combined.length < MIN_TEXT_LENGTH) continue;
+
+          // Collect tool_use details from following lines (text and tool_use are separate in JSONL).
+          // tool_result (type=user) lines are interleaved between tool_use lines — skip them.
+          const toolCallsList: ToolCallMeta[] = [];
+          const lookaheadLimit = Math.min(i + 200, lines.length);
+          for (let j = i + 1; j < lookaheadLimit; j++) {
+            const tLine = lines[j]?.trim();
+            if (!tLine) continue;
+            let tMsg: Record<string, unknown>;
+            try {
+              tMsg = JSON.parse(tLine) as Record<string, unknown>;
+            } catch {
+              continue;
+            }
+            if (tMsg.type !== 'assistant') continue; // skip tool_result (type=user) lines
+            const tMessage = (tMsg.message ?? tMsg) as Record<string, unknown>;
+            const tContent = tMessage.content;
+            if (!Array.isArray(tContent)) continue;
+            const tBlocks = tContent as Record<string, unknown>[];
+            if (tBlocks.some((b) => b.type === 'text')) break; // next text = stop
+            for (const b of tBlocks) {
+              if (b.type === 'tool_use' && typeof b.name === 'string' && b.name !== 'SendMessage') {
+                const input = (b.input ?? {}) as Record<string, unknown>;
+                toolCallsList.push({
+                  name: b.name,
+                  preview: extractToolPreview(b.name, input),
+                });
+              }
+            }
+          }
+          const toolCalls = toolCallsList.length > 0 ? toolCallsList : undefined;
+          const toolSummary = toolCalls ? formatToolSummaryFromCalls(toolCalls) : undefined;
+
+          // Stable messageId: timestamp + text prefix (survives tail-scan range changes)
+          const textPrefix = combined
+            .slice(0, 50)
+            .replace(/[^\p{L}\p{N}]/gu, '')
+            .slice(0, 20);
+
+          const messageId = `lead-session-${timestamp}-${textPrefix}`;
+          if (seenMessageIds.has(messageId)) continue;
+          seenMessageIds.add(messageId);
+
+          textsReversed.push({
+            from: leadName,
+            text: combined,
+            timestamp,
+            read: true,
+            source: 'lead_session',
+            leadSessionId: config.leadSessionId,
+            messageId,
+            toolSummary,
+            toolCalls,
+          });
           if (textsReversed.length >= MAX_LEAD_TEXTS) break;
         }
 

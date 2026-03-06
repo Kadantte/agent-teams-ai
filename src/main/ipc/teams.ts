@@ -402,11 +402,13 @@ async function handleGetData(
   }
 
   const normalizeText = (text: string): string => text.trim().replace(/\r\n/g, '\n');
-  const leadSessionTextFingerprints = new Set<string>();
+
+  // Collect text fingerprints from ALL non-live messages (inbox, lead_session, sentMessages)
+  // so we can dedup lead_process live messages against them.
+  const existingTextFingerprints = new Set<string>();
   for (const msg of data.messages) {
-    if ((msg as { source?: unknown }).source !== 'lead_session') continue;
     if (typeof msg.from !== 'string' || typeof msg.text !== 'string') continue;
-    leadSessionTextFingerprints.add(`${msg.from}\0${normalizeText(msg.text)}`);
+    existingTextFingerprints.add(`${msg.from}\0${normalizeText(msg.text)}`);
   }
 
   const keyFor = (m: {
@@ -421,14 +423,24 @@ async function handleGetData(
     return `${m.timestamp}\0${m.from}\0${(m.text ?? '').slice(0, 80)}`;
   };
 
+  // Text-based fingerprints for lead_process messages to catch duplicates
+  // with different messageIds (e.g. lead-turn-* vs lead-sendmsg-* with same text)
+  const leadProcessTextFingerprints = new Set<string>();
+
   const merged: typeof data.messages = [];
   const seen = new Set<string>();
   for (const msg of [...data.messages, ...live]) {
-    if ((msg as { source?: unknown }).source === 'lead_process') {
+    if ((msg as { source?: unknown }).source === 'lead_process' && !msg.to) {
       const fp = `${msg.from}\0${normalizeText(msg.text ?? '')}`;
-      if (leadSessionTextFingerprints.has(fp)) {
+      // Skip if same text already exists from any source (inbox, lead_session, etc.)
+      if (existingTextFingerprints.has(fp)) {
         continue;
       }
+      // Dedup lead_process messages with same text but different messageIds
+      if (leadProcessTextFingerprints.has(fp)) {
+        continue;
+      }
+      leadProcessTextFingerprints.add(fp);
     }
     const key = keyFor(msg);
     if (seen.has(key)) continue;

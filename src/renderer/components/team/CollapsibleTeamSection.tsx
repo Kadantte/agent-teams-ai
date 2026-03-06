@@ -19,6 +19,8 @@ interface CollapsibleTeamSectionProps {
   badge?: string | number;
   /** Secondary badge (e.g. unread count). Shown next to main badge when defined. */
   secondaryBadge?: number;
+  /** Element rendered immediately after secondary badge (e.g. mark-all-read button). */
+  afterBadge?: React.ReactNode;
   /** Extra element rendered inline after badges (e.g. notification icon). */
   headerExtra?: React.ReactNode;
   defaultOpen?: boolean;
@@ -40,6 +42,7 @@ export const CollapsibleTeamSection = ({
   icon,
   badge,
   secondaryBadge,
+  afterBadge,
   headerExtra,
   defaultOpen = true,
   forceOpen,
@@ -109,6 +112,7 @@ export const CollapsibleTeamSection = ({
               {secondaryBadge} new
             </Badge>
           )}
+          {afterBadge}
           {headerExtra}
         </div>
         {action && <div className="relative z-10 flex shrink-0 items-center">{action}</div>}

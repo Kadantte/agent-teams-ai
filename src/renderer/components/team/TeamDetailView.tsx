@@ -456,16 +456,19 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
 
   // Keep lead-session context fresh in the background while the team tab is active.
   // This keeps the button value current even when the panel is closed.
+  // For offline teams: fetch once on mount so the percentage shows immediately.
+  // For alive teams: fetch on mount + periodic refresh every 30s.
   useEffect(() => {
     if (!isThisTabActive) return;
     if (!tabId || !projectId || !leadSessionId) return;
+
+    void fetchSessionDetail(projectId, leadSessionId, tabId, { silent: true });
+
     if (!data?.isAlive) return;
 
-    const tick = (): void => {
+    const id = window.setInterval(() => {
       void fetchSessionDetail(projectId, leadSessionId, tabId, { silent: true });
-    };
-    tick();
-    const id = window.setInterval(tick, 30_000);
+    }, 30_000);
     return () => window.clearInterval(id);
   }, [isThisTabActive, tabId, projectId, leadSessionId, data?.isAlive, fetchSessionDetail]);
 
@@ -574,9 +577,24 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     return result;
   }, [data, timeWindow, kanbanFilter.selectedOwners]);
 
+  const activeMembers = useMemo(
+    () => (data?.members ?? []).filter((m) => !m.removedAt),
+    [data?.members]
+  );
+
+  const leadMemberName = useMemo(
+    () => activeMembers.find((m) => m.agentType === 'team-lead')?.name,
+    [activeMembers]
+  );
+
   const filteredMessages = useMemo(() => {
     if (!data) return [];
     let list = data.messages;
+    // Temporarily hide lead→user messages from the UI
+    // (notifications and other processing still receive them via data.messages)
+    if (leadMemberName) {
+      list = list.filter((m) => !(m.to?.trim() === 'user' && m.from?.trim() === leadMemberName));
+    }
     if (timeWindow) {
       list = list.filter((m) => {
         const ts = new Date(m.timestamp).getTime();
@@ -603,7 +621,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       });
     }
     return list;
-  }, [data, timeWindow, messagesFilter, messagesSearchQuery]);
+  }, [data, timeWindow, messagesFilter, messagesSearchQuery, leadMemberName]);
 
   const { readSet, markRead, markAllRead } = useTeamMessagesRead(teamName ?? '');
   const messagesUnreadCount = useMemo(
@@ -626,11 +644,6 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     if (!query) return filteredTasks;
     return filterKanbanTasks(filteredTasks, query);
   }, [filteredTasks, kanbanSearch]);
-
-  const activeMembers = useMemo(
-    () => (data?.members ?? []).filter((m) => !m.removedAt),
-    [data?.members]
-  );
 
   const activeTeammateCount = useMemo(
     () => activeMembers.filter((m) => m.agentType !== 'team-lead' && m.name !== 'team-lead').length,
@@ -1415,44 +1428,44 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
                 ? messagesUnreadCount
                 : undefined
             }
-            headerExtra={
-              <>
+            afterBadge={
+              messagesUnreadCount > 0 ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="pointer-events-auto size-6 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                    <button
+                      type="button"
+                      className="pointer-events-auto flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-blue-400 transition-colors hover:bg-blue-500/10"
                       onClick={(e) => {
                         e.stopPropagation();
-                        void window.electronAPI.openExternal(
-                          'https://github.com/777genius/claude-notifications-go'
-                        );
+                        handleMarkAllRead();
                       }}
                     >
-                      <Bell size={12} />
-                    </Button>
+                      <CheckCheck size={12} />
+                    </button>
                   </TooltipTrigger>
-                  <TooltipContent side="top">Desktop notifications plugin</TooltipContent>
+                  <TooltipContent side="bottom">Mark all as read</TooltipContent>
                 </Tooltip>
-                {messagesUnreadCount > 0 && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        className="pointer-events-auto flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-blue-400 transition-colors hover:bg-blue-500/10"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleMarkAllRead();
-                        }}
-                      >
-                        <CheckCheck size={12} />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Mark all as read</TooltipContent>
-                  </Tooltip>
-                )}
-              </>
+              ) : undefined
+            }
+            headerExtra={
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="pointer-events-auto size-6 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void window.electronAPI.openExternal(
+                        'https://github.com/777genius/claude-notifications-go'
+                      );
+                    }}
+                  >
+                    <Bell size={12} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Desktop notifications plugin</TooltipContent>
+              </Tooltip>
             }
             defaultOpen
             action={
@@ -1649,7 +1662,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             currentName={data.config.name}
             currentDescription={data.config.description ?? ''}
             currentColor={data.config.color ?? ''}
-            currentMembers={data.members}
+            currentMembers={data.members.filter((m) => m.agentType !== 'team-lead')}
             projectPath={data.config.projectPath}
             onClose={() => setEditDialogOpen(false)}
             onSaved={() => void selectTeam(teamName)}

@@ -99,6 +99,8 @@ export class TeamInboxReader {
         summary: typeof row.summary === 'string' ? row.summary : undefined,
         color: typeof row.color === 'string' ? row.color : undefined,
         messageId: typeof row.messageId === 'string' ? row.messageId : undefined,
+        source: typeof row.source === 'string' ? (row.source as InboxMessage['source']) : undefined,
+        leadSessionId: typeof row.leadSessionId === 'string' ? row.leadSessionId : undefined,
       });
     }
 

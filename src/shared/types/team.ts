@@ -186,6 +186,14 @@ export interface AttachmentFileData {
   mimeType: AttachmentMediaType;
 }
 
+/** Lightweight metadata for a single tool call (for UI display in tooltips). */
+export interface ToolCallMeta {
+  /** Tool name, e.g. "Read", "Bash", "Grep" */
+  name: string;
+  /** Human-readable preview extracted from input args, e.g. "index.ts", "grep -r foo" */
+  preview?: string;
+}
+
 export interface InboxMessage {
   from: string;
   to?: string;
@@ -199,6 +207,10 @@ export interface InboxMessage {
   attachments?: AttachmentMeta[];
   /** Lead session ID that produced this message (for session boundary detection). */
   leadSessionId?: string;
+  /** Tool usage summary from assistant message, e.g. "3 tools (2 Read, Bash)" */
+  toolSummary?: string;
+  /** Structured tool call details for tooltip display. */
+  toolCalls?: ToolCallMeta[];
 }
 
 export interface SendMessageRequest {
@@ -208,6 +220,8 @@ export interface SendMessageRequest {
   from?: string;
   attachments?: AttachmentPayload[];
   source?: InboxMessage['source'];
+  /** Lead session ID for session boundary detection. */
+  leadSessionId?: string;
 }
 
 export interface SendMessageResult {

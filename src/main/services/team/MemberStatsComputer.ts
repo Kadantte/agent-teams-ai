@@ -9,8 +9,18 @@ import type { FileLineStats, MemberFullStats } from '@shared/types';
 
 const logger = createLogger('Service:MemberStatsComputer');
 
-function isValidFilePath(value: string): boolean {
-  return value.length > 0 && value !== 'null' && value !== 'undefined' && value !== 'None';
+const TRAILING_PUNCT_CHARS = new Set([';', '.', ',']);
+const INVALID_NAMES = new Set(['null', 'undefined', 'None', 'false', 'true', '']);
+
+function stripTrailingPunct(s: string): string {
+  let end = s.length;
+  while (end > 0 && TRAILING_PUNCT_CHARS.has(s[end - 1])) end--;
+  return end === s.length ? s : s.slice(0, end);
+}
+
+export function isValidFilePath(value: string): boolean {
+  const cleaned = stripTrailingPunct(value.trim());
+  return cleaned.length > 1 && !INVALID_NAMES.has(cleaned) && cleaned.includes('/');
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -73,11 +83,19 @@ export class MemberStatsComputer {
       .filter(isValidFilePath)
       .sort((a, b) => a.localeCompare(b));
 
+    // Also filter perFileStats keys to exclude invalid paths
+    const filteredFileStats: Record<string, FileLineStats> = {};
+    for (const [fp, fls] of Object.entries(perFileStats)) {
+      if (isValidFilePath(fp)) {
+        filteredFileStats[fp] = fls;
+      }
+    }
+
     const stats: MemberFullStats = {
       linesAdded,
       linesRemoved,
       filesTouched: validFiles,
-      fileStats: perFileStats,
+      fileStats: filteredFileStats,
       toolUsage,
       inputTokens,
       outputTokens,
@@ -121,18 +139,24 @@ export class MemberStatsComputer {
     // Track last known content per file for accurate Write/NotebookEdit diffs
     const fileLastContent = new Map<string, string>();
 
+    const cleanPath = (fp: string): string => stripTrailingPunct(fp.trim());
+
     const trackFile = (fp: string): void => {
-      if (typeof fp === 'string' && isValidFilePath(fp)) filesTouchedSet.add(fp);
+      if (typeof fp === 'string') {
+        const cleaned = cleanPath(fp);
+        if (isValidFilePath(cleaned)) filesTouchedSet.add(cleaned);
+      }
     };
 
     const addFileLines = (fp: string, added: number, removed: number): void => {
-      if (!isValidFilePath(fp)) return;
-      const existing = perFileStats[fp];
+      const cleaned = cleanPath(fp);
+      if (!isValidFilePath(cleaned)) return;
+      const existing = perFileStats[cleaned];
       if (existing) {
         existing.added += added;
         existing.removed += removed;
       } else {
-        perFileStats[fp] = { added, removed };
+        perFileStats[cleaned] = { added, removed };
       }
     };
 

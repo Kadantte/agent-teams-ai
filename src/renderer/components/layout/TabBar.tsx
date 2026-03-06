@@ -352,7 +352,7 @@ export const TabBar = ({ paneId }: TabBarProps): React.JSX.Element => {
           Gives users a reliable window-drag target regardless of how many tabs are open.
           Only applied on the leftmost pane in Electron to match the TabBar drag region logic. */}
       <div
-        className="min-w-[48px] flex-1 self-stretch"
+        className="min-w-[48px] shrink-0 self-stretch"
         style={
           {
             WebkitAppRegion: isElectronMode() && isLeftmostPane ? 'drag' : undefined,

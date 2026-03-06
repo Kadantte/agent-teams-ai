@@ -3,10 +3,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 
 import { ActivityItem, isNoiseMessage } from './ActivityItem';
-import { groupTimelineItems, LeadThoughtsGroupRow } from './LeadThoughtsGroup';
+import { groupTimelineItems, isLeadThought, LeadThoughtsGroupRow } from './LeadThoughtsGroup';
 
-import type { InboxMessage, ResolvedTeamMember } from '@shared/types';
 import type { TimelineItem } from './LeadThoughtsGroup';
+import type { InboxMessage, ResolvedTeamMember } from '@shared/types';
 
 interface ActivityTimelineProps {
   messages: InboxMessage[];
@@ -134,11 +134,6 @@ export const ActivityTimeline = ({
   const isInitializedRef = useRef(false);
   const prevVisibleCountRef = useRef(visibleCount);
 
-  // Track whether the user was seeing ALL messages (no hidden ones).
-  // If so, auto-expand when new messages push count past the limit,
-  // so previously visible messages don't silently disappear.
-  const wasShowingAllRef = useRef(messages.length <= MESSAGES_PAGE_SIZE);
-
   const colorMap = members ? buildMemberColorMap(members) : new Map<string, string>();
   const memberInfo = new Map<string, { role?: string; color?: string }>();
   if (members) {
@@ -169,22 +164,33 @@ export const ActivityTimeline = ({
     if (member) onMemberClick?.(member);
   };
 
-  const hiddenCount = Math.max(0, messages.length - visibleCount);
+  // Pagination counts only significant (non-thought) messages so that lead thoughts
+  // don't consume the page limit — they collapse into a single visual group anyway.
+  const { visibleMessages, hiddenCount } = useMemo(() => {
+    const total = messages.length;
+    if (total === 0) return { visibleMessages: messages, hiddenCount: 0 };
 
-  // Auto-expand when user was seeing all and new messages arrive — derived state sync.
-  // Reading/updating ref during render is intentional (React docs: derived state sync).
-  /* eslint-disable react-hooks/refs -- intentional ref access during render for animation tracking */
+    let significantSeen = 0;
+    let cutoff = total;
+    for (let i = 0; i < total; i++) {
+      if (!isLeadThought(messages[i])) {
+        significantSeen++;
+        if (significantSeen > visibleCount) {
+          cutoff = i;
+          break;
+        }
+      }
+    }
 
-  const wasShowingAll = wasShowingAllRef.current;
-  if (wasShowingAll && hiddenCount > 0) {
-    setVisibleCount(messages.length);
-  }
-  wasShowingAllRef.current = hiddenCount === 0;
-
-  const visibleMessages = useMemo(
-    () => (hiddenCount > 0 ? messages.slice(0, visibleCount) : messages),
-    [messages, visibleCount, hiddenCount]
-  );
+    const significantTotal =
+      significantSeen +
+      (cutoff < total ? messages.slice(cutoff).filter((m) => !isLeadThought(m)).length : 0);
+    const hidden = Math.max(0, significantTotal - visibleCount);
+    return {
+      visibleMessages: cutoff < total ? messages.slice(0, cutoff) : messages,
+      hiddenCount: hidden,
+    };
+  }, [messages, visibleCount]);
 
   // Group consecutive lead thoughts into collapsible blocks.
   const timelineItems = useMemo(() => groupTimelineItems(visibleMessages), [visibleMessages]);
@@ -209,6 +215,7 @@ export const ActivityTimeline = ({
   }, [timelineItems]);
 
   // Determine which items are "new" (should animate).
+  /* eslint-disable react-hooks/refs -- intentional ref access during render for animation tracking */
 
   const newItemKeys = useMemo(() => {
     const getItemKey = (item: TimelineItem): string => {
@@ -280,25 +287,50 @@ export const ActivityTimeline = ({
       ? item.group.thoughts[0].leadSessionId
       : item.message.leadSessionId;
 
+  // Pin the newest thought group (if first) so it stays at the top and doesn't jump.
+  const pinnedThoughtGroup = timelineItems[0]?.type === 'lead-thoughts' ? timelineItems[0] : null;
+  const startIndex = pinnedThoughtGroup ? 1 : 0;
+
   return (
     <div className="space-y-1">
-      {timelineItems.map((item, index) => {
+      {/* Pinned (newest) thought group — always at top */}
+      {pinnedThoughtGroup &&
+        (() => {
+          const { group } = pinnedThoughtGroup;
+          const firstThought = group.thoughts[0];
+          const info = memberInfo.get(firstThought.from);
+          const itemKey = `thoughts-${firstThought.messageId ?? pinnedThoughtGroup.originalIndices[0]}`;
+          return (
+            <LeadThoughtsGroupRow
+              key={itemKey}
+              group={group}
+              memberColor={info?.color}
+              canBeLive={true}
+              isNew={newItemKeys.has(itemKey)}
+              onVisible={onMessageVisible}
+              zebraShade={zebraShadeSet.has(0)}
+            />
+          );
+        })()}
+
+      {/* Remaining items */}
+      {timelineItems.slice(startIndex).map((item, index) => {
+        const realIndex = index + startIndex;
+
         // Session boundary separator (messages sorted desc — new on top)
         let sessionSeparator: React.JSX.Element | null = null;
-        if (index > 0) {
-          const prevSessionId = getItemSessionId(timelineItems[index - 1]);
+        if (realIndex > 0) {
+          const prevSessionId = getItemSessionId(timelineItems[realIndex - 1]);
           const currSessionId = getItemSessionId(item);
           if (prevSessionId && currSessionId && prevSessionId !== currSessionId) {
             sessionSeparator = (
               <div
                 className="flex items-center gap-3"
-                style={{ paddingTop: 30, paddingBottom: 30 }}
+                style={{ paddingTop: 90, paddingBottom: 90 }}
               >
-                <div className="h-px flex-1 bg-[var(--color-border-emphasis)]" />
-                <span className="whitespace-nowrap text-[11px] text-[var(--color-text-muted)]">
-                  New session
-                </span>
-                <div className="h-px flex-1 bg-[var(--color-border-emphasis)]" />
+                <div className="h-px flex-1 bg-blue-400/30" />
+                <span className="whitespace-nowrap text-[11px] text-blue-400">New session</span>
+                <div className="h-px flex-1 bg-blue-400/30" />
               </div>
             );
           }
@@ -315,8 +347,10 @@ export const ActivityTimeline = ({
               <LeadThoughtsGroupRow
                 group={group}
                 memberColor={info?.color}
+                canBeLive={false}
                 isNew={newItemKeys.has(itemKey)}
                 onVisible={onMessageVisible}
+                zebraShade={zebraShadeSet.has(realIndex)}
               />
             </React.Fragment>
           );
@@ -342,7 +376,7 @@ export const ActivityTimeline = ({
               recipientColor={recipientColor}
               isUnread={isUnread}
               isNew={newItemKeys.has(messageKey)}
-              zebraShade={zebraShadeSet.has(index)}
+              zebraShade={zebraShadeSet.has(realIndex)}
               memberColorMap={colorMap}
               onMemberNameClick={onMemberClick ? handleMemberNameClick : undefined}
               onCreateTask={onCreateTaskFromMessage}
@@ -377,7 +411,7 @@ export const ActivityTimeline = ({
             <span className="text-[11px] tabular-nums text-[var(--color-text-muted)]">
               +{hiddenCount} older
             </span>
-            <span className="h-3 w-px bg-[var(--color-border-emphasis)]" />
+            <span className="h-3 w-px bg-blue-400/30" />
             <button
               onClick={handleShowMore}
               className="rounded-full px-2.5 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)] transition-all hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-text)]"
@@ -386,7 +420,7 @@ export const ActivityTimeline = ({
             </button>
             {hiddenCount > MESSAGES_PAGE_SIZE && (
               <>
-                <span className="h-3 w-px bg-[var(--color-border-emphasis)]" />
+                <span className="h-3 w-px bg-blue-400/30" />
                 <button
                   onClick={handleShowAll}
                   className="rounded-full px-2.5 py-0.5 text-[11px] text-[var(--color-text-muted)] transition-all hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-text-secondary)]"

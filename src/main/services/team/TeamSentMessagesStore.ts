@@ -76,6 +76,20 @@ export class TeamSentMessagesStore {
         attachments: Array.isArray(row.attachments) ? row.attachments : undefined,
         source: typeof row.source === 'string' ? (row.source as InboxMessage['source']) : undefined,
         leadSessionId: typeof row.leadSessionId === 'string' ? row.leadSessionId : undefined,
+        toolSummary: typeof row.toolSummary === 'string' ? row.toolSummary : undefined,
+        toolCalls: Array.isArray(row.toolCalls)
+          ? (row.toolCalls as unknown[])
+              .filter(
+                (tc): tc is { name: string; preview?: string } =>
+                  tc != null &&
+                  typeof tc === 'object' &&
+                  typeof (tc as Record<string, unknown>).name === 'string'
+              )
+              .map((tc) => ({
+                name: tc.name,
+                preview: typeof tc.preview === 'string' ? tc.preview : undefined,
+              }))
+          : undefined,
       });
     }
 

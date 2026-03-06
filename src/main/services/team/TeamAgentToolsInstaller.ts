@@ -865,6 +865,7 @@ function sendInboxMessage(paths, teamName, flags) {
     summary,
     messageId,
   };
+  if (flags.source) payload.source = flags.source;
 
   var lastErr;
   for (var attempt = 0; attempt < 8; attempt++) {
@@ -915,6 +916,7 @@ function reviewApprove(paths, teamName, taskId, flags) {
     text: inboxText,
     summary: 'Approved #' + String(taskId),
     from,
+    source: 'system_notification',
   });
 }
 
@@ -957,6 +959,7 @@ function reviewRequestChanges(paths, teamName, taskId, flags) {
     text: inboxText,
     summary: 'Fix request for #' + String(taskId),
     from,
+    source: 'system_notification',
   });
 }
 
@@ -1282,6 +1285,7 @@ async function main() {
             text: parts.join('\n'),
             summary: 'New task #' + String(task.id) + ' assigned',
             from,
+            source: 'system_notification',
           });
         }
       }
@@ -1319,6 +1323,7 @@ async function main() {
             text: 'Comment on task #' + String(result.taskId) + ' "' + String(result.subject) + '":\n\n' + (typeof args.flags.text === 'string' ? args.flags.text.trim() : ''),
             summary: 'Comment on #' + String(result.taskId),
             from: from,
+            source: 'system_notification',
           });
         } catch (e) { /* best-effort */ }
       }
@@ -1396,6 +1401,7 @@ async function main() {
           text: parts.join('\n'),
           summary: 'Task #' + String(task.id) + ' assigned',
           from,
+          source: 'system_notification',
         });
       }
       return;
@@ -1493,7 +1499,10 @@ async function main() {
 
   if (domain === 'message') {
     if (action === 'send') {
-      const result = sendInboxMessage(paths, teamName, args.flags);
+      // Strip source from agent flags — only internal callers may set it
+      var msgFlags = Object.assign({}, args.flags);
+      delete msgFlags.source;
+      const result = sendInboxMessage(paths, teamName, msgFlags);
       process.stdout.write(JSON.stringify(result, null, 2) + '\n');
       return;
     }

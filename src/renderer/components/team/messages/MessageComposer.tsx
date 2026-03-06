@@ -128,6 +128,7 @@ export const MessageComposer = ({
     addFiles,
     removeAttachment,
     clearAttachments,
+    clearError: clearAttachmentError,
     handlePaste,
     handleDrop,
   } = useAttachments({ persistenceKey: `compose:${teamName}:attachments` });
@@ -155,7 +156,7 @@ export const MessageComposer = ({
   // const leadContext = useStore((s) =>
   //   isLeadAgentRecipient ? s.leadContextByTeam[teamName] : undefined
   // );
-  const supportsAttachments = isLeadRecipient && !!isTeamAlive;
+  const supportsAttachments = isLeadRecipient;
   const canAttach = supportsAttachments && canAddMore;
   const attachmentsBlocked = attachments.length > 0 && !supportsAttachments;
   const canSend =
@@ -262,104 +263,6 @@ export const MessageComposer = ({
       <DropZoneOverlay active={isDragOver && !!canAttach} />
 
       <div className="mb-2 flex items-center gap-2">
-        <Popover open={recipientOpen} onOpenChange={setRecipientOpen}>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs transition-colors hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-raised)]"
-            >
-              {recipient ? (
-                <MemberBadge
-                  name={recipient}
-                  color={selectedResolvedColor}
-                  size="sm"
-                  hideAvatar={recipient === 'user'}
-                />
-              ) : (
-                <span className="text-[var(--color-text-muted)]">Select...</span>
-              )}
-              <ChevronDown size={12} className="shrink-0 text-[var(--color-text-muted)]" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent
-            align="start"
-            className="w-56 p-1.5"
-            onOpenAutoFocus={(e) => {
-              e.preventDefault();
-              setRecipientSearch('');
-              setTimeout(() => recipientSearchRef.current?.focus(), 0);
-            }}
-          >
-            {members.length > 5 && (
-              <div className="relative mb-1">
-                <Search
-                  size={12}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
-                />
-                <input
-                  ref={recipientSearchRef}
-                  type="text"
-                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] py-1 pl-6 pr-2 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-border-emphasis)] focus:outline-none"
-                  placeholder="Search..."
-                  value={recipientSearch}
-                  onChange={(e) => setRecipientSearch(e.target.value)}
-                />
-              </div>
-            )}
-            <div className="max-h-48 space-y-0.5 overflow-y-auto">
-              {/* eslint-disable-next-line sonarjs/function-return-type -- IIFE rendering mixed elements/null */}
-              {(() => {
-                const query = recipientSearch.toLowerCase().trim();
-                const filtered = query
-                  ? members.filter((m) => m.name.toLowerCase().includes(query))
-                  : members;
-                if (filtered.length === 0) {
-                  return (
-                    <div className="px-2 py-3 text-center text-xs text-[var(--color-text-muted)]">
-                      No results
-                    </div>
-                  );
-                }
-                return filtered.map((m) => {
-                  const resolvedColor = colorMap.get(m.name);
-                  const role = formatAgentRole(m.role) ?? formatAgentRole(m.agentType);
-                  const isSelected = m.name === recipient;
-                  return (
-                    <button
-                      key={m.name}
-                      type="button"
-                      className={cn(
-                        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-surface-raised)]',
-                        isSelected && 'bg-[var(--color-surface-raised)]'
-                      )}
-                      onClick={() => {
-                        setRecipient(m.name);
-                        setRecipientOpen(false);
-                        setRecipientSearch('');
-                      }}
-                    >
-                      <MemberBadge
-                        name={m.name}
-                        color={resolvedColor}
-                        size="sm"
-                        hideAvatar={m.name === 'user'}
-                      />
-                      {role ? (
-                        <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
-                          {role}
-                        </span>
-                      ) : null}
-                      {isSelected ? (
-                        <Check size={12} className="ml-auto shrink-0 text-blue-400" />
-                      ) : null}
-                    </button>
-                  );
-                });
-              })()}
-            </div>
-          </PopoverContent>
-        </Popover>
-
         {isLeadRecipient ? (
           <>
             <input
@@ -397,24 +300,125 @@ export const MessageComposer = ({
           </>
         ) : null}
 
-        {!isTeamAlive ? (
-          <span className="ml-auto text-[10px]" style={{ color: 'var(--warning-text)' }}>
-            Team offline
-          </span>
-        ) : null}
+        <div className="ml-auto flex items-center gap-2">
+          {!isTeamAlive ? (
+            <span className="text-[10px]" style={{ color: 'var(--warning-text)' }}>
+              Team offline
+            </span>
+          ) : null}
+
+          <Popover open={recipientOpen} onOpenChange={setRecipientOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs transition-colors hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface-raised)]"
+              >
+                {recipient ? (
+                  <MemberBadge
+                    name={recipient}
+                    color={selectedResolvedColor}
+                    size="sm"
+                    hideAvatar={recipient === 'user'}
+                  />
+                ) : (
+                  <span className="text-[var(--color-text-muted)]">Select...</span>
+                )}
+                <ChevronDown size={12} className="shrink-0 text-[var(--color-text-muted)]" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              className="w-56 p-1.5"
+              onOpenAutoFocus={(e) => {
+                e.preventDefault();
+                setRecipientSearch('');
+                setTimeout(() => recipientSearchRef.current?.focus(), 0);
+              }}
+            >
+              {members.length > 5 && (
+                <div className="relative mb-1">
+                  <Search
+                    size={12}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+                  />
+                  <input
+                    ref={recipientSearchRef}
+                    type="text"
+                    className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] py-1 pl-6 pr-2 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-border-emphasis)] focus:outline-none"
+                    placeholder="Search..."
+                    value={recipientSearch}
+                    onChange={(e) => setRecipientSearch(e.target.value)}
+                  />
+                </div>
+              )}
+              <div className="max-h-48 space-y-0.5 overflow-y-auto">
+                {/* eslint-disable-next-line sonarjs/function-return-type -- IIFE rendering mixed elements/null */}
+                {(() => {
+                  const query = recipientSearch.toLowerCase().trim();
+                  const filtered = query
+                    ? members.filter((m) => m.name.toLowerCase().includes(query))
+                    : members;
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="px-2 py-3 text-center text-xs text-[var(--color-text-muted)]">
+                        No results
+                      </div>
+                    );
+                  }
+                  return filtered.map((m) => {
+                    const resolvedColor = colorMap.get(m.name);
+                    const role = formatAgentRole(m.role) ?? formatAgentRole(m.agentType);
+                    const isSelected = m.name === recipient;
+                    return (
+                      <button
+                        key={m.name}
+                        type="button"
+                        className={cn(
+                          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-surface-raised)]',
+                          isSelected && 'bg-[var(--color-surface-raised)]'
+                        )}
+                        onClick={() => {
+                          setRecipient(m.name);
+                          setRecipientOpen(false);
+                          setRecipientSearch('');
+                        }}
+                      >
+                        <MemberBadge
+                          name={m.name}
+                          color={resolvedColor}
+                          size="sm"
+                          hideAvatar={m.name === 'user'}
+                        />
+                        {role ? (
+                          <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
+                            {role}
+                          </span>
+                        ) : null}
+                        {isSelected ? (
+                          <Check size={12} className="ml-auto shrink-0 text-blue-400" />
+                        ) : null}
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
 
       <AttachmentPreviewList
         attachments={attachments}
         onRemove={removeAttachment}
         error={attachmentError}
+        onDismissError={clearAttachmentError}
         disabled={attachmentsBlocked}
         disabledHint="Image attachments are only supported when sending to the team lead while the team is online. Remove attachments or switch recipient."
       />
 
       <MentionableTextarea
         id={`compose-${teamName}`}
-        placeholder="Write a message... (Enter to send)"
+        placeholder="Write a message... (Enter to send, Shift+Enter for new line)"
         value={draft.value}
         onValueChange={draft.setValue}
         suggestions={mentionSuggestions}
@@ -455,9 +459,6 @@ export const MessageComposer = ({
         }
         footerRight={
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-[var(--color-text-muted)] opacity-70">
-              Mention &quot;create a task&quot; to add it to the board
-            </span>
             {sendError ? (
               <span className="inline-flex items-center gap-1 rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-400">
                 <AlertCircle size={10} className="shrink-0" />
