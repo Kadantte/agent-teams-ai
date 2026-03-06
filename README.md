@@ -67,17 +67,18 @@
 
 <br />
 
-- **Recent tasks across projects** — Browse the latest completed tasks from all your projects in one place
-- **Solo mode** — One-member team: a single agent that creates its own tasks and shows live progress. Saves tokens; can expand to a full team anytime
-- **Advanced context monitoring** — Token breakdown: user messages, CLAUDE.md, tool outputs, thinking text, team coordination. See usage, context window %, and cost per category
-- **Smart task-to-log matching** — Links Claude session logs to tasks by status change timestamps, even when tasks move back and forth
-- **Zero-setup onboarding** — Built-in Claude Code installation and authentication
-- **Built-in code editor** — Edit project files with Git support without leaving the app
-- **Branch strategy** — Choose via prompt: single branch or git worktree per agent
-- **Team member stats** — Global performance statistics per member
-- **Attach code context** — Reference files or snippets in messages, like in Cursor
-- **Notification system** — Configurable alerts when tasks complete, agents need attention, or errors occur
-- **MCP integration** — Built-in [mcp-server](./mcp-server) for Cursor, Claude Desktop, and other MCP clients. 13 tools for task CRUD, kanban, reviews, and messaging — see [mcp-server/README.md](./mcp-server/README.md)
+- **Recent tasks across projects** — browse the latest completed tasks from all your projects in one place
+- **Deep session analysis** — detailed breakdown of what happened in each Claude session: bash commands, reasoning, subprocesses
+- **Solo mode** — a one-member team: a single agent (regular claude process) that creates its own tasks, leaves comments, and shows live progress on the kanban board — saves tokens compared to a full team and can be expanded to a full team at any time
+- **Advanced context monitoring system** — comprehensive breakdown of what consumes tokens at every step: user messages, Claude.md instructions, tool outputs, thinking text, and team coordination. Token usage, percentage of context window, and session cost are displayed for each category, with detailed views by category or size.
+- **Smart task-to-log/changes matching** — automatically links Claude session logs/changes to specific tasks
+- **Zero-setup onboarding** — built-in Claude Code installation and authentication, ready to go out of the box
+- **Built-in code editor** — edit project files with Git support and other essential features without leaving the app
+- **Branch strategy control** — choose via prompt whether all agents work on a single branch or each gets its own git worktree
+- **Team member stats** — global performance statistics for every member of the team
+- **Attach code context** — reference files or code snippets in your messages, just like in Cursor
+- **Notification system** — configurable alerts when tasks complete, agents need attention, or errors occur
+- **MCP integration** — supports the built-in `mcp-server` (see [mcp-server folder](./mcp-server)) for integrating external tools and extensible agent plugins out of the box
 
 </details>
 
@@ -244,7 +245,8 @@ pnpm dist            # macOS + Windows + Linux
 
 ## Roadmap
 
-- [ ] CLI runtime: Run in headless/console environments (web UI), e.g. VPS, remote server
+- [ ] CLI runtime: Run not only on a local PC but in any headless/console environment (web UI), e.g. VPS, remote server, etc.
+- [ ] 2 modes: current (agent teams), and a new mode: regular subagents (no communication between them)
 - [ ] Visual workflow editor ([@xyflow/react](https://github.com/xyflow/xyflow)) for building and orchestrating agent pipelines with drag & drop
 - [ ] Install skills, MCP, and integrations via an intuitive UI, and only for selected agents
 - [ ] Planning mode to organize agent plans before execution

@@ -20,6 +20,8 @@ import {
   MessageSquare,
 } from 'lucide-react';
 
+import { asEnhancedChunkArray } from '@renderer/types/data';
+
 import type { EnhancedChunk } from '@renderer/types/data';
 import type { MemberLogSummary } from '@shared/types';
 
@@ -306,7 +308,7 @@ export const MemberLogsTab = ({
         return d?.chunks ?? null;
       }
       const d = await api.getSessionDetail(log.projectId, log.sessionId, options);
-      return (d?.chunks ?? null) as unknown as EnhancedChunk[] | null;
+      return d ? asEnhancedChunkArray(d.chunks) : null;
     },
     []
   );
