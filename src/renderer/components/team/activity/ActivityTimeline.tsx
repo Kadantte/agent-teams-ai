@@ -7,6 +7,7 @@ import { AnimatedHeightReveal } from './AnimatedHeightReveal';
 import { ActivityItem, isNoiseMessage } from './ActivityItem';
 import { findNewestMessageIndex, resolveTimelineCollapseState } from './collapseState';
 import { groupTimelineItems, isLeadThought, LeadThoughtsGroupRow } from './LeadThoughtsGroup';
+import { useNewItemKeys } from './useNewItemKeys';
 
 import type { TimelineItem } from './LeadThoughtsGroup';
 import type { ActivityCollapseState } from './collapseState';
@@ -145,11 +146,6 @@ export const ActivityTimeline = ({
 }: ActivityTimelineProps): React.JSX.Element => {
   const [visibleCount, setVisibleCount] = useState(MESSAGES_PAGE_SIZE);
 
-  // --- New-message animation tracking ---
-  const knownKeysRef = useRef<Set<string>>(new Set<string>());
-  const isInitializedRef = useRef(false);
-  const prevVisibleCountRef = useRef(visibleCount);
-
   const colorMap = members ? buildMemberColorMap(members) : new Map<string, string>();
   const memberInfo = new Map<string, { role?: string; color?: string }>();
   if (members) {
@@ -243,32 +239,11 @@ export const ActivityTimeline = ({
     return timelineItems.map(getItemKey);
   }, [timelineItems]);
 
-  const isPaginationExpansion =
-    isInitializedRef.current && visibleCount > prevVisibleCountRef.current;
-
-  const newItemKeys = useMemo(() => {
-    if (!isInitializedRef.current || isPaginationExpansion) {
-      return new Set<string>();
-    }
-
-    const newKeys = new Set<string>();
-    for (const key of timelineItemKeys) {
-      if (!knownKeysRef.current.has(key)) {
-        newKeys.add(key);
-      }
-    }
-    return newKeys;
-  }, [isPaginationExpansion, timelineItemKeys]);
-
-  useEffect(() => {
-    if (!isInitializedRef.current) {
-      isInitializedRef.current = true;
-    }
-    for (const key of timelineItemKeys) {
-      knownKeysRef.current.add(key);
-    }
-    prevVisibleCountRef.current = visibleCount;
-  }, [timelineItemKeys, visibleCount]);
+  const newItemKeys = useNewItemKeys({
+    itemKeys: timelineItemKeys,
+    paginationKey: visibleCount,
+    resetKey: teamName,
+  });
 
   const handleShowMore = (): void => {
     setVisibleCount((prev) => prev + MESSAGES_PAGE_SIZE);

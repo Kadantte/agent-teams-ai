@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { CopyButton } from '@renderer/components/common/CopyButton';
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
 import { AnimatedHeightReveal } from '@renderer/components/team/activity/AnimatedHeightReveal';
 import { ReplyQuoteBlock } from '@renderer/components/team/activity/ReplyQuoteBlock';
+import { useNewItemKeys } from '@renderer/components/team/activity/useNewItemKeys';
 import { ImageLightbox } from '@renderer/components/team/attachments/ImageLightbox';
 import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { ExpandableContent } from '@renderer/components/ui/ExpandableContent';
@@ -90,9 +91,6 @@ export const TaskCommentsSection = ({
   const [replyTo, setReplyTo] = useState<{ author: string; text: string } | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COMMENTS);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
-  const knownCommentIdsRef = useRef<Set<string>>(new Set());
-  const isInitializedRef = useRef(false);
-  const prevVisibleCountRef = useRef(INITIAL_VISIBLE_COMMENTS);
 
   // Reset local UI state when team/task changes.
   useEffect(() => {
@@ -100,9 +98,6 @@ export const TaskCommentsSection = ({
     setVisibleCount(INITIAL_VISIBLE_COMMENTS);
     setReplyTo(null);
     setPreviewImageUrl(null);
-    knownCommentIdsRef.current = new Set();
-    isInitializedRef.current = false;
-    prevVisibleCountRef.current = INITIAL_VISIBLE_COMMENTS;
   }, [teamName, taskId]);
 
   const draft = useDraftPersistence({ key: `taskComment:${teamName}:${taskId}` });
@@ -130,33 +125,11 @@ export const TaskCommentsSection = ({
     () => visibleComments.map((comment) => comment.id),
     [visibleComments]
   );
-
-  const isPaginationExpansion =
-    isInitializedRef.current && visibleCount > prevVisibleCountRef.current;
-
-  const newCommentIds = useMemo(() => {
-    if (!isInitializedRef.current || isPaginationExpansion) {
-      return new Set<string>();
-    }
-
-    const next = new Set<string>();
-    for (const id of visibleCommentIds) {
-      if (!knownCommentIdsRef.current.has(id)) {
-        next.add(id);
-      }
-    }
-    return next;
-  }, [isPaginationExpansion, visibleCommentIds]);
-
-  useEffect(() => {
-    if (!isInitializedRef.current) {
-      isInitializedRef.current = true;
-    }
-    for (const id of visibleCommentIds) {
-      knownCommentIdsRef.current.add(id);
-    }
-    prevVisibleCountRef.current = visibleCount;
-  }, [visibleCommentIds, visibleCount]);
+  const newCommentIds = useNewItemKeys({
+    itemKeys: visibleCommentIds,
+    paginationKey: visibleCount,
+    resetKey: `${teamName}:${taskId}`,
+  });
 
   const mentionSuggestions = useMemo<MentionSuggestion[]>(
     () =>
