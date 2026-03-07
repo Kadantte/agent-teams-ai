@@ -322,6 +322,16 @@ export class TeamMemberLogsFinder {
           stream.destroy();
           return true;
         }
+        if (
+          (line.includes('"task_start"') ||
+            line.includes('"task_complete"') ||
+            line.includes('"task_set_status"')) &&
+          pattern.test(line)
+        ) {
+          rl.close();
+          stream.destroy();
+          return true;
+        }
         if (line.includes('teamctl') && line.includes('task') && line.includes(taskId)) {
           rl.close();
           stream.destroy();

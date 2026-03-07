@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - 'agent-teams-controller/**'
+      - 'mcp-server/**'
       - 'test/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -17,6 +19,8 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - 'agent-teams-controller/**'
+      - 'mcp-server/**'
       - 'test/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -55,13 +59,13 @@ jobs:
             eslint-${{ runner.os }}-
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: pnpm typecheck:workspace
 
       - name: Lint
         run: pnpm lint
 
       - name: Build
-        run: pnpm build
+        run: pnpm build:workspace
 
   test:
     strategy:
@@ -87,4 +91,4 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Test
-        run: pnpm test
+        run: pnpm test:workspace

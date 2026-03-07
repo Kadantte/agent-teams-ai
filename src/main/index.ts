@@ -60,7 +60,6 @@ import {
   ServiceContextRegistry,
   SshConnectionManager,
   TaskBoundaryParser,
-  TeamAgentToolsInstaller,
   TeamDataService,
   TeamMemberLogsFinder,
   TeamProvisioningService,
@@ -941,7 +940,6 @@ function createWindow(): void {
       // The window is now visible and responsive; these run in the background.
       setTimeout(() => {
         void teamProvisioningService.warmup();
-        void new TeamAgentToolsInstaller().ensureInstalled();
         teamDataService.startProcessHealthPolling();
       }, 5000);
     }
