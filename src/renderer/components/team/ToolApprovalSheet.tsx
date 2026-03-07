@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
 import { FileText, Search, Terminal } from 'lucide-react';
 
@@ -112,6 +113,7 @@ export const ToolApprovalSheet: React.FC = () => {
 
   const teamSummary = teams.find((t) => t.teamName === current.teamName);
   const teamColor = teamSummary?.color ? getTeamColorSet(teamSummary.color) : null;
+  const { isLight } = useTheme();
 
   return (
     <div
@@ -140,7 +142,7 @@ export const ToolApprovalSheet: React.FC = () => {
             <span
               className="rounded-full px-2 py-0.5 text-[10px] font-medium"
               style={{
-                backgroundColor: teamColor.badge,
+                backgroundColor: getThemedBadge(teamColor, isLight),
                 color: teamColor.text,
                 border: `1px solid ${teamColor.border}`,
               }}

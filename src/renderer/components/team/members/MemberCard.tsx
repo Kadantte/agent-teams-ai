@@ -1,6 +1,7 @@
 import { Badge } from '@renderer/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { agentAvatarUrl, getMemberDotClass, getPresenceLabel } from '@renderer/utils/memberHelpers';
 import { GitBranch, Loader2, MessageSquare, Plus } from 'lucide-react';
@@ -47,6 +48,7 @@ export const MemberCard = ({
   const dotClass = getMemberDotClass(member, isTeamAlive, isTeamProvisioning, leadActivity);
   const presenceLabel = getPresenceLabel(member, isTeamAlive, isTeamProvisioning, leadActivity);
   const colors = getTeamColorSet(memberColor);
+  const { isLight } = useTheme();
   const pending = taskCounts?.pending ?? 0;
   const inProgress = taskCounts?.inProgress ?? 0;
   const completed = taskCounts?.completed ?? 0;
@@ -59,7 +61,7 @@ export const MemberCard = ({
         className="group relative cursor-pointer rounded px-2 py-1.5"
         style={{
           borderLeft: `3px solid ${colors.border}`,
-          background: `linear-gradient(to right, ${colors.badge}, transparent)`,
+          background: `linear-gradient(to right, ${getThemedBadge(colors, isLight)}, transparent)`,
         }}
         title={member.currentTaskId ? `Current task: ${member.currentTaskId}` : undefined}
         role="button"

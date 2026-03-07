@@ -130,7 +130,7 @@ export const TeamSessionsSection = ({
       {selectedSessionId !== null && (
         <button
           type="button"
-          className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-blue-400 transition-colors hover:bg-blue-500/10"
+          className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-blue-600 transition-colors hover:bg-blue-500/10 dark:text-blue-400"
           onClick={() => onSelectSession(null)}
         >
           <FilterX size={12} />
@@ -201,7 +201,7 @@ const SessionRow = ({
           {isLead && (
             <>
               <span style={{ opacity: 0.5 }}>·</span>
-              <span className="text-blue-400">lead</span>
+              <span className="text-blue-600 dark:text-blue-400">lead</span>
             </>
           )}
         </div>

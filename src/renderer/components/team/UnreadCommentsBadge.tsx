@@ -15,7 +15,7 @@ export const UnreadCommentsBadge = ({
     <span
       className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0 text-[10px] font-medium ${
         unreadCount > 0
-          ? 'bg-blue-500/20 text-blue-400'
+          ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400'
           : 'bg-[var(--color-surface-raised)] text-[var(--color-text-muted)]'
       }`}
       title={unreadCount > 0 ? `${unreadCount} unread` : 'All read'}

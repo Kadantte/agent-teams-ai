@@ -268,9 +268,7 @@ export const KanbanTaskCard = ({
       </span>
       <div className="mb-2 pt-2">
         <div className="flex items-center gap-1">
-          {task.owner ? (
-            <MemberBadge name={task.owner} color={colorMap.get(task.owner)} />
-          ) : null}
+          {task.owner ? <MemberBadge name={task.owner} color={colorMap.get(task.owner)} /> : null}
           {!compact && <TruncatedTitle text={task.subject} className="min-w-0" />}
         </div>
         {task.needsClarification ? (
@@ -278,7 +276,7 @@ export const KanbanTaskCard = ({
             className={`mt-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
               task.needsClarification === 'user'
                 ? 'bg-red-500/15 text-red-400'
-                : 'bg-blue-500/15 text-blue-400'
+                : 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
             }`}
           >
             <HelpCircle size={10} />
@@ -307,7 +305,7 @@ export const KanbanTaskCard = ({
 
       {hasBlocks ? (
         <div className="mb-2 flex flex-wrap items-center gap-1">
-          <span className="inline-flex items-center gap-0.5 text-[10px] text-blue-400">
+          <span className="inline-flex items-center gap-0.5 text-[10px] text-blue-600 dark:text-blue-400">
             <ArrowRightFromLine size={10} />
             Blocks
           </span>

@@ -23,6 +23,8 @@ module.exports = {
           subtle: 'var(--color-border-subtle)',
           emphasis: 'var(--color-border-emphasis)',
         },
+        // Theme-aware accent color
+        accent: 'var(--color-accent)',
         // Theme-aware text colors (use CSS variables)
         text: {
           DEFAULT: 'var(--color-text)',
@@ -35,6 +37,12 @@ module.exports = {
           error: '#ef4444',    // red-500
           warning: '#f59e0b',  // amber-500
           info: '#3b82f6',     // blue-500
+        },
+        // Theme-aware info color (use for blue informational elements)
+        info: {
+          DEFAULT: 'var(--info-text)',
+          bg: 'var(--info-bg)',
+          border: 'var(--info-border)',
         },
         // Theme-aware colors using CSS variables
         // These aliases enable all existing components to automatically support light/dark mode

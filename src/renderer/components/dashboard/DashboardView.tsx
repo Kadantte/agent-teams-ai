@@ -287,7 +287,7 @@ const RepositoryCard = ({
             <>
               <span className="text-text-muted">·</span>
               {taskCounts.inProgress > 0 && (
-                <span className="inline-flex items-center rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
+                <span className="inline-flex items-center rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
                   {taskCounts.inProgress} active
                 </span>
               )}

@@ -37,7 +37,7 @@ export const UpdateBanner = (): React.JSX.Element | null => {
             className="mb-1.5 flex items-center gap-2 text-xs"
             style={{ color: 'var(--color-text-secondary)' }}
           >
-            <Loader2 className="size-3.5 shrink-0 animate-spin text-blue-400" />
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
             <span>Updating app</span>
             <span className="tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
               {clampedPercent}%
@@ -48,7 +48,7 @@ export const UpdateBanner = (): React.JSX.Element | null => {
             style={{ backgroundColor: 'var(--color-border)' }}
           >
             <div
-              className="h-full rounded-full bg-blue-500 transition-all duration-300 ease-out"
+              className="h-full rounded-full bg-blue-600 transition-all duration-300 ease-out dark:bg-blue-500"
               style={{ width: `${clampedPercent}%` }}
             />
           </div>

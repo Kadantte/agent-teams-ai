@@ -21,10 +21,11 @@ import {
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { getMemberColor } from '@shared/constants/memberColors';
@@ -203,6 +204,7 @@ export const CreateTeamDialog = ({
   onOpenTeam,
 }: CreateTeamDialogProps): React.JSX.Element => {
   const isDev = process.env.NODE_ENV !== 'production';
+  const { isLight } = useTheme();
 
   const [teamName, setTeamName] = useState('');
   const descriptionDraft = useDraftPersistence({ key: 'createTeam:description' });
@@ -874,7 +876,7 @@ export const CreateTeamDialog = ({
                       isSelected ? 'scale-110' : 'opacity-70 hover:opacity-100'
                     )}
                     style={{
-                      backgroundColor: colorSet.badge,
+                      backgroundColor: getThemedBadge(colorSet, isLight),
                       borderColor: isSelected ? colorSet.border : 'transparent',
                     }}
                     title={colorName}

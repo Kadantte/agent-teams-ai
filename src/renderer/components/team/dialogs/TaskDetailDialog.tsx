@@ -536,25 +536,22 @@ export const TaskDetailDialog = ({
               </div>
             </div>
           ) : currentTask.description ? (
-            <div
-              role="button"
-              tabIndex={0}
-              className="group cursor-pointer"
-              onClick={startEditDescription}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  startEditDescription();
-                }
-              }}
-            >
+            <div className="group relative">
               <ExpandableContent collapsedHeight={200}>
                 <MarkdownViewer content={currentTask.description} maxHeight="max-h-none" bare />
               </ExpandableContent>
-              <Pencil
-                size={12}
-                className="mt-1 text-[var(--color-text-muted)] opacity-0 transition-opacity group-hover:opacity-100"
-              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="absolute right-0 top-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)] group-hover:opacity-100"
+                    onClick={startEditDescription}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Edit description</TooltipContent>
+              </Tooltip>
             </div>
           ) : (
             <button

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { useUnreadCommentCount } from '@renderer/hooks/useUnreadCommentCount';
 import { useStore } from '@renderer/store';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
@@ -78,6 +79,7 @@ export const SidebarTaskItem = ({
   const openGlobalTaskDetail = useStore((s) => s.openGlobalTaskDetail);
   const teamMembers = useStore((s) => s.teamByName[task.teamName]?.members);
   const unreadCount = useUnreadCommentCount(task.teamName, task.id, task.comments);
+  const { isLight } = useTheme();
 
   const isRenaming = renamingKey === `${task.teamName}:${task.id}`;
   const displaySubject = getDisplaySubject?.(task) ?? task.subject;
@@ -118,19 +120,24 @@ export const SidebarTaskItem = ({
     return colorName ? getTeamColorSet(colorName) : null;
   }, [teamMembers, task.owner]);
 
+  const ownerTextColor = useMemo(() => {
+    if (!ownerColorSet) return undefined;
+    return isLight && ownerColorSet.textLight ? ownerColorSet.textLight : ownerColorSet.text;
+  }, [ownerColorSet, isLight]);
+
   const projectLabel = useMemo(() => {
     if (!task.projectPath?.trim()) return null;
     return projectLabelFromPath(task.projectPath);
   }, [task.projectPath]);
 
   const projectColorSet = useMemo(
-    () => (projectLabel ? projectColor(projectLabel) : null),
-    [projectLabel]
+    () => (projectLabel ? projectColor(projectLabel, isLight) : null),
+    [projectLabel, isLight]
   );
 
   const teamColor = useMemo(
-    () => (showTeamName ? nameColorSet(task.teamDisplayName) : null),
-    [showTeamName, task.teamDisplayName]
+    () => (showTeamName ? nameColorSet(task.teamDisplayName, isLight) : null),
+    [showTeamName, task.teamDisplayName, isLight]
   );
 
   const showTeamRow = showTeamName && !hideTeamName;
@@ -220,17 +227,19 @@ export const SidebarTaskItem = ({
         )}
         {!showTeamRow && (
           <>
-            {projectLabel && <span className="opacity-40">·</span>}
+            {projectLabel && <span className="opacity-100 dark:opacity-40">·</span>}
             <span
-              className="shrink-0 opacity-60"
-              style={ownerColorSet ? { color: ownerColorSet.text } : undefined}
+              className="shrink-0 opacity-100 dark:opacity-60"
+              style={ownerTextColor ? { color: ownerTextColor } : undefined}
             >
               {task.owner ?? 'unassigned'}
             </span>
           </>
         )}
         {dateLabel && (
-          <span className={`ml-auto shrink-0 ${updatedLabel ? 'italic opacity-70' : ''}`}>
+          <span
+            className={`ml-auto shrink-0 ${updatedLabel ? 'italic opacity-100 dark:opacity-70' : ''}`}
+          >
             {dateLabel}
           </span>
         )}
@@ -242,14 +251,14 @@ export const SidebarTaskItem = ({
           className="mt-0.5 flex w-full items-center gap-1.5 text-[10px] leading-tight"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          <span className="shrink-0 opacity-50">Team:</span>
+          <span className="shrink-0 opacity-100 dark:opacity-50">Team:</span>
           <span className="shrink-0" style={teamColor ? { color: teamColor.text } : undefined}>
             {task.teamDisplayName}
           </span>
-          <span className="opacity-40">·</span>
+          <span className="opacity-100 dark:opacity-40">·</span>
           <span
-            className="shrink-0 opacity-60"
-            style={ownerColorSet ? { color: ownerColorSet.text } : undefined}
+            className="shrink-0 opacity-100 dark:opacity-60"
+            style={ownerTextColor ? { color: ownerTextColor } : undefined}
           >
             {task.owner ?? 'unassigned'}
           </span>

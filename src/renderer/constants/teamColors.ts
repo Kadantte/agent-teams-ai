@@ -10,22 +10,86 @@ export interface TeamColorSet {
   border: string;
   /** Badge background (semi-transparent) */
   badge: string;
-  /** Text color for labels */
+  /** Badge background for light theme (more visible on white) */
+  badgeLight?: string;
+  /** Text color for labels (dark theme) */
   text: string;
+  /** Text color for labels on light backgrounds (higher contrast) */
+  textLight?: string;
 }
 
 const TEAMMATE_COLORS: Record<string, TeamColorSet> = {
-  blue: { border: '#3b82f6', badge: 'rgba(59, 130, 246, 0.15)', text: '#60a5fa' },
-  green: { border: '#22c55e', badge: 'rgba(34, 197, 94, 0.15)', text: '#4ade80' },
-  red: { border: '#ef4444', badge: 'rgba(239, 68, 68, 0.15)', text: '#f87171' },
-  yellow: { border: '#eab308', badge: 'rgba(234, 179, 8, 0.15)', text: '#facc15' },
-  purple: { border: '#a855f7', badge: 'rgba(168, 85, 247, 0.15)', text: '#c084fc' },
-  cyan: { border: '#06b6d4', badge: 'rgba(6, 182, 212, 0.15)', text: '#22d3ee' },
-  orange: { border: '#f97316', badge: 'rgba(249, 115, 22, 0.15)', text: '#fb923c' },
-  pink: { border: '#ec4899', badge: 'rgba(236, 72, 153, 0.15)', text: '#f472b6' },
-  magenta: { border: '#d946ef', badge: 'rgba(217, 70, 239, 0.15)', text: '#e879f9' },
+  blue: {
+    border: '#3b82f6',
+    badge: 'rgba(59, 130, 246, 0.15)',
+    badgeLight: 'rgba(59, 130, 246, 0.12)',
+    text: '#60a5fa',
+    textLight: '#2563eb',
+  },
+  green: {
+    border: '#22c55e',
+    badge: 'rgba(34, 197, 94, 0.15)',
+    badgeLight: 'rgba(34, 197, 94, 0.12)',
+    text: '#4ade80',
+    textLight: '#16a34a',
+  },
+  red: {
+    border: '#ef4444',
+    badge: 'rgba(239, 68, 68, 0.15)',
+    badgeLight: 'rgba(239, 68, 68, 0.12)',
+    text: '#f87171',
+    textLight: '#dc2626',
+  },
+  yellow: {
+    border: '#eab308',
+    badge: 'rgba(234, 179, 8, 0.15)',
+    badgeLight: 'rgba(161, 98, 7, 0.12)',
+    text: '#facc15',
+    textLight: '#a16207',
+  },
+  purple: {
+    border: '#a855f7',
+    badge: 'rgba(168, 85, 247, 0.15)',
+    badgeLight: 'rgba(168, 85, 247, 0.12)',
+    text: '#c084fc',
+    textLight: '#7c3aed',
+  },
+  cyan: {
+    border: '#06b6d4',
+    badge: 'rgba(6, 182, 212, 0.15)',
+    badgeLight: 'rgba(6, 182, 212, 0.12)',
+    text: '#22d3ee',
+    textLight: '#0891b2',
+  },
+  orange: {
+    border: '#f97316',
+    badge: 'rgba(249, 115, 22, 0.15)',
+    badgeLight: 'rgba(249, 115, 22, 0.12)',
+    text: '#fb923c',
+    textLight: '#c2410c',
+  },
+  pink: {
+    border: '#ec4899',
+    badge: 'rgba(236, 72, 153, 0.15)',
+    badgeLight: 'rgba(236, 72, 153, 0.12)',
+    text: '#f472b6',
+    textLight: '#db2777',
+  },
+  magenta: {
+    border: '#d946ef',
+    badge: 'rgba(217, 70, 239, 0.15)',
+    badgeLight: 'rgba(217, 70, 239, 0.12)',
+    text: '#e879f9',
+    textLight: '#a21caf',
+  },
   /** Reserved for the human user — never assigned to team members. */
-  user: { border: '#f5f5f4', badge: 'rgba(245, 245, 244, 0.12)', text: '#d6d3d1' },
+  user: {
+    border: '#f5f5f4',
+    badge: 'rgba(245, 245, 244, 0.12)',
+    badgeLight: 'rgba(0, 0, 0, 0.08)',
+    text: '#d6d3d1',
+    textLight: '#57534e',
+  },
 };
 
 const DEFAULT_COLOR: TeamColorSet = TEAMMATE_COLORS.blue;
@@ -75,4 +139,12 @@ export function getTeamColorSet(colorName: string): TeamColorSet {
   }
 
   return DEFAULT_COLOR;
+}
+
+/**
+ * Get the appropriate badge background for the current theme.
+ * Uses badgeLight in light theme when available, falls back to badge.
+ */
+export function getThemedBadge(colorSet: TeamColorSet, isLight: boolean): string {
+  return isLight && colorSet.badgeLight ? colorSet.badgeLight : colorSet.badge;
 }

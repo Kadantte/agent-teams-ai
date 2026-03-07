@@ -142,6 +142,33 @@ function getSystemMessageLabel(text: string): string | null {
   return null;
 }
 
+/** Labels to highlight in task assignment / review messages (bold in markdown). */
+const TASK_MESSAGE_LABELS = [
+  'New task assigned to you:',
+  'Description:',
+  'Task approved',
+  'Task needs fixes',
+  'Review changes requested',
+  'Changes requested:',
+  'Comments:',
+  'Reviewer:',
+  'Related:',
+  'Blocked by:',
+  'Blocks:',
+];
+
+/** Make known structural labels bold in system/task messages. */
+function highlightSystemLabels(text: string, isSystem: boolean): string {
+  if (!isSystem) return text;
+  let result = text;
+  for (const label of TASK_MESSAGE_LABELS) {
+    // Escape any regex-special chars in the label, match at line start or after newline
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result.replace(new RegExp(`(^|\\n)(${escaped})`, 'g'), '$1**$2**');
+  }
+  return result;
+}
+
 /** Detect authentication/authorization errors that may be resolved by restarting. */
 const AUTH_ERROR_PATTERNS = [
   /OAuth token has expired/i,
@@ -193,7 +220,7 @@ function linkifyTaskIds(text: string, onClick: (taskId: string) => void): React.
       <TaskTooltip key={i} taskId={taskId}>
         <button
           type="button"
-          className="cursor-pointer font-medium text-blue-400 hover:underline"
+          className="cursor-pointer font-medium text-blue-600 hover:underline dark:text-blue-400"
           onClick={(e) => {
             e.stopPropagation();
             onClick(taskId);
@@ -262,11 +289,12 @@ export const ActivityItem = ({
   // Linkify task IDs (always, for TaskTooltip) + @mentions for display
   const displayText = useMemo(() => {
     if (!strippedText) return null;
-    let result = linkifyTaskIdsInMarkdown(strippedText);
+    let result = highlightSystemLabels(strippedText, !!systemLabel);
+    result = linkifyTaskIdsInMarkdown(result);
     if (memberColorMap && memberColorMap.size > 0)
       result = linkifyMentionsInMarkdown(result, memberColorMap);
     return result;
-  }, [strippedText, memberColorMap]);
+  }, [strippedText, memberColorMap, systemLabel]);
 
   const rawSummary =
     message.summary || (structured ? getStructuredMessageSummary(structured) : '') || '';

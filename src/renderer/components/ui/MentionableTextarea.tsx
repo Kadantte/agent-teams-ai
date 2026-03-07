@@ -1,8 +1,9 @@
 import * as React from 'react';
 
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useFileSuggestions } from '@renderer/hooks/useFileSuggestions';
 import { useMentionDetection } from '@renderer/hooks/useMentionDetection';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import { chipToken } from '@renderer/types/inlineChip';
 import {
@@ -232,6 +233,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
     const internalRef = React.useRef<HTMLTextAreaElement | null>(null);
     const backdropRef = React.useRef<HTMLDivElement>(null);
     const [scrollTop, setScrollTop] = React.useState(0);
+    const { isLight } = useTheme();
 
     // --- File search activation ---
     const enableFiles = !!projectPath;
@@ -599,7 +601,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
     const rotatingTips = React.useMemo(
       () => [
         'Tip: Use @ to mention team members or search files',
-        'Tip: Mention "create a task" to add it to the board',
+        'Tip: Mention "create a task" to add it to the kanban',
         "Tip: Don't overload the team lead with tasks — ask them to delegate to teammates",
       ],
       []
@@ -653,7 +655,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
                 const colorSet = seg.suggestion.color
                   ? getTeamColorSet(seg.suggestion.color)
                   : null;
-                const bg = colorSet?.badge ?? DEFAULT_MENTION_BG;
+                const bg = colorSet ? getThemedBadge(colorSet, isLight) : DEFAULT_MENTION_BG;
                 const fg = colorSet?.text ?? DEFAULT_MENTION_TEXT;
                 return (
                   <span

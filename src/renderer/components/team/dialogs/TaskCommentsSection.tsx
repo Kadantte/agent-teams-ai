@@ -202,7 +202,7 @@ export const TaskCommentsSection = ({
                       Approved
                     </span>
                   ) : comment.type === 'review_request' ? (
-                    <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-400">
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
                       <Eye size={10} />
                       Review requested
                     </span>

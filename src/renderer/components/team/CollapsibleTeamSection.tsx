@@ -106,7 +106,7 @@ export const CollapsibleTeamSection = ({
           {secondaryBadge != null && secondaryBadge > 0 && (
             <Badge
               variant="secondary"
-              className="bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-normal leading-none text-blue-400"
+              className="bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-normal leading-none text-blue-600 dark:text-blue-400"
               title={`${secondaryBadge} unread`}
             >
               {secondaryBadge} new

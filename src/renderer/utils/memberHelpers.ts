@@ -13,8 +13,8 @@ export function agentAvatarUrl(name: string, size = 64): string {
 
 export const STATUS_DOT_COLORS: Record<MemberStatus, string> = {
   active: 'bg-emerald-400',
-  idle: 'bg-emerald-400/50',
-  terminated: 'bg-zinc-500',
+  idle: 'bg-zinc-400',
+  terminated: 'bg-red-400',
   unknown: 'bg-zinc-600',
 };
 

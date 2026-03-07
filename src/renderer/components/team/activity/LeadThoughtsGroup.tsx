@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import { ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 
+import { CopyButton } from '@renderer/components/common/CopyButton';
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
 import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
@@ -329,7 +330,7 @@ const LeadThoughtItem = ({
             />
           </div>
         )}
-        <div className="flex text-[11px]">
+        <div className="group/thought relative flex text-[11px]">
           <div className="min-w-0 flex-1 [&_>div>div]:p-0" style={{ color: CARD_TEXT_LIGHT }}>
             <span
               onClickCapture={
@@ -350,6 +351,9 @@ const LeadThoughtItem = ({
             >
               <MarkdownViewer content={displayContent} maxHeight="max-h-none" bare />
             </span>
+          </div>
+          <div className="absolute right-1 top-0.5 opacity-0 transition-opacity group-hover/thought:opacity-100">
+            <CopyButton text={thought.text} inline />
           </div>
         </div>
         {thought.toolSummary && (

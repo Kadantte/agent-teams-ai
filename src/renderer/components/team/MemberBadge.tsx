@@ -1,4 +1,5 @@
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { agentAvatarUrl } from '@renderer/utils/memberHelpers';
 
 interface MemberBadgeProps {
@@ -24,12 +25,13 @@ export const MemberBadge = ({
   onClick,
 }: MemberBadgeProps): React.JSX.Element => {
   const colors = getTeamColorSet(color ?? '');
+  const { isLight } = useTheme();
   const avatarSize = size === 'md' ? 32 : 24;
   const avatarClass = size === 'md' ? 'size-6' : 'size-5';
   const textClass = size === 'md' ? 'text-xs' : 'text-[10px]';
 
   const badgeStyle = {
-    backgroundColor: colors.badge,
+    backgroundColor: getThemedBadge(colors, isLight),
     color: colors.text,
     border: `1px solid ${colors.border}40`,
   };

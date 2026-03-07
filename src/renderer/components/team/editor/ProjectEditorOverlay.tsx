@@ -725,7 +725,7 @@ export const ProjectEditorOverlay = ({
 
           {/* External change banner */}
           {activeTabId && externalChanges[activeTabId] && (
-            <div className="flex shrink-0 items-center gap-2 border-b border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-300">
+            <div className="flex shrink-0 items-center gap-2 border-b border-blue-400/30 bg-blue-100/50 px-3 py-1.5 text-xs text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300">
               <RefreshCw className="size-3.5 shrink-0" />
               <span>
                 {externalChanges[activeTabId] === 'delete'

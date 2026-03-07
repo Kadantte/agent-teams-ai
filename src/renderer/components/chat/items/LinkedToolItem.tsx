@@ -9,7 +9,8 @@
 import React, { useRef } from 'react';
 
 import { CARD_ICON_MUTED } from '@renderer/constants/cssVariables';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import {
   getToolContextTokens,
   getToolStatus,
@@ -70,6 +71,7 @@ export const LinkedToolItem: React.FC<LinkedToolItemProps> = ({
   registerRef,
 }) => {
   const status = getToolStatus(linkedTool);
+  const { isLight } = useTheme();
   const summary = getToolSummary(linkedTool.name, linkedTool.input);
   const summaryNode =
     searchQueryOverride && searchQueryOverride.trim().length > 0
@@ -104,7 +106,7 @@ export const LinkedToolItem: React.FC<LinkedToolItemProps> = ({
         <span className="size-2.5 rounded-full" style={{ backgroundColor: colors.border }} />
         <span
           className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-          style={{ backgroundColor: colors.badge, color: colors.text }}
+          style={{ backgroundColor: getThemedBadge(colors, isLight), color: colors.text }}
         >
           {name}
         </span>

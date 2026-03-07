@@ -1,5 +1,6 @@
 import { CARD_BG, CARD_BORDER_STYLE, CARD_ICON_MUTED } from '@renderer/constants/cssVariables';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { formatDistanceToNowStrict } from 'date-fns';
@@ -18,6 +19,7 @@ export const PendingRepliesBlock = ({
   pendingRepliesByMember,
   onMemberClick,
 }: PendingRepliesBlockProps): React.JSX.Element | null => {
+  const { isLight } = useTheme();
   const colorMap = buildMemberColorMap(members);
   const pending = Object.entries(pendingRepliesByMember)
     .map(([name, sentAtMs]) => ({
@@ -62,7 +64,7 @@ export const PendingRepliesBlock = ({
                   type="button"
                   className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide transition-opacity hover:opacity-90 focus:outline-none focus:ring-1 focus:ring-[var(--color-border)]"
                   style={{
-                    backgroundColor: colors.badge,
+                    backgroundColor: getThemedBadge(colors, isLight),
                     color: colors.text,
                     border: `1px solid ${colors.border}40`,
                   }}
@@ -75,7 +77,7 @@ export const PendingRepliesBlock = ({
                 <span
                   className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
                   style={{
-                    backgroundColor: colors.badge,
+                    backgroundColor: getThemedBadge(colors, isLight),
                     color: colors.text,
                     border: `1px solid ${colors.border}40`,
                   }}

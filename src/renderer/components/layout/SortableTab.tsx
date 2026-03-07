@@ -7,7 +7,8 @@ import { useCallback, useState } from 'react';
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import {
@@ -61,6 +62,7 @@ export const SortableTab = ({
   setRef,
 }: SortableTabProps): React.JSX.Element => {
   const [isHovered, setIsHovered] = useState(false);
+  const { isLight } = useTheme();
 
   const isPinned = useStore(
     useShallow((s) =>
@@ -96,14 +98,14 @@ export const SortableTab = ({
     opacity: isDragging ? 0.3 : 1,
     backgroundColor: isActive
       ? teamColorSet
-        ? teamColorSet.badge
+        ? getThemedBadge(teamColorSet, isLight)
         : 'var(--color-surface-raised)'
       : isHovered
         ? teamColorSet
-          ? teamColorSet.badge
+          ? getThemedBadge(teamColorSet, isLight)
           : 'var(--color-surface-overlay)'
         : teamColorSet
-          ? teamColorSet.badge
+          ? getThemedBadge(teamColorSet, isLight)
           : 'transparent',
     color:
       isActive || isHovered

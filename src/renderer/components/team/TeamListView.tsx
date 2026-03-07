@@ -11,8 +11,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useBranchSync } from '@renderer/hooks/useBranchSync';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
@@ -70,7 +71,7 @@ function folderName(fullPath: string): string {
   return getBaseName(fullPath) || fullPath;
 }
 
-function renderMemberChips(members: TeamSummaryMember[]): React.JSX.Element {
+function renderMemberChips(members: TeamSummaryMember[], isLight: boolean): React.JSX.Element {
   const teamColorMap = buildMemberColorMap(members);
   return (
     <>
@@ -84,7 +85,7 @@ function renderMemberChips(members: TeamSummaryMember[]): React.JSX.Element {
               style={
                 memberColor
                   ? {
-                      backgroundColor: memberColor.badge,
+                      backgroundColor: getThemedBadge(memberColor, isLight),
                       color: memberColor.text,
                       border: `1px solid ${memberColor.border}40`,
                     }
@@ -177,6 +178,7 @@ const StatusBadge = ({ status }: { status: TeamStatus }): React.JSX.Element => {
 };
 
 export const TeamListView = (): React.JSX.Element => {
+  const { isLight } = useTheme();
   const electronMode = isElectronMode();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [copyData, setCopyData] = useState<TeamCopyData | null>(null);
@@ -679,7 +681,7 @@ export const TeamListView = (): React.JSX.Element => {
                 {teamColorSet ? (
                   <div
                     className="pointer-events-none absolute inset-0 z-0 rounded-lg"
-                    style={{ backgroundColor: teamColorSet.badge }}
+                    style={{ backgroundColor: getThemedBadge(teamColorSet, isLight) }}
                   />
                 ) : null}
                 <div
@@ -760,7 +762,7 @@ export const TeamListView = (): React.JSX.Element => {
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-1.5">
                     {team.members && team.members.length > 0 ? (
-                      renderMemberChips(team.members)
+                      renderMemberChips(team.members, isLight)
                     ) : team.memberCount === 0 ? (
                       <Badge variant="secondary" className="text-[10px] font-normal">
                         Solo
@@ -895,7 +897,7 @@ export const TeamListView = (): React.JSX.Element => {
                     </p>
                     {team.members && team.members.length > 0 && (
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                        {renderMemberChips(team.members)}
+                        {renderMemberChips(team.members, isLight)}
                       </div>
                     )}
                   </div>

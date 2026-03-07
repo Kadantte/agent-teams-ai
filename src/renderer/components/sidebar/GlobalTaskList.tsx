@@ -494,7 +494,7 @@ export const GlobalTaskList = ({
       <div className="flex shrink-0 items-center gap-1.5 px-2 py-1">
         <span className="shrink-0 text-[11px] text-text-muted">Group by:</span>
         <div
-          className="bg-surface-raised/60 inline-flex rounded-md p-0.5 text-[11px]"
+          className="border-border-emphasis/40 inline-flex rounded-md border bg-[var(--color-surface)] p-0.5 text-[11px]"
           role="group"
           aria-label="Group by"
         >
@@ -508,7 +508,7 @@ export const GlobalTaskList = ({
                 className={cn(
                   'rounded px-2 py-0.5 transition-colors',
                   groupingMode === mode
-                    ? 'bg-surface-raised text-text shadow-sm'
+                    ? 'ring-border-emphasis/60 bg-surface-raised text-text shadow-sm ring-1'
                     : 'text-text-muted hover:text-text-secondary'
                 )}
               >

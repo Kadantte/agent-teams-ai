@@ -7,7 +7,8 @@ import {
   CARD_ICON_MUTED,
   CARD_TEXT_LIGHT,
 } from '@renderer/constants/cssVariables';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { detectOperationalNoise } from '@renderer/utils/agentMessageFormatting';
 import { formatTokensCompact } from '@renderer/utils/formatters';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
@@ -77,6 +78,7 @@ export const TeammateMessageItem: React.FC<TeammateMessageItemProps> = ({
   highlightStyle,
 }) => {
   const colors = getTeamColorSet(teammateMessage.color);
+  const { isLight } = useTheme();
 
   // Detect operational noise
   const noiseLabel = useMemo(
@@ -162,7 +164,7 @@ export const TeammateMessageItem: React.FC<TeammateMessageItemProps> = ({
         <span
           className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
           style={{
-            backgroundColor: colors.badge,
+            backgroundColor: getThemedBadge(colors, isLight),
             color: colors.text,
             border: `1px solid ${colors.border}40`,
           }}

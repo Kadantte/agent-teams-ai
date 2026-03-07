@@ -13,11 +13,12 @@ import {
   DialogTitle,
 } from '@renderer/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useBranchSync } from '@renderer/hooks/useBranchSync';
 import { useTabUI } from '@renderer/hooks/useTabUI';
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { useTeamMessagesExpanded } from '@renderer/hooks/useTeamMessagesExpanded';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { createChipFromSelection } from '@renderer/utils/chipUtils';
@@ -125,6 +126,7 @@ function filterKanbanTasks(tasks: TeamTaskWithKanban[], query: string): TeamTask
 }
 
 export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Element => {
+  const { isLight } = useTheme();
   const [requestChangesTaskId, setRequestChangesTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TeamTaskWithKanban | null>(null);
   const [selectedMember, setSelectedMember] = useState<ResolvedTeamMember | null>(null);
@@ -961,7 +963,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             {headerColorSet ? (
               <div
                 className="pointer-events-none absolute inset-0 z-0 rounded-lg"
-                style={{ backgroundColor: headerColorSet.badge }}
+                style={{ backgroundColor: getThemedBadge(headerColorSet, isLight) }}
               />
             ) : null}
             <div

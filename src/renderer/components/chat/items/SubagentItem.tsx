@@ -12,8 +12,13 @@ import {
   COLOR_TEXT_MUTED,
   COLOR_TEXT_SECONDARY,
 } from '@renderer/constants/cssVariables';
-import { getSubagentTypeColorSet, getTeamColorSet } from '@renderer/constants/teamColors';
+import {
+  getSubagentTypeColorSet,
+  getTeamColorSet,
+  getThemedBadge,
+} from '@renderer/constants/teamColors';
 import { useTabUI } from '@renderer/hooks/useTabUI';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
 import { buildDisplayItemsFromMessages, buildSummary } from '@renderer/utils/aiGroupEnhancer';
 import { computeSubagentPhaseBreakdown } from '@renderer/utils/aiGroupHelpers';
@@ -80,6 +85,7 @@ export const SubagentItem: React.FC<SubagentItemProps> = ({
 
   // Team member colors (when this subagent is a team member)
   const teamColors = subagent.team ? getTeamColorSet(subagent.team.memberColor) : null;
+  const { isLight } = useTheme();
   // Type-based colors for non-team subagents (from agent config or deterministic hash)
   const typeColors = !teamColors ? getSubagentTypeColorSet(subagentType, agentConfigs) : null;
 
@@ -233,7 +239,7 @@ export const SubagentItem: React.FC<SubagentItemProps> = ({
         <span
           className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
           style={{
-            backgroundColor: teamColors.badge,
+            backgroundColor: getThemedBadge(teamColors, isLight),
             color: teamColors.text,
             border: `1px solid ${teamColors.border}40`,
           }}
@@ -305,7 +311,7 @@ export const SubagentItem: React.FC<SubagentItemProps> = ({
           <span
             className="rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide"
             style={{
-              backgroundColor: teamColors.badge,
+              backgroundColor: getThemedBadge(teamColors, isLight),
               color: teamColors.text,
               border: `1px solid ${teamColors.border}40`,
             }}
@@ -316,7 +322,7 @@ export const SubagentItem: React.FC<SubagentItemProps> = ({
           <span
             className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
             style={{
-              backgroundColor: typeColors!.badge,
+              backgroundColor: getThemedBadge(typeColors!, isLight),
               color: typeColors!.text,
               border: `1px solid ${typeColors!.border}40`,
             }}

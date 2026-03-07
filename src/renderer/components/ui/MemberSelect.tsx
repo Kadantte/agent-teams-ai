@@ -1,6 +1,7 @@
 import * as React from 'react';
 
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { agentAvatarUrl, buildMemberColorMap } from '@renderer/utils/memberHelpers';
@@ -39,6 +40,7 @@ export const MemberSelect = ({
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const listboxId = React.useId();
+  const { isLight } = useTheme();
 
   const colorMap = React.useMemo(() => buildMemberColorMap(members), [members]);
   const selectedMember = React.useMemo(
@@ -66,7 +68,7 @@ export const MemberSelect = ({
         <span
           className={`rounded px-1.5 py-0.5 ${textSize} font-medium tracking-wide`}
           style={{
-            backgroundColor: colors.badge,
+            backgroundColor: getThemedBadge(colors, isLight),
             color: colors.text,
             border: `1px solid ${colors.border}40`,
           }}

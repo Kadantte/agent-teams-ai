@@ -15,6 +15,7 @@
   --color-text: #f1f5f9;
   --color-text-secondary: #94a3b8;
   --color-text-muted: #64748b;
+  --color-accent: #818cf8; /* Accent — indigo-400, visible on dark surfaces */
 
   /* Scrollbar colors */
   --scrollbar-thumb: rgba(148, 163, 184, 0.15);
@@ -187,6 +188,11 @@
   --system-activity-border: rgba(59, 130, 246, 0.12);
   --system-activity-accent: rgba(96, 165, 250, 0.5);
 
+  /* Info style — banners, status indicators */
+  --info-bg: rgba(59, 130, 246, 0.08);
+  --info-border: rgba(59, 130, 246, 0.25);
+  --info-text: #60a5fa;
+
   /* Assessment severity colors (badges, health indicators) */
   --assess-good: #4ade80;
   --assess-warning: #fbbf24;
@@ -236,6 +242,7 @@
   --color-text: #1c1b19; /* Warm near-black text */
   --color-text-secondary: #4d4b46; /* Warm secondary text */
   --color-text-muted: #6d6b65; /* Warm muted text */
+  --color-accent: #4f46e5; /* Accent — indigo-600, visible on light surfaces */
 
   /* Assessment severity colors - darker for light backgrounds */
   --assess-good: #16a34a;
@@ -410,9 +417,14 @@
   --card-separator: #d5d3cf;
 
   /* System activity messages */
-  --system-activity-bg: rgba(59, 130, 246, 0.06);
-  --system-activity-border: rgba(59, 130, 246, 0.15);
-  --system-activity-accent: rgba(37, 99, 235, 0.5);
+  --system-activity-bg: rgba(59, 130, 246, 0.08);
+  --system-activity-border: rgba(59, 130, 246, 0.25);
+  --system-activity-accent: rgba(37, 99, 235, 0.7);
+
+  /* Info style — banners, status indicators */
+  --info-bg: rgba(59, 130, 246, 0.1);
+  --info-border: rgba(37, 99, 235, 0.3);
+  --info-text: #2563eb;
 
   /* Sticky Context button - transparent glass */
   --context-btn-bg: rgba(0, 0, 0, 0.06);

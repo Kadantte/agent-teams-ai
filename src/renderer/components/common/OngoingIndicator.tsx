@@ -34,7 +34,7 @@ export const OngoingIndicator = ({
         <span className={`relative inline-flex rounded-full ${dotSize} bg-green-500`} />
       </span>
       {showLabel && (
-        <span className="text-sm" style={{ color: 'var(--info-text, #3b82f6)' }}>
+        <span className="text-sm" style={{ color: 'var(--info-text)' }}>
           {label}
         </span>
       )}
@@ -51,15 +51,12 @@ export const OngoingBanner = (): React.JSX.Element => {
     <div
       className="flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3"
       style={{
-        backgroundColor: 'var(--info-bg, rgba(59, 130, 246, 0.1))',
-        border: '1px solid var(--info-border, rgba(59, 130, 246, 0.3))',
+        backgroundColor: 'var(--info-bg)',
+        border: '1px solid var(--info-border)',
       }}
     >
-      <Loader2
-        className="size-4 shrink-0 animate-spin"
-        style={{ color: 'var(--info-text, #3b82f6)' }}
-      />
-      <span className="text-sm" style={{ color: 'var(--info-text, #3b82f6)' }}>
+      <Loader2 className="size-4 shrink-0 animate-spin" style={{ color: 'var(--info-text)' }} />
+      <span className="text-sm font-medium" style={{ color: 'var(--info-text)' }}>
         Session is in progress...
       </span>
     </div>

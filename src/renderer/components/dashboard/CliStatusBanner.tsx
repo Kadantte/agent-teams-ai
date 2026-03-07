@@ -34,7 +34,7 @@ const VARIANT_STYLES: Record<BannerVariant, { border: string; bg: string }> = {
   loading: { border: 'var(--color-border)', bg: 'transparent' },
   error: { border: '#ef4444', bg: 'rgba(239, 68, 68, 0.06)' },
   success: { border: '#22c55e', bg: 'rgba(34, 197, 94, 0.04)' },
-  info: { border: '#3b82f6', bg: 'rgba(59, 130, 246, 0.04)' },
+  info: { border: 'var(--info-border)', bg: 'var(--info-bg)' },
   warning: { border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.06)' },
 };
 
@@ -255,7 +255,7 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Loader2 className="size-4 shrink-0 animate-spin text-blue-400" />
+            <Loader2 className="size-4 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
             <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               Downloading Claude CLI...
             </span>

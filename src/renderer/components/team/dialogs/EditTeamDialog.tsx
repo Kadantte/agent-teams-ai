@@ -16,9 +16,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { CUSTOM_ROLE, PRESET_ROLES } from '@renderer/constants/teamRoles';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import { Loader2 } from 'lucide-react';
 
@@ -73,6 +74,7 @@ export const EditTeamDialog = ({
   onClose,
   onSaved,
 }: EditTeamDialogProps): React.JSX.Element => {
+  const { isLight } = useTheme();
   const [name, setName] = useState(currentName);
   const [description, setDescription] = useState(currentDescription);
   const [color, setColor] = useState(currentColor);
@@ -191,7 +193,7 @@ export const EditTeamDialog = ({
                       isSelected ? 'scale-110' : 'opacity-70 hover:opacity-100'
                     )}
                     style={{
-                      backgroundColor: colorSet.badge,
+                      backgroundColor: getThemedBadge(colorSet, isLight),
                       borderColor: isSelected ? colorSet.border : 'transparent',
                     }}
                     title={colorName}

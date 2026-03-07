@@ -7,12 +7,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, isElectronMode } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { Combobox } from '@renderer/components/ui/combobox';
+import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { getFullResetState } from '@renderer/store/utils/stateResetHelpers';
 import { AGENT_LANGUAGE_OPTIONS, resolveLanguageName } from '@shared/utils/agentLanguage';
 import { Check, Copy, FolderOpen, Laptop, Loader2, RotateCcw } from 'lucide-react';
 
-import { SettingRow, SettingsSectionHeader, SettingsSelect, SettingsToggle } from '../components';
+import { SettingRow, SettingsSectionHeader, SettingsToggle } from '../components';
 
 import type { SafeConfig } from '../hooks/useSettingsConfig';
 import type { ClaudeRootInfo, WslClaudeRootCandidate } from '@shared/types';
@@ -335,12 +336,24 @@ export const GeneralSection = ({
 
       <SettingsSectionHeader title="Appearance" />
       <SettingRow label="Theme" description="Choose your preferred color theme">
-        <SettingsSelect
-          value={safeConfig.general.theme}
-          options={THEME_OPTIONS}
-          onChange={onThemeChange}
-          disabled={saving}
-        />
+        <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
+          {THEME_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              disabled={saving}
+              className={cn(
+                'rounded-[3px] px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50',
+                safeConfig.general.theme === opt.value
+                  ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+              )}
+              onClick={() => onThemeChange(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </SettingRow>
       <SettingRow
         label="Expand AI responses by default"
