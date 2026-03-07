@@ -110,6 +110,14 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     expect(prompt).toContain('PROGRESS REPORTING (MANDATORY)');
     expect(prompt).toContain('Never bulk-move many tasks at the end');
     expect(prompt).toContain('Default to working ONE task at a time');
+    expect(prompt).toContain('task_start');
+    expect(prompt).toContain('task_complete');
+    expect(prompt).not.toContain('teamctl.js');
+    expect(prompt).not.toContain('.claude/tools');
+
+    const launchArgs = vi.mocked(spawnCli).mock.calls[0]?.[1] as string[];
+    expect(launchArgs).toContain('--strict-mcp-config');
+    expect(launchArgs).toContain('--mcp-config');
 
     await svc.cancelProvisioning(runId);
   });
@@ -163,6 +171,13 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     expect(prompt).toContain('SOLO MODE: This team CURRENTLY has ZERO teammates.');
     expect(prompt).toContain('Execute tasks sequentially and keep the board + user updated');
     expect(prompt).toContain('Do NOT start the next task until the current task is completed');
+    expect(prompt).toContain('task_start');
+    expect(prompt).not.toContain('teamctl.js');
+    expect(prompt).not.toContain('.claude/tools');
+
+    const launchArgs = vi.mocked(spawnCli).mock.calls[0]?.[1] as string[];
+    expect(launchArgs).toContain('--strict-mcp-config');
+    expect(launchArgs).toContain('--mcp-config');
 
     await svc.cancelProvisioning(runId);
   });

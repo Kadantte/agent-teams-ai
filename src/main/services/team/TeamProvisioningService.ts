@@ -34,6 +34,7 @@ import { ClaudeBinaryResolver } from './ClaudeBinaryResolver';
 import { withInboxLock } from './inboxLock';
 import { TeamConfigReader } from './TeamConfigReader';
 import { TeamInboxReader } from './TeamInboxReader';
+import { TeamMcpConfigBuilder } from './TeamMcpConfigBuilder';
 import { TeamMembersMetaStore } from './TeamMembersMetaStore';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskReader } from './TeamTaskReader';
@@ -451,40 +452,40 @@ ${processRegistration}`;
 
 function buildTaskStatusProtocol(teamName: string): string {
   return wrapInAgentBlock(`MANDATORY TASK STATUS PROTOCOL — you MUST follow this for EVERY task:
-1. Use this command to mark task started:
-   node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task start <taskId>
+1. Use MCP tool task_start to mark task started:
+   { teamName: "${teamName}", taskId: "<taskId>" }
    - Start the task ONLY when you are actually beginning work on it.
    - Do NOT start multiple tasks at once unless the team lead explicitly directs parallel work.
-2. Use this command to mark task completed BEFORE sending your final reply:
-   node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task complete <taskId>
-3. If you are asked to review and task is accepted, move it to APPROVED (not DONE):
-   node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" review approve <taskId>
-4. If review fails and changes are needed:
-   node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" review request-changes <taskId> --comment "<what to fix>"
+2. Use MCP tool task_complete BEFORE sending your final reply:
+   { teamName: "${teamName}", taskId: "<taskId>" }
+3. If you are asked to review and the task is accepted, move it to APPROVED (not DONE) with MCP tool review_approve:
+   { teamName: "${teamName}", taskId: "<taskId>", note?: "<optional note>", notifyOwner: true }
+4. If review fails and changes are needed, use MCP tool review_request_changes:
+   { teamName: "${teamName}", taskId: "<taskId>", comment: "<what to fix>" }
 5. NEVER skip status updates. A task is NOT done until completed status is written.
    - Never "bulk-complete" a batch of tasks at the end. Update status incrementally as you work.
-6. To reply to a comment on a task:
-   node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task comment <taskId> --text "<your reply>" --from "<your-name>"
+6. To reply to a comment on a task, use MCP tool task_add_comment:
+   { teamName: "${teamName}", taskId: "<taskId>", text: "<your reply>", from: "<your-name>" }
 7. When discussing a task with a teammate and you have important findings, decisions, blockers, or progress updates — record them as a task comment:
-   node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task comment <taskId> --text "<summary of your finding or decision>" --from "<your-name>"
+   { teamName: "${teamName}", taskId: "<taskId>", text: "<summary of your finding or decision>", from: "<your-name>" }
    Do NOT comment on trivial coordination messages. Only comment when the information is valuable context for the task.
 8. When sending a message about a specific task, include #<taskId> in your SendMessage summary field for traceability.
 9. Review workflow clarity (IMPORTANT):
    - The work task (e.g. #1) is the thing that must end up APPROVED after review.
-   - If you are reviewing work for task #X, run review approve/request-changes on #X (the work task).
+   - If you are reviewing work for task #X, run review_approve/review_request_changes on #X (the work task).
    - Do NOT approve a separate "review task" (e.g. #2 created just to ask for a review) — that will put the wrong task into APPROVED.
    - Typical flow:
-     a) Owner finishes work on #X → task complete #X
-     b) Reviewer accepts → review approve #X
+     a) Owner finishes work on #X -> task_complete #X
+     b) Reviewer accepts -> review_approve #X
 10. CLARIFICATION PROTOCOL (CRITICAL — MANDATORY):
-    When you are blocked and need information to continue a task, you MUST do BOTH steps below — skipping the Bash command breaks the task board:
-    a) STEP 1 — FIRST, set the clarification flag via Bash (this updates the task board):
-       node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task set-clarification <taskId> lead --from "<your-name>"
+    When you are blocked and need information to continue a task, you MUST do BOTH steps below — skipping the MCP update breaks the task board:
+    a) STEP 1 — FIRST, set the clarification flag with MCP tool task_set_clarification:
+       { teamName: "${teamName}", taskId: "<taskId>", value: "lead" }
     b) STEP 2 — THEN, send a message to your team lead via SendMessage explaining what you need.
-    IMPORTANT: Always run the Bash command BEFORE sending the message. The flag is what makes the task board show "needs clarification" — without it, your request is invisible on the board.
+    IMPORTANT: Always update the task board BEFORE sending the message. The flag is what makes the task board show "needs clarification" — without it, your request is invisible on the board.
     c) The flag is auto-cleared when the lead adds a task comment on your task.
        If the lead replies via SendMessage instead, clear the flag yourself once you have the answer:
-       node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task set-clarification <taskId> clear --from "<your-name>"
+       { teamName: "${teamName}", taskId: "<taskId>", value: "clear" }
     d) Do NOT set clarification to "user" yourself — only the team lead escalates to the user.
 11. DEPENDENCY AWARENESS:
     When your task has blockedBy dependencies, check if they are completed before starting.
@@ -496,20 +497,20 @@ function buildProcessRegistrationProtocol(teamName: string): string {
   return wrapInAgentBlock(`BACKGROUND PROCESS REGISTRATION — when you start a background process (dev server, watcher, database, etc.):
 1. Launch with & to get PID:
    pnpm dev &
-2. Register immediately (--port and --url are optional, use when the process listens on a port):
-   node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" process register --pid $! --label "<description>" --from "<your-name>" [--port <PORT> --url "http://localhost:<PORT>"]
-3. VERIFY registration succeeded (MANDATORY — never skip this step):
-   node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" process list
-4. When stopping a process:
-   node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" process unregister --pid <PID>
+2. Register immediately with MCP tool process_register (--port and --url are optional, use when the process listens on a port):
+   { teamName: "${teamName}", pid: <PID>, label: "<description>", from: "<your-name>", port?: <PORT>, url?: "http://localhost:<PORT>", command?: "<command>" }
+3. VERIFY registration succeeded (MANDATORY — never skip this step) using MCP tool process_list:
+   { teamName: "${teamName}" }
+4. When stopping a process, use MCP tool process_unregister:
+   { teamName: "${teamName}", pid: <PID> }
 If verification in step 3 fails or the process is missing from the list, re-register it.`);
 }
 
 function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string {
   return wrapInAgentBlock(
     [
-      `Internal task board tooling (teamctl.js):`,
-      `- Use teamctl.js (via Bash) for tasks that must appear on the team board (assigned work, substantial work, or when the user explicitly asks to create a task).`,
+      `Internal task board tooling (MCP):`,
+      `- Use the board-management MCP tools for tasks that must appear on the team board (assigned work, substantial work, or when the user explicitly asks to create a task).`,
       ``,
       `Execution discipline (CRITICAL — prevents misleading task boards):`,
       `- Start a task (move to in_progress) ONLY when you are actually beginning work on it.`,
@@ -520,61 +521,61 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
       `Parallelization guideline (IMPORTANT):`,
       `- If a task is genuinely parallelizable, split it into multiple smaller tasks owned by different members.`,
       `  - Prefer splitting by independent deliverables (e.g. frontend/backend, API/UI, parsing/rendering, tests/docs) rather than arbitrary slices.`,
-      `  - Use --blocked-by only when one piece truly cannot start without another; otherwise link with --related.`,
+      `  - Use blockedBy only when one piece truly cannot start without another; otherwise link with related.`,
       `  - Do NOT split when work is inherently sequential, requires one person to keep consistent context, or the overhead would exceed the benefit.`,
       `  - When splitting, make each task have a clear completion criterion and a single accountable owner.`,
       ``,
-      `IMPORTANT: teamctl.js only supports these domains: task, kanban, review, message, process. There is NO "member" domain — team members are managed by spawning teammates via the Task tool, not via teamctl.`,
+      `IMPORTANT: The board MCP only supports these domains: task, kanban, review, message, process. There is NO "member" domain — team members are managed by spawning teammates via the Task tool, not via the board MCP.`,
       ``,
-      `Task board operations — use teamctl.js via Bash:`,
-      `- Create task: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task create --subject "..." --description "..." --owner "<actual-member-name>" --notify --from "${leadName}"`,
-      `- Assign/reassign owner: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task set-owner <id> <member-name> --notify --from "${leadName}"`,
-      `- Clear owner: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task set-owner <id> clear`,
-      `- Start task (preferred over set-status): node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task start <id>`,
-      `- Complete task (preferred over set-status): node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task complete <id>`,
-      `- Update status: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task set-status <id> <pending|in_progress|completed|deleted>`,
-      `- Add comment: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task comment <id> --text "..." --from "${leadName}"`,
-      `- Attach file to task: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task attach <id> --file "<path>" [--mode copy|link] [--filename "<name>"] [--mime-type "<type>"]`,
+      `Task board operations — use MCP tools directly:`,
+      `- Create task: task_create { teamName: "${teamName}", subject: "...", description?: "...", owner?: "<actual-member-name>", blockedBy?: ["1","2"], related?: ["3"] }`,
+      `- Assign/reassign owner: task_set_owner { teamName: "${teamName}", taskId: "<id>", owner: "<member-name>" }`,
+      `- Clear owner: task_set_owner { teamName: "${teamName}", taskId: "<id>", owner: null }`,
+      `- Start task (preferred over set-status): task_start { teamName: "${teamName}", taskId: "<id>" }`,
+      `- Complete task (preferred over set-status): task_complete { teamName: "${teamName}", taskId: "<id>" }`,
+      `- Update status: task_set_status { teamName: "${teamName}", taskId: "<id>", status: "pending|in_progress|completed|deleted" }`,
+      `- Add comment: task_add_comment { teamName: "${teamName}", taskId: "<id>", text: "...", from: "${leadName}" }`,
+      `- Attach file to task: task_attach_file { teamName: "${teamName}", taskId: "<id>", filePath: "<path>", mode?: "copy|link", filename?: "<name>", mimeType?: "<type>" }`,
       `- Attach file to a specific comment:`,
-      `  1) Find commentId: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task get <id>`,
-      `  2) Attach: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task comment-attach <id> <commentId> --file "<path>" [--mode copy|link] [--filename "<name>"] [--mime-type "<type>"]`,
-      `- Create with deps (blocked work MUST be pending): node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task create --subject "..." --blocked-by 1,2 --related 3 --status pending --owner "<member>" --notify --from "${leadName}"`,
-      `- Link dependency: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task link <id> --blocked-by <targetId>`,
-      `- Link related: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task link <id> --related <targetId>`,
-      `- Unlink: node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task unlink <id> --blocked-by <targetId>`,
+      `  1) Find commentId: task_get { teamName: "${teamName}", taskId: "<id>" }`,
+      `  2) Attach: task_attach_comment_file { teamName: "${teamName}", taskId: "<id>", commentId: "<commentId>", filePath: "<path>", mode?: "copy|link", filename?: "<name>", mimeType?: "<type>" }`,
+      `- Create with deps (blocked work MUST be pending): task_create { teamName: "${teamName}", subject: "...", owner: "<member>", blockedBy: ["1","2"], related?: ["3"], startImmediately: false }`,
+      `- Link dependency: task_link { teamName: "${teamName}", taskId: "<id>", targetId: "<targetId>", relationship: "blocked-by" }`,
+      `- Link related: task_link { teamName: "${teamName}", taskId: "<id>", targetId: "<targetId>", relationship: "related" }`,
+      `- Unlink: task_unlink { teamName: "${teamName}", taskId: "<id>", targetId: "<targetId>", relationship: "blocked-by" }`,
       ``,
       `Attachment storage modes (IMPORTANT):`,
       `- Default is copy (safe, robust).`,
-      `- Use --mode link to try a hardlink (no duplication). It may fall back to copy unless you add --no-fallback.`,
+      `- Use mode: "link" to try a hardlink (no duplication). It may fall back to copy unless you disable fallback.`,
       ``,
       `Dependency guidelines:`,
-      `- Use --blocked-by when a task cannot start until another is done.`,
-      `- If you set --blocked-by, create the task in pending (use --status pending). Do NOT put blocked tasks into in_progress.`,
-      `- Use --related to link related work (e.g. frontend + backend) without blocking.`,
-      `- Review tasks: Prefer NOT creating a separate "review task". Reviews apply to the work task (#X) via: review approve/request-changes #X.`,
-      `  - If you must create a separate review reminder/assignment task, keep it pending and link it to #X with --related (and optionally --blocked-by #X if it truly cannot start yet).`,
+      `- Use blockedBy when a task cannot start until another is done.`,
+      `- If you set blockedBy, create the task in pending (for example with startImmediately: false). Do NOT put blocked tasks into in_progress.`,
+      `- Use related to link related work (e.g. frontend + backend) without blocking.`,
+      `- Review tasks: Prefer NOT creating a separate "review task". Reviews apply to the work task (#X) via review_approve/review_request_changes on #X.`,
+      `  - If you must create a separate review reminder/assignment task, keep it pending and link it to #X with related (and optionally blockedBy #X if it truly cannot start yet).`,
       `  - Dependencies do not auto-start tasks; the owner must explicitly start it when ready.`,
       `- Avoid over-specifying. Only add dependencies when execution order matters.`,
       ``,
       `Notification policy:`,
-      `- The --notify flag sends the assignment to the member automatically, so do NOT send a separate SendMessage for the same task.`,
+      `- Task assignment notifications are handled by the board runtime, so do NOT send a separate SendMessage for the same assignment unless you have extra context that is not already on the task.`,
       ``,
       `Clarification handling (CRITICAL — MANDATORY for correct task board state):`,
       `- When a teammate needs clarification (needsClarification: "lead"), reply via task comment (preferred — auto-clears the flag) or SendMessage.`,
       `- If you reply via SendMessage instead of task comment, also clear the flag manually:`,
-      `  node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task set-clarification <taskId> clear --from "${leadName}"`,
+      `  task_set_clarification { teamName: "${teamName}", taskId: "<taskId>", value: "clear" }`,
       `- If you cannot answer and the user needs to decide — ESCALATION PROTOCOL:`,
-      `  1) FIRST, set the flag to "user" via Bash (this updates the task board):`,
-      `     node "$HOME/.claude/tools/teamctl.js" --team "${teamName}" task set-clarification <taskId> user --from "${leadName}"`,
+      `  1) FIRST, set the flag to "user" via MCP tool task_set_clarification (this updates the task board):`,
+      `     { teamName: "${teamName}", taskId: "<taskId>", value: "user" }`,
       `  2) THEN, send a message to "user" explaining the question.`,
       `  3) THEN, reply to the teammate telling them to wait.`,
-      `  IMPORTANT: Always run the Bash command BEFORE sending messages. Without the flag, the task board won't show that the task is blocked waiting for user input.`,
+      `  IMPORTANT: Always update the task board BEFORE sending messages. Without the flag, the task board won't show that the task is blocked waiting for user input.`,
     ].join('\n')
   );
 }
 
 /**
- * Builds the durable lead context — constraints, communication protocol, teamctl ops,
+ * Builds the durable lead context — constraints, communication protocol, board MCP ops,
  * and agent block policy — that must survive context compaction.
  *
  * Used by: buildProvisioningPrompt, buildLaunchPrompt, and post-compact reinjection.
@@ -630,7 +631,7 @@ Constraints:
 - Use the team task board for assigned/substantial work.
 - DELEGATION-FIRST (behavior rule for ALL future turns): When "user" gives you work, your top priority is to (a) decompose into tasks, (b) create tasks on the team board, (c) assign them to teammates, and (d) SendMessage "user" a short confirmation (task IDs + owners). Do NOT start implementing yourself unless the team is truly in SOLO MODE (no teammates).
 - TaskCreate is optional for private planning only; do NOT use it for team-board tasks.
-- When messaging "user" (the human): NEVER mention teamctl.js, internal scripts, CLI commands, or file paths under ~/.claude/. The user sees messages in the UI — write plain human language. If a task needs a status update, do it yourself via Bash; never ask the user to run a command.${soloConstraint}
+- When messaging "user" (the human): NEVER mention internal MCP tools, scripts, CLI commands, or file paths under ~/.claude/. The user sees messages in the UI — write plain human language. If a task needs a status update, do it yourself via the board MCP tools; never ask the user to run a command.${soloConstraint}
 
 ${teamCtlOps}
 
@@ -650,9 +651,9 @@ function buildAgentBlockUsagePolicy(): string {
 - Humans can see teammate inbox messages and coordination text in the UI.
 - Keep normal reasoning, decisions, and user-facing communication OUTSIDE agent-only blocks.
 - Any internal operational instructions about tooling/scripts MUST be hidden inside an agent-only block, including:
-  - how to use internal scripts (e.g. teamctl.js), exact CLI commands, flags (e.g. --notify)
-  - review command phrases like "review approve <id>" / "review request-changes <id>"
-  - internal file paths under ~/.claude/ (tools, teams, tasks, kanban state, etc.)
+  - how to use internal MCP tools, exact tool names, and argument shapes
+  - review command phrases like "review_approve" / "review_request_changes"
+  - internal file paths under ~/.claude/ (teams, tasks, kanban state, etc.)
   - meta coordination lines like "All teammates are online and have received their assignments via --notify."
 - Use an agent-only fenced block (AGENT_BLOCK_OPEN / AGENT_BLOCK_CLOSE):
   - AGENT_BLOCK_OPEN is exactly: ${AGENT_BLOCK_OPEN}
@@ -664,10 +665,10 @@ ${AGENT_BLOCK_OPEN}
 ${AGENT_BLOCK_CLOSE}
 - Put ONLY the internal instructions inside the agent-only block.
 - CRITICAL: Messages to "user" (the human) must NEVER contain agent-only blocks. Write them as plain readable text — the human sees these messages directly in the UI. Agent-only blocks are stripped before display, so a message containing ONLY an agent-only block will appear completely empty.
-- CRITICAL: Messages to "user" must NEVER mention internal tooling, scripts, or CLI commands — not even in plain text. The user interacts through the UI, NOT the terminal. Specifically, NEVER include in user-facing messages:
-  - teamctl.js commands or references
-  - any node/bash commands (e.g. node "$HOME/.claude/tools/...")
-  - internal file paths (~/.claude/tools/, ~/.claude/teams/, etc.)
+- CRITICAL: Messages to "user" must NEVER mention internal tooling, MCP tools, scripts, or CLI commands — not even in plain text. The user interacts through the UI, NOT the terminal. Specifically, NEVER include in user-facing messages:
+  - internal MCP tool names or argument shapes
+  - any node/bash commands
+  - internal file paths (~/.claude/teams/, etc.)
   - instructions to run commands in terminal
   Instead, describe the action in human-friendly language (e.g. "Task #6 is complete." instead of showing a command to mark it complete). If you need to update task status, do it YOURSELF — never ask the user to run a command.
 - CRITICAL: When processing relayed inbox messages, your text output is shown to the user. Do NOT wrap your entire response in an agent-only block. If you need agent-only instructions, put them in a separate block and include a brief human-readable summary outside of it (e.g. "Delegated task to carol." or "Acknowledged, no action needed.").`;
@@ -756,15 +757,15 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
    - Assign each created task to an appropriate teammate as owner (NOT to yourself), based on role/workflow and current load.
      - If ownership is unclear, pick the best default owner and note assumptions in the task description or a task comment.
    - Avoid duplicate notifications for the same assignment (one message per member per topic is enough).
-   - When tasks have natural ordering (e.g. setup → implementation → testing), use --blocked-by.
-   - If a task is blocked (uses --blocked-by), it MUST be created as pending (use --status pending). Do NOT mark blocked tasks in_progress.
+  - When tasks have natural ordering (e.g. setup -> implementation -> testing), use blockedBy relationships.
+  - If a task is blocked (uses blockedBy), it MUST be created as pending (for example with task_create + startImmediately: false). Do NOT mark blocked tasks in_progress.
      - Review guidance:
-       - Prefer NOT creating a separate “review task”. Our workflow reviews the work task itself: run review approve/request-changes on the implementation task #X.
+      - Prefer NOT creating a separate "review task". Our workflow reviews the work task itself: run review_approve/review_request_changes on the implementation task #X.
        - If you MUST create a separate review reminder/assignment task, create it as pending and link it to the work task:
-         - Use --related to connect it to #X (non-blocking link).
-         - If the review truly cannot start until #X is done, ALSO add --blocked-by #X.
-       - There is no automatic status transition when dependencies resolve — the owner must explicitly start it (task start / set-status in_progress) when ready.
-   - Use --related to connect tasks working on the same feature without blocking.`;
+        - Use related to connect it to #X (non-blocking link).
+        - If the review truly cannot start until #X is done, ALSO add blockedBy #X.
+      - There is no automatic status transition when dependencies resolve — the owner must explicitly start it (task_start / task_set_status in_progress) when ready.
+  - Use related to connect tasks working on the same feature without blocking.`;
 
   const step2Block = isSolo
     ? '2) Skip — this is a solo team with no teammates to spawn.'
@@ -880,8 +881,8 @@ function buildLaunchPrompt(
      The team has been reconnected after a restart.
      ${hasTasks ? `You have pending tasks from the previous session.` : 'You have no pending tasks currently.'}
 
-     Your FIRST action: run this command to get your full task briefing with descriptions and comments:
-     node "$HOME/.claude/tools/teamctl.js" --team "${request.teamName}" task briefing --for "${m.name}"
+     Your FIRST action: call MCP tool task_briefing with:
+     { teamName: "${request.teamName}", memberName: "${m.name}" }
      Then resume in_progress tasks first, then pending tasks.
      If you have no tasks, wait for new assignments.`;
       })
@@ -901,7 +902,7 @@ ${processRegistration}
    Per-member spawn instructions:
 ${memberSpawnInstructions}
 
-3) After spawning all members, check the task board. If any pending tasks are unassigned, assign them to appropriate members using teamctl.`;
+3) After spawning all members, check the task board. If any pending tasks are unassigned, assign them to appropriate members using the board MCP tools.`;
   }
 
   const persistentContext = buildPersistentLeadContext({
@@ -1070,7 +1071,8 @@ export class TeamProvisioningService {
     private readonly configReader: TeamConfigReader = new TeamConfigReader(),
     private readonly inboxReader: TeamInboxReader = new TeamInboxReader(),
     private readonly membersMetaStore: TeamMembersMetaStore = new TeamMembersMetaStore(),
-    private readonly sentMessagesStore: TeamSentMessagesStore = new TeamSentMessagesStore()
+    private readonly sentMessagesStore: TeamSentMessagesStore = new TeamSentMessagesStore(),
+    private readonly mcpConfigBuilder: TeamMcpConfigBuilder = new TeamMcpConfigBuilder()
   ) {}
 
   getClaudeLogs(
@@ -1811,6 +1813,7 @@ export class TeamProvisioningService {
       const prompt = buildProvisioningPrompt(request);
       let child: ReturnType<typeof spawn>;
       const { env: shellEnv } = await this.buildProvisioningEnv();
+      const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile();
       const spawnArgs = [
         '--input-format',
         'stream-json',
@@ -1819,6 +1822,9 @@ export class TeamProvisioningService {
         '--verbose',
         '--setting-sources',
         'user,project,local',
+        '--strict-mcp-config',
+        '--mcp-config',
+        mcpConfigPath,
         '--disallowedTools',
         'TeamDelete,TodoWrite',
         ...(request.skipPermissions !== false ? ['--dangerously-skip-permissions'] : []),
@@ -2139,6 +2145,7 @@ export class TeamProvisioningService {
       );
       let child: ReturnType<typeof spawn>;
       const { env: shellEnv } = await this.buildProvisioningEnv();
+      const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile();
       const launchArgs = [
         '--input-format',
         'stream-json',
@@ -2147,6 +2154,9 @@ export class TeamProvisioningService {
         '--verbose',
         '--setting-sources',
         'user,project,local',
+        '--strict-mcp-config',
+        '--mcp-config',
+        mcpConfigPath,
         '--disallowedTools',
         'TeamDelete,TodoWrite',
         ...(request.skipPermissions !== false ? ['--dangerously-skip-permissions'] : []),
@@ -2476,7 +2486,7 @@ export class TeamProvisioningService {
         `If action is required, delegate via task creation or SendMessage, and keep responses minimal.`,
         `IMPORTANT: Your text response here is shown to the user. Always include a brief human-readable summary (e.g. "Delegated to carol." or "No action needed."). Do NOT respond with only an agent-only block.`,
         AGENT_BLOCK_OPEN,
-        `Internal note: for task assignments, prefer teamctl.js task create --notify (avoid sending a separate SendMessage for the same assignment).`,
+        `Internal note: for task assignments, prefer task_create and rely on the board/runtime notification path instead of sending a separate SendMessage for the same assignment.`,
         AGENT_BLOCK_CLOSE,
         ``,
         `Messages:`,
@@ -3298,7 +3308,7 @@ export class TeamProvisioningService {
 
   /**
    * Injects a post-compact context reminder into the lead process via stdin.
-   * Reinjects durable lead rules (constraints, communication protocol, teamctl ops)
+   * Reinjects durable lead rules (constraints, communication protocol, board MCP ops)
    * plus a fresh task board snapshot so the lead recovers full operational context
    * after context compaction.
    *

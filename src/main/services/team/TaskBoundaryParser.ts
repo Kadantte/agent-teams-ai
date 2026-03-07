@@ -31,6 +31,7 @@ interface ToolUseInfo {
 
 /** Regex для teamctl task команд */
 const TEAMCTL_TASK_REGEX = /task\s+(start|complete|set-status)\s+(\d+)/;
+const MCP_TASK_BOUNDARY_TOOLS = new Set(['task_start', 'task_complete', 'task_set_status']);
 
 export class TaskBoundaryParser {
   private cache = new Map<string, BoundaryCacheEntry>();
@@ -56,7 +57,7 @@ export class TaskBoundaryParser {
     const boundaries: TaskBoundary[] = [];
     const allToolUsesByLine = new Map<number, ToolUseInfo[]>();
     let lineNumber = 0;
-    let detectedMechanism: 'TaskUpdate' | 'teamctl' | 'none' = 'none';
+    let detectedMechanism: 'TaskUpdate' | 'teamctl' | 'mcp' | 'none' = 'none';
 
     try {
       const stream = createReadStream(filePath, { encoding: 'utf8' });
@@ -93,6 +94,13 @@ export class TaskBoundaryParser {
           if (taskUpdateBounds.length > 0) {
             detectedMechanism = 'TaskUpdate';
             boundaries.push(...taskUpdateBounds);
+            continue;
+          }
+
+          const mcpBounds = this.extractMcpTaskBoundaries(content, lineNumber, timestamp);
+          if (mcpBounds.length > 0) {
+            detectedMechanism = 'mcp';
+            boundaries.push(...mcpBounds);
             continue;
           }
 
@@ -198,6 +206,62 @@ export class TaskBoundaryParser {
           lineNumber,
           timestamp,
           mechanism: 'TaskUpdate',
+          toolUseId,
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Find MCP task tools that mark task boundaries.
+   */
+  private extractMcpTaskBoundaries(
+    content: unknown[],
+    lineNumber: number,
+    timestamp: string
+  ): TaskBoundary[] {
+    const results: TaskBoundary[] = [];
+
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue;
+      const b = block as Record<string, unknown>;
+      if (b.type !== 'tool_use') continue;
+
+      const rawName = typeof b.name === 'string' ? b.name : '';
+      const toolName = rawName.replace(/^proxy_/, '');
+      if (!MCP_TASK_BOUNDARY_TOOLS.has(toolName)) continue;
+
+      const input = b.input as Record<string, unknown> | undefined;
+      if (!input) continue;
+
+      const rawTaskId = input.taskId;
+      const taskId =
+        typeof rawTaskId === 'string'
+          ? rawTaskId
+          : typeof rawTaskId === 'number'
+            ? String(rawTaskId)
+            : '';
+      if (!taskId) continue;
+
+      let event: 'start' | 'complete' | null = null;
+      if (toolName === 'task_start') event = 'start';
+      else if (toolName === 'task_complete') event = 'complete';
+      else {
+        const status = typeof input.status === 'string' ? input.status : '';
+        if (status === 'in_progress') event = 'start';
+        else if (status === 'completed') event = 'complete';
+      }
+
+      if (event) {
+        const toolUseId = typeof b.id === 'string' ? b.id : undefined;
+        results.push({
+          taskId,
+          event,
+          lineNumber,
+          timestamp,
+          mechanism: 'mcp',
           toolUseId,
         });
       }

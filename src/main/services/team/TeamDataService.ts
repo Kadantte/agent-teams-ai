@@ -25,7 +25,6 @@ import * as path from 'path';
 import { gitIdentityResolver } from '../parsing/GitIdentityResolver';
 
 import { atomicWriteAsync } from './atomicWrite';
-import { TeamAgentToolsInstaller } from './TeamAgentToolsInstaller';
 import { TeamConfigReader } from './TeamConfigReader';
 import { TeamInboxReader } from './TeamInboxReader';
 import { TeamInboxWriter } from './TeamInboxWriter';
@@ -85,7 +84,7 @@ export class TeamDataService {
     private readonly taskWriter: TeamTaskWriter = new TeamTaskWriter(),
     private readonly memberResolver: TeamMemberResolver = new TeamMemberResolver(),
     private readonly kanbanManager: TeamKanbanManager = new TeamKanbanManager(),
-    private readonly toolsInstaller: TeamAgentToolsInstaller = new TeamAgentToolsInstaller(),
+    _legacyToolsInstaller: unknown = null,
     private readonly membersMetaStore: TeamMembersMetaStore = new TeamMembersMetaStore(),
     private readonly sentMessagesStore: TeamSentMessagesStore = new TeamSentMessagesStore()
   ) {}
@@ -892,8 +891,6 @@ export class TeamDataService {
 
         // Skip inbox notification when lead assigns a task to themselves (solo teams)
         if (!this.isLeadOwner(request.owner, leadName)) {
-          const toolPath = await this.toolsInstaller.ensureInstalled();
-
           // Build notification with full context — inbox is the primary delivery
           // channel to agents (Claude Code monitors inbox via fs.watch)
           const parts = [`New task assigned to you: #${task.id} "${task.subject}".`];
@@ -908,9 +905,9 @@ export class TeamDataService {
 
           parts.push(
             `\n${AGENT_BLOCK_OPEN}`,
-            `Update task status using:`,
-            `node "${toolPath}" --team ${teamName} task start ${task.id}`,
-            `node "${toolPath}" --team ${teamName} task complete ${task.id}`,
+            `Update task status using the board MCP tools:`,
+            `task_start { teamName: "${teamName}", taskId: "${task.id}" }`,
+            `task_complete { teamName: "${teamName}", taskId: "${task.id}" }`,
             AGENT_BLOCK_CLOSE
           );
 
@@ -948,15 +945,14 @@ export class TeamDataService {
 
         // Skip inbox notification when lead starts their own task (solo teams)
         if (!this.isLeadOwner(task.owner, leadName)) {
-          const toolPath = await this.toolsInstaller.ensureInstalled();
           const parts = [`Task #${task.id} "${task.subject}" has been started.`];
           if (task.description?.trim()) {
             parts.push(`\nDetails:\n${task.description.trim()}`);
           }
           parts.push(
             `\n${AGENT_BLOCK_OPEN}`,
-            `Update task status using:`,
-            `node "${toolPath}" --team ${teamName} task complete ${task.id}`,
+            `Update task status using the board MCP tools:`,
+            `task_complete { teamName: "${teamName}", taskId: "${task.id}" }`,
             AGENT_BLOCK_CLOSE
           );
           await this.sendMessage(teamName, {
@@ -1104,9 +1100,8 @@ export class TeamDataService {
     });
 
     try {
-      const [tasks, toolPath, config] = await Promise.all([
+      const [tasks, config] = await Promise.all([
         this.taskReader.getTasks(teamName),
-        this.toolsInstaller.ensureInstalled(),
         this.configReader.getConfig(teamName).catch(() => null),
       ]);
       const task = tasks.find((t) => t.id === taskId);
@@ -1123,8 +1118,8 @@ export class TeamDataService {
         const parts = [
           `Comment on task #${taskId} "${task.subject}":\n\n${text}`,
           `\n${AGENT_BLOCK_OPEN}`,
-          `Reply to this comment using:`,
-          `node "${toolPath}" --team ${teamName} task comment ${taskId} --text "<your reply>" --from "<your-name>"`,
+          `Reply to this comment using MCP tool task_add_comment:`,
+          `{ teamName: "${teamName}", taskId: "${taskId}", text: "<your reply>", from: "<your-name>" }`,
           AGENT_BLOCK_CLOSE,
         ];
         await this.sendMessage(teamName, {
@@ -1140,8 +1135,8 @@ export class TeamDataService {
         const parts = [
           `New comment from user on your task #${taskId} "${task.subject}":\n\n${text}`,
           `\n${AGENT_BLOCK_OPEN}`,
-          `Reply to this comment using:`,
-          `node "${toolPath}" --team ${teamName} task comment ${taskId} --text "<your reply>" --from "${leadName}"`,
+          `Reply to this comment using MCP tool task_add_comment:`,
+          `{ teamName: "${teamName}", taskId: "${taskId}", text: "<your reply>", from: "${leadName}" }`,
           AGENT_BLOCK_CLOSE,
         ];
         await this.sendMessage(teamName, {
@@ -1266,20 +1261,17 @@ export class TeamDataService {
     }
 
     try {
-      const [toolPath, leadName] = await Promise.all([
-        this.toolsInstaller.ensureInstalled(),
-        this.resolveLeadName(teamName),
-      ]);
+      const leadName = await this.resolveLeadName(teamName);
       await this.sendMessage(teamName, {
         member: reviewer,
         from: leadName,
         text:
           `Please review task #${taskId}.\n\n` +
           `${AGENT_BLOCK_OPEN}\n` +
-          `When approved, move it to APPROVED:\n` +
-          `node "${toolPath}" --team ${teamName} review approve ${taskId}\n\n` +
-          `If changes are needed:\n` +
-          `node "${toolPath}" --team ${teamName} review request-changes ${taskId} --comment "..."\n` +
+          `When approved, use MCP tool review_approve:\n` +
+          `{ teamName: "${teamName}", taskId: "${taskId}", notifyOwner: true }\n\n` +
+          `If changes are needed, use MCP tool review_request_changes:\n` +
+          `{ teamName: "${teamName}", taskId: "${taskId}", comment: "..." }\n` +
           AGENT_BLOCK_CLOSE,
         summary: `Review request for #${taskId}`,
         source: 'system_notification',

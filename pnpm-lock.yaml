@@ -373,8 +373,13 @@ importers:
         specifier: ^3.1.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@25.0.7)(happy-dom@20.0.2)(terser@5.46.0)
 
+  agent-teams-controller: {}
+
   mcp-server:
     dependencies:
+      agent-teams-controller:
+        specifier: workspace:*
+        version: link:../agent-teams-controller
       fastmcp:
         specifier: ^3.34.0
         version: 3.34.0
