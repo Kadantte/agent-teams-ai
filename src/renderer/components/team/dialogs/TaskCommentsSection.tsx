@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { CopyButton } from '@renderer/components/common/CopyButton';
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
+import { CopyButton } from '@renderer/components/common/CopyButton';
 import { AnimatedHeightReveal } from '@renderer/components/team/activity/AnimatedHeightReveal';
 import { ReplyQuoteBlock } from '@renderer/components/team/activity/ReplyQuoteBlock';
 import { ImageLightbox } from '@renderer/components/team/attachments/ImageLightbox';
@@ -16,8 +16,8 @@ import { buildReplyBlock, parseMessageReply } from '@renderer/utils/agentMessage
 import { isImageMimeType } from '@renderer/utils/attachmentUtils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
-import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { MAX_TEXT_LENGTH } from '@shared/constants';
+import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { formatDistanceToNow } from 'date-fns';
 import { CheckCircle2, Eye, File, Loader2, MessageSquare, Reply, Send, X } from 'lucide-react';
 
@@ -90,20 +90,24 @@ export const TaskCommentsSection = ({
   const [replyTo, setReplyTo] = useState<{ author: string; text: string } | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COMMENTS);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
-  const knownCommentIdsRef = useRef<Set<string>>(new Set());
-  const isInitializedRef = useRef(false);
-  const prevVisibleCountRef = useRef(INITIAL_VISIBLE_COMMENTS);
+  const [knownCommentIds, setKnownCommentIds] = useState<Set<string>>(new Set());
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [prevVisibleCount, setPrevVisibleCount] = useState(INITIAL_VISIBLE_COMMENTS);
 
-  // Reset local UI state when team/task changes.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync on prop change
+  // Reset local UI state when team/task changes using the
+  // "adjust state during render" pattern (no effect needed).
+  // See: https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const resetKey = `${teamName}:${taskId}`;
+  const [prevResetKey, setPrevResetKey] = useState(resetKey);
+  if (resetKey !== prevResetKey) {
+    setPrevResetKey(resetKey);
     setVisibleCount(INITIAL_VISIBLE_COMMENTS);
     setReplyTo(null);
     setPreviewImageUrl(null);
-    knownCommentIdsRef.current = new Set();
-    isInitializedRef.current = false;
-    prevVisibleCountRef.current = INITIAL_VISIBLE_COMMENTS;
-  }, [teamName, taskId]);
+    setKnownCommentIds(new Set());
+    setIsInitialized(false);
+    setPrevVisibleCount(INITIAL_VISIBLE_COMMENTS);
+  }
 
   const draft = useDraftPersistence({ key: `taskComment:${teamName}:${taskId}` });
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
@@ -131,32 +135,39 @@ export const TaskCommentsSection = ({
     [visibleComments]
   );
 
-  const isPaginationExpansion =
-    isInitializedRef.current && visibleCount > prevVisibleCountRef.current;
+  // Detect new comments and track known IDs using the "adjust state during render"
+  // pattern to avoid both ref-reads-during-render and setState-in-effect.
+  // See: https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const [prevVisibleCommentIds, setPrevVisibleCommentIds] = useState(visibleCommentIds);
+  let newCommentIds = new Set<string>();
 
-  const newCommentIds = useMemo(() => {
-    if (!isInitializedRef.current || isPaginationExpansion) {
-      return new Set<string>();
-    }
+  if (visibleCommentIds !== prevVisibleCommentIds) {
+    setPrevVisibleCommentIds(visibleCommentIds);
 
-    const next = new Set<string>();
-    for (const id of visibleCommentIds) {
-      if (!knownCommentIdsRef.current.has(id)) {
-        next.add(id);
+    const isPaginationExpansion = isInitialized && visibleCount > prevVisibleCount;
+
+    if (isInitialized && !isPaginationExpansion) {
+      const next = new Set<string>();
+      for (const id of visibleCommentIds) {
+        if (!knownCommentIds.has(id)) {
+          next.add(id);
+        }
       }
+      newCommentIds = next;
     }
-    return next;
-  }, [isPaginationExpansion, visibleCommentIds]);
 
-  useEffect(() => {
-    if (!isInitializedRef.current) {
-      isInitializedRef.current = true;
-    }
+    // Mark current visible IDs as known and snapshot the visible count.
+    const nextKnown = new Set(knownCommentIds);
     for (const id of visibleCommentIds) {
-      knownCommentIdsRef.current.add(id);
+      nextKnown.add(id);
     }
-    prevVisibleCountRef.current = visibleCount;
-  }, [visibleCommentIds, visibleCount]);
+    setKnownCommentIds(nextKnown);
+    setPrevVisibleCount(visibleCount);
+
+    if (!isInitialized) {
+      setIsInitialized(true);
+    }
+  }
 
   const mentionSuggestions = useMemo<MentionSuggestion[]>(
     () =>

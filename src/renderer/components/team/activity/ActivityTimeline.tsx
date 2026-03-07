@@ -1,15 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 
-import { AnimatedHeightReveal } from './AnimatedHeightReveal';
 import { ActivityItem, isNoiseMessage } from './ActivityItem';
+import { AnimatedHeightReveal } from './AnimatedHeightReveal';
 import { findNewestMessageIndex, resolveTimelineCollapseState } from './collapseState';
 import { groupTimelineItems, isLeadThought, LeadThoughtsGroupRow } from './LeadThoughtsGroup';
 
-import type { TimelineItem } from './LeadThoughtsGroup';
 import type { ActivityCollapseState } from './collapseState';
+import type { TimelineItem } from './LeadThoughtsGroup';
 import type { InboxMessage, ResolvedTeamMember } from '@shared/types';
 
 interface ActivityTimelineProps {
@@ -40,6 +40,59 @@ interface ActivityTimelineProps {
 
 const VIEWPORT_THRESHOLD = 0.15;
 const MESSAGES_PAGE_SIZE = 30;
+
+// --- New-item animation tracking via reducer ---
+// Using a reducer allows us to compute newItemKeys and update knownKeys atomically,
+// avoiding both ref reads during render and setState calls in effects.
+
+interface AnimationState {
+  knownKeys: Set<string>;
+  newItemKeys: Set<string>;
+  isInitialized: boolean;
+  prevVisibleCount: number;
+}
+
+interface AnimationAction {
+  type: 'sync';
+  timelineItemKeys: string[];
+  visibleCount: number;
+}
+
+function animationReducer(state: AnimationState, action: AnimationAction): AnimationState {
+  const { timelineItemKeys, visibleCount } = action;
+  const isPaginationExpansion = state.isInitialized && visibleCount > state.prevVisibleCount;
+
+  let newItemKeys: Set<string>;
+  if (!state.isInitialized || isPaginationExpansion) {
+    newItemKeys = new Set<string>();
+  } else {
+    newItemKeys = new Set<string>();
+    for (const key of timelineItemKeys) {
+      if (!state.knownKeys.has(key)) {
+        newItemKeys.add(key);
+      }
+    }
+  }
+
+  const nextKnownKeys = new Set(state.knownKeys);
+  for (const key of timelineItemKeys) {
+    nextKnownKeys.add(key);
+  }
+
+  return {
+    knownKeys: nextKnownKeys,
+    newItemKeys,
+    isInitialized: true,
+    prevVisibleCount: visibleCount,
+  };
+}
+
+const INITIAL_ANIMATION_STATE: AnimationState = {
+  knownKeys: new Set<string>(),
+  newItemKeys: new Set<string>(),
+  isInitialized: false,
+  prevVisibleCount: MESSAGES_PAGE_SIZE,
+};
 
 const MessageRowWithObserver = ({
   message,
@@ -145,10 +198,8 @@ export const ActivityTimeline = ({
 }: ActivityTimelineProps): React.JSX.Element => {
   const [visibleCount, setVisibleCount] = useState(MESSAGES_PAGE_SIZE);
 
-  // --- New-message animation tracking ---
-  const knownKeysRef = useRef<Set<string>>(new Set<string>());
-  const isInitializedRef = useRef(false);
-  const prevVisibleCountRef = useRef(visibleCount);
+  // --- New-message animation tracking via reducer ---
+  const [animationState, dispatchAnimation] = useReducer(animationReducer, INITIAL_ANIMATION_STATE);
 
   const colorMap = members ? buildMemberColorMap(members) : new Map<string, string>();
   const memberInfo = new Map<string, { role?: string; color?: string }>();
@@ -243,32 +294,13 @@ export const ActivityTimeline = ({
     return timelineItems.map(getItemKey);
   }, [timelineItems]);
 
-  const isPaginationExpansion =
-    isInitializedRef.current && visibleCount > prevVisibleCountRef.current;
-
-  const newItemKeys = useMemo(() => {
-    if (!isInitializedRef.current || isPaginationExpansion) {
-      return new Set<string>();
-    }
-
-    const newKeys = new Set<string>();
-    for (const key of timelineItemKeys) {
-      if (!knownKeysRef.current.has(key)) {
-        newKeys.add(key);
-      }
-    }
-    return newKeys;
-  }, [isPaginationExpansion, timelineItemKeys]);
-
+  // Sync animation state whenever timeline keys or visible count changes.
+  // The reducer atomically computes newItemKeys and updates knownKeys.
   useEffect(() => {
-    if (!isInitializedRef.current) {
-      isInitializedRef.current = true;
-    }
-    for (const key of timelineItemKeys) {
-      knownKeysRef.current.add(key);
-    }
-    prevVisibleCountRef.current = visibleCount;
+    dispatchAnimation({ type: 'sync', timelineItemKeys, visibleCount });
   }, [timelineItemKeys, visibleCount]);
+
+  const { newItemKeys } = animationState;
 
   const handleShowMore = (): void => {
     setVisibleCount((prev) => prev + MESSAGES_PAGE_SIZE);
@@ -277,15 +309,6 @@ export const ActivityTimeline = ({
   const handleShowAll = (): void => {
     setVisibleCount(Infinity);
   };
-
-  if (messages.length === 0) {
-    return (
-      <div className="rounded-md border border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
-        <p>No messages</p>
-        <p className="mt-1 text-[11px]">Send a message to a member to see activity.</p>
-      </div>
-    );
-  }
 
   const getItemSessionId = (item: TimelineItem): string | undefined =>
     item.type === 'lead-thoughts'
@@ -320,6 +343,15 @@ export const ActivityTimeline = ({
       }),
     [allCollapsed, newestMessageIndex, pinnedThoughtGroup, expandOverrides, onToggleExpandOverride]
   );
+
+  if (messages.length === 0) {
+    return (
+      <div className="rounded-md border border-[var(--color-border)] p-3 text-xs text-[var(--color-text-muted)]">
+        <p>No messages</p>
+        <p className="mt-1 text-[11px]">Send a message to a member to see activity.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-1">
