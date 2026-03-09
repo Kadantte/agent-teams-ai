@@ -22,6 +22,7 @@ import {
   parseStructuredAgentMessage,
 } from '@renderer/utils/agentMessageFormatting';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
+import { linkifyMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import {
   CROSS_TEAM_SENT_SOURCE,
@@ -197,28 +198,6 @@ export function linkifyTaskIdsInMarkdown(text: string): string {
   return text.replace(/#([A-Za-z0-9-]+)\b/g, '[#$1](task://$1)');
 }
 
-/**
- * Convert `@memberName` in plain text to markdown links with mention:// protocol.
- * Encodes color in the URL so MarkdownViewer can render colored badges without extra context.
- * Greedy match: longer names are tried first to avoid partial matches.
- */
-export function linkifyMentionsInMarkdown(
-  text: string,
-  memberColorMap: Map<string, string>
-): string {
-  if (memberColorMap.size === 0) return text;
-  // Sort by name length descending for greedy matching
-  const names = [...memberColorMap.keys()].sort((a, b) => b.length - a.length);
-  // Build regex that matches @name at start or after whitespace, followed by boundary
-  const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const pattern = new RegExp(`(^|\\s)@(${escaped.join('|')})(?=[\\s,.:;!?)\\]}-]|$)`, 'gi');
-  return text.replace(pattern, (match, prefix: string, name: string) => {
-    // Find the canonical name (case-insensitive lookup)
-    const canonical = names.find((n) => n.toLowerCase() === name.toLowerCase()) ?? name;
-    const color = memberColorMap.get(canonical) ?? '';
-    return `${prefix}[@${canonical}](mention://${encodeURIComponent(color)}/${encodeURIComponent(canonical)})`;
-  });
-}
 /** Render `#<task-display-id>` in plain text as clickable inline elements with TaskTooltip. */
 function linkifyTaskIds(text: string, onClick: (taskId: string) => void): React.ReactNode[] {
   return text.split(/(#[A-Za-z0-9-]+\b)/g).map((part, i) => {

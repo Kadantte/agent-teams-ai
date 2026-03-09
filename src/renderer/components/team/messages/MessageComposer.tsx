@@ -25,12 +25,7 @@ import {
 } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
-import type {
-  AttachmentPayload,
-  LeadContextUsage,
-  ResolvedTeamMember,
-  SendMessageResult,
-} from '@shared/types';
+import type { AttachmentPayload, ResolvedTeamMember, SendMessageResult } from '@shared/types';
 
 interface MessageComposerProps {
   teamName: string;
@@ -47,58 +42,6 @@ interface MessageComposerProps {
   ) => void;
   onCrossTeamSend?: (toTeam: string, text: string, summary?: string) => void;
 }
-
-/** Circular progress indicator for lead context usage. */
-const _ContextRing = ({ ctx }: { ctx: LeadContextUsage }): React.JSX.Element => {
-  const size = 26;
-  const stroke = 2.5;
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const pct = Math.min(ctx.percent, 100);
-  const offset = circumference - (pct / 100) * circumference;
-  const color = pct > 90 ? '#ef4444' : pct > 70 ? '#f59e0b' : '#3b82f6';
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div
-          className="relative flex shrink-0 cursor-default items-center justify-center"
-          style={{ width: size, height: size }}
-        >
-          <svg width={size} height={size} className="-rotate-90">
-            <circle
-              cx={size / 2}
-              cy={size / 2}
-              r={radius}
-              fill="none"
-              stroke="var(--color-border)"
-              strokeWidth={stroke}
-            />
-            <circle
-              cx={size / 2}
-              cy={size / 2}
-              r={radius}
-              fill="none"
-              stroke={color}
-              strokeWidth={stroke}
-              strokeDasharray={circumference}
-              strokeDashoffset={offset}
-              strokeLinecap="round"
-              className="transition-all duration-500"
-            />
-          </svg>
-          <span className="absolute text-[8px] font-medium" style={{ color }}>
-            {Math.round(pct)}
-          </span>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="top">
-        Context: {Math.round(pct)}% ({(ctx.currentTokens / 1000).toFixed(1)}k /{' '}
-        {(ctx.contextWindow / 1000).toFixed(0)}k tokens)
-      </TooltipContent>
-    </Tooltip>
-  );
-};
 
 export const MessageComposer = ({
   teamName,
@@ -140,8 +83,12 @@ export const MessageComposer = ({
   );
 
   const isCrossTeam = selectedTeam !== null;
-  const targetDisplayName =
-    crossTeamTargets.find((t) => t.teamName === selectedTeam)?.displayName ?? selectedTeam;
+  const selectedTarget = crossTeamTargets.find((t) => t.teamName === selectedTeam);
+  const targetDisplayName = selectedTarget?.displayName ?? selectedTeam;
+  const selectedTargetColor = selectedTarget?.color;
+  const crossTeamHintText = isCrossTeam
+    ? 'Tip: Cross-team messages go to the target team lead. If you want the reply to come back to your team lead instead of you, say that explicitly in the message.'
+    : undefined;
 
   // Members load async with team data; keep recipient stable if valid, otherwise default to lead/first.
   useEffect(() => {
@@ -156,6 +103,7 @@ export const MessageComposer = ({
   }, [members, recipient]);
 
   const projectPath = useStore((s) => s.selectedTeamData?.config.projectPath ?? null);
+  const currentTeamColor = useStore((s) => s.selectedTeamData?.config.color ?? undefined);
   const isProvisioning = useStore((s) =>
     Object.values(s.provisioningRuns).some(
       (run) =>
@@ -421,11 +369,26 @@ export const MessageComposer = ({
                 >
                   {isCrossTeam ? (
                     <>
-                      <ArrowRightLeft size={11} className="shrink-0" />
+                      {selectedTargetColor ? (
+                        <span
+                          className="inline-block size-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: selectedTargetColor }}
+                        />
+                      ) : (
+                        <ArrowRightLeft size={11} className="shrink-0" />
+                      )}
                       <span className="max-w-[100px] truncate">{targetDisplayName}</span>
                     </>
                   ) : (
-                    <span className="text-[var(--color-text-secondary)]">This team</span>
+                    <>
+                      {currentTeamColor ? (
+                        <span
+                          className="inline-block size-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: currentTeamColor }}
+                        />
+                      ) : null}
+                      <span className="text-[var(--color-text-secondary)]">This team</span>
+                    </>
                   )}
                   <ChevronDown size={12} className="shrink-0 text-[var(--color-text-muted)]" />
                 </button>
@@ -444,6 +407,12 @@ export const MessageComposer = ({
                       setTeamSelectorOpen(false);
                     }}
                   >
+                    {currentTeamColor ? (
+                      <span
+                        className="inline-block size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: currentTeamColor }}
+                      />
+                    ) : null}
                     <span className="truncate text-[var(--color-text)]">This team</span>
                     <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
                       current
@@ -629,7 +598,8 @@ export const MessageComposer = ({
         minRows={2}
         maxRows={6}
         maxLength={MAX_TEXT_LENGTH}
-        disabled={sending || isProvisioning}
+        disabled={sending}
+        hintText={crossTeamHintText}
         cornerAction={
           <div className="flex items-center gap-2">
             {/* NOTE: ContextRing disabled — usage formula is inaccurate */}
@@ -645,15 +615,26 @@ export const MessageComposer = ({
               </TooltipTrigger>
               <TooltipContent side="top">Voice to text</TooltipContent>
             </Tooltip>
-            <button
-              type="button"
-              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!canSend}
-              onClick={handleSend}
-            >
-              <Send size={12} />
-              Send
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <button
+                    type="button"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!canSend}
+                    onClick={handleSend}
+                  >
+                    <Send size={12} />
+                    Send
+                  </button>
+                </span>
+              </TooltipTrigger>
+              {isProvisioning && !sending ? (
+                <TooltipContent side="top">
+                  Sending unavailable while team is launching
+                </TooltipContent>
+              ) : null}
+            </Tooltip>
           </div>
         }
         footerRight={

@@ -4,8 +4,10 @@ import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors'
 import { useTheme } from '@renderer/hooks/useTheme';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { agentAvatarUrl, getMemberDotClass, getPresenceLabel } from '@renderer/utils/memberHelpers';
-import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
+import { deriveTaskDisplayId } from '@shared/utils/taskIdentity';
 import { GitBranch, Loader2, MessageSquare, Plus } from 'lucide-react';
+
+import { CurrentTaskIndicator } from './CurrentTaskIndicator';
 
 import type { TaskStatusCounts } from '@renderer/utils/pathNormalize';
 import type { LeadActivityState, ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
@@ -102,35 +104,11 @@ export const MemberCard = ({
               </span>
             ) : null}
             {currentTask ? (
-              <>
-                <Loader2
-                  className="size-3 shrink-0 animate-spin"
-                  style={{ color: colors.border }}
-                />
-                <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
-                  working on
-                </span>
-                <button
-                  type="button"
-                  className="min-w-0 shrink truncate rounded px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text)] transition-opacity hover:opacity-90 focus:outline-none focus:ring-1 focus:ring-[var(--color-border)]"
-                  style={{ border: `1px solid ${colors.border}40` }}
-                  title="Open task"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpenTask?.();
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onOpenTask?.();
-                    }
-                  }}
-                >
-                  {formatTaskDisplayLabel(currentTask)} {currentTask.subject.slice(0, 36)}
-                  {currentTask.subject.length > 36 ? '…' : ''}
-                </button>
-              </>
+              <CurrentTaskIndicator
+                task={currentTask}
+                borderColor={colors.border}
+                onOpenTask={onOpenTask}
+              />
             ) : null}
             {!currentTask && isAwaitingReply ? (
               <>

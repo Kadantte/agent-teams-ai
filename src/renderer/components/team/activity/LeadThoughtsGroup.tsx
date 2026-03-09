@@ -14,11 +14,12 @@ import {
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useStore } from '@renderer/store';
 import { agentAvatarUrl } from '@renderer/utils/memberHelpers';
+import { linkifyMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import { formatToolSummary, parseToolSummary } from '@shared/utils/toolSummary';
 import { ChevronDown, ChevronRight, ChevronUp, Reply } from 'lucide-react';
 
-import { linkifyMentionsInMarkdown, linkifyTaskIdsInMarkdown } from './ActivityItem';
+import { linkifyTaskIdsInMarkdown } from './ActivityItem';
 import {
   AnimatedHeightReveal,
   ENTRY_REVEAL_ANIMATION_MS,

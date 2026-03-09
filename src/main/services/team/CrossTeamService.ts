@@ -26,6 +26,7 @@ export interface CrossTeamTarget {
   teamName: string;
   displayName: string;
   description?: string;
+  color?: string;
 }
 
 export class CrossTeamService {
@@ -155,6 +156,7 @@ export class CrossTeamService {
         teamName: entry,
         displayName: config.name || entry,
         description: config.description,
+        color: config.color,
       });
     }
 

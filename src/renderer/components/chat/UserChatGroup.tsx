@@ -1,10 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown';
 
 import { api } from '@renderer/api';
+import { MemberHoverCard } from '@renderer/components/team/members/MemberHoverCard';
+import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useTabUI } from '@renderer/hooks/useTabUI';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
 import { REHYPE_PLUGINS } from '@renderer/utils/markdownPlugins';
+import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
+import { linkifyMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { createLogger } from '@shared/utils/logger';
 import { format } from 'date-fns';
@@ -108,6 +113,15 @@ function highlightPaths(
 }
 
 /**
+ * Custom URL transform that preserves mention:// protocol.
+ * react-markdown strips non-standard protocols by default.
+ */
+function allowMentionProtocol(url: string): string {
+  if (url.startsWith('mention://')) return url;
+  return defaultUrlTransform(url);
+}
+
+/**
  * Creates markdown components for user bubble rendering.
  * Uses chat-user CSS variables for consistent styling and wraps
  * text-bearing elements through highlightPaths for @path tag injection
@@ -115,7 +129,8 @@ function highlightPaths(
  */
 function createUserMarkdownComponents(
   validatedPaths: Record<string, boolean>,
-  searchCtx: SearchContext | null
+  searchCtx: SearchContext | null,
+  isLight = false
 ): Components {
   const userTextColor = 'var(--chat-user-text)';
 
@@ -168,17 +183,56 @@ function createUserMarkdownComponents(
     ),
 
     // Inline elements — no hl(); parent block element's hl() descends here
-    a: ({ href, children }) => (
-      <a
-        href={href}
-        className="no-underline hover:underline"
-        style={{ color: 'var(--chat-user-tag-text)' }}
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        {children}
-      </a>
-    ),
+    // mention:// links render as colored badges with MemberHoverCard
+    a: ({ href, children }) => {
+      if (href?.startsWith('mention://')) {
+        const path = href.slice('mention://'.length);
+        const slashIdx = path.indexOf('/');
+        let color = '';
+        let memberName = '';
+        try {
+          color = slashIdx >= 0 ? decodeURIComponent(path.slice(0, slashIdx)) : '';
+          memberName = slashIdx >= 0 ? decodeURIComponent(path.slice(slashIdx + 1)) : '';
+        } catch {
+          // malformed percent-encoding
+        }
+        const colorSet = getTeamColorSet(color);
+        const bg = getThemedBadge(colorSet, isLight);
+        const badge = (
+          <span
+            style={{
+              backgroundColor: bg,
+              color: colorSet.text,
+              borderRadius: '3px',
+              boxShadow: `0 0 0 1.5px ${bg}`,
+              fontSize: 'inherit',
+              cursor: 'default',
+            }}
+          >
+            {children}
+          </span>
+        );
+        if (memberName) {
+          return (
+            <MemberHoverCard name={memberName} color={color}>
+              {badge}
+            </MemberHoverCard>
+          );
+        }
+        return badge;
+      }
+      return (
+        <a
+          href={href}
+          className="no-underline hover:underline"
+          style={{ color: 'var(--chat-user-tag-text)' }}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {children}
+        </a>
+      );
+    },
 
     strong: ({ children }) => (
       <strong className="font-semibold" style={{ color: userTextColor }}>
@@ -324,6 +378,7 @@ const UserChatGroupInner = ({ userGroup }: Readonly<UserChatGroupProps>): React.
   const { content, timestamp, id: groupId } = userGroup;
   const [isManuallyExpanded, setIsManuallyExpanded] = useState(false);
   const [validatedPaths, setValidatedPaths] = useState<Record<string, boolean>>({});
+  const { isLight } = useTheme();
 
   // Get projectPath from per-tab session data, falling back to global state
   const { tabId } = useTabUI();
@@ -331,6 +386,13 @@ const UserChatGroupInner = ({ userGroup }: Readonly<UserChatGroupProps>): React.
     const td = tabId ? s.tabSessionData[tabId] : null;
     return (td?.sessionDetail ?? s.sessionDetail)?.session?.projectPath;
   });
+
+  // Get team members for @mention highlighting
+  const members = useStore((s) => s.selectedTeamData?.members);
+  const memberColorMap = useMemo(
+    () => (members ? buildMemberColorMap(members) : new Map<string, string>()),
+    [members]
+  );
 
   // Get search state for highlighting
   const { searchQuery, searchMatches, currentSearchIndex } = useStore(
@@ -397,13 +459,13 @@ const UserChatGroupInner = ({ userGroup }: Readonly<UserChatGroupProps>): React.
 
   // Base markdown components (no search) — safe to memoize
   const userMarkdownComponentsBase = useMemo(
-    () => createUserMarkdownComponents(effectiveValidatedPaths, null),
-    [effectiveValidatedPaths]
+    () => createUserMarkdownComponents(effectiveValidatedPaths, null, isLight),
+    [effectiveValidatedPaths, isLight]
   );
   // When search is active, create fresh each render (match counter is stateful and must start at 0)
   // useMemo would cache stale closures when parent re-renders without search deps changing
   const userMarkdownComponents = searchCtx
-    ? createUserMarkdownComponents(effectiveValidatedPaths, searchCtx)
+    ? createUserMarkdownComponents(effectiveValidatedPaths, searchCtx, isLight)
     : userMarkdownComponentsBase;
 
   // Auto-expand when search is active and this message has ANY matches.
@@ -418,7 +480,13 @@ const UserChatGroupInner = ({ userGroup }: Readonly<UserChatGroupProps>): React.
   const isExpanded = isManuallyExpanded || shouldAutoExpand;
 
   // Determine display text
-  const displayText = isLongContent && !isExpanded ? stripped.slice(0, 500) + '...' : stripped;
+  const baseDisplayText = isLongContent && !isExpanded ? stripped.slice(0, 500) + '...' : stripped;
+
+  // Pre-process: convert @memberName to mention:// markdown links
+  const displayText = useMemo(
+    () => linkifyMentionsInMarkdown(baseDisplayText, memberColorMap),
+    [baseDisplayText, memberColorMap]
+  );
 
   return (
     <div className="flex justify-end">
@@ -451,6 +519,7 @@ const UserChatGroupInner = ({ userGroup }: Readonly<UserChatGroupProps>): React.
                 remarkPlugins={[remarkGfm]}
                 rehypePlugins={REHYPE_PLUGINS}
                 components={userMarkdownComponents}
+                urlTransform={allowMentionProtocol}
               >
                 {displayText}
               </ReactMarkdown>

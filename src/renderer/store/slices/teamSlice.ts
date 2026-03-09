@@ -263,6 +263,10 @@ export interface TeamSlice {
   globalTaskDetail: GlobalTaskDetailState | null;
   openGlobalTaskDetail: (teamName: string, taskId: string) => void;
   closeGlobalTaskDetail: () => void;
+  /** Set by MemberHoverCard to signal TeamDetailView to open MemberDetailDialog */
+  pendingMemberProfile: string | null;
+  openMemberProfile: (memberName: string) => void;
+  closeMemberProfile: () => void;
   /** Set by GlobalTaskDetailDialog to signal TeamDetailView to open ChangeReviewDialog */
   pendingReviewRequest: { taskId: string; filePath?: string } | null;
   setPendingReviewRequest: (req: { taskId: string; filePath?: string } | null) => void;
@@ -296,7 +300,12 @@ export interface TeamSlice {
   selectTeam: (teamName: string, opts?: { skipProjectAutoSelect?: boolean }) => Promise<void>;
   refreshTeamData: (teamName: string) => Promise<void>;
   sendTeamMessage: (teamName: string, request: SendMessageRequest) => Promise<void>;
-  crossTeamTargets: { teamName: string; displayName: string; description?: string }[];
+  crossTeamTargets: {
+    teamName: string;
+    displayName: string;
+    description?: string;
+    color?: string;
+  }[];
   crossTeamTargetsLoading: boolean;
   fetchCrossTeamTargets: () => Promise<void>;
   sendCrossTeamMessage: (request: CrossTeamSendRequest) => Promise<void>;
@@ -455,6 +464,9 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   clearProvisioningError: () => set({ provisioningError: null }),
   kanbanFilterQuery: null,
   globalTaskDetail: null,
+  pendingMemberProfile: null,
+  openMemberProfile: (memberName: string) => set({ pendingMemberProfile: memberName }),
+  closeMemberProfile: () => set({ pendingMemberProfile: null }),
   pendingReviewRequest: null,
   setPendingReviewRequest: (req) => set({ pendingReviewRequest: req }),
   openGlobalTaskDetail: (teamName: string, taskId: string) => {

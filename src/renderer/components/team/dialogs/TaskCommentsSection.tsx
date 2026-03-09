@@ -17,6 +17,7 @@ import { buildReplyBlock, parseMessageReply } from '@renderer/utils/agentMessage
 import { isImageMimeType } from '@renderer/utils/attachmentUtils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
+import { linkifyMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import { MAX_TEXT_LENGTH } from '@shared/constants';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { formatDistanceToNow } from 'date-fns';
@@ -60,19 +61,6 @@ interface TaskCommentsSectionProps {
 /** Convert `#<task-display-id>` in plain text to markdown links with task:// protocol. */
 function linkifyTaskIdsInMarkdown(text: string): string {
   return text.replace(/#([A-Za-z0-9-]+)\b/g, '[#$1](task://$1)');
-}
-
-/** Convert `@memberName` to markdown links with mention:// protocol for colored badge rendering. */
-function linkifyMentionsInMarkdown(text: string, memberColorMap: Map<string, string>): string {
-  if (memberColorMap.size === 0) return text;
-  const names = [...memberColorMap.keys()].sort((a, b) => b.length - a.length);
-  const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const pattern = new RegExp(`(^|\\s)@(${escaped.join('|')})(?=[\\s,.:;!?)\\]}-]|$)`, 'gi');
-  return text.replace(pattern, (_match, prefix: string, name: string) => {
-    const canonical = names.find((n) => n.toLowerCase() === name.toLowerCase()) ?? name;
-    const color = memberColorMap.get(canonical) ?? '';
-    return `${prefix}[@${canonical}](mention://${encodeURIComponent(color)}/${encodeURIComponent(canonical)})`;
-  });
 }
 
 export const TaskCommentsSection = ({

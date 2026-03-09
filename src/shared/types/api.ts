@@ -544,7 +544,7 @@ export interface CrossTeamAPI {
   send: (request: CrossTeamSendRequest) => Promise<CrossTeamSendResult>;
   listTargets: (
     excludeTeam?: string
-  ) => Promise<{ teamName: string; displayName: string; description?: string }[]>;
+  ) => Promise<{ teamName: string; displayName: string; description?: string; color?: string }[]>;
   getOutbox: (teamName: string) => Promise<CrossTeamMessage[]>;
 }
 

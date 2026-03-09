@@ -575,8 +575,11 @@ Communication protocol (CRITICAL — you are running headless, no one sees your 
 - Keep cross-team requests high-signal: one focused request per topic, with clear next action and desired outcome.
 - Before sending a follow-up on the same topic, check "cross_team_get_outbox" so you do not resend the same request unnecessarily.
 - If you receive a message that is clearly from another team (for example prefixed with "[${CROSS_TEAM_PREFIX_TAG} ...]"), treat it as an actionable cross-team request and respond to the originating team with "cross_team_send" when a reply, decision, or status update is needed.
+- When a cross-team request arrives, do NOT appear silent: first emit a brief plain-text status update visible in your own team's Messages/Activity (for example: "Accepted cross-team request from @other-team. Investigating and delegating now."), then do the research, task creation, or delegation work.
+- For cross-team work, your canonical progress trail should be team-visible first. Use plain text updates, task comments, and task state changes so your own team can see what is happening.
 - Do not wait silently on another team: if cross-team coordination is blocking progress, send the request promptly, then continue any useful local work that does not depend on that answer.
 - After a meaningful cross-team exchange, update the relevant task or plan context so your team retains the decision, dependency, or answer.
+- Reply to the requesting team when a concrete answer, decision, blocker, or status update is ready. Do NOT default to messaging "user" for cross-team coordination unless the human explicitly asked to be kept informed or the update is clearly human-relevant.
 - Golden format for cross-team requests: include (1) brief context, (2) the concrete ask, (3) why your team needs that team specifically, (4) the expected output or decision, and (5) any deadline or blocking impact if relevant.
 - Golden format for cross-team replies: answer the concrete ask first, then include the decision, recommendation, or status, and finally any important caveats, next steps, or handoff expectations.
 - Do NOT use cross-team messaging when your own team can answer the question locally, when no action/decision is required, when you are only thinking out loud, or when a task update belongs on your own board instead of another team's inbox.
@@ -950,8 +953,31 @@ function extractLogsTail(stdoutBuffer: string, stderrBuffer: string): string | u
   return trimmed.slice(-UI_LOGS_TAIL_LIMIT);
 }
 
+/**
+ * Builds cliLogsTail from the line-buffered claudeLogLines array instead of the
+ * byte-capped stdoutBuffer/stderrBuffer ring buffers.
+ *
+ * claudeLogLines already contains [stdout]/[stderr] markers and individual lines
+ * in chronological order (up to CLAUDE_LOG_LINES_LIMIT = 50 000 lines), so it
+ * does not suffer from the 64 KB ring-buffer truncation that causes the raw
+ * stdoutBuffer to lose older assistant messages.
+ *
+ * Falls back to the legacy extractLogsTail when claudeLogLines is empty (e.g.
+ * early in provisioning before any output has been line-split).
+ */
+function extractCliLogsFromRun(run: ProvisioningRun): string | undefined {
+  if (run.claudeLogLines.length > 0) {
+    const joined = run.claudeLogLines.join('\n').trim();
+    if (joined.length === 0) {
+      return undefined;
+    }
+    return joined.slice(-UI_LOGS_TAIL_LIMIT);
+  }
+  return extractLogsTail(run.stdoutBuffer, run.stderrBuffer);
+}
+
 function emitLogsProgress(run: ProvisioningRun): void {
-  const logsTail = extractLogsTail(run.stdoutBuffer, run.stderrBuffer);
+  const logsTail = extractCliLogsFromRun(run);
   const assistantOutput =
     run.provisioningOutputParts.length > 0 ? run.provisioningOutputParts.join('\n\n') : undefined;
 
@@ -1265,7 +1291,6 @@ export class TeamProvisioningService {
 
   private static readonly CONTEXT_EMIT_THROTTLE_MS = 2000;
   private static readonly LEAD_TEXT_EMIT_THROTTLE_MS = 2000;
-  private static readonly LEAD_TEXT_MIN_LENGTH = 30;
 
   private emitLeadContextUsage(run: ProvisioningRun): void {
     if (!run.leadContextUsage || !run.provisioningComplete) return;
@@ -1506,7 +1531,7 @@ export class TeamProvisioningService {
 
     const progress = updateProgress(run, 'failed', `${hint} failed — ${statusLabel}`, {
       error: `Claude CLI reported ${statusLabel} during startup. The team was not started.`,
-      cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+      cliLogsTail: extractCliLogsFromRun(run),
     });
     run.onProgress(progress);
 
@@ -1541,7 +1566,7 @@ export class TeamProvisioningService {
         error:
           'Claude CLI is not authenticated. Run `claude auth login` (or start `claude` and run `/login`) ' +
           'to authenticate, or set ANTHROPIC_API_KEY and try again.',
-        cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+        cliLogsTail: extractCliLogsFromRun(run),
       });
       run.onProgress(progress);
       this.cleanupRun(run);
@@ -1664,7 +1689,7 @@ export class TeamProvisioningService {
           const hint = run.isLaunch ? ' (launch)' : '';
           const progress = updateProgress(run, 'failed', `Timed out waiting for CLI${hint}`, {
             error: `Timed out waiting for CLI${hint}.`,
-            cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+            cliLogsTail: extractCliLogsFromRun(run),
           });
           run.onProgress(progress);
           this.cleanupRun(run);
@@ -1676,7 +1701,7 @@ export class TeamProvisioningService {
       const hint = run.isLaunch ? ' (launch)' : '';
       const progress = updateProgress(run, 'failed', `Failed to start Claude CLI${hint}`, {
         error: error.message,
-        cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+        cliLogsTail: extractCliLogsFromRun(run),
       });
       run.onProgress(progress);
       this.cleanupRun(run);
@@ -1947,7 +1972,7 @@ export class TeamProvisioningService {
             const progress = updateProgress(run, 'failed', 'Timed out waiting for CLI', {
               error:
                 'Timed out waiting for CLI. Run `claude` once in terminal to complete onboarding and try again.',
-              cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+              cliLogsTail: extractCliLogsFromRun(run),
             });
             run.onProgress(progress);
             this.cleanupRun(run);
@@ -1958,7 +1983,7 @@ export class TeamProvisioningService {
       child.once('error', (error) => {
         const progress = updateProgress(run, 'failed', 'Failed to start Claude CLI', {
           error: error.message,
-          cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+          cliLogsTail: extractCliLogsFromRun(run),
         });
         run.onProgress(progress);
         this.cleanupRun(run);
@@ -2310,7 +2335,7 @@ export class TeamProvisioningService {
 
             const progress = updateProgress(run, 'failed', 'Timed out waiting for CLI (launch)', {
               error: 'Timed out waiting for CLI during team launch.',
-              cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+              cliLogsTail: extractCliLogsFromRun(run),
             });
             run.onProgress(progress);
             this.cleanupRun(run);
@@ -2321,7 +2346,7 @@ export class TeamProvisioningService {
       child.once('error', (error) => {
         const progress = updateProgress(run, 'failed', 'Failed to start Claude CLI (launch)', {
           error: error.message,
-          cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+          cliLogsTail: extractCliLogsFromRun(run),
         });
         run.onProgress(progress);
         this.cleanupRun(run);
@@ -3023,19 +3048,6 @@ export class TeamProvisioningService {
     this.liveLeadProcessMessages.set(teamName, list);
   }
 
-  private removeLiveLeadProcessMessage(teamName: string, messageId: string): void {
-    const id = messageId.trim();
-    if (!id) return;
-    const list = this.liveLeadProcessMessages.get(teamName);
-    if (!list || list.length === 0) return;
-    const next = list.filter((m) => (m.messageId ?? '').trim() !== id);
-    if (next.length === 0) {
-      this.liveLeadProcessMessages.delete(teamName);
-    } else {
-      this.liveLeadProcessMessages.set(teamName, next);
-    }
-  }
-
   /**
    * Create an InboxMessage from assistant text and push it into the live cache.
    * Used for both pre-ready (provisioning) and post-ready assistant text.
@@ -3398,7 +3410,7 @@ export class TeamProvisioningService {
             'CLI reported an error during provisioning',
             {
               error: errorMsg,
-              cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+              cliLogsTail: extractCliLogsFromRun(run),
             }
           );
           run.onProgress(progress);
@@ -3998,7 +4010,7 @@ export class TeamProvisioningService {
 
       const readyMessage = 'Team launched — process alive and ready';
       const progress = updateProgress(run, 'ready', readyMessage, {
-        cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+        cliLogsTail: extractCliLogsFromRun(run),
       });
       run.onProgress(progress);
       logger.info(`[${run.teamName}] Launch complete. Process alive for subsequent tasks.`);
@@ -4067,7 +4079,7 @@ export class TeamProvisioningService {
           `TeamCreate produced config.json under a different Claude root (${configProbe.configPath}). ` +
           `This app is configured to read teams from ${configuredTeamsBasePath}. ` +
           'Align the app Claude root setting with the CLI, then retry.',
-        cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+        cliLogsTail: extractCliLogsFromRun(run),
       });
       run.onProgress(progress);
       run.processKilled = true;
@@ -4082,7 +4094,7 @@ export class TeamProvisioningService {
     await this.updateConfigPostLaunch(run.teamName, run.request.cwd, run.detectedSessionId);
 
     const progress = updateProgress(run, 'ready', 'Team provisioned — process alive and ready', {
-      cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+      cliLogsTail: extractCliLogsFromRun(run),
     });
     run.onProgress(progress);
     // NOTE: do NOT remove from activeByTeam — process stays alive
@@ -4297,7 +4309,7 @@ export class TeamProvisioningService {
           : `Team process exited unexpectedly (code ${code ?? 'unknown'})`;
       logger.info(`[${run.teamName}] ${message}`);
       const progress = updateProgress(run, 'disconnected', message, {
-        cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+        cliLogsTail: extractCliLogsFromRun(run),
       });
       run.onProgress(progress);
       this.cleanupRun(run);
@@ -4325,7 +4337,7 @@ export class TeamProvisioningService {
           `TeamCreate produced config.json under a different Claude root (${configProbe.configPath}). ` +
           `This app is configured to read teams from ${configuredTeamsBasePath}. ` +
           'Align the app Claude root setting with the CLI, then retry.',
-        cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+        cliLogsTail: extractCliLogsFromRun(run),
       });
       run.onProgress(progress);
       this.cleanupRun(run);
@@ -4362,7 +4374,7 @@ export class TeamProvisioningService {
         'Team provisioned but process is no longer alive',
         {
           warnings,
-          cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+          cliLogsTail: extractCliLogsFromRun(run),
         }
       );
       run.onProgress(progress);
@@ -4388,7 +4400,7 @@ export class TeamProvisioningService {
         : 'Team did not appear in team:list after provisioning';
       const progress = updateProgress(run, 'failed', 'Provisioning failed validation', {
         error: errorMessage,
-        cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+        cliLogsTail: extractCliLogsFromRun(run),
       });
       run.onProgress(progress);
       this.cleanupRun(run);
@@ -4398,7 +4410,7 @@ export class TeamProvisioningService {
     const errorText = buildCliExitError(code, run.stdoutBuffer, run.stderrBuffer);
     const progress = updateProgress(run, 'failed', 'Claude CLI exited with an error', {
       error: errorText,
-      cliLogsTail: extractLogsTail(run.stdoutBuffer, run.stderrBuffer),
+      cliLogsTail: extractCliLogsFromRun(run),
     });
     run.onProgress(progress);
     this.cleanupRun(run);

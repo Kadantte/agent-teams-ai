@@ -782,6 +782,17 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     setPendingReviewRequest(null);
   }, [pendingReviewRequest, selectReviewFile, setPendingReviewRequest]);
 
+  // Pick up pending member profile request from MemberHoverCard
+  const pendingMemberProfile = useStore((s) => s.pendingMemberProfile);
+  useEffect(() => {
+    if (!pendingMemberProfile || !data) return;
+    const member = data.members.find((m) => m.name === pendingMemberProfile);
+    if (member) {
+      setSelectedMember(member);
+    }
+    useStore.getState().closeMemberProfile();
+  }, [pendingMemberProfile, data]);
+
   const handleDeleteTask = useCallback(
     (taskId: string) => {
       void (async () => {
