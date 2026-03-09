@@ -634,6 +634,8 @@ export interface CrossTeamSendRequest {
   fromTeam: string;
   fromMember: string;
   toTeam: string;
+  timestamp?: string;
+  messageId?: string;
   conversationId?: string;
   replyToConversationId?: string;
   text: string;

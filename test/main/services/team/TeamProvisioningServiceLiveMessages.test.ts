@@ -422,4 +422,53 @@ describe('TeamProvisioningService pre-ready live messages', () => {
       })
     );
   });
+
+  it('upgrades qualified SendMessage recipients into cross-team sends', async () => {
+    const service = new TeamProvisioningService();
+    seedConfig('my-team');
+    const emitter = vi.fn<(event: TeamChangeEvent) => void>();
+    const crossTeamSender = vi.fn(async () => ({ deliveredToInbox: true, messageId: 'cross-1' }));
+    service.setTeamChangeEmitter(emitter);
+    service.setCrossTeamSender(crossTeamSender);
+    const run = attachRun(service, 'my-team', { provisioningComplete: true });
+
+    callHandleStreamJsonMessage(service, run, {
+      type: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          name: 'SendMessage',
+          input: {
+            type: 'message',
+            recipient: 'team-best.user',
+            content: '[Cross-team reply | conversation:conv-123] Привет!',
+            summary: 'Ответ',
+          },
+        },
+      ],
+    });
+
+    await vi.waitFor(() => {
+      expect(crossTeamSender).toHaveBeenCalledTimes(1);
+    });
+
+    expect(crossTeamSender).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromTeam: 'my-team',
+        fromMember: 'team-lead',
+        toTeam: 'team-best',
+        text: 'Привет!',
+        conversationId: 'conv-123',
+        replyToConversationId: 'conv-123',
+      })
+    );
+
+    const live = service.getLiveLeadProcessMessages('my-team');
+    expect(live).toHaveLength(1);
+    expect(live[0].source).toBe('cross_team_sent');
+    expect(live[0].to).toBe('team-best.user');
+    expect(live[0].text).toBe('Привет!');
+    expect(hoisted.sendInboxMessage).not.toHaveBeenCalled();
+    expect(hoisted.appendSentMessage).not.toHaveBeenCalled();
+  });
 });

@@ -27,6 +27,8 @@ import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import {
   CROSS_TEAM_SENT_SOURCE,
   CROSS_TEAM_SOURCE,
+  parseCrossTeamPrefix,
+  parseCrossTeamReplyPrefix,
   stripCrossTeamPrefix,
 } from '@shared/constants/crossTeam';
 import { extractMarkdownPlainText } from '@shared/utils/markdownTextSearch';
@@ -42,6 +44,19 @@ import type { TeamColorSet } from '@renderer/constants/teamColors';
 import type { InboxMessage } from '@shared/types';
 
 type StructuredMessage = Record<string, unknown>;
+
+function parseQualifiedRecipient(
+  value: string | undefined
+): { teamName: string; memberName: string } | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const dot = trimmed.indexOf('.');
+  if (dot <= 0 || dot === trimmed.length - 1) return null;
+  return {
+    teamName: trimmed.slice(0, dot),
+    memberName: trimmed.slice(dot + 1),
+  };
+}
 
 interface ActivityItemProps {
   message: InboxMessage;
@@ -259,24 +274,36 @@ export const ActivityItem = ({
   const isManaged = isManagedCollapseState(collapseState);
   const isExpanded = isManaged ? !collapseState.isCollapsed : true;
 
-  const isCrossTeam = message.source === CROSS_TEAM_SOURCE;
-  const isCrossTeamSent = message.source === CROSS_TEAM_SENT_SOURCE;
+  const parsedCrossTeamPrefix = useMemo(() => parseCrossTeamPrefix(message.text), [message.text]);
+  const parsedCrossTeamReplyPrefix = useMemo(
+    () => parseCrossTeamReplyPrefix(message.text),
+    [message.text]
+  );
+  const qualifiedRecipient = useMemo(() => parseQualifiedRecipient(message.to), [message.to]);
+  const isCrossTeam = message.source === CROSS_TEAM_SOURCE || parsedCrossTeamPrefix !== null;
+  const isCrossTeamSent =
+    message.source === CROSS_TEAM_SENT_SOURCE ||
+    parsedCrossTeamReplyPrefix !== null ||
+    (qualifiedRecipient?.teamName !== undefined && qualifiedRecipient.teamName !== teamName);
   const isCrossTeamAny = isCrossTeam || isCrossTeamSent;
   const crossTeamOrigin = useMemo(() => {
     if (!isCrossTeam) return null;
-    const dot = message.from.indexOf('.');
-    if (dot <= 0 || dot === message.from.length - 1) return null;
+    const fromValue = parsedCrossTeamPrefix?.from ?? message.from;
+    const dot = fromValue.indexOf('.');
+    if (dot <= 0 || dot === fromValue.length - 1) return null;
     return {
-      teamName: message.from.substring(0, dot),
-      memberName: message.from.substring(dot + 1),
+      teamName: fromValue.substring(0, dot),
+      memberName: fromValue.substring(dot + 1),
     };
-  }, [isCrossTeam, message.from]);
+  }, [isCrossTeam, message.from, parsedCrossTeamPrefix]);
   const crossTeamTarget = useMemo(() => {
-    if (!isCrossTeamSent || !message.to) return null;
+    if (!isCrossTeamSent) return null;
+    if (qualifiedRecipient) return qualifiedRecipient.teamName;
+    if (!message.to) return null;
     const dot = message.to.indexOf('.');
     if (dot <= 0) return message.to;
     return message.to.substring(0, dot);
-  }, [isCrossTeamSent, message.to]);
+  }, [isCrossTeamSent, message.to, qualifiedRecipient]);
 
   // Strip agent-only blocks + normalize escape sequences (before linkification)
   const strippedText = useMemo(() => {
@@ -493,9 +520,9 @@ export const ActivityItem = ({
               &rarr;
             </span>
             <MemberBadge
-              name={message.to}
+              name={qualifiedRecipient?.memberName ?? message.to}
               color={recipientColor}
-              hideAvatar={message.to === 'user'}
+              hideAvatar={(qualifiedRecipient?.memberName ?? message.to) === 'user'}
               onClick={onMemberNameClick}
             />
           </>

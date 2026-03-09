@@ -23,6 +23,8 @@ import {
   CROSS_TEAM_PREFIX_TAG,
   CROSS_TEAM_SENT_SOURCE,
   parseCrossTeamPrefix,
+  parseCrossTeamReplyPrefix,
+  stripCrossTeamPrefix,
 } from '@shared/constants/crossTeam';
 import { getMemberColorByName } from '@shared/constants/memberColors';
 import { DEFAULT_TOOL_APPROVAL_SETTINGS } from '@shared/types/team';
@@ -52,6 +54,7 @@ import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskReader } from './TeamTaskReader';
 
 import type {
+  CrossTeamSendResult,
   InboxMessage,
   LeadContextUsage,
   TeamChangeEvent,
@@ -72,6 +75,7 @@ import type {
 
 const logger = createLogger('Service:TeamProvisioning');
 const { createController } = agentTeamsControllerModule;
+const TEAM_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const RUN_TIMEOUT_MS = 300_000;
 const VERIFY_TIMEOUT_MS = 15_000;
 const VERIFY_POLL_MS = 500;
@@ -1067,6 +1071,19 @@ export class TeamProvisioningService {
   private toolApprovalSettings: ToolApprovalSettings = DEFAULT_TOOL_APPROVAL_SETTINGS;
   private pendingTimeouts = new Map<string, NodeJS.Timeout>();
   private inFlightResponses = new Set<string>();
+  private crossTeamSender:
+    | ((request: {
+        fromTeam: string;
+        fromMember: string;
+        toTeam: string;
+        text: string;
+        summary?: string;
+        messageId?: string;
+        timestamp?: string;
+        conversationId?: string;
+        replyToConversationId?: string;
+      }) => Promise<CrossTeamSendResult>)
+    | null = null;
 
   constructor(
     private readonly configReader: TeamConfigReader = new TeamConfigReader(),
@@ -1075,6 +1092,24 @@ export class TeamProvisioningService {
     _sentMessagesStore: TeamSentMessagesStore = new TeamSentMessagesStore(),
     private readonly mcpConfigBuilder: TeamMcpConfigBuilder = new TeamMcpConfigBuilder()
   ) {}
+
+  setCrossTeamSender(
+    sender:
+      | ((request: {
+          fromTeam: string;
+          fromMember: string;
+          toTeam: string;
+          text: string;
+          summary?: string;
+          messageId?: string;
+          timestamp?: string;
+          conversationId?: string;
+          replyToConversationId?: string;
+        }) => Promise<CrossTeamSendResult>)
+      | null
+  ): void {
+    this.crossTeamSender = sender;
+  }
 
   getClaudeLogs(
     teamName: string,
@@ -1186,6 +1221,21 @@ export class TeamProvisioningService {
     this.teamChangeEmitter = emitter;
   }
 
+  private parseCrossTeamRecipient(
+    currentTeam: string,
+    recipient: string
+  ): { teamName: string; memberName: string } | null {
+    const trimmed = recipient.trim();
+    const dot = trimmed.indexOf('.');
+    if (dot <= 0 || dot === trimmed.length - 1) return null;
+    const teamName = trimmed.slice(0, dot).trim();
+    const memberName = trimmed.slice(dot + 1).trim();
+    if (!TEAM_NAME_PATTERN.test(teamName) || !memberName || teamName === currentTeam) {
+      return null;
+    }
+    return { teamName, memberName };
+  }
+
   private persistSentMessage(teamName: string, message: InboxMessage): void {
     try {
       createController({
@@ -1200,6 +1250,8 @@ export class TeamProvisioningService {
         messageId: message.messageId,
         source: message.source,
         leadSessionId: message.leadSessionId,
+        conversationId: message.conversationId,
+        replyToConversationId: message.replyToConversationId,
         attachments: message.attachments,
         color: message.color,
         toolSummary: message.toolSummary,
@@ -1224,6 +1276,8 @@ export class TeamProvisioningService {
         messageId: message.messageId,
         source: message.source,
         leadSessionId: message.leadSessionId,
+        conversationId: message.conversationId,
+        replyToConversationId: message.replyToConversationId,
         attachments: message.attachments,
         color: message.color,
         toolSummary: message.toolSummary,
@@ -3016,17 +3070,91 @@ export class TeamProvisioningService {
 
       const cleanContent = stripAgentBlocks(msgContent);
       if (cleanContent.trim().length === 0) continue;
+      const strippedCrossTeamContent = stripCrossTeamPrefix(cleanContent).trim();
+      if (strippedCrossTeamContent.length === 0) continue;
+
+      const crossTeamRecipient = this.parseCrossTeamRecipient(run.teamName, recipient);
+      if (crossTeamRecipient && this.crossTeamSender) {
+        const explicitReplyMeta = parseCrossTeamReplyPrefix(cleanContent);
+        const inferredReplyMeta = this.resolveCrossTeamReplyMetadata(
+          run.teamName,
+          crossTeamRecipient.teamName
+        );
+        const crossTeamMeta = parseCrossTeamPrefix(cleanContent);
+        const replyMeta = explicitReplyMeta ?? inferredReplyMeta;
+        const timestamp = nowIso();
+        const messageId = `lead-sendmsg-${run.runId}-${Date.now()}`;
+
+        void this.crossTeamSender({
+          fromTeam: run.teamName,
+          fromMember: leadName,
+          toTeam: crossTeamRecipient.teamName,
+          text: strippedCrossTeamContent,
+          summary,
+          messageId,
+          timestamp,
+          conversationId:
+            explicitReplyMeta?.conversationId ??
+            crossTeamMeta?.conversationId ??
+            replyMeta?.conversationId,
+          replyToConversationId:
+            explicitReplyMeta?.replyToConversationId ??
+            replyMeta?.replyToConversationId ??
+            explicitReplyMeta?.conversationId ??
+            crossTeamMeta?.conversationId ??
+            replyMeta?.conversationId,
+        })
+          .then(() => {
+            const msg: InboxMessage = {
+              from: 'user',
+              to: `${crossTeamRecipient.teamName}.${crossTeamRecipient.memberName}`,
+              text: strippedCrossTeamContent,
+              timestamp,
+              read: true,
+              summary:
+                (summary || strippedCrossTeamContent).length > 60
+                  ? (summary || strippedCrossTeamContent).slice(0, 57) + '...'
+                  : summary || strippedCrossTeamContent,
+              messageId,
+              source: 'cross_team_sent',
+              conversationId:
+                explicitReplyMeta?.conversationId ??
+                crossTeamMeta?.conversationId ??
+                replyMeta?.conversationId,
+              replyToConversationId:
+                explicitReplyMeta?.replyToConversationId ??
+                replyMeta?.replyToConversationId ??
+                explicitReplyMeta?.conversationId ??
+                crossTeamMeta?.conversationId ??
+                replyMeta?.conversationId,
+            };
+            this.pushLiveLeadProcessMessage(run.teamName, msg);
+            this.teamChangeEmitter?.({
+              type: 'lead-message',
+              teamName: run.teamName,
+              detail: 'cross-team-send',
+            });
+          })
+          .catch((error: unknown) => {
+            logger.warn(
+              `[${run.teamName}] qualified SendMessage→${recipient} cross-team fallback failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            );
+          });
+        continue;
+      }
 
       const msg: InboxMessage = {
         from: leadName,
         to: recipient,
-        text: cleanContent,
+        text: strippedCrossTeamContent,
         timestamp: nowIso(),
         read: recipient !== 'user',
         summary:
-          (summary || cleanContent).length > 60
-            ? (summary || cleanContent).slice(0, 57) + '...'
-            : summary || cleanContent,
+          (summary || strippedCrossTeamContent).length > 60
+            ? (summary || strippedCrossTeamContent).slice(0, 57) + '...'
+            : summary || strippedCrossTeamContent,
         messageId: `lead-sendmsg-${run.runId}-${Date.now()}`,
         source: 'lead_process',
       };
@@ -3094,9 +3222,10 @@ export class TeamProvisioningService {
     const runId = this.activeByTeam.get(teamName);
     if (!runId) return null;
     const run = this.runs.get(runId);
-    if (!run || run.activeCrossTeamReplyHints.length === 0) return null;
+    const hints = run?.activeCrossTeamReplyHints ?? [];
+    if (hints.length === 0) return null;
 
-    const matches = run.activeCrossTeamReplyHints.filter((hint) => hint.toTeam === toTeam);
+    const matches = hints.filter((hint) => hint.toTeam === toTeam);
     if (matches.length !== 1) return null;
 
     return {

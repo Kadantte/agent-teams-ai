@@ -122,6 +122,10 @@ describe('CrossTeamService', () => {
       expect(senderReq.source).toBe(CROSS_TEAM_SENT_SOURCE);
       expect(senderReq.to).toBe('team-b.team-lead');
       expect(senderReq.text).toBe('Hello from team-a');
+      expect(senderReq.messageId).toBeDefined();
+      expect(senderReq.timestamp).toBeDefined();
+      expect(senderReq.messageId).toBe(inboxWriter.sendMessage.mock.calls[0][1].messageId);
+      expect(senderReq.timestamp).toBe(inboxWriter.sendMessage.mock.calls[0][1].timestamp);
       expect(senderReq.conversationId).toBeTruthy();
     });
 

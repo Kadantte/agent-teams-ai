@@ -45,6 +45,8 @@ export class CrossTeamService {
   async send(request: CrossTeamSendRequest): Promise<CrossTeamSendResult> {
     const { fromTeam, fromMember, toTeam, text, summary } = request;
     const chainDepth = request.chainDepth ?? 0;
+    const messageId = request.messageId?.trim() || randomUUID();
+    const timestamp = request.timestamp ?? new Date().toISOString();
     const inferredReplyMeta =
       !request.conversationId && !request.replyToConversationId
         ? (this.provisioning?.resolveCrossTeamReplyMetadata(fromTeam, toTeam) ?? null)
@@ -90,7 +92,6 @@ export class CrossTeamService {
       conversationId,
       replyToConversationId,
     });
-    const messageId = randomUUID();
     const outboxMessage: CrossTeamMessage = {
       messageId,
       fromTeam,
@@ -101,7 +102,7 @@ export class CrossTeamService {
       text,
       summary,
       chainDepth,
-      timestamp: new Date().toISOString(),
+      timestamp,
     };
 
     const { duplicate } = await this.outbox.appendIfNotRecent(fromTeam, outboxMessage, async () => {
@@ -114,6 +115,8 @@ export class CrossTeamService {
         member: leadName,
         text: formattedText,
         from,
+        timestamp,
+        messageId,
         summary: summary ?? `Cross-team message from ${fromTeam}`,
         source: CROSS_TEAM_SOURCE,
         conversationId,
@@ -132,6 +135,8 @@ export class CrossTeamService {
         member: senderLeadName,
         text,
         from: 'user',
+        timestamp,
+        messageId,
         to: `${toTeam}.${leadName}`,
         summary: summary ?? `Cross-team message to ${toTeam}`,
         source: CROSS_TEAM_SENT_SOURCE,

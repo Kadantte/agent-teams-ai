@@ -676,6 +676,7 @@ function initializeServices(): void {
     crossTeamInboxWriter,
     teamProvisioningService
   );
+  teamProvisioningService.setCrossTeamSender((request) => crossTeamService.send(request));
 
   const teamMemberLogsFinder = new TeamMemberLogsFinder();
   const memberStatsComputer = new MemberStatsComputer(teamMemberLogsFinder);
