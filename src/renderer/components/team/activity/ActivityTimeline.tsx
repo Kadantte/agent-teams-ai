@@ -42,6 +42,12 @@ interface ActivityTimelineProps {
   expandOverrides?: Set<string>;
   /** Called when user toggles expand/collapse override on a specific message. */
   onToggleExpandOverride?: (key: string) => void;
+  /**
+   * All session IDs belonging to this team (current + history).
+   * When two adjacent messages have different leadSessionId but both are in this set,
+   * the "New session" separator is suppressed (it's a reconnect, not a new session).
+   */
+  teamSessionIds?: Set<string>;
 }
 
 const VIEWPORT_THRESHOLD = 0.15;
@@ -148,6 +154,7 @@ export const ActivityTimeline = ({
   allCollapsed,
   expandOverrides,
   onToggleExpandOverride,
+  teamSessionIds,
 }: ActivityTimelineProps): React.JSX.Element => {
   const [visibleCount, setVisibleCount] = useState(MESSAGES_PAGE_SIZE);
 
@@ -354,18 +361,26 @@ export const ActivityTimeline = ({
           const prevSessionId = getItemSessionId(timelineItems[realIndex - 1]);
           const currSessionId = getItemSessionId(item);
           if (prevSessionId && currSessionId && prevSessionId !== currSessionId) {
-            sessionSeparator = (
-              <div
-                className="flex items-center gap-3"
-                style={{ paddingTop: 45, paddingBottom: 45 }}
-              >
-                <div className="h-px flex-1 bg-blue-600/30 dark:bg-blue-400/30" />
-                <span className="whitespace-nowrap text-[11px] font-medium text-blue-600 dark:text-blue-400">
-                  New session
-                </span>
-                <div className="h-px flex-1 bg-blue-600/30 dark:bg-blue-400/30" />
-              </div>
-            );
+            // Suppress separator when both sessions belong to the same team
+            // (reconnects produce new session IDs but are not "new sessions" from user's perspective)
+            const isSameTeam =
+              teamSessionIds &&
+              teamSessionIds.has(prevSessionId) &&
+              teamSessionIds.has(currSessionId);
+            if (!isSameTeam) {
+              sessionSeparator = (
+                <div
+                  className="flex items-center gap-3"
+                  style={{ paddingTop: 45, paddingBottom: 45 }}
+                >
+                  <div className="h-px flex-1 bg-blue-600/30 dark:bg-blue-400/30" />
+                  <span className="whitespace-nowrap text-[11px] font-medium text-blue-600 dark:text-blue-400">
+                    New session
+                  </span>
+                  <div className="h-px flex-1 bg-blue-600/30 dark:bg-blue-400/30" />
+                </div>
+              );
+            }
           }
         }
 

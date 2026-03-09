@@ -249,6 +249,10 @@
   --color-section-bg-open: rgba(255, 255, 255, 0.07);
   --color-section-hover: rgba(255, 255, 255, 0.08);
   --color-section-hover-open: rgba(255, 255, 255, 0.1);
+
+  /* Compact boundary — phase badge */
+  --compact-phase-bg: rgba(99, 102, 241, 0.15);
+  --compact-phase-text: #818cf8;
 }
 
 /* File icon glow — halo so dark icons stay visible on dark backgrounds */
@@ -502,6 +506,10 @@
   --color-section-bg-open: rgba(0, 0, 0, 0.07);
   --color-section-hover: rgba(0, 0, 0, 0.08);
   --color-section-hover-open: rgba(0, 0, 0, 0.1);
+
+  /* Compact boundary — phase badge */
+  --compact-phase-bg: rgba(67, 56, 202, 0.12);
+  --compact-phase-text: #4338ca;
 }
 
 /* rehype-highlight (highlight.js) — map hljs classes to app theme variables */

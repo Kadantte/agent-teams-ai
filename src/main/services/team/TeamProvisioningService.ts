@@ -3154,14 +3154,9 @@ export class TeamProvisioningService {
             }
           }
         } else {
-          // Pre-ready: also push to live cache so Messages shows early narration
-          // once team:getData becomes readable. The banner still uses provisioningOutputParts.
-          if (!run.silentUserDmForward && !hasCapturedSendMessage) {
-            const cleanText = stripAgentBlocks(text).trim();
-            if (cleanText.length > 0) {
-              this.pushLiveLeadTextMessage(run, cleanText);
-            }
-          }
+          // Pre-ready: provisioning narration is shown in the ProvisioningProgressBlock banner
+          // (via provisioningOutputParts). Do NOT push to live cache to avoid duplicate display
+          // and leaking internal provisioning monologue into the Activity timeline.
         }
       }
 

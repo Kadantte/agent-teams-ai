@@ -118,6 +118,13 @@ export const MessageComposer = ({
   }, [members, recipient]);
 
   const projectPath = useStore((s) => s.selectedTeamData?.config.projectPath ?? null);
+  const isProvisioning = useStore((s) =>
+    Object.values(s.provisioningRuns).some(
+      (run) =>
+        run.teamName === teamName &&
+        !['ready', 'disconnected', 'failed', 'cancelled'].includes(run.state)
+    )
+  );
   const draft = useComposerDraft(teamName);
 
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
@@ -151,6 +158,7 @@ export const MessageComposer = ({
     trimmed.length > 0 &&
     trimmed.length <= MAX_TEXT_LENGTH &&
     !sending &&
+    !isProvisioning &&
     !attachmentsBlocked;
 
   // Track whether we initiated a send — clear draft only on confirmed success
@@ -335,7 +343,11 @@ export const MessageComposer = ({
         )}
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          {!isTeamAlive ? (
+          {isProvisioning ? (
+            <span className="text-[10px]" style={{ color: 'var(--warning-text)' }}>
+              Launching...
+            </span>
+          ) : !isTeamAlive ? (
             <span className="text-[10px]" style={{ color: 'var(--warning-text)' }}>
               Team offline
             </span>
@@ -448,7 +460,11 @@ export const MessageComposer = ({
 
       <MentionableTextarea
         id={`compose-${teamName}`}
-        placeholder="Write a message... (Enter to send, Shift+Enter for new line)"
+        placeholder={
+          isProvisioning
+            ? 'Team is launching... Please wait.'
+            : 'Write a message... (Enter to send, Shift+Enter for new line)'
+        }
         value={draft.text}
         onValueChange={draft.setText}
         suggestions={mentionSuggestions}
@@ -460,7 +476,7 @@ export const MessageComposer = ({
         minRows={2}
         maxRows={6}
         maxLength={MAX_TEXT_LENGTH}
-        disabled={sending}
+        disabled={sending || isProvisioning}
         cornerAction={
           <div className="flex items-center gap-2">
             {/* NOTE: ContextRing disabled — usage formula is inaccurate */}

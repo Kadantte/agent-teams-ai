@@ -37,6 +37,7 @@ import {
   CheckCheck,
   ChevronsDownUp,
   ChevronsUpDown,
+  ChevronRight,
   Clock,
   Code,
   Columns3,
@@ -316,6 +317,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
   });
   const [messagesFilterOpen, setMessagesFilterOpen] = useState(false);
   const [messagesCollapsed, setMessagesCollapsed] = useState(true);
+  const [statusBlockCollapsed, setStatusBlockCollapsed] = useState(false);
 
   // Open editor overlay when a file reveal is requested (e.g. from chip click)
   const pendingRevealFile = useStore((s) => s.editorPendingRevealFile);
@@ -523,7 +525,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
   );
 
   // Filter sessions to team-only using sessionHistory + leadSessionId
-  const teamSessions = useMemo(() => {
+  const teamSessionIds = useMemo(() => {
     const sessionIds = new Set<string>();
     if (data?.config.leadSessionId) {
       sessionIds.add(data.config.leadSessionId);
@@ -533,10 +535,14 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
         sessionIds.add(id);
       }
     }
+    return sessionIds;
+  }, [data?.config.leadSessionId, data?.config.sessionHistory]);
+
+  const teamSessions = useMemo(() => {
     // If no session IDs known (backward compat), show all sessions
-    if (sessionIds.size === 0) return sessions;
-    return sessions.filter((s) => sessionIds.has(s.id));
-  }, [sessions, data?.config.leadSessionId, data?.config.sessionHistory]);
+    if (teamSessionIds.size === 0) return sessions;
+    return sessions.filter((s) => teamSessionIds.has(s.id));
+  }, [sessions, teamSessionIds]);
 
   // Auto-reset session filter if the selected session is no longer in teamSessions
   useEffect(() => {
@@ -1563,17 +1569,33 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
               }}
             />
             <div className="mb-[35px]">
-              <PendingRepliesBlock
-                members={data.members}
-                pendingRepliesByMember={pendingRepliesByMember}
-                onMemberClick={setSelectedMember}
-              />
-              <ActiveTasksBlock
-                members={data.members}
-                tasks={data.tasks}
-                onMemberClick={setSelectedMember}
-                onTaskClick={setSelectedTask}
-              />
+              <button
+                type="button"
+                className="mb-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-secondary)]"
+                onClick={() => setStatusBlockCollapsed((prev) => !prev)}
+                aria-label={statusBlockCollapsed ? 'Expand status' : 'Collapse status'}
+              >
+                <ChevronRight
+                  size={12}
+                  className={`shrink-0 transition-transform duration-150 ${statusBlockCollapsed ? '' : 'rotate-90'}`}
+                />
+                Status
+              </button>
+              {!statusBlockCollapsed && (
+                <>
+                  <PendingRepliesBlock
+                    members={data.members}
+                    pendingRepliesByMember={pendingRepliesByMember}
+                    onMemberClick={setSelectedMember}
+                  />
+                  <ActiveTasksBlock
+                    members={data.members}
+                    tasks={data.tasks}
+                    onMemberClick={setSelectedMember}
+                    onTaskClick={setSelectedTask}
+                  />
+                </>
+              )}
             </div>
             <ActivityTimeline
               messages={filteredMessages}
@@ -1583,6 +1605,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
               allCollapsed={messagesCollapsed}
               expandOverrides={expandedSet}
               onToggleExpandOverride={toggleExpandOverride}
+              teamSessionIds={teamSessionIds}
               onMemberClick={setSelectedMember}
               onCreateTaskFromMessage={(subject, description) => {
                 openCreateTaskDialog(subject, description);

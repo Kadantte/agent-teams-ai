@@ -110,7 +110,9 @@ export const TeamProvisioningBanner = ({
       <div className="mb-3">
         <div className="mb-2 flex items-center gap-2 rounded-md border border-[var(--step-done-border)] bg-[var(--step-done-bg)] px-3 py-2">
           <CheckCircle2 size={14} className="shrink-0 text-[var(--step-done-text)]" />
-          <p className="flex-1 text-xs text-[var(--step-success-text)]">Team launched — process alive</p>
+          <p className="flex-1 text-xs text-[var(--step-success-text)]">
+            Team launched — teammates may still be starting
+          </p>
           <Button
             variant="outline"
             size="sm"
