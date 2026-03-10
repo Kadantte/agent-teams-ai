@@ -444,12 +444,11 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
     textRef.current = '';
     chipsRef.current = [];
     attachmentsRef.current = [];
-    actionModeRef.current = 'do';
+    // actionMode is intentionally NOT reset — it is "sticky" across sends
 
     setTextState('');
     setChipsState([]);
     setAttachmentsState([]);
-    setActionModeState('do');
     setAttachmentError(null);
     setIsSaved(false);
 

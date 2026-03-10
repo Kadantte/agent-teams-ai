@@ -377,16 +377,44 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       [getTriggerIndex, query, value, chips, onValueChange, onFileChipInsert, onChipRemove, dismiss]
     );
 
+    // --- Folder selection handler (inserts folder path with trailing slash) ---
+    const handleFolderSelect = React.useCallback(
+      (s: MentionSuggestion) => {
+        const textarea = internalRef.current;
+        const triggerIdx = getTriggerIndex();
+        if (!textarea || triggerIdx < 0) return;
+
+        const replaceStart = triggerIdx;
+        const replaceEnd = triggerIdx + 1 + query.length;
+        const before = value.slice(0, replaceStart);
+        const after = value.slice(replaceEnd);
+
+        const displayPath = s.relativePath ?? s.name;
+        const insertion = `\`${displayPath}\` `;
+        const newValue = before + insertion + after;
+        onValueChange(newValue);
+        dismiss();
+
+        requestAnimationFrame(() => {
+          const cursor = before.length + insertion.length;
+          textarea.setSelectionRange(cursor, cursor);
+        });
+      },
+      [getTriggerIndex, query, value, onValueChange, dismiss]
+    );
+
     // --- Merged selection handler ---
     const handleMergedSelect = React.useCallback(
       (s: MentionSuggestion) => {
         if (s.type === 'file') {
           handleFileSelect(s);
+        } else if (s.type === 'folder') {
+          handleFolderSelect(s);
         } else {
           selectSuggestion(s);
         }
       },
-      [handleFileSelect, selectSuggestion]
+      [handleFileSelect, handleFolderSelect, selectSuggestion]
     );
 
     // Sync backdrop font with textarea computed font to prevent caret drift.

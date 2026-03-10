@@ -43,9 +43,7 @@ export const TeamProvisioningBanner = ({
 
   if (prevRunIdRef.current !== progress?.runId) {
     prevRunIdRef.current = progress?.runId;
-    if (dismissed) {
-      setDismissed(false);
-    }
+    setDismissed(false);
   }
 
   // NOTE: we intentionally do NOT auto-dismiss "ready" banners.

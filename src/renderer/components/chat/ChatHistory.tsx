@@ -242,6 +242,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
 
   // --- New-item animation tracking ---
   const knownGroupIdsRef = useRef<Set<string>>(new Set());
+  const animatedGroupIdsRef = useRef<Set<string>>(new Set());
   const isInitialRenderRef = useRef(true);
   const prevTabIdRef = useRef(effectiveTabId);
 
@@ -249,6 +250,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
   if (prevTabIdRef.current !== effectiveTabId) {
     prevTabIdRef.current = effectiveTabId;
     knownGroupIdsRef.current.clear();
+    animatedGroupIdsRef.current.clear();
     isInitialRenderRef.current = true;
   }
 
@@ -256,6 +258,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
     const items = conversation?.items;
     if (!items || items.length === 0) {
       knownGroupIdsRef.current.clear();
+      animatedGroupIdsRef.current.clear();
       isInitialRenderRef.current = true;
       return new Set<string>();
     }
@@ -279,6 +282,18 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
     }
     return newIds;
   }, [conversation]);
+
+  // Expire animation flags after the CSS animation completes (350ms + buffer).
+  // This prevents replay when the virtualizer remounts off-screen elements.
+  useEffect(() => {
+    if (newGroupIds.size === 0) return;
+    const timer = setTimeout(() => {
+      for (const id of newGroupIds) {
+        animatedGroupIdsRef.current.add(id);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [newGroupIds]);
 
   const rowVirtualizer = useVirtualizer({
     count: shouldVirtualize ? (conversation?.items.length ?? 0) : 0,
@@ -921,7 +936,10 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
                           isSearchHighlight={isSearchHighlight}
                           isNavigationHighlight={isNavigationHighlight}
                           highlightColor={effectiveHighlightColor}
-                          isNew={newGroupIds.has(item.group.id)}
+                          isNew={
+                            newGroupIds.has(item.group.id) &&
+                            !animatedGroupIdsRef.current.has(item.group.id)
+                          }
                           registerChatItemRef={registerChatItemRef}
                           registerAIGroupRef={registerAIGroupRefCombined}
                           registerToolRef={registerToolRef}
@@ -940,7 +958,10 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
                     isSearchHighlight={isSearchHighlight}
                     isNavigationHighlight={isNavigationHighlight}
                     highlightColor={effectiveHighlightColor}
-                    isNew={newGroupIds.has(item.group.id)}
+                    isNew={
+                      newGroupIds.has(item.group.id) &&
+                      !animatedGroupIdsRef.current.has(item.group.id)
+                    }
                     registerChatItemRef={registerChatItemRef}
                     registerAIGroupRef={registerAIGroupRefCombined}
                     registerToolRef={registerToolRef}

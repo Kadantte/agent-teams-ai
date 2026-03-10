@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import { FileIcon } from '@renderer/components/team/editor/FileIcon';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { nameColorSet } from '@renderer/utils/projectColor';
-import { Loader2, UsersRound } from 'lucide-react';
+import { Folder, Loader2, UsersRound } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
 
@@ -74,10 +74,10 @@ export const MentionSuggestionList = ({
     );
   }
 
-  // Categorize suggestions
+  // Categorize suggestions (folders are grouped with files)
   type Section = 'member' | 'team' | 'file';
   const getSuggestionSection = (s: MentionSuggestion): Section => {
-    if (s.type === 'file') return 'file';
+    if (s.type === 'file' || s.type === 'folder') return 'file';
     if (s.type === 'team') return 'team';
     return 'member';
   };
@@ -99,7 +99,9 @@ export const MentionSuggestionList = ({
 
   for (const s of suggestions) {
     const section = getSuggestionSection(s);
-    const isFile = section === 'file';
+    const isFile = s.type === 'file';
+    const isFolder = s.type === 'folder';
+    const isFileOrFolder = isFile || isFolder;
     const isTeam = section === 'team';
 
     // Insert section header on transition
@@ -109,7 +111,7 @@ export const MentionSuggestionList = ({
     }
 
     const isSelected = optionIndex === selectedIndex;
-    const colorSet = isFile
+    const colorSet = isFileOrFolder
       ? null
       : s.color
         ? getTeamColorSet(s.color)
@@ -135,7 +137,9 @@ export const MentionSuggestionList = ({
           onSelect(s);
         }}
       >
-        {isFile ? (
+        {isFolder ? (
+          <Folder size={14} className="shrink-0 text-[var(--color-text-muted)]" />
+        ) : isFile ? (
           <FileIcon fileName={s.name} className="size-3.5" />
         ) : isTeam ? (
           <UsersRound
@@ -150,7 +154,7 @@ export const MentionSuggestionList = ({
           />
         )}
         <span
-          className={isFile ? 'truncate' : 'font-medium'}
+          className={isFileOrFolder ? 'truncate' : 'font-medium'}
           style={colorSet ? { color: colorSet.text } : undefined}
         >
           <HighlightedName name={s.name} query={query} />

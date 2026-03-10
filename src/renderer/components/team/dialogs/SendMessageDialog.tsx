@@ -64,6 +64,9 @@ interface SendMessageDialogProps {
   onClose: () => void;
 }
 
+// Sticky action mode — survives dialog close/reopen (component remount)
+let stickyActionMode: ActionMode = 'do';
+
 export const SendMessageDialog = ({
   open,
   teamName,
@@ -94,7 +97,13 @@ export const SendMessageDialog = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [imageRestrictionError, setImageRestrictionError] = useState<string | null>(null);
   const imageRestrictionTimerRef = useRef(0);
-  const [actionMode, setActionMode] = useState<ActionMode>('do');
+  const [actionMode, setActionModeState] = useState<ActionMode>(stickyActionMode);
+  const actionModeRef = useRef<ActionMode>(stickyActionMode);
+  const setActionMode = useCallback((mode: ActionMode) => {
+    actionModeRef.current = mode;
+    stickyActionMode = mode;
+    setActionModeState(mode);
+  }, []);
 
   const {
     attachments,
@@ -112,13 +121,20 @@ export const SendMessageDialog = ({
   const supportsAttachments = isLeadRecipient && !!isTeamAlive;
   const canAttach = supportsAttachments && canAddMore;
 
+  // Auto-switch to delegate when lead recipient is selected, but don't
+  // override user's explicit choice on dialog open.
+  const prevIsLeadRef = useRef(isLeadRecipient);
   useEffect(() => {
+    // Skip the initial mount — honour the sticky mode
+    if (prevIsLeadRef.current === isLeadRecipient) return;
+    prevIsLeadRef.current = isLeadRecipient;
+
     if (isLeadRecipient) {
       setActionMode('delegate');
     } else {
-      setActionMode((prev) => (prev === 'delegate' ? 'do' : prev));
+      setActionModeState((prev) => (prev === 'delegate' ? 'do' : prev));
     }
-  }, [isLeadRecipient]);
+  }, [isLeadRecipient, setActionMode]);
 
   const [pendingAutoClose, setPendingAutoClose] = useState(false);
   // Reset form on open transition (avoid setState in render)
