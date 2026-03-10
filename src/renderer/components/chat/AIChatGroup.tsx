@@ -6,7 +6,6 @@ import { useStore } from '@renderer/store';
 import { enhanceAIGroup, type PrecedingSlashInfo } from '@renderer/utils/aiGroupEnhancer';
 import { extractSlashInfo, isCommandContent } from '@shared/utils/contentSanitizer';
 import { getModelColorClass } from '@shared/utils/modelParser';
-import { estimateTokens } from '@shared/utils/tokenFormatting';
 import { format } from 'date-fns';
 import { Bot, ChevronDown, Clock } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -248,28 +247,6 @@ const AIChatGroupInner = ({
   // Get the total cost
   const costUSD = aiGroup.metrics.costUsd;
 
-  // Calculate thinking and text output tokens from assistant message content blocks
-  // These are estimated from the actual content, providing breakdown of output token usage
-  const { thinkingTokens, textOutputTokens } = useMemo(() => {
-    let thinking = 0;
-    let textOutput = 0;
-
-    const responses = aiGroup.responses || [];
-    for (const msg of responses) {
-      if (msg.type === 'assistant' && Array.isArray(msg.content)) {
-        for (const block of msg.content) {
-          if (block.type === 'thinking' && block.thinking) {
-            thinking += estimateTokens(block.thinking);
-          } else if (block.type === 'text' && block.text) {
-            textOutput += estimateTokens(block.text);
-          }
-        }
-      }
-    }
-
-    return { thinkingTokens: thinking, textOutputTokens: textOutput };
-  }, [aiGroup.responses]);
-
   // Auto-expand if contains error or search result, or if manually expanded
   const isExpanded =
     isAIGroupExpandedForTab(aiGroup.id) || containsHighlightedError || shouldExpandForSearch;
@@ -470,8 +447,6 @@ const AIChatGroupInner = ({
                 outputTokens={lastUsage.output_tokens}
                 cacheReadTokens={lastUsage.cache_read_input_tokens ?? 0}
                 cacheCreationTokens={lastUsage.cache_creation_input_tokens ?? 0}
-                thinkingTokens={thinkingTokens}
-                textOutputTokens={textOutputTokens}
                 modelName={enhanced.mainModel?.name}
                 modelFamily={enhanced.mainModel?.family}
                 size="sm"
