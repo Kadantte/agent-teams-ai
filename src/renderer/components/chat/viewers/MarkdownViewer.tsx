@@ -246,31 +246,6 @@ function createViewerMarkdownComponents(
         }
         return badge;
       }
-      if (href?.startsWith('team://')) {
-        let teamName = '';
-        try {
-          teamName = decodeURIComponent(href.slice('team://'.length));
-        } catch {
-          // malformed percent-encoding
-        }
-        return (
-          <span
-            className="inline-flex items-center gap-0.5"
-            style={{
-              backgroundColor: 'rgba(168, 85, 247, 0.15)',
-              color: '#c084fc',
-              borderRadius: '3px',
-              boxShadow: '0 0 0 1.5px rgba(168, 85, 247, 0.15)',
-              fontSize: 'inherit',
-              cursor: 'default',
-            }}
-            title={teamName ? `Team: ${teamName}` : undefined}
-          >
-            <UsersRound size={11} className="shrink-0" style={{ opacity: 0.8 }} />
-            {children}
-          </span>
-        );
-      }
       if (href?.startsWith('task://')) {
         const taskId = href.slice('task://'.length);
         return (

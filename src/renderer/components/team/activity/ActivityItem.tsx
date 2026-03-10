@@ -15,6 +15,7 @@ import {
 } from '@renderer/constants/cssVariables';
 import { getTeamColorSet, getThemedBorder } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
+import { useStore } from '@renderer/store';
 import {
   getMessageTypeLabel,
   getStructuredMessageSummary,
@@ -22,7 +23,7 @@ import {
   parseStructuredAgentMessage,
 } from '@renderer/utils/agentMessageFormatting';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
-import { linkifyMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
+import { linkifyAllMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import {
   CROSS_TEAM_SENT_SOURCE,
@@ -305,6 +306,12 @@ export const ActivityItem = ({
   const { isLight } = useTheme();
   const formattedRole = formatAgentRole(memberRole);
 
+  const teams = useStore((s) => s.teams);
+  const teamNames = useMemo(
+    () => teams.filter((t) => !t.deletedAt).map((t) => t.teamName),
+    [teams]
+  );
+
   const timestamp = Number.isNaN(Date.parse(message.timestamp))
     ? message.timestamp
     : new Date(message.timestamp).toLocaleString();
@@ -374,7 +381,7 @@ export const ActivityItem = ({
     return stripped.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
   }, [structured, message.text, isCrossTeamAny]);
 
-  // Parse reply BEFORE linkification — linkifyMentionsInMarkdown transforms @name
+  // Parse reply BEFORE linkification — linkifyAllMentionsInMarkdown transforms @name
   // into markdown links which breaks the reply regex matcher
   const parsedReply = useMemo(
     () => (strippedText ? parseMessageReply(strippedText) : null),
@@ -386,10 +393,10 @@ export const ActivityItem = ({
     if (!strippedText) return null;
     let result = highlightSystemLabels(strippedText, !!systemLabel);
     result = linkifyTaskIdsInMarkdown(result);
-    if (memberColorMap && memberColorMap.size > 0)
-      result = linkifyMentionsInMarkdown(result, memberColorMap);
+    if ((memberColorMap && memberColorMap.size > 0) || teamNames.length > 0)
+      result = linkifyAllMentionsInMarkdown(result, memberColorMap ?? new Map(), teamNames);
     return result;
-  }, [strippedText, memberColorMap, systemLabel]);
+  }, [strippedText, memberColorMap, teamNames, systemLabel]);
 
   const rawSummary =
     message.summary || (structured ? getStructuredMessageSummary(structured) : '') || '';

@@ -557,7 +557,12 @@ function buildPersistentLeadContext(opts: {
       `\n  - ALLOWED: You may message "user" (the human operator) via SendMessage.` +
       `\n  - ALLOWED: You may use the Task tool for regular subagents WITHOUT team_name — these are normal Claude Code helpers, not teammates.` +
       `\n  - If teammates are added later (e.g. via UI), you may then spawn them using the Task tool with team_name + name.` +
-      `\n  - Work on tasks directly yourself. Use subagents for research and parallel work as needed.` +
+      `\n  - TASK BOARD FIRST (MANDATORY): Do NOT do substantial work silently or off-board.` +
+      `\n    - Before you start meaningful implementation, debugging, research, review, or follow-up work, make sure there is a visible team-board task for it and that task is assigned to you.` +
+      `\n    - If the user asks for new work, your first move is to create/update the relevant board task(s), then start work from those tasks.` +
+      `\n    - If scope changes mid-task, update the existing task or create a follow-up task before continuing.` +
+      `\n    - If you notice you already began meaningful work without a task, stop, put it on the board, then continue.` +
+      `\n  - Work on tasks directly yourself. Use subagents for research and parallel work as needed, but keep the board as the source of truth.` +
       `\n  - PROGRESS REPORTING (MANDATORY): Since you have no teammates, "user" is your only communication channel.` +
       `\n    - SendMessage "user" at minimum: when you start a task (after marking it in_progress), when you complete a task, and when you hit a meaningful milestone/blocker/decision.` +
       `\n    - Avoid long silent stretches. If something is taking longer than expected, send a brief update and the next step.` +
@@ -741,6 +746,7 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
   const step3Block = isSolo
     ? `3) If user instructions describe work to be done — create tasks on the team board and assign each task to yourself (“${leadName}”) as owner.\n` +
       `   - Prefer fewer, broader tasks over many micro-tasks.\n` +
+      `   - Every substantial item that may be worked later must exist on the board; do NOT keep implicit/off-board work.\n` +
       `   - CRITICAL: Do NOT start working on the tasks now. Provisioning is ONLY for setting up the team structure.\n` +
       `   - The tasks will be executed after the team is launched separately.`
     : `3) If user instructions explicitly ask to create tasks OR describe substantial/assigned work that should be tracked — create tasks on the team board.
@@ -844,6 +850,7 @@ function buildLaunchPrompt(
    - Execute tasks sequentially and keep the board + user updated:
    - Identify the next READY task (pending, not blocked by incomplete dependencies).
    - If the task is unassigned, set yourself ("${leadName}") as owner.
+   - If the work you are about to do is not represented on the board yet, create/update the task first before continuing.
    - BEFORE doing any work on a task: mark it started (in_progress).
    - Immediately SendMessage "user" that you started task #<id> (what you're doing + next step).
    - While working: after each meaningful milestone/decision/blocker, add a task comment on #<id>. If the milestone is user-relevant, also SendMessage "user".
@@ -3646,10 +3653,29 @@ export class TeamProvisioningService {
    * Used for both pre-ready (provisioning) and post-ready assistant text.
    * Emits a coalesced `lead-message` event for renderer refresh.
    */
-  private pushLiveLeadTextMessage(run: ProvisioningRun, cleanText: string): void {
+  private getStableLeadThoughtMessageId(msg: Record<string, unknown>): string | null {
+    const entryUuid = typeof msg.uuid === 'string' ? msg.uuid.trim() : '';
+    if (entryUuid) {
+      return `lead-thought-${entryUuid}`;
+    }
+
+    const message = (msg.message ?? msg) as Record<string, unknown>;
+    const assistantMessageId = typeof message.id === 'string' ? message.id.trim() : '';
+    if (assistantMessageId) {
+      return `lead-thought-msg-${assistantMessageId}`;
+    }
+
+    return null;
+  }
+
+  private pushLiveLeadTextMessage(
+    run: ProvisioningRun,
+    cleanText: string,
+    stableMessageId?: string
+  ): void {
     run.leadMsgSeq += 1;
     const leadName = this.getRunLeadName(run);
-    const messageId = `lead-turn-${run.runId}-${run.leadMsgSeq}`;
+    const messageId = stableMessageId || `lead-turn-${run.runId}-${run.leadMsgSeq}`;
     // Attach accumulated tool call details from preceding tool_use messages, then reset.
     const toolCalls = run.pendingToolCalls.length > 0 ? [...run.pendingToolCalls] : undefined;
     const toolSummary = toolCalls ? formatToolSummaryFromCalls(toolCalls) : undefined;
@@ -3778,7 +3804,11 @@ export class TeamProvisioningService {
           ) {
             const cleanText = stripAgentBlocks(text).trim();
             if (cleanText.length > 0) {
-              this.pushLiveLeadTextMessage(run, cleanText);
+              this.pushLiveLeadTextMessage(
+                run,
+                cleanText,
+                this.getStableLeadThoughtMessageId(msg) ?? undefined
+              );
             }
           }
         } else {
@@ -3787,7 +3817,11 @@ export class TeamProvisioningService {
           if (!run.silentUserDmForward && !hasCapturedSendMessage) {
             const cleanText = stripAgentBlocks(text).trim();
             if (cleanText.length > 0) {
-              this.pushLiveLeadTextMessage(run, cleanText);
+              this.pushLiveLeadTextMessage(
+                run,
+                cleanText,
+                this.getStableLeadThoughtMessageId(msg) ?? undefined
+              );
             }
           }
         }

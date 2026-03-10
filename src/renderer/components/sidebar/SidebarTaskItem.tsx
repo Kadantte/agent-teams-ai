@@ -58,8 +58,6 @@ interface SidebarTaskItemProps {
   task: GlobalTask;
   hideTeamName?: boolean;
   showTeamName?: boolean;
-  /** When true, the item plays an enter animation */
-  isNew?: boolean;
   /** The composite key "teamName:taskId" of the task being renamed, or null */
   renamingKey?: string | null;
   /** Called when rename is completed with Enter or blur */
@@ -74,7 +72,6 @@ export const SidebarTaskItem = ({
   task,
   hideTeamName,
   showTeamName,
-  isNew,
   renamingKey,
   onRenameComplete,
   onRenameCancel,
@@ -147,12 +144,10 @@ export const SidebarTaskItem = ({
 
   const showTeamRow = showTeamName && !hideTeamName;
 
-  const enterClass = isNew ? 'task-item-enter-animate' : '';
-
   return (
     <button
       type="button"
-      className={`flex w-full cursor-pointer flex-col justify-center border-b px-3 py-1.5 text-left transition-colors hover:bg-surface-raised ${task.teamDeleted ? 'opacity-50' : ''} ${enterClass}`}
+      className={`flex w-full cursor-pointer flex-col justify-center border-b px-3 py-1.5 text-left transition-colors hover:bg-surface-raised ${task.teamDeleted ? 'opacity-50' : ''}`}
       style={{ borderColor: 'var(--color-border)' }}
       onClick={() => {
         if (!isRenaming) {

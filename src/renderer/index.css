@@ -709,24 +709,6 @@ body {
   animation: chat-message-enter 350ms ease-out both;
 }
 
-@keyframes task-item-enter {
-  from {
-    opacity: 0;
-    max-height: 0;
-    transform: translateY(-4px);
-    overflow: hidden;
-  }
-  to {
-    opacity: 1;
-    max-height: 80px;
-    transform: translateY(0);
-  }
-}
-
-.task-item-enter-animate {
-  animation: task-item-enter 280ms ease-out both;
-}
-
 @keyframes thought-expand {
   from {
     max-height: 0;

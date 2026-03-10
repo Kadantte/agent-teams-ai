@@ -14,7 +14,7 @@ import {
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useStore } from '@renderer/store';
 import { agentAvatarUrl } from '@renderer/utils/memberHelpers';
-import { linkifyMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
+import { linkifyAllMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import { formatToolSummary, parseToolSummary } from '@shared/utils/toolSummary';
 import { extractMarkdownPlainText } from '@shared/utils/markdownTextSearch';
@@ -227,15 +227,23 @@ const LeadThoughtItem = ({
   const previousHeightRef = useRef<number | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const cleanupTimerRef = useRef<number | null>(null);
+  const initialAnimationCompletedRef = useRef(!shouldAnimate);
+  const [shouldAnimateOnMount] = useState(() => shouldAnimate);
+
+  const teams = useStore((s) => s.teams);
+  const teamNames = useMemo(
+    () => teams.filter((t) => !t.deletedAt).map((t) => t.teamName),
+    [teams]
+  );
 
   const displayContent = useMemo(() => {
     let text = thought.text.replace(/\n/g, '  \n');
     text = linkifyTaskIdsInMarkdown(text);
-    if (memberColorMap && memberColorMap.size > 0) {
-      text = linkifyMentionsInMarkdown(text, memberColorMap);
+    if ((memberColorMap && memberColorMap.size > 0) || teamNames.length > 0) {
+      text = linkifyAllMentionsInMarkdown(text, memberColorMap ?? new Map(), teamNames);
     }
     return text;
-  }, [thought.text, memberColorMap]);
+  }, [thought.text, memberColorMap, teamNames]);
 
   const clearPendingAnimation = useCallback(() => {
     if (animationFrameRef.current !== null) {
@@ -283,6 +291,7 @@ const LeadThoughtItem = ({
       startHeight: number,
       startOpacity: number
     ): void => {
+      initialAnimationCompletedRef.current = false;
       clearPendingAnimation();
       wrapper.style.transition = 'none';
       wrapper.style.overflow = 'hidden';
@@ -299,6 +308,7 @@ const LeadThoughtItem = ({
 
       cleanupTimerRef.current = window.setTimeout(() => {
         resetWrapperStyles();
+        initialAnimationCompletedRef.current = true;
         cleanupTimerRef.current = null;
       }, THOUGHT_HEIGHT_ANIMATION_MS + 40);
     };
@@ -307,7 +317,8 @@ const LeadThoughtItem = ({
       const previousHeight = previousHeightRef.current;
       previousHeightRef.current = nextHeight;
 
-      if (!shouldAnimate) {
+      if (!shouldAnimateOnMount) {
+        initialAnimationCompletedRef.current = true;
         resetWrapperStyles();
         return;
       }
@@ -316,12 +327,20 @@ const LeadThoughtItem = ({
         if (nextHeight > 0 && animateFromZero) {
           animateHeight(nextHeight, 0, 0);
         } else {
+          initialAnimationCompletedRef.current = true;
           resetWrapperStyles();
         }
         return;
       }
 
       if (Math.abs(nextHeight - previousHeight) < 1) return;
+
+      // Only the first reveal should animate. Late content growth (for example when
+      // tool summary metadata appears after the text) should resize naturally.
+      if (initialAnimationCompletedRef.current) {
+        resetWrapperStyles();
+        return;
+      }
 
       const renderedHeight = wrapper.getBoundingClientRect().height;
       animateHeight(nextHeight, renderedHeight > 0 ? renderedHeight : previousHeight, 1);
@@ -338,9 +357,10 @@ const LeadThoughtItem = ({
     return () => {
       observer.disconnect();
       clearPendingAnimation();
+      initialAnimationCompletedRef.current = true;
       resetWrapperStyles();
     };
-  }, [clearPendingAnimation, resetWrapperStyles, shouldAnimate]);
+  }, [clearPendingAnimation, resetWrapperStyles, shouldAnimateOnMount]);
 
   useEffect(
     () => () => {

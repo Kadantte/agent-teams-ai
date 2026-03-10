@@ -13,7 +13,7 @@ import { useStore } from '@renderer/store';
 import { detectOperationalNoise } from '@renderer/utils/agentMessageFormatting';
 import { formatTokensCompact } from '@renderer/utils/formatters';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
-import { linkifyMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
+import { linkifyAllMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { extractMarkdownPlainText } from '@shared/utils/markdownTextSearch';
 import { format } from 'date-fns';
@@ -91,6 +91,13 @@ export const TeammateMessageItem: React.FC<TeammateMessageItemProps> = ({
     [members]
   );
 
+  // Get team names for @team linkification
+  const teams = useStore((s) => s.teams);
+  const teamNames = useMemo(
+    () => teams.filter((t) => !t.deletedAt).map((t) => t.teamName),
+    [teams]
+  );
+
   // Detect operational noise
   const noiseLabel = useMemo(
     () => detectOperationalNoise(teammateMessage.content, teammateMessage.teammateId),
@@ -114,8 +121,8 @@ export const TeammateMessageItem: React.FC<TeammateMessageItemProps> = ({
 
   const displayContent = useMemo(() => {
     const stripped = stripAgentBlocks(teammateMessage.content);
-    return linkifyMentionsInMarkdown(stripped, memberColorMap);
-  }, [teammateMessage.content, memberColorMap]);
+    return linkifyAllMentionsInMarkdown(stripped, memberColorMap, teamNames);
+  }, [teammateMessage.content, memberColorMap, teamNames]);
 
   // Noise: minimal inline row (no card, no expand)
   if (noiseLabel) {

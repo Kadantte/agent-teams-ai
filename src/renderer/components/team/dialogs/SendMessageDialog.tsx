@@ -118,23 +118,31 @@ export const SendMessageDialog = ({
 
   const selectedMember = members.find((m) => m.name === member);
   const isLeadRecipient = selectedMember?.role === 'lead' || selectedMember?.name === 'team-lead';
+  const hasTeammates = members.length > 1;
+  const canDelegate = hasTeammates && isLeadRecipient;
+  const shouldAutoDelegate = canDelegate;
   const supportsAttachments = isLeadRecipient && !!isTeamAlive;
   const canAttach = supportsAttachments && canAddMore;
 
   // Auto-switch to delegate when lead recipient is selected, but don't
   // override user's explicit choice on dialog open.
-  const prevIsLeadRef = useRef(isLeadRecipient);
+  const prevShouldAutoDelegateRef = useRef(shouldAutoDelegate);
   useEffect(() => {
-    // Skip the initial mount — honour the sticky mode
-    if (prevIsLeadRef.current === isLeadRecipient) return;
-    prevIsLeadRef.current = isLeadRecipient;
+    if (!canDelegate && actionMode === 'delegate') {
+      setActionMode('do');
+      return;
+    }
 
-    if (isLeadRecipient) {
+    // Skip the initial mount — honour the sticky mode
+    if (prevShouldAutoDelegateRef.current === shouldAutoDelegate) return;
+    prevShouldAutoDelegateRef.current = shouldAutoDelegate;
+
+    if (shouldAutoDelegate) {
       setActionMode('delegate');
     } else {
       setActionModeState((prev) => (prev === 'delegate' ? 'do' : prev));
     }
-  }, [isLeadRecipient, setActionMode]);
+  }, [actionMode, canDelegate, setActionMode, shouldAutoDelegate]);
 
   const [pendingAutoClose, setPendingAutoClose] = useState(false);
   // Reset form on open transition (avoid setState in render)
@@ -470,7 +478,7 @@ export const SendMessageDialog = ({
                   <ActionModeSelector
                     value={actionMode}
                     onChange={setActionMode}
-                    showDelegate={isLeadRecipient}
+                    showDelegate={canDelegate}
                   />
                 }
                 cornerAction={

@@ -9,7 +9,7 @@ import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
 import { REHYPE_PLUGINS } from '@renderer/utils/markdownPlugins';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
-import { linkifyMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
+import { linkifyAllMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { createLogger } from '@shared/utils/logger';
 import { format } from 'date-fns';
@@ -394,6 +394,13 @@ const UserChatGroupInner = ({ userGroup }: Readonly<UserChatGroupProps>): React.
     [members]
   );
 
+  // Get team names for @team linkification
+  const teams = useStore((s) => s.teams);
+  const teamNames = useMemo(
+    () => teams.filter((t) => !t.deletedAt).map((t) => t.teamName),
+    [teams]
+  );
+
   // Get search state for highlighting
   const { searchQuery, searchMatches, currentSearchIndex } = useStore(
     useShallow((s) => ({
@@ -490,8 +497,8 @@ const UserChatGroupInner = ({ userGroup }: Readonly<UserChatGroupProps>): React.
 
   // Pre-process: convert @memberName to mention:// markdown links
   const displayText = useMemo(
-    () => linkifyMentionsInMarkdown(baseDisplayText, memberColorMap),
-    [baseDisplayText, memberColorMap]
+    () => linkifyAllMentionsInMarkdown(baseDisplayText, memberColorMap, teamNames),
+    [baseDisplayText, memberColorMap, teamNames]
   );
 
   return (

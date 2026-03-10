@@ -377,7 +377,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       [getTriggerIndex, query, value, chips, onValueChange, onFileChipInsert, onChipRemove, dismiss]
     );
 
-    // --- Folder selection handler (inserts folder path with trailing slash) ---
+    // --- Folder selection handler (inserts folder as chip with folder icon) ---
     const handleFolderSelect = React.useCallback(
       (s: MentionSuggestion) => {
         const textarea = internalRef.current;
@@ -389,18 +389,51 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
         const before = value.slice(0, replaceStart);
         const after = value.slice(replaceEnd);
 
-        const displayPath = s.relativePath ?? s.name;
-        const insertion = `\`${displayPath}\` `;
-        const newValue = before + insertion + after;
-        onValueChange(newValue);
-        dismiss();
+        if (onFileChipInsert && onChipRemove) {
+          // Chip mode: create folder InlineChip
+          const chip = createChipFromSelection(
+            {
+              type: 'sendMessage',
+              filePath: s.filePath ?? '',
+              fromLine: null,
+              toLine: null,
+              selectedText: '',
+              formattedContext: '',
+              displayPath: s.relativePath,
+              isFolder: true,
+            },
+            chips
+          );
 
-        requestAnimationFrame(() => {
-          const cursor = before.length + insertion.length;
-          textarea.setSelectionRange(cursor, cursor);
-        });
+          if (chip) {
+            const token = chipToken(chip);
+            const newValue = before + token + after;
+            onValueChange(newValue);
+            onFileChipInsert(chip);
+            dismiss();
+
+            requestAnimationFrame(() => {
+              const cursor = before.length + token.length;
+              textarea.setSelectionRange(cursor, cursor);
+            });
+          } else {
+            dismiss();
+          }
+        } else {
+          // Text mode fallback: insert backtick-wrapped relative path
+          const displayPath = s.relativePath ?? s.name;
+          const insertion = `\`${displayPath}\` `;
+          const newValue = before + insertion + after;
+          onValueChange(newValue);
+          dismiss();
+
+          requestAnimationFrame(() => {
+            const cursor = before.length + insertion.length;
+            textarea.setSelectionRange(cursor, cursor);
+          });
+        }
       },
-      [getTriggerIndex, query, value, onValueChange, dismiss]
+      [getTriggerIndex, query, value, chips, onValueChange, onFileChipInsert, onChipRemove, dismiss]
     );
 
     // --- Merged selection handler ---

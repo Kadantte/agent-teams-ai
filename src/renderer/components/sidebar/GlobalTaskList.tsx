@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
+import { AnimatedHeightReveal } from '../team/activity/AnimatedHeightReveal';
 import { Combobox, type ComboboxOption } from '../ui/combobox';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 
@@ -513,15 +514,16 @@ export const GlobalTaskList = ({
               onRename={() => setRenamingTaskKey(`${task.teamName}:${task.id}`)}
               onDelete={() => handleDeleteTask(task.teamName, task.id)}
             >
-              <SidebarTaskItem
-                task={task}
-                showTeamName
-                isNew={isNewTask(task)}
-                renamingKey={renamingTaskKey}
-                onRenameComplete={handleRenameComplete}
-                onRenameCancel={handleRenameCancel}
-                getDisplaySubject={(t) => taskLocalState.getRenamedSubject(t.teamName, t.id)}
-              />
+              <AnimatedHeightReveal animate={isNewTask(task)}>
+                <SidebarTaskItem
+                  task={task}
+                  showTeamName
+                  renamingKey={renamingTaskKey}
+                  onRenameComplete={handleRenameComplete}
+                  onRenameCancel={handleRenameCancel}
+                  getDisplaySubject={(t) => taskLocalState.getRenamedSubject(t.teamName, t.id)}
+                />
+              </AnimatedHeightReveal>
             </TaskContextMenu>
           ))}
         </div>
@@ -611,15 +613,16 @@ export const GlobalTaskList = ({
               onRename={() => setRenamingTaskKey(`${task.teamName}:${task.id}`)}
               onDelete={() => handleDeleteTask(task.teamName, task.id)}
             >
-              <SidebarTaskItem
-                task={task}
-                showTeamName
-                isNew={isNewTask(task)}
-                renamingKey={renamingTaskKey}
-                onRenameComplete={handleRenameComplete}
-                onRenameCancel={handleRenameCancel}
-                getDisplaySubject={(t) => taskLocalState.getRenamedSubject(t.teamName, t.id)}
-              />
+              <AnimatedHeightReveal animate={isNewTask(task)}>
+                <SidebarTaskItem
+                  task={task}
+                  showTeamName
+                  renamingKey={renamingTaskKey}
+                  onRenameComplete={handleRenameComplete}
+                  onRenameCancel={handleRenameCancel}
+                  getDisplaySubject={(t) => taskLocalState.getRenamedSubject(t.teamName, t.id)}
+                />
+              </AnimatedHeightReveal>
             </TaskContextMenu>
           ))}
 
@@ -677,17 +680,18 @@ export const GlobalTaskList = ({
                           onRename={() => setRenamingTaskKey(`${task.teamName}:${task.id}`)}
                           onDelete={() => handleDeleteTask(task.teamName, task.id)}
                         >
-                          <SidebarTaskItem
-                            task={task}
-                            hideTeamName
-                            isNew={isNewTask(task)}
-                            renamingKey={renamingTaskKey}
-                            onRenameComplete={handleRenameComplete}
-                            onRenameCancel={handleRenameCancel}
-                            getDisplaySubject={(t) =>
-                              taskLocalState.getRenamedSubject(t.teamName, t.id)
-                            }
-                          />
+                          <AnimatedHeightReveal animate={isNewTask(task)}>
+                            <SidebarTaskItem
+                              task={task}
+                              hideTeamName
+                              renamingKey={renamingTaskKey}
+                              onRenameComplete={handleRenameComplete}
+                              onRenameCancel={handleRenameCancel}
+                              getDisplaySubject={(t) =>
+                                taskLocalState.getRenamedSubject(t.teamName, t.id)
+                              }
+                            />
+                          </AnimatedHeightReveal>
                         </TaskContextMenu>
                       </div>
                     );
@@ -744,16 +748,17 @@ export const GlobalTaskList = ({
                           onRename={() => setRenamingTaskKey(`${task.teamName}:${task.id}`)}
                           onDelete={() => handleDeleteTask(task.teamName, task.id)}
                         >
-                          <SidebarTaskItem
-                            task={task}
-                            isNew={isNewTask(task)}
-                            renamingKey={renamingTaskKey}
-                            onRenameComplete={handleRenameComplete}
-                            onRenameCancel={handleRenameCancel}
-                            getDisplaySubject={(t) =>
-                              taskLocalState.getRenamedSubject(t.teamName, t.id)
-                            }
-                          />
+                          <AnimatedHeightReveal animate={isNewTask(task)}>
+                            <SidebarTaskItem
+                              task={task}
+                              renamingKey={renamingTaskKey}
+                              onRenameComplete={handleRenameComplete}
+                              onRenameCancel={handleRenameCancel}
+                              getDisplaySubject={(t) =>
+                                taskLocalState.getRenamedSubject(t.teamName, t.id)
+                              }
+                            />
+                          </AnimatedHeightReveal>
                         </TaskContextMenu>
                       </div>
                     );

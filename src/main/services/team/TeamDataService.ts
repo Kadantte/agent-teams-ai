@@ -319,18 +319,21 @@ export class TeamDataService {
     // Dedup: if a lead_process message text is also present in lead_session, prefer lead_session.
     // This avoids double-rendering when we persist lead process messages and later load the lead JSONL.
     // Exception: lead_process messages with `to` field are captured SendMessage — never dedup those.
-    if (leadTexts.length > 0 && sentMessages.length > 0) {
+    if (leadTexts.length > 0) {
       const normalizeText = (text: string): string => text.trim().replace(/\r\n/g, '\n');
+      const getLeadThoughtFingerprint = (
+        msg: Pick<InboxMessage, 'from' | 'text' | 'leadSessionId'>
+      ) => `${msg.leadSessionId ?? ''}\0${msg.from}\0${normalizeText(msg.text ?? '')}`;
       const leadSessionFingerprints = new Set<string>();
       for (const msg of leadTexts) {
         if (msg.source !== 'lead_session') continue;
-        leadSessionFingerprints.add(`${msg.from}\0${normalizeText(msg.text)}`);
+        leadSessionFingerprints.add(getLeadThoughtFingerprint(msg));
       }
       messages = messages.filter((m) => {
         if (m.source !== 'lead_process') return true;
         // Captured SendMessage messages (with recipient) are real messages — never dedup
         if (m.to) return true;
-        const fp = `${m.from}\0${normalizeText(m.text ?? '')}`;
+        const fp = getLeadThoughtFingerprint(m);
         return !leadSessionFingerprints.has(fp);
       });
     }
@@ -1195,39 +1198,70 @@ export class TeamDataService {
     });
   }
 
-  private async extractLeadSessionTexts(config: TeamConfig): Promise<InboxMessage[]> {
-    if (!config.leadSessionId || !config.projectPath) {
-      return [];
-    }
-
-    const projectId = encodePath(config.projectPath);
+  private getLeadProjectDirCandidates(projectPath: string): string[] {
+    const projectId = encodePath(projectPath);
     const baseDir = extractBaseDir(projectId);
-    let jsonlPath = path.join(getProjectsBasePath(), baseDir, `${config.leadSessionId}.jsonl`);
-
-    try {
-      await fs.promises.access(jsonlPath, fs.constants.F_OK);
-    } catch {
+    const candidateDirs = [
+      path.join(getProjectsBasePath(), baseDir),
       // Claude Code encodes underscores as hyphens in project directory names;
       // our encodePath only handles slashes. Try the underscore-to-hyphen variant.
-      const altBaseDir = baseDir.replace(/_/g, '-');
-      if (altBaseDir !== baseDir) {
-        const altPath = path.join(
-          getProjectsBasePath(),
-          altBaseDir,
-          `${config.leadSessionId}.jsonl`
-        );
-        try {
-          await fs.promises.access(altPath, fs.constants.F_OK);
-          jsonlPath = altPath;
-        } catch {
-          return [];
-        }
-      } else {
-        return [];
+      ...(baseDir.includes('_')
+        ? [path.join(getProjectsBasePath(), baseDir.replace(/_/g, '-'))]
+        : []),
+    ];
+
+    return [...new Set(candidateDirs)];
+  }
+
+  private async getLeadSessionJsonlPaths(projectPath: string): Promise<Map<string, string>> {
+    const jsonlPaths = new Map<string, string>();
+    for (const dirPath of this.getLeadProjectDirCandidates(projectPath)) {
+      let entries: fs.Dirent[];
+      try {
+        entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+        const sessionId = entry.name.slice(0, -'.jsonl'.length).trim();
+        if (!sessionId || jsonlPaths.has(sessionId)) continue;
+        jsonlPaths.set(sessionId, path.join(dirPath, entry.name));
       }
     }
 
-    const leadName = config.members?.find((m) => m.agentType === 'team-lead')?.name ?? 'team-lead';
+    return jsonlPaths;
+  }
+
+  private getRecentLeadSessionIds(config: TeamConfig): string[] {
+    const sessionIds: string[] = [];
+    const seen = new Set<string>();
+    const pushSessionId = (value: unknown): void => {
+      if (typeof value !== 'string') return;
+      const sessionId = value.trim();
+      if (!sessionId || seen.has(sessionId)) return;
+      seen.add(sessionId);
+      sessionIds.push(sessionId);
+    };
+
+    pushSessionId(config.leadSessionId);
+    if (Array.isArray(config.sessionHistory)) {
+      for (let i = config.sessionHistory.length - 1; i >= 0; i--) {
+        pushSessionId(config.sessionHistory[i]);
+      }
+    }
+
+    return sessionIds;
+  }
+
+  private async extractLeadSessionTextsFromJsonl(
+    jsonlPath: string,
+    leadName: string,
+    leadSessionId: string,
+    maxTexts: number
+  ): Promise<InboxMessage[]> {
+    if (maxTexts <= 0) return [];
 
     // Optimization: read from the end of the JSONL file (we only need the last N texts).
     // The full file can be huge; scanning from the start causes long stalls on Windows.
@@ -1242,7 +1276,7 @@ export class TeamDataService {
       const fileSize = stat.size;
 
       let scanBytes = Math.min(INITIAL_SCAN_BYTES, fileSize);
-      while (textsReversed.length < MAX_LEAD_TEXTS && scanBytes <= MAX_SCAN_BYTES) {
+      while (textsReversed.length < maxTexts && scanBytes <= MAX_SCAN_BYTES) {
         const start = Math.max(0, fileSize - scanBytes);
         const buffer = Buffer.alloc(scanBytes);
         await handle.read(buffer, 0, scanBytes, start);
@@ -1314,13 +1348,22 @@ export class TeamDataService {
           const toolCalls = toolCallsList.length > 0 ? toolCallsList : undefined;
           const toolSummary = toolCalls ? formatToolSummaryFromCalls(toolCalls) : undefined;
 
-          // Stable messageId: timestamp + text prefix (survives tail-scan range changes)
+          const entryUuid = typeof msg.uuid === 'string' ? msg.uuid.trim() : '';
+          const assistantMessageId = typeof message.id === 'string' ? message.id.trim() : '';
+          const stableMessageId = entryUuid
+            ? `lead-thought-${entryUuid}`
+            : assistantMessageId
+              ? `lead-thought-msg-${assistantMessageId}`
+              : null;
+
+          // Fallback messageId: timestamp + text prefix (survives tail-scan range changes)
           const textPrefix = combined
             .slice(0, 50)
             .replace(/[^\p{L}\p{N}]/gu, '')
             .slice(0, 20);
 
-          const messageId = `lead-session-${timestamp}-${textPrefix}`;
+          const messageId =
+            stableMessageId ?? `lead-session-${leadSessionId}-${timestamp}-${textPrefix}`;
           if (seenMessageIds.has(messageId)) continue;
           seenMessageIds.add(messageId);
 
@@ -1330,15 +1373,15 @@ export class TeamDataService {
             timestamp,
             read: true,
             source: 'lead_session',
-            leadSessionId: config.leadSessionId,
+            leadSessionId,
             messageId,
             toolSummary,
             toolCalls,
           });
-          if (textsReversed.length >= MAX_LEAD_TEXTS) break;
+          if (textsReversed.length >= maxTexts) break;
         }
 
-        if (textsReversed.length >= MAX_LEAD_TEXTS) break;
+        if (textsReversed.length >= maxTexts) break;
         if (scanBytes === fileSize) break;
         scanBytes = Math.min(fileSize, scanBytes * 2);
       }
@@ -1349,6 +1392,42 @@ export class TeamDataService {
     // Convert back to chronological order (old behavior) and keep the last N texts.
     textsReversed.reverse();
     const texts = textsReversed;
+    return texts.length > maxTexts ? texts.slice(-maxTexts) : texts;
+  }
+
+  private async extractLeadSessionTexts(config: TeamConfig): Promise<InboxMessage[]> {
+    if (!config.projectPath) {
+      return [];
+    }
+
+    const leadName = config.members?.find((m) => m.agentType === 'team-lead')?.name ?? 'team-lead';
+    const sessionIds = this.getRecentLeadSessionIds(config);
+    if (sessionIds.length === 0) {
+      return [];
+    }
+    const availableJsonlPaths = await this.getLeadSessionJsonlPaths(config.projectPath);
+    if (availableJsonlPaths.size === 0) {
+      return [];
+    }
+
+    const texts: InboxMessage[] = [];
+    for (const sessionId of sessionIds) {
+      if (texts.length >= MAX_LEAD_TEXTS) break;
+      const jsonlPath = availableJsonlPaths.get(sessionId);
+      if (!jsonlPath) continue;
+      const remaining = MAX_LEAD_TEXTS - texts.length;
+      const sessionTexts = await this.extractLeadSessionTextsFromJsonl(
+        jsonlPath,
+        leadName,
+        sessionId,
+        remaining
+      );
+      if (sessionTexts.length > 0) {
+        texts.push(...sessionTexts);
+      }
+    }
+
+    texts.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
     return texts.length > MAX_LEAD_TEXTS ? texts.slice(-MAX_LEAD_TEXTS) : texts;
   }
 

@@ -10,14 +10,17 @@ import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { ExpandableContent } from '@renderer/components/ui/ExpandableContent';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
+import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useMarkCommentsRead } from '@renderer/hooks/useMarkCommentsRead';
+import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { useStore } from '@renderer/store';
+import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { buildReplyBlock, parseMessageReply } from '@renderer/utils/agentMessageFormatting';
 import { isImageMimeType } from '@renderer/utils/attachmentUtils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
-import { linkifyMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
+import { linkifyAllMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import { MAX_TEXT_LENGTH } from '@shared/constants';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { formatDistanceToNow } from 'date-fns';
@@ -77,6 +80,7 @@ export const TaskCommentsSection = ({
 }: TaskCommentsSectionProps): React.JSX.Element => {
   const addTaskComment = useStore((s) => s.addTaskComment);
   const addingComment = useStore((s) => s.addingComment);
+  const projectPath = useStore((s) => s.selectedTeamData?.config.projectPath ?? null);
   const commentsRef = useMarkCommentsRead(teamName, taskId, comments);
 
   const [replyTo, setReplyTo] = useState<{ author: string; text: string } | null>(null);
@@ -96,7 +100,13 @@ export const TaskCommentsSection = ({
   }
 
   const draft = useDraftPersistence({ key: `taskComment:${teamName}:${taskId}` });
+  const chipDraft = useChipDraftPersistence(`taskCommentChips:${teamName}:${taskId}`);
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
+  const { suggestions: teamMentionSuggestions } = useTeamSuggestions(teamName);
+  const teamNamesForLinkify = useMemo(
+    () => teamMentionSuggestions.map((t) => t.name),
+    [teamMentionSuggestions]
+  );
 
   const cappedComments = useMemo(() => {
     if (comments.length <= MAX_COMMENTS_TO_RENDER) return comments;
@@ -139,19 +149,24 @@ export const TaskCommentsSection = ({
 
   const trimmed = draft.value.trim();
   const remaining = MAX_TEXT_LENGTH - trimmed.length;
-  const canSubmit = trimmed.length > 0 && trimmed.length <= MAX_TEXT_LENGTH && !addingComment;
+  const canSubmit =
+    (trimmed.length > 0 || chipDraft.chips.length > 0) &&
+    trimmed.length <= MAX_TEXT_LENGTH &&
+    !addingComment;
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
     try {
-      const text = replyTo ? buildReplyBlock(replyTo.author, replyTo.text, trimmed) : trimmed;
+      const serialized = serializeChipsWithText(trimmed, chipDraft.chips);
+      const text = replyTo ? buildReplyBlock(replyTo.author, replyTo.text, serialized) : serialized;
       await addTaskComment(teamName, taskId, text);
       draft.clearDraft();
+      chipDraft.clearChipDraft();
       setReplyTo(null);
     } catch {
       // Error is stored in addCommentError via store
     }
-  }, [canSubmit, addTaskComment, teamName, taskId, trimmed, draft, replyTo]);
+  }, [canSubmit, addTaskComment, teamName, taskId, trimmed, draft, chipDraft, replyTo]);
 
   return (
     <div ref={commentsRef}>
@@ -288,7 +303,12 @@ export const TaskCommentsSection = ({
                             <MarkdownViewer
                               content={(() => {
                                 let t = linkifyTaskIdsInMarkdown(displayText);
-                                if (colorMap.size > 0) t = linkifyMentionsInMarkdown(t, colorMap);
+                                if (colorMap.size > 0 || teamNamesForLinkify.length > 0)
+                                  t = linkifyAllMentionsInMarkdown(
+                                    t,
+                                    colorMap,
+                                    teamNamesForLinkify
+                                  );
                                 return t;
                               })()}
                               maxHeight="max-h-none"
@@ -373,6 +393,11 @@ export const TaskCommentsSection = ({
               value={draft.value}
               onValueChange={draft.setValue}
               suggestions={mentionSuggestions}
+              teamSuggestions={teamMentionSuggestions}
+              projectPath={projectPath}
+              chips={chipDraft.chips}
+              onFileChipInsert={chipDraft.addChip}
+              onChipRemove={chipDraft.removeChip}
               onModEnter={() => void handleSubmit()}
               minRows={2}
               maxRows={8}

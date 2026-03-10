@@ -429,13 +429,21 @@ async function handleGetData(
   }
 
   const normalizeText = (text: string): string => text.trim().replace(/\r\n/g, '\n');
+  const isLeadThoughtLike = (msg: { source?: unknown; to?: string }): boolean =>
+    !msg.to && (msg.source === 'lead_process' || msg.source === 'lead_session');
+  const getLeadThoughtFingerprint = (msg: {
+    from: string;
+    text: string;
+    leadSessionId?: string;
+  }): string => `${msg.leadSessionId ?? ''}\0${msg.from}\0${normalizeText(msg.text)}`;
 
-  // Collect text fingerprints from ALL non-live messages (inbox, lead_session, sentMessages)
-  // so we can dedup lead_process live messages against them.
+  // Collect fingerprints only for thought-like lead messages. Include leadSessionId so a
+  // repeated thought in a new session does not get collapsed into an old session's history.
   const existingTextFingerprints = new Set<string>();
   for (const msg of data.messages) {
     if (typeof msg.from !== 'string' || typeof msg.text !== 'string') continue;
-    existingTextFingerprints.add(`${msg.from}\0${normalizeText(msg.text)}`);
+    if (!isLeadThoughtLike(msg)) continue;
+    existingTextFingerprints.add(getLeadThoughtFingerprint(msg));
   }
 
   const keyFor = (m: {
@@ -450,20 +458,20 @@ async function handleGetData(
     return `${m.timestamp}\0${m.from}\0${(m.text ?? '').slice(0, 80)}`;
   };
 
-  // Text-based fingerprints for lead_process messages to catch duplicates
-  // with different messageIds (e.g. lead-turn-* vs lead-sendmsg-* with same text)
+  // Text-based fingerprints for live lead thoughts to catch duplicates with different
+  // messageIds inside the same session (e.g. lead-turn-* re-emits).
   const leadProcessTextFingerprints = new Set<string>();
 
   const merged: typeof data.messages = [];
   const seen = new Set<string>();
   for (const msg of [...data.messages, ...live]) {
     if ((msg as { source?: unknown }).source === 'lead_process' && !msg.to) {
-      const fp = `${msg.from}\0${normalizeText(msg.text ?? '')}`;
-      // Skip if same text already exists from any source (inbox, lead_session, etc.)
+      const fp = getLeadThoughtFingerprint(msg);
+      // Skip if the same thought already exists in persisted history for the same session.
       if (existingTextFingerprints.has(fp)) {
         continue;
       }
-      // Dedup lead_process messages with same text but different messageIds
+      // Dedup live lead_process thoughts with the same text in the same session.
       if (leadProcessTextFingerprints.has(fp)) {
         continue;
       }
