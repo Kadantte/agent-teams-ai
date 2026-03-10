@@ -5,8 +5,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip';
+import type { AgentActionMode } from '@shared/types';
 
-export type ActionMode = 'do' | 'ask' | 'delegate';
+export type ActionMode = AgentActionMode;
 
 interface ActionModeSelectorProps {
   value: ActionMode;
@@ -24,21 +25,21 @@ const MODE_CONFIG: {
   {
     mode: 'do',
     label: 'Do',
-    tooltip: 'Execute the task independently',
+    tooltip: 'Full execution mode - can change code/state, run commands, or delegate',
     activeClass: 'bg-rose-500/80 text-white',
     tooltipClass: 'bg-rose-500/80 border-rose-600 text-white',
   },
   {
     mode: 'ask',
     label: 'Ask',
-    tooltip: 'Chat only — no file changes or commands',
+    tooltip: 'Read-only discussion mode - no code/state changes or commands',
     activeClass: 'bg-blue-600 text-white',
     tooltipClass: 'bg-blue-600 border-blue-700 text-white',
   },
   {
     mode: 'delegate',
     label: 'Delegate',
-    tooltip: 'Delegate task to a teammate (lead only)',
+    tooltip: 'Lead-only orchestration - delegate everything, do not execute yourself',
     activeClass: 'bg-amber-500/80 text-white',
     tooltipClass: 'bg-amber-500/80 border-amber-600 text-white',
   },

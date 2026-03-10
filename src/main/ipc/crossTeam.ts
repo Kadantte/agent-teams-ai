@@ -6,6 +6,7 @@ import {
 } from '@preload/constants/ipcChannels';
 import { createLogger } from '@shared/utils/logger';
 
+import { isAgentActionMode } from '../services/team/actionModeInstructions';
 import type { CrossTeamService } from '../services/team/CrossTeamService';
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import type { IpcResult } from '@shared/types';
@@ -48,6 +49,9 @@ async function handleSend(
       throw new Error('Invalid request');
     }
     const req = request as Record<string, unknown>;
+    if (req.actionMode !== undefined && !isAgentActionMode(req.actionMode)) {
+      throw new Error('actionMode must be one of: do, ask, delegate');
+    }
     return getService().send({
       fromTeam: String(req.fromTeam ?? ''),
       fromMember: String(req.fromMember ?? ''),
@@ -56,6 +60,7 @@ async function handleSend(
       replyToConversationId:
         typeof req.replyToConversationId === 'string' ? req.replyToConversationId : undefined,
       text: String(req.text ?? ''),
+      actionMode: isAgentActionMode(req.actionMode) ? req.actionMode : undefined,
       summary: typeof req.summary === 'string' ? req.summary : undefined,
       chainDepth: typeof req.chainDepth === 'number' ? req.chainDepth : undefined,
     });

@@ -33,9 +33,15 @@ interface MessageComposerProps {
     recipient: string,
     text: string,
     summary?: string,
-    attachments?: AttachmentPayload[]
+    attachments?: AttachmentPayload[],
+    actionMode?: ActionMode
   ) => void;
-  onCrossTeamSend?: (toTeam: string, text: string, summary?: string) => void;
+  onCrossTeamSend?: (
+    toTeam: string,
+    text: string,
+    summary?: string,
+    actionMode?: ActionMode
+  ) => void;
 }
 
 export const MessageComposer = ({
@@ -131,6 +137,7 @@ export const MessageComposer = ({
   const selectedMember = members.find((m) => m.name === recipient);
   const selectedResolvedColor = selectedMember ? colorMap.get(selectedMember.name) : undefined;
   const isLeadRecipient = selectedMember?.role === 'lead' || selectedMember?.name === 'team-lead';
+  const canDelegate = isCrossTeam || isLeadRecipient;
 
   // Auto-select delegate when lead recipient changes, reset when non-lead
   useEffect(() => {
@@ -165,17 +172,19 @@ export const MessageComposer = ({
     pendingSendRef.current = true;
     const serialized = serializeChipsWithText(trimmed, draft.chips);
     if (isCrossTeam && selectedTeam && onCrossTeamSend) {
-      onCrossTeamSend(selectedTeam, serialized, trimmed);
+      onCrossTeamSend(selectedTeam, serialized, trimmed, actionMode);
     } else {
       // Summary should stay compact (no expanded chip markdown)
       onSend(
         recipient,
         serialized,
         trimmed,
-        draft.attachments.length > 0 ? draft.attachments : undefined
+        draft.attachments.length > 0 ? draft.attachments : undefined,
+        actionMode
       );
     }
   }, [
+    actionMode,
     canSend,
     recipient,
     trimmed,
@@ -508,6 +517,7 @@ export const MessageComposer = ({
                         color={selectedResolvedColor}
                         size="sm"
                         hideAvatar={recipient === 'user'}
+                        disableHoverCard
                       />
                     ) : (
                       <span className="text-[var(--color-text-muted)]">Select...</span>
@@ -582,6 +592,7 @@ export const MessageComposer = ({
                               color={resolvedColor}
                               size="sm"
                               hideAvatar={m.name === 'user'}
+                              disableHoverCard
                             />
                             {role ? (
                               <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
@@ -612,6 +623,7 @@ export const MessageComposer = ({
                       color={selectedResolvedColor}
                       size="sm"
                       hideAvatar={recipient === 'user'}
+                      disableHoverCard
                     />
                   ) : (
                     <span className="text-[var(--color-text-muted)]">Select...</span>
@@ -686,6 +698,7 @@ export const MessageComposer = ({
                             color={resolvedColor}
                             size="sm"
                             hideAvatar={m.name === 'user'}
+                            disableHoverCard
                           />
                           {role ? (
                             <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
@@ -732,7 +745,7 @@ export const MessageComposer = ({
           <ActionModeSelector
             value={actionMode}
             onChange={setActionMode}
-            showDelegate={isLeadRecipient}
+            showDelegate={canDelegate}
           />
         }
         cornerAction={

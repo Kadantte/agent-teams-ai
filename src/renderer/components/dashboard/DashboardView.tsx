@@ -646,6 +646,7 @@ const ProjectsGrid = ({
 
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
+      {!searchQuery.trim() && <NewProjectCard />}
       {filteredRepos.map((repo) => {
         const counts = repo.worktrees.reduce(
           (acc, wt) => {
@@ -673,7 +674,6 @@ const ProjectsGrid = ({
           />
         );
       })}
-      {!searchQuery.trim() && <NewProjectCard />}
     </div>
   );
 };

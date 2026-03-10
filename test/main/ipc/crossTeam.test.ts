@@ -76,6 +76,7 @@ describe('crossTeam IPC handlers', () => {
       fromMember: 'lead',
       toTeam: 'team-b',
       text: 'Hello',
+      actionMode: 'delegate',
     });
 
     expect(result).toEqual({
@@ -87,8 +88,27 @@ describe('crossTeam IPC handlers', () => {
       fromMember: 'lead',
       toTeam: 'team-b',
       text: 'Hello',
+      actionMode: 'delegate',
       summary: undefined,
       chainDepth: undefined,
+    });
+  });
+
+  it('send handler rejects invalid actionMode', async () => {
+    registerCrossTeamHandlers(mockIpc as never);
+    const handler = mockIpc.handle.mock.calls.find((c) => c[0] === 'cross-team:send')![1];
+
+    const result = await handler({} as never, {
+      fromTeam: 'team-a',
+      fromMember: 'lead',
+      toTeam: 'team-b',
+      text: 'Hello',
+      actionMode: 'break-everything',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'actionMode must be one of: do, ask, delegate',
     });
   });
 

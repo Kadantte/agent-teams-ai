@@ -74,6 +74,10 @@ import * as path from 'path';
 
 import { ConfigManager } from '../services/infrastructure/ConfigManager';
 import { NotificationManager } from '../services/infrastructure/NotificationManager';
+import {
+  buildActionModeAgentBlock,
+  isAgentActionMode,
+} from '../services/team/actionModeInstructions';
 import { gitIdentityResolver } from '../services/parsing/GitIdentityResolver';
 import { TeamAttachmentStore } from '../services/team/TeamAttachmentStore';
 import { TeamTaskAttachmentStore } from '../services/team/TeamTaskAttachmentStore';
@@ -93,6 +97,7 @@ import type {
   TeamProvisioningService,
 } from '../services';
 import type {
+  AgentActionMode,
   AttachmentFileData,
   AttachmentMeta,
   AttachmentPayload,
@@ -986,6 +991,37 @@ function validateAttachments(
   return { valid: true, value: result };
 }
 
+function buildMessageDeliveryText(
+  baseText: string,
+  opts: {
+    actionMode?: AgentActionMode;
+    isLeadRecipient: boolean;
+  }
+): string {
+  const hiddenBlocks: string[] = [];
+  const actionModeBlock = buildActionModeAgentBlock(opts.actionMode);
+  if (actionModeBlock) {
+    hiddenBlocks.push(actionModeBlock);
+  }
+  if (!opts.isLeadRecipient) {
+    hiddenBlocks.push(
+      [
+        AGENT_BLOCK_OPEN,
+        'You received a direct message from the human user via the UI.',
+        'Please reply back to recipient "user" with a short, human-readable answer.',
+        'If you cannot respond now, reply with a brief status (e.g. "Busy, will reply later").',
+        AGENT_BLOCK_CLOSE,
+      ].join('\n')
+    );
+  }
+
+  if (hiddenBlocks.length === 0) {
+    return baseText;
+  }
+
+  return [...hiddenBlocks, baseText].join('\n\n');
+}
+
 async function handleSendMessage(
   _event: IpcMainInvokeEvent,
   teamName: unknown,
@@ -1017,6 +1053,9 @@ async function handleSendMessage(
       return { success: false, error: validatedFrom.error ?? 'Invalid from' };
     }
   }
+  if (payload.actionMode !== undefined && !isAgentActionMode(payload.actionMode)) {
+    return { success: false, error: 'actionMode must be one of: do, ask, delegate' };
+  }
 
   let validatedAttachments: AttachmentPayload[] | undefined;
   if (
@@ -1031,14 +1070,41 @@ async function handleSendMessage(
     validatedAttachments = attResult.value;
   }
 
+  const tn = validatedTeamName.value!;
+  const memberName = validatedMember.value!;
+  let prevalidatedLeadName: string | null | undefined;
+  let prevalidatedIsLeadRecipient: boolean | undefined;
+  if (payload.actionMode === 'delegate') {
+    try {
+      prevalidatedLeadName = await getTeamDataService().getLeadMemberName(tn);
+    } catch (error) {
+      return wrapTeamHandler('sendMessage', async () => {
+        throw error;
+      });
+    }
+    prevalidatedIsLeadRecipient =
+      prevalidatedLeadName !== null && memberName === prevalidatedLeadName;
+    if (!prevalidatedIsLeadRecipient) {
+      return {
+        success: false,
+        error: 'Delegate mode is only supported when messaging the team lead',
+      };
+    }
+  }
+
   return wrapTeamHandler('sendMessage', async () => {
-    const tn = validatedTeamName.value!;
     const provisioning = getTeamProvisioningService();
     const isAlive = provisioning.isTeamAlive(tn);
 
-    const leadName = await getTeamDataService().getLeadMemberName(tn);
-    const memberName = validatedMember.value!;
-    const isLeadRecipient = leadName !== null && memberName === leadName;
+    const leadName =
+      prevalidatedLeadName !== undefined
+        ? prevalidatedLeadName
+        : await getTeamDataService().getLeadMemberName(tn);
+    const isLeadRecipient =
+      prevalidatedIsLeadRecipient !== undefined
+        ? prevalidatedIsLeadRecipient
+        : leadName !== null && memberName === leadName;
+    const actionMode = payload.actionMode;
 
     // Attachments only supported for live lead (stdin content blocks)
     if (validatedAttachments?.length && (!isLeadRecipient || !isAlive)) {
@@ -1049,6 +1115,7 @@ async function handleSendMessage(
 
     // Smart routing: lead + alive → stdin direct, else → inbox
     if (isLeadRecipient && isAlive) {
+      const resolvedLeadName = leadName ?? memberName;
       // Separate try blocks: stdin delivery vs persistence
       // If stdin succeeds but persistence fails, do NOT fallback to inbox (would duplicate)
       // Wrap with instructions so lead responds with visible text (not just agent-only blocks)
@@ -1057,7 +1124,10 @@ async function handleSendMessage(
         `IMPORTANT: Your text response here is shown to the user in the Messages panel. Always include a brief human-readable reply. Do NOT respond with only an agent-only block.`,
         ``,
         `Message from user:`,
-        payload.text!,
+        buildMessageDeliveryText(payload.text!, {
+          actionMode,
+          isLeadRecipient: true,
+        }),
       ].join('\n');
 
       let stdinSent = false;
@@ -1090,7 +1160,7 @@ async function handleSendMessage(
         try {
           result = await getTeamDataService().sendDirectToLead(
             tn,
-            leadName,
+            resolvedLeadName,
             payload.text!,
             payload.summary,
             attachmentMeta
@@ -1109,7 +1179,7 @@ async function handleSendMessage(
 
         provisioning.pushLiveLeadProcessMessage(tn, {
           from: 'user',
-          to: leadName,
+          to: resolvedLeadName,
           text: payload.text!,
           timestamp: new Date().toISOString(),
           read: true,
@@ -1125,17 +1195,10 @@ async function handleSendMessage(
 
     // Inbox path: offline lead or regular members (no attachment support)
     const baseText = payload.text!.trim();
-    const memberDeliveryText = isLeadRecipient
-      ? baseText
-      : [
-          baseText,
-          '',
-          AGENT_BLOCK_OPEN,
-          'You received a direct message from the human user via the UI.',
-          'Please reply back to recipient "user" with a short, human-readable answer.',
-          'If you cannot respond now, reply with a brief status (e.g. "Busy, will reply later").',
-          AGENT_BLOCK_CLOSE,
-        ].join('\n');
+    const memberDeliveryText = buildMessageDeliveryText(baseText, {
+      actionMode,
+      isLeadRecipient,
+    });
     const result = await getTeamDataService().sendMessage(tn, {
       member: memberName,
       text: memberDeliveryText,

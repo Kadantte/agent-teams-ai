@@ -1564,10 +1564,16 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
               sending={sendingMessage}
               sendError={sendMessageError}
               lastResult={lastSendMessageResult}
-              onSend={(member, text, summary, attachments) => {
+              onSend={(member, text, summary, attachments, actionMode) => {
                 const sentAtMs = Date.now();
                 setPendingRepliesByMember((prev) => ({ ...prev, [member]: sentAtMs }));
-                void sendTeamMessage(teamName, { member, text, summary, attachments }).catch(() => {
+                void sendTeamMessage(teamName, {
+                  member,
+                  text,
+                  summary,
+                  attachments,
+                  actionMode,
+                }).catch(() => {
                   setPendingRepliesByMember((prev) => {
                     if (prev[member] !== sentAtMs) return prev;
                     const next = { ...prev };
@@ -1576,12 +1582,13 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
                   });
                 });
               }}
-              onCrossTeamSend={(toTeam, text, summary) => {
+              onCrossTeamSend={(toTeam, text, summary, actionMode) => {
                 void sendCrossTeamMessage({
                   fromTeam: teamName,
                   fromMember: 'user',
                   toTeam,
                   text,
+                  actionMode,
                   summary,
                 });
               }}

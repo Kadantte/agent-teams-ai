@@ -107,7 +107,9 @@ describe('ipc teams handlers', () => {
     })),
     reconcileTeamArtifacts: vi.fn(async () => undefined),
     deleteTeam: vi.fn(async () => undefined),
+    getLeadMemberName: vi.fn(async () => 'team-lead'),
     sendMessage: vi.fn(async () => ({ deliveredToInbox: true, messageId: 'm1' })),
+    sendDirectToLead: vi.fn(async () => ({ deliveredToInbox: false, messageId: 'direct-1' })),
     createTask: vi.fn(async () => ({ id: '1', subject: 'Test', status: 'pending' })),
     requestReview: vi.fn(async () => undefined),
     updateKanban: vi.fn(async () => undefined),
@@ -153,6 +155,7 @@ describe('ipc teams handlers', () => {
     launchTeam: vi.fn(async () => ({ runId: 'run-2' })),
     sendMessageToTeam: vi.fn(async () => undefined),
     isTeamAlive: vi.fn(() => true),
+    pushLiveLeadProcessMessage: vi.fn(),
     relayLeadInboxMessages: vi.fn(async () => 0),
     relayMemberInboxMessages: vi.fn(async () => 0),
     getLiveLeadProcessMessages: vi.fn(() => [] as InboxMessage[]),
@@ -228,6 +231,45 @@ describe('ipc teams handlers', () => {
       text: 'hi',
     })) as { success: boolean };
     expect(result.success).toBe(false);
+  });
+
+  it('passes hidden ask-mode instructions to a live lead without exposing them in stored text', async () => {
+    const sendHandler = handlers.get(TEAM_SEND_MESSAGE);
+    expect(sendHandler).toBeDefined();
+
+    const result = (await sendHandler!({} as never, 'my-team', {
+      member: 'team-lead',
+      text: 'Can you review the approach?',
+      actionMode: 'ask',
+    })) as { success: boolean };
+
+    expect(result.success).toBe(true);
+    expect(provisioningService.sendMessageToTeam).toHaveBeenCalledWith(
+      'my-team',
+      expect.stringContaining('TURN ACTION MODE: ASK'),
+      undefined
+    );
+    expect(service.sendDirectToLead).toHaveBeenCalledWith(
+      'my-team',
+      'team-lead',
+      'Can you review the approach?',
+      undefined,
+      undefined
+    );
+  });
+
+  it('rejects delegate mode when recipient is not the team lead', async () => {
+    const sendHandler = handlers.get(TEAM_SEND_MESSAGE);
+    expect(sendHandler).toBeDefined();
+
+    const result = (await sendHandler!({} as never, 'my-team', {
+      member: 'alice',
+      text: 'Take this on',
+      actionMode: 'delegate',
+    })) as { success: boolean; error?: string };
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Delegate mode is only supported when messaging the team lead');
   });
 
   it('calls service and returns success on happy paths', async () => {

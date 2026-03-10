@@ -44,6 +44,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { atomicWriteAsync } from './atomicWrite';
+import { buildActionModeProtocol } from './actionModeInstructions';
 import { ClaudeBinaryResolver } from './ClaudeBinaryResolver';
 import { withFileLock } from './fileLock';
 import { withInboxLock } from './inboxLock';
@@ -362,6 +363,7 @@ function buildMemberSpawnPrompt(
   const workflowBlock = member.workflow?.trim()
     ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '')}`
     : '';
+  const actionModeProtocol = buildActionModeProtocol();
   return `You are ${member.name}, a ${role} on team "${displayName}" (${teamName}).${workflowBlock}
 
 ${getAgentLanguageInstruction()}
@@ -369,6 +371,7 @@ Introduce yourself briefly (name and role) and confirm you are ready.
 Then wait for task assignments.
 When you later receive work or reconnect after a restart, use task_briefing as your compact queue view. Use task_get when you need the full task context before starting a pending/needsFix task or when the in_progress briefing details are not enough.
 ${buildTeammateAgentBlockReminder()}
+${actionModeProtocol}
 Include the following agent-only instructions verbatim in the prompt:
 
 ${taskProtocol}
@@ -531,6 +534,7 @@ function buildPersistentLeadContext(opts: {
   const { teamName, leadName, isSolo, members, compact } = opts;
   const languageInstruction = getAgentLanguageInstruction();
   const agentBlockPolicy = buildAgentBlockUsagePolicy();
+  const actionModeProtocol = buildActionModeProtocol();
   const teamCtlOps = buildTeamCtlOpsInstructions(teamName, leadName);
 
   const soloConstraint = isSolo
@@ -574,6 +578,8 @@ Constraints:
 - When messaging "user" (the human): NEVER mention internal MCP tools, scripts, CLI commands, or file paths under ~/.claude/. The user sees messages in the UI — write plain human language. If a task needs a status update, do it yourself via the board MCP tools; never ask the user to run a command.${soloConstraint}
 
 ${teamCtlOps}
+
+${actionModeProtocol}
 
 Communication protocol (CRITICAL — you are running headless, no one sees your text output):
 - When you receive a <teammate-message> from a teammate, ALWAYS reply using the SendMessage tool with the sender's name as recipient.
@@ -844,6 +850,7 @@ function buildLaunchPrompt(
         const workflowBlock = m.workflow?.trim()
           ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(m.workflow, '     ')}`
           : '';
+        const actionModeProtocol = indentMultiline(buildActionModeProtocol(), '     ');
 
         return `   For "${m.name}":
    - prompt:
@@ -853,6 +860,7 @@ function buildLaunchPrompt(
      The team has been reconnected after a restart.
      ${hasTasks ? `You may have assigned tasks in states like in_progress, needsFix, pending, review, completed, or approved from the previous session.` : 'You have no assigned tasks currently.'}
      ${buildTeammateAgentBlockReminder()}
+${actionModeProtocol}
 
      Your FIRST action: call MCP tool task_briefing with:
      { teamName: "${request.teamName}", memberName: "${m.name}" }

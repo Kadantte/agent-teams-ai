@@ -268,9 +268,12 @@ export interface InboxMessage {
   toolCalls?: ToolCallMeta[];
 }
 
+export type AgentActionMode = 'do' | 'ask' | 'delegate';
+
 export interface SendMessageRequest {
   member: string;
   text: string;
+  actionMode?: AgentActionMode;
   summary?: string;
   from?: string;
   timestamp?: string;
@@ -641,6 +644,7 @@ export interface CrossTeamSendRequest {
   conversationId?: string;
   replyToConversationId?: string;
   text: string;
+  actionMode?: AgentActionMode;
   summary?: string;
   chainDepth?: number;
 }

@@ -4,6 +4,7 @@ import { createLogger } from '@shared/utils/logger';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 
+import { buildActionModeAgentBlock } from './actionModeInstructions';
 import { CascadeGuard } from './CascadeGuard';
 import { CrossTeamOutbox } from './CrossTeamOutbox';
 
@@ -43,7 +44,7 @@ export class CrossTeamService {
   ) {}
 
   async send(request: CrossTeamSendRequest): Promise<CrossTeamSendResult> {
-    const { fromTeam, fromMember, toTeam, text, summary } = request;
+    const { fromTeam, fromMember, toTeam, text, summary, actionMode } = request;
     const chainDepth = request.chainDepth ?? 0;
     const messageId = request.messageId?.trim() || randomUUID();
     const timestamp = request.timestamp ?? new Date().toISOString();
@@ -88,7 +89,9 @@ export class CrossTeamService {
 
     // 3. Format
     const from = `${fromTeam}.${fromMember}`;
-    const formattedText = formatCrossTeamText(from, chainDepth, text, {
+    const actionModeBlock = buildActionModeAgentBlock(actionMode);
+    const deliveryText = actionModeBlock ? `${actionModeBlock}\n\n${text}` : text;
+    const formattedText = formatCrossTeamText(from, chainDepth, deliveryText, {
       conversationId,
       replyToConversationId,
     });

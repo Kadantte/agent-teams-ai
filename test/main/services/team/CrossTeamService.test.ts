@@ -108,6 +108,20 @@ describe('CrossTeamService', () => {
       expect(prefix?.conversationId).toBeTruthy();
     });
 
+    it('injects a hidden action-mode block for the target lead only', async () => {
+      await service.send(makeRequest({ actionMode: 'ask', text: 'Can you inspect this?' }));
+
+      const [, req] = inboxWriter.sendMessage.mock.calls[0];
+      expect(req.text).toContain('TURN ACTION MODE: ASK');
+      expect(req.text).toContain('STRICTLY read-only conversation mode');
+
+      await vi.waitFor(() => {
+        expect(inboxWriter.sendMessage).toHaveBeenCalledTimes(2);
+      });
+      const [, senderReq] = inboxWriter.sendMessage.mock.calls[1];
+      expect(senderReq.text).toBe('Can you inspect this?');
+    });
+
     it('writes sender copy to fromTeam inbox as user_sent', async () => {
       await service.send(makeRequest());
 

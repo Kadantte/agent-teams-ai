@@ -114,6 +114,9 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     expect(prompt).toContain('Default to working ONE task at a time');
     expect(prompt).toContain('task_start');
     expect(prompt).toContain('task_complete');
+    expect(prompt).toContain('TURN ACTION MODE PROTOCOL (HIGHEST PRIORITY FOR EACH USER TURN):');
+    expect(prompt).toContain('ASK: Strict read-only conversation mode.');
+    expect(prompt).toContain('DELEGATE: Strict orchestration mode for leads.');
     expect(prompt).toContain(`AGENT_BLOCK_OPEN is exactly: ${AGENT_BLOCK_OPEN}`);
     expect(prompt).toContain(`AGENT_BLOCK_CLOSE is exactly: ${AGENT_BLOCK_CLOSE}`);
     expect(prompt).not.toContain('teamctl.js');
@@ -218,6 +221,9 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     expect(prompt).toContain(`  ${AGENT_BLOCK_OPEN}`);
     expect(prompt).toContain(`  ${AGENT_BLOCK_CLOSE}`);
     expect(prompt).toContain('NEVER use agent-only blocks in messages to "user".');
+    expect(prompt).toContain('TURN ACTION MODE PROTOCOL (HIGHEST PRIORITY FOR EACH USER TURN):');
+    expect(prompt).toContain('DO: Full execution mode.');
+    expect(prompt).toContain('DELEGATE: Strict orchestration mode for leads.');
     expect(prompt).toContain('you MUST do ALL steps below');
     expect(prompt).toContain('STEP 2 — THEN, add a task comment describing exactly what you need');
     expect(prompt).toContain('STEP 3 — THEN, send a message to your team lead via SendMessage');
