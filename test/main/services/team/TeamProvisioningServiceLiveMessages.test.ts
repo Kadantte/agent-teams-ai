@@ -518,6 +518,44 @@ describe('TeamProvisioningService pre-ready live messages', () => {
     expect(hoisted.sendInboxMessage).not.toHaveBeenCalled();
   });
 
+  it('strips canonical cross-team tag from outbound cross-team content', async () => {
+    const service = new TeamProvisioningService();
+    seedConfig('my-team');
+    const crossTeamSender = vi.fn(async () => ({ deliveredToInbox: true, messageId: 'cross-legacy' }));
+    service.setCrossTeamSender(crossTeamSender);
+    const run = attachRun(service, 'my-team', { provisioningComplete: true });
+    run.activeCrossTeamReplyHints = [{ toTeam: 'team-best', conversationId: 'conv-legacy' }];
+
+    callHandleStreamJsonMessage(service, run, {
+      type: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          name: 'SendMessage',
+          input: {
+            type: 'message',
+            recipient: 'team-best.user',
+            content:
+              '<cross-team from="my-team.team-lead" depth="0" conversationId="conv-legacy" replyToConversationId="conv-legacy" />\nПривет!',
+            summary: 'Ответ',
+          },
+        },
+      ],
+    });
+
+    await vi.waitFor(() => {
+      expect(crossTeamSender).toHaveBeenCalledTimes(1);
+    });
+
+    expect(crossTeamSender).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Привет!',
+        conversationId: 'conv-legacy',
+        replyToConversationId: 'conv-legacy',
+      })
+    );
+  });
+
   it('does not push a duplicate live row when cross-team fallback deduplicates', async () => {
     const service = new TeamProvisioningService();
     seedConfig('my-team');

@@ -56,6 +56,8 @@ describe('CrossTeamService', () => {
     isTeamAlive: ReturnType<typeof vi.fn>;
     relayLeadInboxMessages: ReturnType<typeof vi.fn>;
     resolveCrossTeamReplyMetadata: ReturnType<typeof vi.fn>;
+    registerPendingCrossTeamReplyExpectation: ReturnType<typeof vi.fn>;
+    clearPendingCrossTeamReplyExpectation: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -73,6 +75,8 @@ describe('CrossTeamService', () => {
       isTeamAlive: vi.fn().mockReturnValue(false),
       relayLeadInboxMessages: vi.fn().mockResolvedValue(0),
       resolveCrossTeamReplyMetadata: vi.fn().mockReturnValue(null),
+      registerPendingCrossTeamReplyExpectation: vi.fn(),
+      clearPendingCrossTeamReplyExpectation: vi.fn(),
     };
 
     service = new CrossTeamService(
@@ -187,6 +191,35 @@ describe('CrossTeamService', () => {
       await service.send(makeRequest());
 
       expect(provisioning.relayLeadInboxMessages).toHaveBeenCalledWith('team-b');
+    });
+
+    it('writes sender copy before triggering live relay', async () => {
+      const order: string[] = [];
+      inboxWriter.sendMessage.mockImplementation(async (teamName: string) => {
+        order.push(`write:${teamName}`);
+        return { deliveredToInbox: true, messageId: 'mock-id' };
+      });
+      provisioning.registerPendingCrossTeamReplyExpectation.mockImplementation(async () => {
+        order.push('register:team-a->team-b');
+      });
+      provisioning.clearPendingCrossTeamReplyExpectation.mockImplementation(async () => {
+        order.push('clear:team-a->team-b');
+      });
+      provisioning.isTeamAlive.mockReturnValue(true);
+      provisioning.relayLeadInboxMessages.mockImplementation(async () => {
+        order.push('relay:team-b');
+        return 0;
+      });
+
+      await service.send(makeRequest());
+
+      expect(order).toEqual([
+        'register:team-a->team-b',
+        'write:team-b',
+        'write:team-a',
+        'clear:team-a->team-b',
+        'relay:team-b',
+      ]);
     });
 
     it('does not relay when team is offline', async () => {

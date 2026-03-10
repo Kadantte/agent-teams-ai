@@ -2,8 +2,13 @@
 // Single source of truth for the cross-team message prefix format.
 // Used by: CrossTeamService (main), crossTeam.js (controller), ActivityItem (renderer), tests.
 
-/** Prefix tag that wraps cross-team metadata in stored message text. */
-export const CROSS_TEAM_PREFIX_TAG = 'Cross-team from';
+/** Canonical metadata tag written before stored cross-team message text. */
+export const CROSS_TEAM_TAG_NAME = 'cross-team';
+export const CROSS_TEAM_ATTR_FROM = 'from';
+export const CROSS_TEAM_ATTR_DEPTH = 'depth';
+export const CROSS_TEAM_ATTR_CONVERSATION_ID = 'conversationId';
+export const CROSS_TEAM_ATTR_REPLY_TO_CONVERSATION_ID = 'replyToConversationId';
+export const CROSS_TEAM_PREFIX_TAG = CROSS_TEAM_TAG_NAME;
 
 export interface CrossTeamPrefixMeta {
   conversationId?: string;
@@ -15,23 +20,58 @@ export interface ParsedCrossTeamPrefix extends CrossTeamPrefixMeta {
   chainDepth: number;
 }
 
+function escapeCrossTeamAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function unescapeCrossTeamAttribute(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function parseCrossTeamAttributes(raw: string): Map<string, string> {
+  const attrs = new Map<string, string>();
+  const matches = raw.matchAll(/([A-Za-z][A-Za-z0-9]*)="([^"]*)"/g);
+  for (const match of matches) {
+    const key = match[1]?.trim();
+    const value = match[2];
+    if (!key || value == null) continue;
+    attrs.set(key, unescapeCrossTeamAttribute(value));
+  }
+  return attrs;
+}
+
 /**
  * Build the full prefix line:
- * `[Cross-team from team.member | depth:N | conversation:abc | replyTo:def]`
+ * `<cross-team from="team.member" depth="0" conversationId="abc" replyToConversationId="def" />`
  */
 export function formatCrossTeamPrefix(
   from: string,
   chainDepth: number,
   meta?: CrossTeamPrefixMeta
 ): string {
-  const parts = [`${CROSS_TEAM_PREFIX_TAG} ${from}`, `depth:${chainDepth}`];
+  const attrs = [
+    `${CROSS_TEAM_ATTR_FROM}="${escapeCrossTeamAttribute(from)}"`,
+    `${CROSS_TEAM_ATTR_DEPTH}="${String(chainDepth)}"`,
+  ];
   if (meta?.conversationId) {
-    parts.push(`conversation:${meta.conversationId}`);
+    attrs.push(
+      `${CROSS_TEAM_ATTR_CONVERSATION_ID}="${escapeCrossTeamAttribute(meta.conversationId)}"`
+    );
   }
   if (meta?.replyToConversationId) {
-    parts.push(`replyTo:${meta.replyToConversationId}`);
+    attrs.push(
+      `${CROSS_TEAM_ATTR_REPLY_TO_CONVERSATION_ID}="${escapeCrossTeamAttribute(meta.replyToConversationId)}"`
+    );
   }
-  return `[${parts.join(' | ')}]`;
+  return `<${CROSS_TEAM_TAG_NAME} ${attrs.join(' ')} />`;
 }
 
 /** Format the full message text with prefix + body. */
@@ -45,26 +85,27 @@ export function formatCrossTeamText(
 }
 
 /**
- * Regex that matches the cross-team prefix line at the start of a message.
- * Compatible with legacy rows that only contain `depth`.
+ * Regex that matches the canonical cross-team metadata tag at the start of a message.
  */
-export const CROSS_TEAM_PREFIX_RE =
-  /^\[Cross-team from (?<from>[^\]|]+?) \| depth:(?<depth>\d+)(?: \| conversation:(?<conversationId>[^\]|]+))?(?: \| replyTo:(?<replyToConversationId>[^\]|]+))?\]\n?/;
+export const CROSS_TEAM_PREFIX_RE = new RegExp(
+  `^<${CROSS_TEAM_TAG_NAME}\\s+(?<attrs>[^>]*?)\\s*\\/>\\n?`
+);
 
 /** Parse metadata from a cross-team prefix line. */
 export function parseCrossTeamPrefix(text: string): ParsedCrossTeamPrefix | null {
   const match = text.match(CROSS_TEAM_PREFIX_RE);
   if (!match?.groups) return null;
 
-  const from = match.groups.from?.trim();
-  const chainDepth = Number.parseInt(match.groups.depth ?? '', 10);
+  const attrs = parseCrossTeamAttributes(match.groups.attrs ?? '');
+  const from = attrs.get(CROSS_TEAM_ATTR_FROM)?.trim();
+  const chainDepth = Number.parseInt(attrs.get(CROSS_TEAM_ATTR_DEPTH) ?? '', 10);
   if (!from || !Number.isFinite(chainDepth)) return null;
 
   return {
     from,
     chainDepth,
-    conversationId: match.groups.conversationId?.trim() || undefined,
-    replyToConversationId: match.groups.replyToConversationId?.trim() || undefined,
+    conversationId: attrs.get(CROSS_TEAM_ATTR_CONVERSATION_ID)?.trim() || undefined,
+    replyToConversationId: attrs.get(CROSS_TEAM_ATTR_REPLY_TO_CONVERSATION_ID)?.trim() || undefined,
   };
 }
 

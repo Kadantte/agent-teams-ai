@@ -227,6 +227,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     startTask,
     deleteTeam,
     openTeamsTab,
+    closeTab,
     sendingMessage,
     sendMessageError,
     lastSendMessageResult,
@@ -270,6 +271,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
       startTask: s.startTask,
       deleteTeam: s.deleteTeam,
       openTeamsTab: s.openTeamsTab,
+      closeTab: s.closeTab,
       sendingMessage: s.sendingMessage,
       sendMessageError: s.sendMessageError,
       lastSendMessageResult: s.lastSendMessageResult,
@@ -854,12 +856,13 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     void (async () => {
       try {
         await deleteTeam(teamName);
+        if (tabId) closeTab(tabId);
         openTeamsTab();
       } catch {
         // error is shown via store
       }
     })();
-  }, [teamName, deleteTeam, openTeamsTab]);
+  }, [teamName, deleteTeam, openTeamsTab, closeTab, tabId]);
 
   const handleCreateTask = (
     subject: string,

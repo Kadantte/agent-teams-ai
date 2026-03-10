@@ -112,6 +112,7 @@ export class CrossTeamService {
       // 4. Cascade check only for real new deliveries
       this.cascadeGuard.check(fromTeam, toTeam, chainDepth);
       this.cascadeGuard.record(fromTeam, toTeam);
+      this.provisioning?.registerPendingCrossTeamReplyExpectation(fromTeam, toTeam, conversationId);
 
       // 5. Inbox write to TARGET team (TeamInboxWriter handles file lock + in-process lock internally)
       await this.inboxWriter.sendMessage(toTeam, {
@@ -133,8 +134,8 @@ export class CrossTeamService {
 
     // 6. Write "sent" copy to SENDER's inbox so the message appears in their activity
     const senderLeadName = (await this.dataService.getLeadMemberName(fromTeam)) ?? 'team-lead';
-    void this.inboxWriter
-      .sendMessage(fromTeam, {
+    try {
+      await this.inboxWriter.sendMessage(fromTeam, {
         member: senderLeadName,
         text,
         from: 'user',
@@ -145,12 +146,13 @@ export class CrossTeamService {
         source: CROSS_TEAM_SENT_SOURCE,
         conversationId,
         replyToConversationId,
-      })
-      .catch((e: unknown) => {
-        logger.warn(
-          `Failed to write sender copy for ${fromTeam}: ${e instanceof Error ? e.message : String(e)}`
-        );
       });
+      this.provisioning?.clearPendingCrossTeamReplyExpectation(fromTeam, toTeam, conversationId);
+    } catch (e: unknown) {
+      logger.warn(
+        `Failed to write sender copy for ${fromTeam}: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
 
     // 7. Best-effort relay (if online)
     if (this.provisioning?.isTeamAlive(toTeam)) {

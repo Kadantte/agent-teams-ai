@@ -600,9 +600,10 @@ Communication protocol (CRITICAL — you are running headless, no one sees your 
 - Prefer concise messages that state: what you need, why that team is relevant, the expected response, and any task or file references they need.
 - Keep cross-team requests high-signal: one focused request per topic, with clear next action and desired outcome.
 - Before sending a follow-up on the same topic, check "cross_team_get_outbox" so you do not resend the same request unnecessarily.
-- If you receive a message that is clearly from another team (for example prefixed with "[${CROSS_TEAM_PREFIX_TAG} ...]"), treat it as an actionable cross-team request and respond to the originating team with "cross_team_send" when a reply, decision, or status update is needed.
+- If you receive a message that is clearly from another team (for example prefixed with "<${CROSS_TEAM_PREFIX_TAG} ... />"), treat it as an actionable cross-team request and respond to the originating team with "cross_team_send" when a reply, decision, or status update is needed.
 - Cross-team requests may include a stable conversationId in their metadata. When you reply to that thread, preserve the same conversationId and pass replyToConversationId with that same value so the system can correlate the reply reliably.
 - If the relay prompt shows explicit cross-team reply metadata/instructions for a message, follow that metadata exactly when calling "cross_team_send".
+- Never write protocol markup yourself in message text. Do NOT include "<${CROSS_TEAM_PREFIX_TAG} ... />" or any other metadata wrapper in the visible reply body; send plain user-visible text only.
 - When a cross-team request arrives, do NOT appear silent: first emit a brief plain-text status update visible in your own team's Messages/Activity (for example: "Accepted cross-team request from @other-team. Investigating and delegating now."), then do the research, task creation, or delegation work.
 - For cross-team work, your canonical progress trail should be team-visible first. Use plain text updates, task comments, and task state changes so your own team can see what is happening.
 - Do not wait silently on another team: if cross-team coordination is blocking progress, send the request promptly, then continue any useful local work that does not depend on that answer.
@@ -1073,6 +1074,7 @@ function isTransientProbeWarning(warning: string): boolean {
 
 export class TeamProvisioningService {
   private static readonly CLAUDE_LOG_LINES_LIMIT = 50_000;
+  private static readonly PENDING_CROSS_TEAM_REPLY_TTL_MS = 10 * 60 * 1000;
 
   private readonly runs = new Map<string, ProvisioningRun>();
   private readonly activeByTeam = new Map<string, string>();
@@ -1081,6 +1083,7 @@ export class TeamProvisioningService {
   private readonly relayedLeadInboxMessageIds = new Map<string, Set<string>>();
   private readonly memberInboxRelayInFlight = new Map<string, Promise<number>>();
   private readonly relayedMemberInboxMessageIds = new Map<string, Set<string>>();
+  private readonly pendingCrossTeamFirstReplies = new Map<string, Map<string, number>>();
   private readonly liveLeadProcessMessages = new Map<string, InboxMessage[]>();
   private teamChangeEmitter: ((event: TeamChangeEvent) => void) | null = null;
   private helpOutputCache: string | null = null;
@@ -1283,6 +1286,80 @@ export class TeamProvisioningService {
     const teamName = trimmed.slice(0, dot).trim();
     const memberName = trimmed.slice(dot + 1).trim();
     return TEAM_NAME_PATTERN.test(teamName) && memberName.length > 0;
+  }
+
+  private buildCrossTeamConversationKey(otherTeam: string, conversationId: string): string {
+    return `${otherTeam.trim()}\0${conversationId.trim()}`;
+  }
+
+  private parseCrossTeamTargetTeam(value: string | undefined): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith('cross-team:')) {
+      const teamName = trimmed.slice('cross-team:'.length).trim();
+      return TEAM_NAME_PATTERN.test(teamName) ? teamName : null;
+    }
+    const dot = trimmed.indexOf('.');
+    if (dot <= 0) return null;
+    const teamName = trimmed.slice(0, dot).trim();
+    return TEAM_NAME_PATTERN.test(teamName) ? teamName : null;
+  }
+
+  private getCrossTeamSourceTeam(value: string | undefined): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    const dot = trimmed.indexOf('.');
+    if (dot <= 0) return null;
+    const teamName = trimmed.slice(0, dot).trim();
+    return TEAM_NAME_PATTERN.test(teamName) ? teamName : null;
+  }
+
+  registerPendingCrossTeamReplyExpectation(
+    teamName: string,
+    otherTeam: string,
+    conversationId: string
+  ): void {
+    const normalizedTeam = teamName.trim();
+    const normalizedOtherTeam = otherTeam.trim();
+    const normalizedConversationId = conversationId.trim();
+    if (!normalizedTeam || !normalizedOtherTeam || !normalizedConversationId) return;
+    const teamMap =
+      this.pendingCrossTeamFirstReplies.get(normalizedTeam) ?? new Map<string, number>();
+    teamMap.set(
+      this.buildCrossTeamConversationKey(normalizedOtherTeam, normalizedConversationId),
+      Date.now()
+    );
+    this.pendingCrossTeamFirstReplies.set(normalizedTeam, teamMap);
+  }
+
+  clearPendingCrossTeamReplyExpectation(
+    teamName: string,
+    otherTeam: string,
+    conversationId: string
+  ): void {
+    const teamMap = this.pendingCrossTeamFirstReplies.get(teamName.trim());
+    if (!teamMap) return;
+    teamMap.delete(this.buildCrossTeamConversationKey(otherTeam, conversationId));
+    if (teamMap.size === 0) {
+      this.pendingCrossTeamFirstReplies.delete(teamName.trim());
+    }
+  }
+
+  private getPendingCrossTeamReplyExpectationKeys(teamName: string): Set<string> {
+    const teamMap = this.pendingCrossTeamFirstReplies.get(teamName.trim());
+    if (!teamMap) return new Set<string>();
+    const cutoff = Date.now() - TeamProvisioningService.PENDING_CROSS_TEAM_REPLY_TTL_MS;
+    for (const [key, createdAt] of teamMap.entries()) {
+      if (createdAt < cutoff) {
+        teamMap.delete(key);
+      }
+    }
+    if (teamMap.size === 0) {
+      this.pendingCrossTeamFirstReplies.delete(teamName.trim());
+      return new Set<string>();
+    }
+    return new Set(teamMap.keys());
   }
 
   private persistSentMessage(teamName: string, message: InboxMessage): void {
@@ -2836,16 +2913,43 @@ export class TeamProvisioningService {
 
       if (unread.length === 0) return 0;
 
-      const outboundCrossTeamConversations = new Set(
-        leadInboxMessages.flatMap((message) => {
-          if (message.source !== CROSS_TEAM_SENT_SOURCE) return [];
+      const latestOutboundByConversation = new Map<string, number>();
+      const latestReadInboundByConversation = new Map<string, number>();
+      for (const message of leadInboxMessages) {
+        const timestampMs = Date.parse(message.timestamp);
+        if (!Number.isFinite(timestampMs)) continue;
+        if (message.source === CROSS_TEAM_SENT_SOURCE) {
           const conversationId = message.conversationId?.trim();
-          const targetTeam =
-            typeof message.to === 'string' ? message.to.split('.', 1)[0]?.trim() : '';
-          if (!conversationId || !targetTeam) return [];
-          return [`${conversationId}\0${targetTeam}`];
-        })
+          const targetTeam = this.parseCrossTeamTargetTeam(message.to);
+          if (!conversationId || !targetTeam) continue;
+          const key = this.buildCrossTeamConversationKey(targetTeam, conversationId);
+          latestOutboundByConversation.set(
+            key,
+            Math.max(latestOutboundByConversation.get(key) ?? 0, timestampMs)
+          );
+          continue;
+        }
+        if (message.source === CROSS_TEAM_SOURCE && message.read) {
+          const conversationId =
+            message.replyToConversationId?.trim() ??
+            message.conversationId?.trim() ??
+            parseCrossTeamPrefix(message.text)?.conversationId;
+          const sourceTeam = this.getCrossTeamSourceTeam(message.from);
+          if (!conversationId || !sourceTeam) continue;
+          const key = this.buildCrossTeamConversationKey(sourceTeam, conversationId);
+          latestReadInboundByConversation.set(
+            key,
+            Math.max(latestReadInboundByConversation.get(key) ?? 0, timestampMs)
+          );
+        }
+      }
+      const pendingHistoricalReplies = new Set(
+        Array.from(latestOutboundByConversation.entries())
+          .filter(([key, sentAtMs]) => sentAtMs > (latestReadInboundByConversation.get(key) ?? 0))
+          .map(([key]) => key)
       );
+      const pendingTransientReplies = this.getPendingCrossTeamReplyExpectationKeys(teamName);
+      const matchedTransientReplyKeys = new Set<string>();
 
       const isCrossTeamReplyToOwnOutbound = (message: InboxMessage): boolean => {
         if (message.source !== CROSS_TEAM_SOURCE) return false;
@@ -2854,9 +2958,17 @@ export class TeamProvisioningService {
           message.conversationId?.trim() ??
           parseCrossTeamPrefix(message.text)?.conversationId;
         if (!conversationId) return false;
-        const sourceTeam = message.from.includes('.') ? message.from.split('.', 1)[0]?.trim() : '';
+        const sourceTeam = this.getCrossTeamSourceTeam(message.from);
         if (!sourceTeam) return false;
-        return outboundCrossTeamConversations.has(`${conversationId}\0${sourceTeam}`);
+        const key = this.buildCrossTeamConversationKey(sourceTeam, conversationId);
+        if (pendingHistoricalReplies.has(key)) {
+          return true;
+        }
+        if (pendingTransientReplies.has(key)) {
+          matchedTransientReplyKeys.add(key);
+          return true;
+        }
+        return false;
       };
 
       // Ignore (and auto-mark read) internal coordination noise like idle/shutdown messages.
@@ -2875,6 +2987,12 @@ export class TeamProvisioningService {
           await this.markInboxMessagesRead(teamName, leadName, ignoredUnread);
         } catch {
           // best-effort
+        }
+        for (const key of matchedTransientReplyKeys) {
+          const [otherTeam, conversationId] = key.split('\0');
+          if (otherTeam && conversationId) {
+            this.clearPendingCrossTeamReplyExpectation(teamName, otherTeam, conversationId);
+          }
         }
       }
 
@@ -4490,6 +4608,7 @@ export class TeamProvisioningService {
     this.activeByTeam.delete(run.teamName);
     this.leadInboxRelayInFlight.delete(run.teamName);
     this.relayedLeadInboxMessageIds.delete(run.teamName);
+    this.pendingCrossTeamFirstReplies.delete(run.teamName);
     run.activeCrossTeamReplyHints = [];
     for (const key of Array.from(this.memberInboxRelayInFlight.keys())) {
       if (key.startsWith(`${run.teamName}:`)) {

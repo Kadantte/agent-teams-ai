@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 
 import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
 import { AttachmentDisplay } from '@renderer/components/team/attachments/AttachmentDisplay';
@@ -265,13 +265,13 @@ export function linkifyTaskIdsInMarkdown(text: string): string {
 function linkifyTaskIds(text: string, onClick: (taskId: string) => void): React.ReactNode[] {
   return text.split(/(#[A-Za-z0-9-]+\b)/g).map((part, i) => {
     const match = /^#([A-Za-z0-9-]+)$/.exec(part);
-    if (!match) return <span key={i}>{part}</span>;
+    if (!match) return <Fragment key={i}>{part}</Fragment>;
     const taskId = match[1];
     return (
       <TaskTooltip key={i} taskId={taskId}>
         <button
           type="button"
-          className="cursor-pointer font-medium text-blue-600 hover:underline dark:text-blue-400"
+          className="inline cursor-pointer font-medium text-blue-600 hover:underline dark:text-blue-400"
           onClick={(e) => {
             e.stopPropagation();
             onClick(taskId);
@@ -365,7 +365,8 @@ export const ActivityItem = ({
     if (structured) return null;
     let stripped = stripAgentBlocks(message.text).trim();
     if (!stripped) return null; // All content was agent-only blocks → show summary instead
-    // Strip cross-team prefix (e.g. "[Cross-team from team.lead | depth:0]\n") — kept in stored text for CLI agents
+    // Strip cross-team metadata tag (e.g. `<cross-team from="team.lead" depth="0" />\n`)
+    // — kept in stored text for CLI agents / durable artifacts.
     if (isCrossTeamAny) {
       stripped = stripCrossTeamPrefix(stripped);
     }
@@ -569,7 +570,7 @@ export const ActivityItem = ({
         ) : null}
 
         {/* Summary */}
-        <span className="flex-1 truncate text-xs" style={{ color: CARD_TEXT_LIGHT }}>
+        <span className="min-w-0 flex-1 truncate text-xs" style={{ color: CARD_TEXT_LIGHT }}>
           {onTaskIdClick ? linkifyTaskIds(summaryText, onTaskIdClick) : summaryText}
         </span>
 

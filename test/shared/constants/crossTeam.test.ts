@@ -5,7 +5,7 @@ import { parseCrossTeamPrefix, stripCrossTeamPrefix } from '@shared/constants/cr
 describe('crossTeam protocol helpers', () => {
   it('parses canonical cross-team prefix metadata', () => {
     const parsed = parseCrossTeamPrefix(
-      '[Cross-team from dream-team.team-lead | depth:0 | conversation:conv-1 | replyTo:conv-0]\nHello'
+      '<cross-team from="dream-team.team-lead" depth="0" conversationId="conv-1" replyToConversationId="conv-0" />\nHello'
     );
 
     expect(parsed).toEqual({
@@ -17,7 +17,9 @@ describe('crossTeam protocol helpers', () => {
   });
 
   it('strips canonical prefix from UI text', () => {
-    expect(stripCrossTeamPrefix('[Cross-team from a.b | depth:0 | conversation:conv-1]\nHello')).toBe(
+    expect(
+      stripCrossTeamPrefix('<cross-team from="a.b" depth="0" conversationId="conv-1" />\nHello')
+    ).toBe(
       'Hello'
     );
   });

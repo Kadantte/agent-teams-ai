@@ -692,11 +692,11 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       return;
     }
 
-    // Clear stale data immediately to prevent flash of previous team's content
-    const prev = get().selectedTeamName;
+    // Stale-while-revalidate: keep previous data visible while loading new team.
+    // Skeleton only shows on first load (when data is null).
+    // Data is atomically replaced when the new team's data arrives.
     set({
       selectedTeamName: teamName,
-      selectedTeamData: prev !== teamName ? null : get().selectedTeamData,
       selectedTeamLoading: true,
       selectedTeamError: null,
       reviewActionError: null,

@@ -386,7 +386,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
       {
         from: 'other-team.team-lead',
         to: 'team-lead',
-        text: '[Cross-team from other-team.team-lead | conversation:conv-1 | replyToConversation:conv-1] Reply back to origin.',
+        text: '<cross-team from="other-team.team-lead" depth="0" conversationId="conv-1" replyToConversationId="conv-1" />\nReply back to origin.',
         timestamp: '2026-02-23T10:01:00.000Z',
         read: false,
         source: 'cross_team',
@@ -407,6 +407,86 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     ) as Array<{ messageId?: string; read?: boolean }>;
     expect(updatedInbox).toHaveLength(2);
     expect(updatedInbox[1]?.messageId).toBe('m-cross-team-reply-1');
+  });
+
+  it('does not relay a fast first reply while outbound sender copy is still pending', async () => {
+    const service = new TeamProvisioningService();
+    const teamName = 'my-team';
+    seedConfig(teamName);
+    service.registerPendingCrossTeamReplyExpectation(teamName, 'other-team', 'conv-race');
+    seedLeadInbox(teamName, [
+      {
+        from: 'other-team.team-lead',
+        to: 'team-lead',
+        text: '<cross-team from="other-team.team-lead" depth="0" conversationId="conv-race" replyToConversationId="conv-race" />\nFast reply before sender copy.',
+        timestamp: '2026-02-23T10:01:00.000Z',
+        read: false,
+        source: 'cross_team',
+        messageId: 'm-cross-team-race-1',
+        conversationId: 'conv-race',
+        replyToConversationId: 'conv-race',
+      },
+    ]);
+
+    const { writeSpy } = attachAliveRun(service, teamName);
+    const relayed = await service.relayLeadInboxMessages(teamName);
+
+    expect(relayed).toBe(0);
+    expect(writeSpy).toHaveBeenCalledTimes(0);
+  });
+
+  it('relays later follow-up messages after the first reply in a conversation was already received', async () => {
+    const service = new TeamProvisioningService();
+    const teamName = 'my-team';
+    seedConfig(teamName);
+    seedLeadInbox(teamName, [
+      {
+        from: 'user',
+        to: 'other-team.team-lead',
+        text: 'Original outbound request',
+        timestamp: '2026-02-23T10:00:00.000Z',
+        read: true,
+        source: 'cross_team_sent',
+        messageId: 'm-cross-team-sent-2',
+        conversationId: 'conv-followup',
+      },
+      {
+        from: 'other-team.team-lead',
+        to: 'team-lead',
+        text: '<cross-team from="other-team.team-lead" depth="0" conversationId="conv-followup" replyToConversationId="conv-followup" />\nFirst answer.',
+        timestamp: '2026-02-23T10:01:00.000Z',
+        read: true,
+        source: 'cross_team',
+        messageId: 'm-cross-team-first-reply',
+        conversationId: 'conv-followup',
+        replyToConversationId: 'conv-followup',
+      },
+      {
+        from: 'other-team.team-lead',
+        to: 'team-lead',
+        text: '<cross-team from="other-team.team-lead" depth="0" conversationId="conv-followup" replyToConversationId="conv-followup" />\nCan you confirm one more detail?',
+        timestamp: '2026-02-23T10:02:00.000Z',
+        read: false,
+        source: 'cross_team',
+        messageId: 'm-cross-team-followup',
+        conversationId: 'conv-followup',
+        replyToConversationId: 'conv-followup',
+      },
+    ]);
+
+    const { writeSpy } = attachAliveRun(service, teamName);
+    const relayPromise = service.relayLeadInboxMessages(teamName);
+    const run = await waitForCapture(service);
+    expect(run?.leadRelayCapture).toBeTruthy();
+    (service as any).handleStreamJsonMessage(run, {
+      type: 'assistant',
+      content: [{ type: 'text', text: 'I will answer the follow-up.' }],
+    });
+    (service as any).handleStreamJsonMessage(run, { type: 'result', subtype: 'success' });
+
+    const relayed = await relayPromise;
+    expect(relayed).toBe(1);
+    expect(writeSpy).toHaveBeenCalledTimes(1);
   });
 
   it('relays unread teammate inbox messages through the live team process', async () => {

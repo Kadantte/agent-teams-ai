@@ -25,7 +25,7 @@ import {
 } from '@renderer/utils/attachmentUtils';
 
 import type { InlineChip } from '@renderer/types/inlineChip';
-import type { AttachmentPayload } from '@shared/types';
+import type { AttachmentPayload, AgentActionMode } from '@shared/types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,6 +52,10 @@ export interface UseComposerDraftResult {
   handlePaste: (event: React.ClipboardEvent) => void;
   handleDrop: (event: React.DragEvent) => void;
 
+  // Action mode
+  actionMode: AgentActionMode;
+  setActionMode: (mode: AgentActionMode) => void;
+
   // Status
   isSaved: boolean;
   isLoaded: boolean;
@@ -75,6 +79,7 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
   const [chips, setChipsState] = useState<InlineChip[]>([]);
   const [attachments, setAttachmentsState] = useState<AttachmentPayload[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [actionMode, setActionModeState] = useState<AgentActionMode>('do');
   const [isSaved, setIsSaved] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -82,6 +87,7 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
   const textRef = useRef('');
   const chipsRef = useRef<InlineChip[]>([]);
   const attachmentsRef = useRef<AttachmentPayload[]>([]);
+  const actionModeRef = useRef<AgentActionMode>('do');
   const teamNameRef = useRef(teamName);
   const mountedRef = useRef(true);
 
@@ -115,6 +121,7 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
       text: textRef.current,
       chips: chipsRef.current,
       attachments: attachmentsRef.current,
+      actionMode: actionModeRef.current,
       updatedAt: Date.now(),
     };
   }, []);
@@ -176,9 +183,11 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
     textRef.current = snap.text;
     chipsRef.current = snap.chips;
     attachmentsRef.current = snap.attachments;
+    actionModeRef.current = snap.actionMode ?? 'do';
     setTextState(snap.text);
     setChipsState(snap.chips);
     setAttachmentsState(snap.attachments);
+    setActionModeState(snap.actionMode ?? 'do');
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -281,6 +290,21 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
       const next = chipsRef.current.filter((c) => c.id !== chipId);
       chipsRef.current = next;
       setChipsState(next);
+      setIsSaved(false);
+      scheduleSave();
+    },
+    [scheduleSave]
+  );
+
+  // ---------------------------------------------------------------------------
+  // Action mode
+  // ---------------------------------------------------------------------------
+
+  const setActionMode = useCallback(
+    (mode: AgentActionMode) => {
+      userTouchedRef.current = true;
+      actionModeRef.current = mode;
+      setActionModeState(mode);
       setIsSaved(false);
       scheduleSave();
     },
@@ -420,10 +444,12 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
     textRef.current = '';
     chipsRef.current = [];
     attachmentsRef.current = [];
+    actionModeRef.current = 'do';
 
     setTextState('');
     setChipsState([]);
     setAttachmentsState([]);
+    setActionModeState('do');
     setAttachmentError(null);
     setIsSaved(false);
 
@@ -445,6 +471,8 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
     clearAttachmentError,
     handlePaste,
     handleDrop,
+    actionMode,
+    setActionMode,
     isSaved,
     isLoaded,
     clearDraft,

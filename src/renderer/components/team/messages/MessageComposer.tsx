@@ -66,7 +66,6 @@ export const MessageComposer = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [imageRestrictionError, setImageRestrictionError] = useState<string | null>(null);
   const imageRestrictionTimerRef = useRef(0);
-  const [actionMode, setActionMode] = useState<ActionMode>('do');
 
   // Cross-team state
   const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
@@ -139,14 +138,35 @@ export const MessageComposer = ({
   const isLeadRecipient = selectedMember?.role === 'lead' || selectedMember?.name === 'team-lead';
   const canDelegate = isCrossTeam || isLeadRecipient;
 
-  // Auto-select delegate when lead recipient changes, reset when non-lead
+  const { actionMode, setActionMode, isLoaded: draftLoaded } = draft;
+
+  // Auto-select delegate when lead recipient is chosen by the user.
+  // Wait until draft is restored from IndexedDB (draftLoaded) before running,
+  // so we don't overwrite the persisted actionMode during initialization.
+  // After draft loads, only auto-switch on subsequent recipient changes.
+  const isInitializedRef = useRef(false);
+  const prevIsLeadRef = useRef(isLeadRecipient);
   useEffect(() => {
+    if (!draftLoaded) return;
+
+    // On first run after load, just record the baseline — don't overwrite
+    if (!isInitializedRef.current) {
+      isInitializedRef.current = true;
+      prevIsLeadRef.current = isLeadRecipient;
+      return;
+    }
+
+    // Only react when isLeadRecipient actually changes
+    if (isLeadRecipient === prevIsLeadRef.current) return;
+    prevIsLeadRef.current = isLeadRecipient;
+
     if (isLeadRecipient) {
       setActionMode('delegate');
-    } else {
-      setActionMode((prev) => (prev === 'delegate' ? 'do' : prev));
+    } else if (actionMode === 'delegate') {
+      setActionMode('do');
     }
-  }, [isLeadRecipient]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLeadRecipient, draftLoaded]);
   // NOTE: lead context ring disabled — usage formula is inaccurate
   // const isLeadAgentRecipient = selectedMember?.agentType === 'team-lead';
   // const leadContext = useStore((s) =>
