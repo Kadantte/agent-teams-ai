@@ -24,6 +24,18 @@ vi.mock('../../../src/renderer/api', () => ({
       install: vi.fn(),
       uninstall: vi.fn(),
     },
+    skills: {
+      list: vi.fn(),
+      getDetail: vi.fn(),
+      previewUpsert: vi.fn(),
+      applyUpsert: vi.fn(),
+      previewImport: vi.fn(),
+      applyImport: vi.fn(),
+      deleteSkill: vi.fn(),
+      startWatching: vi.fn(),
+      stopWatching: vi.fn(),
+      onChanged: vi.fn(),
+    },
   },
 }));
 
@@ -181,6 +193,16 @@ describe('extensionsSlice', () => {
       const extTab = tabs.find((t) => t.type === 'extensions');
       expect(extTab).toBeDefined();
       expect(extTab!.label).toBe('Extensions');
+    });
+
+    it('seeds projectId from activeProjectId when selectedProjectId is null', () => {
+      store.setState({ selectedProjectId: null, activeProjectId: 'project-active' });
+
+      store.getState().openExtensionsTab();
+
+      const tabs = store.getState().paneLayout.panes.flatMap((p) => p.tabs);
+      const extTab = tabs.find((t) => t.type === 'extensions');
+      expect(extTab?.projectId).toBe('project-active');
     });
 
     it('activates existing extensions tab instead of creating new', () => {

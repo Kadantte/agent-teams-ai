@@ -10,7 +10,7 @@
 import type { CliArgsValidationResult } from '../utils/cliArgsParser';
 import type { CliInstallerAPI } from './cliInstaller';
 import type { EditorAPI, ProjectAPI } from './editor';
-import type { McpCatalogAPI, PluginCatalogAPI, ApiKeysAPI } from './extensions';
+import type { McpCatalogAPI, PluginCatalogAPI, ApiKeysAPI, SkillsCatalogAPI } from './extensions';
 import type {
   AppConfig,
   DetectedError,
@@ -813,6 +813,9 @@ export interface ElectronAPI {
 
   // Extension Store — MCP Registry API (Electron-only, optional)
   mcpRegistry?: McpCatalogAPI;
+
+  // Extension Store — Skills Catalog API (Electron-only, optional)
+  skills?: SkillsCatalogAPI;
 
   // Extension Store — API Keys Management (Electron-only, optional)
   apiKeys?: ApiKeysAPI;

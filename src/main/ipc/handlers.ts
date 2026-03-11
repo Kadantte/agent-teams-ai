@@ -66,6 +66,7 @@ import {
   removeSessionHandlers,
 } from './sessions';
 import { initializeSshHandlers, registerSshHandlers, removeSshHandlers } from './ssh';
+import { initializeSkillsHandlers, registerSkillsHandlers, removeSkillsHandlers } from './skills';
 import {
   initializeSubagentHandlers,
   registerSubagentHandlers,
@@ -109,6 +110,9 @@ import type { McpInstallService } from '../services/extensions/install/McpInstal
 import type { PluginInstallService } from '../services/extensions/install/PluginInstallService';
 import type { ApiKeyService } from '../services/extensions/apikeys/ApiKeyService';
 import type { McpHealthDiagnosticsService } from '../services/extensions/state/McpHealthDiagnosticsService';
+import type { SkillsCatalogService } from '../services/extensions/skills/SkillsCatalogService';
+import type { SkillsMutationService } from '../services/extensions/skills/SkillsMutationService';
+import type { SkillsWatcherService } from '../services/extensions/skills/SkillsWatcherService';
 import type { SchedulerService } from '../services/schedule/SchedulerService';
 
 /**
@@ -143,6 +147,9 @@ export function initializeIpcHandlers(
   mcpInstaller?: McpInstallService,
   apiKeyService?: ApiKeyService,
   mcpHealthDiagnosticsService?: McpHealthDiagnosticsService,
+  skillsCatalogService?: SkillsCatalogService,
+  skillsMutationService?: SkillsMutationService,
+  skillsWatcherService?: SkillsWatcherService,
   crossTeamService?: CrossTeamService
 ): void {
   // Initialize domain handlers with registry
@@ -186,6 +193,7 @@ export function initializeIpcHandlers(
       apiKeyService,
       mcpHealthDiagnosticsService
     );
+    initializeSkillsHandlers(skillsCatalogService, skillsMutationService, skillsWatcherService);
   }
   if (crossTeamService) {
     initializeCrossTeamHandlers(crossTeamService);
@@ -229,6 +237,7 @@ export function initializeIpcHandlers(
   }
   if (extensionFacade) {
     registerExtensionHandlers(ipcMain);
+    registerSkillsHandlers(ipcMain);
   }
   if (crossTeamService) {
     registerCrossTeamHandlers(ipcMain);
@@ -263,6 +272,7 @@ export function removeIpcHandlers(): void {
   removeTerminalHandlers(ipcMain);
   removeHttpServerHandlers(ipcMain);
   removeExtensionHandlers(ipcMain);
+  removeSkillsHandlers(ipcMain);
   removeCrossTeamHandlers(ipcMain);
 
   logger.info('All handlers removed');

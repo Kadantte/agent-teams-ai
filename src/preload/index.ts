@@ -158,6 +158,16 @@ import {
   MCP_REGISTRY_INSTALL_CUSTOM,
   MCP_REGISTRY_UNINSTALL,
   MCP_GITHUB_STARS,
+  SKILLS_APPLY_IMPORT,
+  SKILLS_APPLY_UPSERT,
+  SKILLS_CHANGED,
+  SKILLS_DELETE,
+  SKILLS_GET_DETAIL,
+  SKILLS_LIST,
+  SKILLS_PREVIEW_IMPORT,
+  SKILLS_PREVIEW_UPSERT,
+  SKILLS_START_WATCHING,
+  SKILLS_STOP_WATCHING,
   API_KEYS_LIST,
   API_KEYS_SAVE,
   API_KEYS_DELETE,
@@ -280,6 +290,13 @@ import type {
   McpSearchResult,
   OperationResult,
   PluginInstallRequest,
+  SkillCatalogItem,
+  SkillDeleteRequest,
+  SkillDetail,
+  SkillImportRequest,
+  SkillReviewPreview,
+  SkillUpsertRequest,
+  SkillWatcherEvent,
 } from '@shared/types/extensions';
 import type {
   BinaryPreviewResult,
@@ -1395,6 +1412,34 @@ const electronAPI: ElectronAPI = {
       invokeIpcWithResult<OperationResult>(MCP_REGISTRY_UNINSTALL, name, scope, projectPath),
     githubStars: (repositoryUrls: string[]) =>
       invokeIpcWithResult<Record<string, number>>(MCP_GITHUB_STARS, repositoryUrls),
+  },
+
+  // ===== Skills Catalog API (Electron-only) =====
+  skills: {
+    list: (projectPath?: string) =>
+      invokeIpcWithResult<SkillCatalogItem[]>(SKILLS_LIST, projectPath),
+    getDetail: (skillId: string, projectPath?: string) =>
+      invokeIpcWithResult<SkillDetail | null>(SKILLS_GET_DETAIL, skillId, projectPath),
+    previewUpsert: (request: SkillUpsertRequest) =>
+      invokeIpcWithResult<SkillReviewPreview>(SKILLS_PREVIEW_UPSERT, request),
+    applyUpsert: (request: SkillUpsertRequest) =>
+      invokeIpcWithResult<SkillDetail | null>(SKILLS_APPLY_UPSERT, request),
+    previewImport: (request: SkillImportRequest) =>
+      invokeIpcWithResult<SkillReviewPreview>(SKILLS_PREVIEW_IMPORT, request),
+    applyImport: (request: SkillImportRequest) =>
+      invokeIpcWithResult<SkillDetail | null>(SKILLS_APPLY_IMPORT, request),
+    deleteSkill: (request: SkillDeleteRequest) => invokeIpcWithResult<void>(SKILLS_DELETE, request),
+    startWatching: (projectPath?: string) =>
+      invokeIpcWithResult<string>(SKILLS_START_WATCHING, projectPath),
+    stopWatching: (watchId: string) => invokeIpcWithResult<void>(SKILLS_STOP_WATCHING, watchId),
+    onChanged: (callback: (event: SkillWatcherEvent) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: SkillWatcherEvent): void =>
+        callback(data);
+      ipcRenderer.on(SKILLS_CHANGED, listener);
+      return (): void => {
+        ipcRenderer.removeListener(SKILLS_CHANGED, listener);
+      };
+    },
   },
 
   // ===== API Keys API (Electron-only) =====

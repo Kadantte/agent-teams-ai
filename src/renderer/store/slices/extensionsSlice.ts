@@ -19,6 +19,12 @@ import type {
   McpInstallRequest,
   McpServerDiagnostic,
   PluginInstallRequest,
+  SkillCatalogItem,
+  SkillDeleteRequest,
+  SkillDetail,
+  SkillImportRequest,
+  SkillReviewPreview,
+  SkillUpsertRequest,
 } from '@shared/types/extensions';
 import type { StateCreator } from 'zustand';
 
@@ -59,6 +65,16 @@ export interface ExtensionsSlice {
   apiKeySaving: boolean;
   apiKeyStorageStatus: ApiKeyStorageStatus | null;
 
+  // ── Skills catalog cache ──
+  skillsUserCatalog: SkillCatalogItem[];
+  skillsProjectCatalogByProjectPath: Record<string, SkillCatalogItem[]>;
+  skillsLoading: boolean;
+  skillsError: string | null;
+  skillsDetailsById: Record<string, SkillDetail | null | undefined>;
+  skillsDetailLoadingById: Record<string, boolean>;
+  skillsMutationLoading: boolean;
+  skillsMutationError: string | null;
+
   // ── GitHub Stars (supplementary) ──
   mcpGitHubStars: Record<string, number>;
 
@@ -68,6 +84,13 @@ export interface ExtensionsSlice {
   mcpBrowse: (cursor?: string) => Promise<void>;
   mcpFetchInstalled: (projectPath?: string) => Promise<void>;
   runMcpDiagnostics: () => Promise<void>;
+  fetchSkillsCatalog: (projectPath?: string) => Promise<void>;
+  fetchSkillDetail: (skillId: string, projectPath?: string) => Promise<void>;
+  previewSkillUpsert: (request: SkillUpsertRequest) => Promise<SkillReviewPreview>;
+  applySkillUpsert: (request: SkillUpsertRequest) => Promise<SkillDetail | null>;
+  previewSkillImport: (request: SkillImportRequest) => Promise<SkillReviewPreview>;
+  applySkillImport: (request: SkillImportRequest) => Promise<SkillDetail | null>;
+  deleteSkill: (request: SkillDeleteRequest) => Promise<void>;
 
   // ── Mutation actions ──
   installPlugin: (request: PluginInstallRequest) => Promise<void>;
@@ -136,6 +159,15 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
   apiKeysError: null,
   apiKeySaving: false,
   apiKeyStorageStatus: null,
+
+  skillsUserCatalog: [],
+  skillsProjectCatalogByProjectPath: {},
+  skillsLoading: false,
+  skillsError: null,
+  skillsDetailsById: {},
+  skillsDetailLoadingById: {},
+  skillsMutationLoading: false,
+  skillsMutationError: null,
 
   mcpGitHubStars: {},
 
@@ -280,6 +312,156 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
 
     mcpDiagnosticsInFlight = promise;
     await promise;
+  },
+
+  fetchSkillsCatalog: async (projectPath?: string) => {
+    if (!api.skills) return;
+
+    set({ skillsLoading: true, skillsError: null });
+    try {
+      const skills = await api.skills.list(projectPath);
+      set((prev) => ({
+        skillsLoading: false,
+        skillsError: null,
+        skillsUserCatalog: skills.filter((skill) => skill.scope === 'user'),
+        skillsProjectCatalogByProjectPath: projectPath
+          ? {
+              ...prev.skillsProjectCatalogByProjectPath,
+              [projectPath]: skills.filter((skill) => skill.scope === 'project'),
+            }
+          : prev.skillsProjectCatalogByProjectPath,
+      }));
+    } catch (err) {
+      set({
+        skillsLoading: false,
+        skillsError: err instanceof Error ? err.message : 'Failed to load skills',
+      });
+    }
+  },
+
+  fetchSkillDetail: async (skillId: string, projectPath?: string) => {
+    if (!api.skills) return;
+
+    set((prev) => ({
+      skillsDetailLoadingById: { ...prev.skillsDetailLoadingById, [skillId]: true },
+    }));
+
+    try {
+      const detail = await api.skills.getDetail(skillId, projectPath);
+      set((prev) => ({
+        skillsDetailsById: { ...prev.skillsDetailsById, [skillId]: detail },
+        skillsDetailLoadingById: { ...prev.skillsDetailLoadingById, [skillId]: false },
+      }));
+    } catch {
+      set((prev) => ({
+        skillsDetailsById: { ...prev.skillsDetailsById, [skillId]: null },
+        skillsDetailLoadingById: { ...prev.skillsDetailLoadingById, [skillId]: false },
+      }));
+    }
+  },
+
+  previewSkillUpsert: async (request: SkillUpsertRequest) => {
+    if (!api.skills) {
+      throw new Error('Skills API is not available');
+    }
+
+    set({ skillsMutationLoading: true, skillsMutationError: null });
+    try {
+      const preview = await api.skills.previewUpsert(request);
+      set({ skillsMutationLoading: false });
+      return preview;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to review skill changes';
+      set({ skillsMutationLoading: false, skillsMutationError: message });
+      throw err;
+    }
+  },
+
+  applySkillUpsert: async (request: SkillUpsertRequest) => {
+    if (!api.skills) {
+      throw new Error('Skills API is not available');
+    }
+
+    set({ skillsMutationLoading: true, skillsMutationError: null });
+    try {
+      const detail = await api.skills.applyUpsert(request);
+      await get().fetchSkillsCatalog(request.projectPath);
+      set((prev) => ({
+        skillsMutationLoading: false,
+        skillsDetailsById: detail?.item.id
+          ? { ...prev.skillsDetailsById, [detail.item.id]: detail }
+          : prev.skillsDetailsById,
+      }));
+      return detail;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save skill';
+      set({ skillsMutationLoading: false, skillsMutationError: message });
+      throw err;
+    }
+  },
+
+  previewSkillImport: async (request: SkillImportRequest) => {
+    if (!api.skills) {
+      throw new Error('Skills API is not available');
+    }
+
+    set({ skillsMutationLoading: true, skillsMutationError: null });
+    try {
+      const preview = await api.skills.previewImport(request);
+      set({ skillsMutationLoading: false });
+      return preview;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to review import changes';
+      set({ skillsMutationLoading: false, skillsMutationError: message });
+      throw err;
+    }
+  },
+
+  applySkillImport: async (request: SkillImportRequest) => {
+    if (!api.skills) {
+      throw new Error('Skills API is not available');
+    }
+
+    set({ skillsMutationLoading: true, skillsMutationError: null });
+    try {
+      const detail = await api.skills.applyImport(request);
+      await get().fetchSkillsCatalog(request.projectPath);
+      set((prev) => ({
+        skillsMutationLoading: false,
+        skillsDetailsById: detail?.item.id
+          ? { ...prev.skillsDetailsById, [detail.item.id]: detail }
+          : prev.skillsDetailsById,
+      }));
+      return detail;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to import skill';
+      set({ skillsMutationLoading: false, skillsMutationError: message });
+      throw err;
+    }
+  },
+
+  deleteSkill: async (request: SkillDeleteRequest) => {
+    if (!api.skills) {
+      throw new Error('Skills API is not available');
+    }
+
+    set({ skillsMutationLoading: true, skillsMutationError: null });
+    try {
+      await api.skills.deleteSkill(request);
+      await get().fetchSkillsCatalog(request.projectPath);
+      set((prev) => {
+        const nextDetails = { ...prev.skillsDetailsById };
+        delete nextDetails[request.skillId];
+        return {
+          skillsMutationLoading: false,
+          skillsDetailsById: nextDetails,
+        };
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete skill';
+      set({ skillsMutationLoading: false, skillsMutationError: message });
+      throw err;
+    }
   },
 
   // ── Plugin install ──
@@ -595,6 +777,7 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
     state.openTab({
       type: 'extensions',
       label: 'Extensions',
+      projectId: state.selectedProjectId ?? state.activeProjectId ?? undefined,
     });
   },
 

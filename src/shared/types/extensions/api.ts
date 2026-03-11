@@ -19,6 +19,15 @@ import type {
   McpServerDiagnostic,
   McpSearchResult,
 } from './mcp';
+import type {
+  SkillCatalogItem,
+  SkillDeleteRequest,
+  SkillDetail,
+  SkillImportRequest,
+  SkillReviewPreview,
+  SkillUpsertRequest,
+  SkillWatcherEvent,
+} from './skill';
 
 // ── Plugin API ─────────────────────────────────────────────────────────────
 
@@ -48,6 +57,21 @@ export interface McpCatalogAPI {
   installCustom: (request: McpCustomInstallRequest) => Promise<OperationResult>;
   uninstall: (name: string, scope?: string, projectPath?: string) => Promise<OperationResult>;
   githubStars: (repositoryUrls: string[]) => Promise<Record<string, number>>;
+}
+
+// ── Skills API ─────────────────────────────────────────────────────────────
+
+export interface SkillsCatalogAPI {
+  list: (projectPath?: string) => Promise<SkillCatalogItem[]>;
+  getDetail: (skillId: string, projectPath?: string) => Promise<SkillDetail | null>;
+  previewUpsert: (request: SkillUpsertRequest) => Promise<SkillReviewPreview>;
+  applyUpsert: (request: SkillUpsertRequest) => Promise<SkillDetail | null>;
+  previewImport: (request: SkillImportRequest) => Promise<SkillReviewPreview>;
+  applyImport: (request: SkillImportRequest) => Promise<SkillDetail | null>;
+  deleteSkill: (request: SkillDeleteRequest) => Promise<void>;
+  startWatching: (projectPath?: string) => Promise<string>;
+  stopWatching: (watchId: string) => Promise<void>;
+  onChanged: (callback: (event: SkillWatcherEvent) => void) => () => void;
 }
 
 // ── API Keys API ──────────────────────────────────────────────────────────

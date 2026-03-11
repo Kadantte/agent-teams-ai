@@ -29,6 +29,7 @@ import { SchedulerService } from '@main/services/schedule/SchedulerService';
 import {
   CONTEXT_CHANGED,
   SCHEDULE_CHANGE,
+  SKILLS_CHANGED,
   SSH_STATUS,
   TEAM_CHANGE,
   TEAM_TOOL_APPROVAL_EVENT,
@@ -84,6 +85,9 @@ import {
   PluginCatalogService,
   PluginInstallationStateService,
   PluginInstallService,
+  SkillsCatalogService,
+  SkillsMutationService,
+  SkillsWatcherService,
 } from './services/extensions';
 
 import type { FileChangeEvent } from '@main/types';
@@ -339,6 +343,7 @@ let cliInstallerService: CliInstallerService;
 let ptyTerminalService: PtyTerminalService;
 let httpServer: HttpServer;
 let schedulerService: SchedulerService;
+let skillsWatcherService: SkillsWatcherService | null = null;
 
 // File watcher event cleanup functions
 let fileChangeCleanup: (() => void) | null = null;
@@ -713,6 +718,9 @@ function initializeServices(): void {
   const mcpAggregator = new McpCatalogAggregator(officialMcpRegistry, glamaMcpService);
   const mcpStateService = new McpInstallationStateService();
   const mcpHealthDiagnosticsService = new McpHealthDiagnosticsService(null);
+  const skillsCatalogService = new SkillsCatalogService();
+  const skillsMutationService = new SkillsMutationService();
+  skillsWatcherService = new SkillsWatcherService();
   const extensionFacadeService = new ExtensionFacadeService(
     pluginCatalogService,
     pluginStateService,
@@ -741,6 +749,12 @@ function initializeServices(): void {
   schedulerService.setChangeEmitter((event) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send(SCHEDULE_CHANGE, event);
+    }
+  });
+
+  skillsWatcherService.setEmitter((event) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(SKILLS_CHANGED, event);
     }
   });
 
@@ -786,6 +800,9 @@ function initializeServices(): void {
     mcpInstallService,
     apiKeyService,
     mcpHealthDiagnosticsService,
+    skillsCatalogService,
+    skillsMutationService,
+    skillsWatcherService,
     crossTeamService
   );
 
@@ -899,6 +916,8 @@ function shutdownServices(): void {
   if (schedulerService) {
     void schedulerService.stop();
   }
+
+  void skillsWatcherService?.stopAll();
 
   // Kill all PTY processes
   if (ptyTerminalService) {

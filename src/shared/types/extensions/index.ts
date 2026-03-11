@@ -34,10 +34,36 @@ export type {
 } from './mcp';
 
 export type {
+  CreateSkillRequest,
+  DeleteSkillRequest,
+  SkillCatalogItem,
+  SkillDeleteRequest,
+  SkillDraft,
+  SkillDraftFile,
+  SkillDraftTemplateInput,
+  SkillDetail,
+  SkillDirectoryFlags,
+  SkillImportRequest,
+  SkillInvocationMode,
+  SkillIssueSeverity,
+  SkillRootKind,
+  SkillReviewAction,
+  SkillReviewFileChange,
+  SkillReviewPreview,
+  SkillSaveResult,
+  SkillScope,
+  SkillSourceType,
+  UpdateSkillRequest,
+  SkillUpsertRequest,
+  SkillValidationIssue,
+  SkillWatcherEvent,
+} from './skill';
+
+export type {
   ApiKeyEntry,
   ApiKeyLookupResult,
   ApiKeySaveRequest,
   ApiKeyStorageStatus,
 } from './apikey';
 
-export type { ApiKeysAPI, McpCatalogAPI, PluginCatalogAPI } from './api';
+export type { ApiKeysAPI, McpCatalogAPI, PluginCatalogAPI, SkillsCatalogAPI } from './api';

@@ -4,10 +4,11 @@
  * Global catalog data comes from Zustand store.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { Button } from '@renderer/components/ui/button';
+import { useTabIdOptional } from '@renderer/contexts/useTabUIContext';
 import { useExtensionsTabState } from '@renderer/hooks/useExtensionsTabState';
 import { useStore } from '@renderer/store';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
@@ -17,53 +18,78 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip';
-import { AlertTriangle, Info, Key, Plus, Puzzle, RefreshCw, Server } from 'lucide-react';
+import { AlertTriangle, BookOpen, Info, Key, Plus, Puzzle, RefreshCw, Server } from 'lucide-react';
 
 import { ApiKeysPanel } from './apikeys/ApiKeysPanel';
 import { CustomMcpServerDialog } from './mcp/CustomMcpServerDialog';
 import { McpServersPanel } from './mcp/McpServersPanel';
 import { PluginsPanel } from './plugins/PluginsPanel';
+import { SkillsPanel } from './skills/SkillsPanel';
 
 export const ExtensionStoreView = (): React.JSX.Element => {
+  const tabId = useTabIdOptional();
   const fetchPluginCatalog = useStore((s) => s.fetchPluginCatalog);
   const fetchApiKeys = useStore((s) => s.fetchApiKeys);
+  const fetchSkillsCatalog = useStore((s) => s.fetchSkillsCatalog);
   const mcpBrowse = useStore((s) => s.mcpBrowse);
   const mcpFetchInstalled = useStore((s) => s.mcpFetchInstalled);
   const pluginCatalogLoading = useStore((s) => s.pluginCatalogLoading);
   const mcpBrowseLoading = useStore((s) => s.mcpBrowseLoading);
+  const skillsLoading = useStore((s) => s.skillsLoading);
   const cliStatus = useStore((s) => s.cliStatus);
   const cliInstalled = cliStatus?.installed ?? true; // assume installed until checked
   const hasOngoingSessions = useStore((s) => s.sessions.some((sess) => sess.isOngoing));
+  const projects = useStore((s) => s.projects);
+  const extensionsTabProjectId = useStore((s) =>
+    tabId
+      ? (s.paneLayout.panes.flatMap((pane) => pane.tabs).find((tab) => tab.id === tabId)
+          ?.projectId ?? null)
+      : null
+  );
 
   const tabState = useExtensionsTabState();
   const [customMcpDialogOpen, setCustomMcpDialogOpen] = useState(false);
+  const projectPath = useMemo(
+    () => projects.find((project) => project.id === extensionsTabProjectId)?.path ?? null,
+    [extensionsTabProjectId, projects]
+  );
+  const projectLabel = useMemo(
+    () => projects.find((project) => project.id === extensionsTabProjectId)?.name ?? null,
+    [extensionsTabProjectId, projects]
+  );
 
   // Fetch plugin catalog on mount
   useEffect(() => {
-    void fetchPluginCatalog();
-  }, [fetchPluginCatalog]);
+    void fetchPluginCatalog(projectPath ?? undefined);
+  }, [fetchPluginCatalog, projectPath]);
 
   // Fetch MCP installed state on mount
   useEffect(() => {
-    void mcpFetchInstalled();
-  }, [mcpFetchInstalled]);
+    void mcpFetchInstalled(projectPath ?? undefined);
+  }, [mcpFetchInstalled, projectPath]);
 
   // Fetch API keys on mount
   useEffect(() => {
     void fetchApiKeys();
   }, [fetchApiKeys]);
 
-  // Refresh all data (plugins + MCP browse + installed)
-  const handleRefresh = useCallback(() => {
-    void fetchPluginCatalog(undefined, true);
-    void mcpBrowse(); // re-fetch first page
-    void mcpFetchInstalled();
-  }, [fetchPluginCatalog, mcpBrowse, mcpFetchInstalled]);
+  // Fetch Skills catalog on mount / project change
+  useEffect(() => {
+    void fetchSkillsCatalog(projectPath ?? undefined);
+  }, [fetchSkillsCatalog, projectPath]);
 
-  const isRefreshing = pluginCatalogLoading || mcpBrowseLoading;
+  // Refresh all data (plugins + MCP browse + installed + skills)
+  const handleRefresh = useCallback(() => {
+    void fetchPluginCatalog(projectPath ?? undefined, true);
+    void mcpBrowse(); // re-fetch first page
+    void mcpFetchInstalled(projectPath ?? undefined);
+    void fetchSkillsCatalog(projectPath ?? undefined);
+  }, [fetchPluginCatalog, fetchSkillsCatalog, mcpBrowse, mcpFetchInstalled, projectPath]);
+
+  const isRefreshing = pluginCatalogLoading || mcpBrowseLoading || skillsLoading;
 
   // Browser mode guard
-  if (!api.plugins && !api.mcpRegistry) {
+  if (!api.plugins && !api.mcpRegistry && !api.skills) {
     return (
       <div className="flex flex-1 items-center justify-center">
         <div className="text-center">
@@ -114,7 +140,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
         <Tabs
           value={tabState.activeSubTab}
           onValueChange={(v) =>
-            tabState.setActiveSubTab(v as 'plugins' | 'mcp-servers' | 'api-keys')
+            tabState.setActiveSubTab(v as 'plugins' | 'mcp-servers' | 'skills' | 'api-keys')
           }
         >
           <div className="mb-4 flex items-center justify-between">
@@ -126,6 +152,10 @@ export const ExtensionStoreView = (): React.JSX.Element => {
               <TabsTrigger value="mcp-servers" className="gap-1.5">
                 <Server className="size-3.5" />
                 MCP Servers
+              </TabsTrigger>
+              <TabsTrigger value="skills" className="gap-1.5">
+                <BookOpen className="size-3.5" />
+                Skills
               </TabsTrigger>
               <TabsTrigger value="api-keys" className="gap-1.5">
                 <Key className="size-3.5" />
@@ -175,6 +205,19 @@ export const ExtensionStoreView = (): React.JSX.Element => {
 
           <TabsContent value="api-keys">
             <ApiKeysPanel />
+          </TabsContent>
+
+          <TabsContent value="skills">
+            <SkillsPanel
+              projectPath={projectPath}
+              projectLabel={projectLabel}
+              skillsSearchQuery={tabState.skillsSearchQuery}
+              setSkillsSearchQuery={tabState.setSkillsSearchQuery}
+              skillsSort={tabState.skillsSort}
+              setSkillsSort={tabState.setSkillsSort}
+              selectedSkillId={tabState.selectedSkillId}
+              setSelectedSkillId={tabState.setSelectedSkillId}
+            />
           </TabsContent>
         </Tabs>
 
