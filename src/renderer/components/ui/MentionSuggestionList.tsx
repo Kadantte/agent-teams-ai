@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
 
+import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { FileIcon } from '@renderer/components/team/editor/FileIcon';
-import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedText } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { Folder, Hash, Loader2, UsersRound } from 'lucide-react';
 
@@ -56,6 +58,7 @@ export const MentionSuggestionList = ({
   filesLoading,
 }: MentionSuggestionListProps): React.JSX.Element => {
   const listRef = useRef<HTMLUListElement>(null);
+  const { isLight } = useTheme();
 
   useEffect(() => {
     const list = listRef.current;
@@ -111,6 +114,12 @@ export const MentionSuggestionList = ({
     const isFileOrFolder = isFile || isFolder;
     const isTeam = section === 'team';
     const isTask = section === 'task';
+    const taskTeamColorSet =
+      isTask && s.color
+        ? getTeamColorSet(s.color)
+        : isTask && s.teamDisplayName
+          ? nameColorSet(s.teamDisplayName, isLight)
+          : null;
 
     // Insert section header on transition
     if (showSections && section !== currentSection) {
@@ -177,8 +186,16 @@ export const MentionSuggestionList = ({
             >
               <HighlightedName name={isTask ? `#${s.name}` : s.name} query={query} />
             </span>
-            {isTask && !s.isCurrentTeamTask && s.teamDisplayName ? (
-              <span className="truncate text-[10px] text-[var(--color-text-muted)]">
+            {isTask && s.ownerName ? (
+              <MemberBadge name={s.ownerName} color={s.ownerColor} size="xs" disableHoverCard />
+            ) : null}
+            {isTask && s.teamDisplayName ? (
+              <span
+                className="truncate text-[10px]"
+                style={
+                  taskTeamColorSet ? { color: getThemedText(taskTeamColorSet, isLight) } : undefined
+                }
+              >
                 {s.teamDisplayName}
               </span>
             ) : null}

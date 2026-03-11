@@ -8,6 +8,7 @@ import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { reconcileChips, removeChipTokenFromText } from '@renderer/utils/chipUtils';
 import { getMemberColorByName } from '@shared/constants/memberColors';
 import { ChevronDown, ChevronRight, Info } from 'lucide-react';
@@ -47,6 +48,7 @@ export const MemberDraftRow = ({
   projectPath,
   mentionSuggestions = [],
 }: MemberDraftRowProps): React.JSX.Element => {
+  const { isLight } = useTheme();
   const memberColorSet = getTeamColorSet(
     getMemberColorByName(member.name.trim() || `member-${index}`)
   );
@@ -117,12 +119,19 @@ export const MemberDraftRow = ({
 
   return (
     <div
-      className="grid grid-cols-1 gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-2 md:grid-cols-[1fr_220px_auto]"
+      className="relative grid grid-cols-1 gap-2 overflow-hidden rounded-md p-2 shadow-sm md:grid-cols-[1fr_220px_auto]"
       style={{
-        borderLeftWidth: '3px',
-        borderLeftColor: memberColorSet.border,
+        backgroundColor: isLight
+          ? 'color-mix(in srgb, var(--color-surface-raised) 22%, white 78%)'
+          : 'var(--color-surface-raised)',
+        boxShadow: isLight ? '0 1px 2px rgba(15, 23, 42, 0.06)' : '0 1px 2px rgba(0, 0, 0, 0.28)',
       }}
     >
+      <div
+        className="absolute inset-y-0 left-0 w-1"
+        style={{ backgroundColor: memberColorSet.border }}
+        aria-hidden="true"
+      />
       <div className="space-y-0.5">
         <Input
           className="h-8 text-xs"

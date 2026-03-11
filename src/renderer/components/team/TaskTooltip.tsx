@@ -73,27 +73,39 @@ export const TaskTooltip = ({
   const globalTasks = useStore((s) => s.globalTasks);
   const teamByName = useStore((s) => s.teamByName);
 
-  const tasks = useMemo(() => {
+  const task = useMemo(() => {
     if (teamName && selectedTeamName === teamName) {
-      return selectedTeamData?.tasks ?? [];
+      return (
+        (selectedTeamData?.tasks ?? []).find((candidate) => taskMatchesRef(candidate, taskId)) ??
+        null
+      );
     }
+
     if (teamName) {
-      return globalTasks.filter((task) => task.teamName === teamName);
+      return (
+        globalTasks.find(
+          (candidate) => candidate.teamName === teamName && taskMatchesRef(candidate, taskId)
+        ) ?? null
+      );
     }
+
     const currentTasks = selectedTeamData?.tasks ?? [];
     const currentMatch = currentTasks.find((task) => taskMatchesRef(task, taskId));
-    if (currentMatch) return currentTasks;
-    return globalTasks;
+    if (currentMatch) return currentMatch;
+
+    const globalMatches = globalTasks.filter((candidate) => taskMatchesRef(candidate, taskId));
+    return globalMatches.length === 1 ? globalMatches[0] : null;
   }, [globalTasks, selectedTeamData, selectedTeamName, teamName, taskId]);
 
   const members = useMemo(() => {
     if (teamName && selectedTeamName === teamName) {
       return selectedTeamData?.members ?? [];
     }
+    if (!teamName && task && selectedTeamName === (task as { teamName?: string }).teamName) {
+      return selectedTeamData?.members ?? [];
+    }
     return [];
-  }, [selectedTeamData, selectedTeamName, teamName]);
-
-  const task = useMemo(() => tasks?.find((t) => taskMatchesRef(t, taskId)), [tasks, taskId]);
+  }, [selectedTeamData, selectedTeamName, teamName, task]);
 
   const colorMap = useMemo(
     () => (members ? buildMemberColorMap(members) : new Map<string, string>()),

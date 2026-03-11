@@ -839,18 +839,33 @@ export const CreateTeamDialog = ({
             />
           </div>
 
-          <div className="rounded-lg border border-[var(--color-border-emphasis)] bg-[var(--color-surface-overlay)] p-4 shadow-sm md:col-span-2">
+          <div
+            className="rounded-lg border border-[var(--color-border-emphasis)] p-4 shadow-sm md:col-span-2"
+            style={{
+              backgroundColor: isLight
+                ? 'color-mix(in srgb, var(--color-surface-overlay) 24%, white 76%)'
+                : 'var(--color-surface-overlay)',
+            }}
+          >
             <div className="flex items-start gap-3">
               <Checkbox
                 id="launch-team"
+                className="mt-1 shrink-0"
                 checked={launchTeam}
                 onCheckedChange={(checked) => setLaunchTeam(checked === true)}
               />
               <div className="space-y-1">
-                <Label htmlFor="launch-team" className="cursor-pointer text-sm font-medium">
+                <Label htmlFor="launch-team" className="cursor-pointer text-sm font-semibold">
                   Run command after create
                 </Label>
-                <p className="text-xs text-[var(--color-text-muted)]">
+                <p
+                  className="text-xs"
+                  style={{
+                    color: isLight
+                      ? 'color-mix(in srgb, var(--color-text-muted) 54%, var(--color-text) 46%)'
+                      : 'var(--color-text-muted)',
+                  }}
+                >
                   Start the team immediately via local Claude CLI.
                 </p>
               </div>

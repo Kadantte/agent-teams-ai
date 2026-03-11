@@ -20,6 +20,7 @@ import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
@@ -108,6 +109,7 @@ function getLocalTimezone(): string {
 
 export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Element => {
   const { open, onClose } = props;
+  const { isLight } = useTheme();
   const isLaunch = props.mode === 'launch';
   const isSchedule = props.mode === 'schedule';
   const schedule = isSchedule ? ((props as LaunchDialogScheduleMode).schedule ?? null) : null;
@@ -821,7 +823,14 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               Schedule-only: Schedule configuration section
               ═══════════════════════════════════════════════════════════════════ */}
           {isSchedule ? (
-            <div className="rounded-lg border border-[var(--color-border-emphasis)] bg-[var(--color-surface-overlay)] shadow-sm">
+            <div
+              className="rounded-lg border border-[var(--color-border-emphasis)] shadow-sm"
+              style={{
+                backgroundColor: isLight
+                  ? 'color-mix(in srgb, var(--color-surface-overlay) 24%, white 76%)'
+                  : 'var(--color-surface-overlay)',
+              }}
+            >
               <button
                 type="button"
                 className="flex w-full items-center gap-1.5 px-3 py-2 text-left"

@@ -71,7 +71,19 @@ export const TaskReferenceInteractionLayer = ({
                   width: position.width,
                   height: position.height,
                 }}
+                onMouseDown={(e) => {
+                  if (e.metaKey || e.ctrlKey) return;
+                  e.preventDefault();
+                  const textarea = textareaRef.current;
+                  if (!textarea) return;
+
+                  textarea.focus();
+                  const clickOffsetX = e.clientX - e.currentTarget.getBoundingClientRect().left;
+                  const snapTo = clickOffsetX < position.width / 2 ? position.start : position.end;
+                  textarea.setSelectionRange(snapTo, snapTo);
+                }}
                 onClick={(e) => {
+                  if (!e.metaKey && !e.ctrlKey) return;
                   e.preventDefault();
                   e.stopPropagation();
                   if (teamName) {
