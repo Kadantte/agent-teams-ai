@@ -263,10 +263,11 @@
 .kanban-grid-layout {
   min-height: 640px;
   overflow: visible;
+  transition: none;
 }
 
 .kanban-grid-layout .react-grid-item {
-  transition-property: transform, width, height;
+  transition: none;
   overflow: visible;
 }
 

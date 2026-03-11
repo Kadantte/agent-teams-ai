@@ -41,9 +41,11 @@ export function usePersistedGridLayout({
     () => buildDefaultItems(allItemIds),
     [allItemIds, buildDefaultItems]
   );
-  const [layoutState, setLayoutState] = useState<PersistedGridLayoutState>(() =>
-    normalizePersistedGridLayoutState(null, defaultItems)
+  const initialState = useMemo(
+    () => normalizePersistedGridLayoutState(repository.peek?.(scopeKey) ?? null, defaultItems),
+    [defaultItems, repository, scopeKey]
   );
+  const [layoutState, setLayoutState] = useState<PersistedGridLayoutState>(() => initialState);
   const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null);
   const resolvedLayoutState = useMemo(
     () => normalizePersistedGridLayoutState(layoutState, defaultItems),

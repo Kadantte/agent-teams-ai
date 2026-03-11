@@ -51,9 +51,14 @@ export class BrowserGridLayoutRepository implements GridLayoutRepository<Persist
   private idbUnavailable = false;
   private readonly fallbackStore = new Map<string, PersistedGridLayoutState>();
 
+  peek(scopeKey: string): PersistedGridLayoutState | null {
+    const key = storageKey(scopeKey);
+    return pickNewestState(this.fallbackStore.get(key) ?? null, readLocalStorage(key));
+  }
+
   async load(scopeKey: string): Promise<PersistedGridLayoutState | null> {
     const key = storageKey(scopeKey);
-    const memoryState = this.fallbackStore.get(key) ?? null;
+    const memoryState = this.peek(scopeKey);
     const localState = readLocalStorage(key);
     let idbState: PersistedGridLayoutState | null = null;
 

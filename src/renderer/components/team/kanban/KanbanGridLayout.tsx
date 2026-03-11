@@ -1,5 +1,5 @@
 /* eslint-disable tailwindcss/no-custom-classname -- this adapter needs stable non-Tailwind class hooks for react-grid-layout handles. */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactGridLayout, { WidthProvider } from 'react-grid-layout/legacy';
 
 import { usePersistedGridLayout } from '@renderer/hooks/usePersistedGridLayout';
@@ -25,6 +25,7 @@ const DEFAULT_ITEM_HEIGHT = Math.max(
 const DEFAULT_MIN_HEIGHT = 10;
 const DEFAULT_MIN_WIDTH = 3;
 const GRID_SCOPE_KEY = 'kanban-grid-layout:global';
+const SKELETON_HIDE_DELAY_MS = 500;
 const RESIZE_HANDLES: ResizeHandleAxis[] = ['s', 'w', 'e', 'n', 'sw', 'nw', 'se', 'ne'];
 const WidthAwareGridLayout = WidthProvider(ReactGridLayout);
 
@@ -47,6 +48,11 @@ interface LoadedKanbanGridLayoutProps {
   readonly columns: KanbanGridColumn[];
   readonly visibleItems: PersistedGridLayoutItem[];
   readonly onPersistLayout: (layout: Layout, options?: { persist?: boolean }) => void;
+}
+
+interface LoadingKanbanGridLayoutProps {
+  readonly columns: KanbanGridColumn[];
+  readonly visibleItems: PersistedGridLayoutItem[];
 }
 
 function buildDefaultItems(itemIds: string[]): PersistedGridLayoutItem[] {
@@ -98,6 +104,58 @@ function renderResizeHandle(axis: ResizeHandleAxis, ref: Ref<HTMLElement>): Reac
     />
   );
 }
+
+const LoadingKanbanGridLayout = ({
+  columns,
+  visibleItems,
+}: Readonly<LoadingKanbanGridLayoutProps>): ReactElement => {
+  const columnMap = new Map(columns.map((column) => [column.id, column]));
+  const loadingItems =
+    visibleItems.length > 0
+      ? visibleItems
+      : buildDefaultItems(columns.length > 0 ? columns.map((column) => column.id) : ['todo']);
+
+  return (
+    <div className="p-1.5">
+      <div
+        className="grid gap-3"
+        style={{
+          gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))`,
+          gridAutoRows: `${GRID_ROW_HEIGHT}px`,
+        }}
+      >
+        {loadingItems.map((item) => {
+          const column = columnMap.get(item.id as KanbanColumnId);
+
+          return (
+            <section
+              key={item.id}
+              className="min-h-[400px] animate-pulse rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
+              style={{
+                gridColumn: `${item.x + 1} / span ${item.w}`,
+                gridRow: `${item.y + 1} / span ${item.h}`,
+              }}
+            >
+              <header className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
+                <div
+                  className="h-5 rounded bg-[var(--color-surface-raised)]"
+                  style={{ width: column ? 96 : 72 }}
+                />
+                <div className="h-6 w-10 rounded-md bg-[var(--color-surface-raised)]" />
+              </header>
+              <div className="flex h-[calc(100%-41px)] flex-col gap-3 p-3">
+                <div className="bg-[var(--color-surface-raised)]/35 h-12 rounded-md border border-dashed border-[var(--color-border-emphasis)]" />
+                <div className="h-24 rounded-md bg-[var(--color-surface-raised)]" />
+                <div className="bg-[var(--color-surface-raised)]/80 h-20 rounded-md" />
+                <div className="bg-[var(--color-surface-raised)]/60 h-16 rounded-md" />
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 const LoadedKanbanGridLayout = ({
   columns,
@@ -188,6 +246,19 @@ export const KanbanGridLayout = ({
     repository: browserGridLayoutRepository,
     buildDefaultItems,
   });
+  const [showResolvedLayout, setShowResolvedLayout] = useState(false);
+
+  useEffect(() => {
+    if (!isLoaded || showResolvedLayout) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setShowResolvedLayout(true);
+    }, SKELETON_HIDE_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isLoaded, showResolvedLayout]);
 
   const applyReactGridLayout = useCallback(
     (layout: Layout, options?: { persist?: boolean }) => {
@@ -198,13 +269,11 @@ export const KanbanGridLayout = ({
     [applyVisibleItems]
   );
 
-  if (!isLoaded) {
-    return <div className="min-h-[640px] p-1.5" />;
+  if (!isLoaded || !showResolvedLayout) {
+    return <LoadingKanbanGridLayout columns={columns} visibleItems={visibleItems} />;
   }
 
-  const gridKey = visibleItems
-    .map((item) => `${item.id}:${item.x}:${item.y}:${item.w}:${item.h}`)
-    .join('|');
+  const gridKey = visibleItems.map((item) => item.id).join('|');
 
   return (
     <LoadedKanbanGridLayout
