@@ -16,6 +16,7 @@ import {
   REVIEW_GET_FILE_CONTENT,
   REVIEW_GET_GIT_FILE_LOG,
   REVIEW_GET_TASK_CHANGES,
+  REVIEW_INVALIDATE_TASK_CHANGE_SUMMARIES,
   REVIEW_LOAD_DECISIONS,
   REVIEW_PREVIEW_REJECT,
   REVIEW_REJECT_FILE,
@@ -91,6 +92,7 @@ export function registerReviewHandlers(ipcMain: IpcMain): void {
   // Phase 1
   ipcMain.handle(REVIEW_GET_AGENT_CHANGES, handleGetAgentChanges);
   ipcMain.handle(REVIEW_GET_TASK_CHANGES, handleGetTaskChanges);
+  ipcMain.handle(REVIEW_INVALIDATE_TASK_CHANGE_SUMMARIES, handleInvalidateTaskChangeSummaries);
   ipcMain.handle(REVIEW_GET_CHANGE_STATS, handleGetChangeStats);
   // Phase 2
   ipcMain.handle(REVIEW_CHECK_CONFLICT, handleCheckConflict);
@@ -113,6 +115,7 @@ export function removeReviewHandlers(ipcMain: IpcMain): void {
   // Phase 1
   ipcMain.removeHandler(REVIEW_GET_AGENT_CHANGES);
   ipcMain.removeHandler(REVIEW_GET_TASK_CHANGES);
+  ipcMain.removeHandler(REVIEW_INVALIDATE_TASK_CHANGE_SUMMARIES);
   ipcMain.removeHandler(REVIEW_GET_CHANGE_STATS);
   // Phase 2
   ipcMain.removeHandler(REVIEW_CHECK_CONFLICT);
@@ -174,13 +177,38 @@ async function handleGetTaskChanges(
                     typeof (i as Record<string, unknown>).completedAt === 'string')
               ) as { startedAt: string; completedAt?: string }[])
             : undefined,
+          stateBucket:
+            (options as Record<string, unknown>).stateBucket === 'approved' ||
+            (options as Record<string, unknown>).stateBucket === 'review' ||
+            (options as Record<string, unknown>).stateBucket === 'completed' ||
+            (options as Record<string, unknown>).stateBucket === 'active'
+              ? ((options as Record<string, unknown>).stateBucket as
+                  | 'approved'
+                  | 'review'
+                  | 'completed'
+                  | 'active')
+              : undefined,
           summaryOnly: (options as Record<string, unknown>).summaryOnly === true,
+          forceFresh: (options as Record<string, unknown>).forceFresh === true,
         }
       : undefined;
 
   return wrapReviewHandler('getTaskChanges', () =>
     getChangeExtractor().getTaskChanges(teamName, taskId, opts)
   );
+}
+
+async function handleInvalidateTaskChangeSummaries(
+  _event: IpcMainInvokeEvent,
+  teamName: string,
+  taskIds: string[]
+): Promise<IpcResult<void>> {
+  return wrapReviewHandler('invalidateTaskChangeSummaries', async () => {
+    await getChangeExtractor().invalidateTaskChangeSummaries(
+      teamName,
+      Array.isArray(taskIds) ? taskIds.filter((taskId) => typeof taskId === 'string') : []
+    );
+  });
 }
 
 async function handleGetChangeStats(

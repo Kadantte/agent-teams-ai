@@ -12,6 +12,7 @@ const hoisted = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   requestReview: vi.fn(),
   updateKanban: vi.fn(),
+  invalidateTaskChangeSummaries: vi.fn(),
   onProvisioningProgress: vi.fn(() => () => undefined),
 }));
 
@@ -27,6 +28,9 @@ vi.mock('@renderer/api', () => ({
       requestReview: hoisted.requestReview,
       updateKanban: hoisted.updateKanban,
       onProvisioningProgress: hoisted.onProvisioningProgress,
+    },
+    review: {
+      invalidateTaskChangeSummaries: hoisted.invalidateTaskChangeSummaries,
     },
   },
 }));
@@ -63,6 +67,8 @@ function createSliceStore() {
     openTab: vi.fn(),
     setActiveTab: vi.fn(),
     getAllPaneTabs: vi.fn(() => []),
+    warmTaskChangeSummaries: vi.fn(async () => undefined),
+    invalidateTaskChangePresence: vi.fn(),
   }));
 }
 
@@ -82,6 +88,7 @@ describe('teamSlice actions', () => {
     hoisted.requestReview.mockResolvedValue(undefined);
     hoisted.updateKanban.mockResolvedValue(undefined);
     hoisted.createTeam.mockResolvedValue({ runId: 'run-1' });
+    hoisted.invalidateTaskChangeSummaries.mockResolvedValue(undefined);
     hoisted.getProvisioningStatus.mockResolvedValue({
       runId: 'run-1',
       teamName: 'my-team',
@@ -250,6 +257,113 @@ describe('teamSlice actions', () => {
 
       // No previous data — error should be shown
       expect(store.getState().selectedTeamError).toBe('Team not found');
+    });
+
+    it('invalidates changed task summaries and warms only cacheable terminal tasks', async () => {
+      const store = createSliceStore();
+      const invalidateTaskChangePresence = vi.fn();
+      const warmTaskChangeSummaries = vi.fn(async () => undefined);
+      store.setState({
+        selectedTeamName: 'my-team',
+        invalidateTaskChangePresence,
+        warmTaskChangeSummaries,
+        selectedTeamData: {
+          teamName: 'my-team',
+          config: { name: 'My Team' },
+          tasks: [
+            {
+              id: 'task-1',
+              subject: 'Old completed',
+              status: 'completed',
+              owner: 'alice',
+              createdAt: '2026-03-01T10:00:00.000Z',
+              updatedAt: '2026-03-01T10:00:00.000Z',
+              workIntervals: [{ startedAt: '2026-03-01T10:05:00.000Z' }],
+              historyEvents: [],
+              comments: [],
+              attachments: [],
+            },
+            {
+              id: 'task-2',
+              subject: 'Still approved',
+              status: 'completed',
+              owner: 'bob',
+              createdAt: '2026-03-01T10:00:00.000Z',
+              updatedAt: '2026-03-01T10:00:00.000Z',
+              workIntervals: [{ startedAt: '2026-03-01T10:05:00.000Z' }],
+              historyEvents: [
+                {
+                  id: 'evt-approved',
+                  type: 'review_approved',
+                  to: 'approved',
+                  timestamp: '2026-03-01T10:10:00.000Z',
+                },
+              ],
+              comments: [],
+              attachments: [],
+            },
+          ],
+          members: [],
+          messages: [],
+          kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        },
+      });
+
+      hoisted.getData.mockResolvedValue({
+        teamName: 'my-team',
+        config: { name: 'My Team' },
+        tasks: [
+          {
+            id: 'task-1',
+            subject: 'Moved to review',
+            status: 'completed',
+            owner: 'alice',
+            createdAt: '2026-03-01T10:00:00.000Z',
+            updatedAt: '2026-03-01T11:00:00.000Z',
+            workIntervals: [{ startedAt: '2026-03-01T10:05:00.000Z' }],
+            historyEvents: [
+              {
+                id: 'evt-review',
+                type: 'review_requested',
+                to: 'review',
+                timestamp: '2026-03-01T11:00:00.000Z',
+              },
+            ],
+            comments: [],
+            attachments: [],
+          },
+          {
+            id: 'task-2',
+            subject: 'Still approved',
+            status: 'completed',
+            owner: 'bob',
+            createdAt: '2026-03-01T10:00:00.000Z',
+            updatedAt: '2026-03-01T10:00:00.000Z',
+            workIntervals: [{ startedAt: '2026-03-01T10:05:00.000Z' }],
+            historyEvents: [
+              {
+                id: 'evt-approved',
+                type: 'review_approved',
+                to: 'approved',
+                timestamp: '2026-03-01T10:10:00.000Z',
+              },
+            ],
+            comments: [],
+            attachments: [],
+          },
+        ],
+        members: [],
+        messages: [],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+      });
+
+      await store.getState().refreshTeamData('my-team');
+
+      expect(hoisted.invalidateTaskChangeSummaries).toHaveBeenCalledWith('my-team', ['task-1']);
+      expect(invalidateTaskChangePresence).toHaveBeenCalledTimes(1);
+      expect(warmTaskChangeSummaries).toHaveBeenCalledWith([
+        expect.objectContaining({ teamName: 'my-team', taskId: 'task-2' }),
+      ]);
     });
   });
 });

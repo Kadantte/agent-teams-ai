@@ -368,3 +368,7 @@ export function getToolsBasePath(): string {
 export function getSchedulesBasePath(): string {
   return path.join(getClaudeBasePath(), 'claude-devtools-schedules');
 }
+
+export function getTaskChangeSummariesBasePath(): string {
+  return path.join(getClaudeBasePath(), 'task-change-summaries');
+}

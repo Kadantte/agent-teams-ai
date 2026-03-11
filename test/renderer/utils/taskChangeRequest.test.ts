@@ -48,6 +48,7 @@ describe('taskChangeRequest', () => {
       status: 'completed',
       intervals: [{ startedAt: '2026-03-01T10:10:00.000Z' }],
       since: '2026-03-01T10:03:00.000Z',
+      stateBucket: 'completed',
       summaryOnly: true,
     });
   });
@@ -58,10 +59,14 @@ describe('taskChangeRequest', () => {
       status: 'completed',
       intervals: [{ startedAt: '2026-03-01T10:10:00.000Z' }],
       since: '2026-03-01T10:03:00.000Z',
+      stateBucket: 'completed' as const,
     };
 
     expect(buildTaskChangePresenceKey('team-a', '1', base)).not.toBe(
       buildTaskChangePresenceKey('team-a', '1', { ...base, owner: 'bob' })
+    );
+    expect(buildTaskChangePresenceKey('team-a', '1', base)).not.toBe(
+      buildTaskChangePresenceKey('team-a', '1', { ...base, stateBucket: 'review' })
     );
   });
 });

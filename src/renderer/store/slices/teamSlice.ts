@@ -1,5 +1,10 @@
 import { api } from '@renderer/api';
-import type { TaskChangeRequestOptions } from '@renderer/utils/taskChangeRequest';
+import {
+  buildTaskChangePresenceKey,
+  buildTaskChangeRequestOptions,
+  isTaskSummaryCacheableForOptions,
+  type TaskChangeRequestOptions,
+} from '@renderer/utils/taskChangeRequest';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { IpcError, unwrapIpc } from '@renderer/utils/unwrapIpc';
 import { createLogger } from '@shared/utils/logger';
@@ -224,6 +229,48 @@ function fireStatusChangeNotification(
       suppressToast,
     })
     .catch(() => undefined);
+}
+
+function collectTaskChangeInvalidationState(
+  teamName: string,
+  prevTasks: TeamData['tasks'],
+  nextTasks: TeamData['tasks']
+): { cacheKeys: string[]; taskIds: string[] } {
+  const nextKeys = new Set(
+    nextTasks.map((task) =>
+      buildTaskChangePresenceKey(teamName, task.id, buildTaskChangeRequestOptions(task))
+    )
+  );
+  const invalidationKeys: string[] = [];
+  const invalidationTaskIds = new Set<string>();
+  for (const task of prevTasks) {
+    const previousKey = buildTaskChangePresenceKey(
+      teamName,
+      task.id,
+      buildTaskChangeRequestOptions(task)
+    );
+    if (!nextKeys.has(previousKey)) {
+      invalidationKeys.push(previousKey);
+      invalidationTaskIds.add(task.id);
+    }
+  }
+  return {
+    cacheKeys: invalidationKeys,
+    taskIds: [...invalidationTaskIds],
+  };
+}
+
+function buildTaskChangeWarmRequests(
+  teamName: string,
+  tasks: TeamData['tasks']
+): { teamName: string; taskId: string; options: TaskChangeRequestOptions }[] {
+  return tasks.flatMap((task) => {
+    const options = buildTaskChangeRequestOptions(task);
+    if (!isTaskSummaryCacheableForOptions(options)) {
+      return [];
+    }
+    return [{ teamName, taskId: task.id, options }];
+  });
 }
 
 function mapSendMessageError(error: unknown): string {
@@ -770,6 +817,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     if (get().selectedTeamLoading && get().selectedTeamName === teamName) {
       return;
     }
+    const previousSelectedTeamName = get().selectedTeamName;
+    const previousData = previousSelectedTeamName === teamName ? get().selectedTeamData : null;
 
     // Stale-while-revalidate: keep previous data visible while loading new team.
     // Skeleton only shows on first load (when data is null).
@@ -817,6 +866,19 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         selectedTeamLoading: false,
         selectedTeamError: null,
       });
+      const invalidationState = previousData
+        ? collectTaskChangeInvalidationState(teamName, previousData.tasks, data.tasks)
+        : { cacheKeys: [], taskIds: [] };
+      if (invalidationState.cacheKeys.length > 0) {
+        get().invalidateTaskChangePresence(invalidationState.cacheKeys);
+      }
+      if (invalidationState.taskIds.length > 0) {
+        await api.review.invalidateTaskChangeSummaries(teamName, invalidationState.taskIds);
+      }
+      const warmRequests = buildTaskChangeWarmRequests(teamName, data.tasks);
+      if (warmRequests.length > 0) {
+        void get().warmTaskChangeSummaries(warmRequests);
+      }
 
       // Sync tab label with the team's display name from config
       const displayName = data.config.name || teamName;
@@ -902,6 +964,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     // Silent refresh — update data without showing loading skeleton.
     // Only selectTeam() sets loading: true (for initial load).
     try {
+      const previousData = get().selectedTeamData;
       const data = await withTimeout(
         unwrapIpc('team:getData', () => api.teams.getData(teamName)),
         TEAM_GET_DATA_TIMEOUT_MS,
@@ -915,6 +978,19 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         selectedTeamData: data,
         selectedTeamError: null,
       });
+      const invalidationState = previousData
+        ? collectTaskChangeInvalidationState(teamName, previousData.tasks, data.tasks)
+        : { cacheKeys: [], taskIds: [] };
+      if (invalidationState.cacheKeys.length > 0) {
+        get().invalidateTaskChangePresence(invalidationState.cacheKeys);
+      }
+      if (invalidationState.taskIds.length > 0) {
+        await api.review.invalidateTaskChangeSummaries(teamName, invalidationState.taskIds);
+      }
+      const warmRequests = buildTaskChangeWarmRequests(teamName, data.tasks);
+      if (warmRequests.length > 0) {
+        void get().warmTaskChangeSummaries(warmRequests);
+      }
     } catch (error) {
       if (get().selectedTeamName !== teamName) {
         return;

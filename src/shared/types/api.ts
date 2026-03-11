@@ -595,10 +595,15 @@ export interface ReviewAPI {
       intervals?: { startedAt: string; completedAt?: string }[];
       /** Back-compat: single since timestamp (deprecated). */
       since?: string;
+      /** Derived task lifecycle bucket used for safe summary caching. */
+      stateBucket?: 'approved' | 'review' | 'completed' | 'active';
       /** Lightweight response for summary UIs; skips snippets/timeline details. */
       summaryOnly?: boolean;
+      /** Force a fresh recompute and overwrite any cache snapshot. */
+      forceFresh?: boolean;
     }
   ) => Promise<TaskChangeSetV2>;
+  invalidateTaskChangeSummaries: (teamName: string, taskIds: string[]) => Promise<void>;
   getChangeStats: (teamName: string, memberName: string) => Promise<ChangeStats>;
   getFileContent: (
     teamName: string,

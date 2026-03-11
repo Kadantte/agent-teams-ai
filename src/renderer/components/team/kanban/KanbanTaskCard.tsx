@@ -11,6 +11,7 @@ import { REVIEW_STATE_DISPLAY, buildMemberColorMap } from '@renderer/utils/membe
 import {
   buildTaskChangePresenceKey,
   buildTaskChangeRequestOptions,
+  isTaskSummaryCacheableForOptions,
 } from '@renderer/utils/taskChangeRequest';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
@@ -18,8 +19,11 @@ import {
   ArrowRightFromLine,
   CheckCircle2,
   FileCode,
+  FilePenLine,
+  GitPullRequestArrow,
   HelpCircle,
   Play,
+  RotateCcw,
   Trash2,
   XCircle,
 } from 'lucide-react';
@@ -131,18 +135,22 @@ const CancelTaskButton = ({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="destructive"
-          size="sm"
-          className="gap-1"
-          aria-label={`Cancel task ${taskId}`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <XCircle size={12} />
-          Cancel
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              variant="destructive"
+              size="icon"
+              className="size-8 rounded-full shadow-sm"
+              aria-label={`Cancel task ${taskId}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <XCircle size={14} />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">Cancel</TooltipContent>
+      </Tooltip>
       <PopoverContent
         className="w-56 p-3"
         side="top"
@@ -172,6 +180,37 @@ const CancelTaskButton = ({
     </Popover>
   );
 };
+
+interface TaskActionIconButtonProps {
+  label: string;
+  icon: React.ReactNode;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  className: string;
+  variant?: 'outline' | 'ghost' | 'destructive';
+}
+
+const TaskActionIconButton = ({
+  label,
+  icon,
+  onClick,
+  className,
+  variant = 'outline',
+}: TaskActionIconButtonProps): React.JSX.Element => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <Button
+        variant={variant}
+        size="icon"
+        className={`size-8 shrink-0 rounded-full shadow-sm ${className}`}
+        aria-label={label}
+        onClick={onClick}
+      >
+        {icon}
+      </Button>
+    </TooltipTrigger>
+    <TooltipContent side="top">{label}</TooltipContent>
+  </Tooltip>
+);
 
 export const KanbanTaskCard = ({
   task,
@@ -205,6 +244,10 @@ export const KanbanTaskCard = ({
   const showChangesColumn =
     (columnId === 'done' || columnId === 'review' || columnId === 'approved') && !!onViewChanges;
   const taskChangeRequestOptions = useMemo(() => buildTaskChangeRequestOptions(task), [task]);
+  const useTerminalSummaryCache = useMemo(
+    () => isTaskSummaryCacheableForOptions(taskChangeRequestOptions),
+    [taskChangeRequestOptions]
+  );
   const cacheKey = useMemo(
     () => buildTaskChangePresenceKey(teamName, task.id, taskChangeRequestOptions),
     [teamName, task.id, taskChangeRequestOptions]
@@ -213,12 +256,12 @@ export const KanbanTaskCard = ({
   const checkTaskHasChanges = useStore((s) => s.checkTaskHasChanges);
 
   useEffect(() => {
-    if (showChangesColumn && task.status === 'completed' && taskHasChanges !== true) {
+    if (showChangesColumn && useTerminalSummaryCache && taskHasChanges !== true) {
       void checkTaskHasChanges(teamName, task.id, taskChangeRequestOptions);
     }
   }, [
     showChangesColumn,
-    task.status,
+    useTerminalSummaryCache,
     task.id,
     teamName,
     taskHasChanges,
@@ -227,41 +270,32 @@ export const KanbanTaskCard = ({
   ]);
 
   const isReviewManual = columnId === 'review' && !hasReviewers;
-  const multiButton =
-    compact ||
-    columnId === 'todo' ||
-    columnId === 'in_progress' ||
-    columnId === 'done' ||
-    columnId === 'review';
-
   const metaActions = (
     <>
       {showChangesColumn && taskHasChanges === true ? (
-        <button
-          type="button"
+        <TaskActionIconButton
+          label="Changes"
+          icon={<FileCode className="size-3.5" />}
+          variant="ghost"
+          className="text-sky-400 hover:bg-sky-500/10 hover:text-sky-300"
           onClick={(e) => {
             e.stopPropagation();
             onViewChanges(task.id);
           }}
-          className="flex items-center gap-1 text-[10px] text-[var(--color-text-muted)] transition-colors hover:text-blue-400"
-        >
-          <FileCode className="size-3" />
-          Changes
-        </button>
+        />
       ) : null}
       <UnreadCommentsBadge unreadCount={unreadCount} totalCount={task.comments?.length ?? 0} />
       {onDeleteTask ? (
-        <button
-          type="button"
+        <TaskActionIconButton
+          label="Delete task"
+          icon={<Trash2 size={14} />}
+          variant="ghost"
+          className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
           onClick={(e) => {
             e.stopPropagation();
             onDeleteTask(task.id);
           }}
-          className="text-[var(--color-text-muted)] transition-colors hover:text-red-400"
-          title="Delete task"
-        >
-          <Trash2 size={12} />
-        </button>
+        />
       ) : null}
     </>
   );
@@ -348,143 +382,118 @@ export const KanbanTaskCard = ({
         </div>
       ) : null}
 
-      <div className={multiButton ? 'space-y-2' : 'flex items-end gap-2'}>
-        <div className="flex flex-1 flex-wrap gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-nowrap gap-2">
           {columnId === 'todo' ? (
             <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                aria-label={`Start task ${task.id}`}
+              <TaskActionIconButton
+                label="Start"
+                icon={<Play size={14} />}
+                className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
                 onClick={(e) => {
                   e.stopPropagation();
                   onStartTask(task.id);
                 }}
-              >
-                <Play size={12} />
-                Start
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                aria-label={`Complete task ${task.id}`}
+              />
+              <TaskActionIconButton
+                label="Complete"
+                icon={<CheckCircle2 size={14} />}
+                className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
                 onClick={(e) => {
                   e.stopPropagation();
                   onCompleteTask(task.id);
                 }}
-              >
-                <CheckCircle2 size={12} />
-                Complete
-              </Button>
+              />
             </>
           ) : null}
 
           {columnId === 'in_progress' ? (
             <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                aria-label={`Complete task ${task.id}`}
+              <TaskActionIconButton
+                label="Complete"
+                icon={<CheckCircle2 size={14} />}
+                className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
                 onClick={(e) => {
                   e.stopPropagation();
                   onCompleteTask(task.id);
                 }}
-              >
-                <CheckCircle2 size={12} />
-                Complete
-              </Button>
+              />
               <CancelTaskButton taskId={task.id} onConfirm={onCancelTask} />
             </>
           ) : null}
 
           {columnId === 'done' ? (
             <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                aria-label={`Approve task ${task.id}`}
+              <TaskActionIconButton
+                label="Approve"
+                icon={<CheckCircle2 size={14} />}
+                className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
                 onClick={(e) => {
                   e.stopPropagation();
                   onApprove(task.id);
                 }}
-              >
-                <CheckCircle2 size={12} />
-                Approve
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                aria-label={`Request review for task ${task.id}`}
+              />
+              <TaskActionIconButton
+                label="Request review"
+                icon={<GitPullRequestArrow size={14} />}
+                className="border-violet-500/40 text-violet-400 hover:bg-violet-500/10 hover:text-violet-300"
                 onClick={(e) => {
                   e.stopPropagation();
                   onRequestReview(task.id);
                 }}
-              >
-                Request Review
-              </Button>
+              />
             </>
           ) : null}
 
           {columnId === 'review' ? (
-            <div className="w-full space-y-2">
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
               {isReviewManual ? (
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] text-[var(--color-text-muted)]">Manual review</p>
-                  <div className="flex items-center gap-1.5">{metaActions}</div>
+                <div className="min-w-0 shrink text-[11px] text-[var(--color-text-muted)]">
+                  Manual review
                 </div>
               ) : null}
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                  aria-label={`Approve task ${task.id}`}
+              <div className="flex shrink-0 flex-nowrap gap-2">
+                <TaskActionIconButton
+                  label="Approve"
+                  icon={<CheckCircle2 size={14} />}
+                  className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
                   onClick={(e) => {
                     e.stopPropagation();
                     onApprove(task.id);
                   }}
-                >
-                  <CheckCircle2 size={12} />
-                  Approve
-                </Button>
-                <Button
+                />
+                <TaskActionIconButton
+                  label="Request changes"
+                  icon={<FilePenLine size={14} />}
                   variant="destructive"
-                  size="sm"
-                  aria-label={`Request changes for task ${task.id}`}
+                  className="bg-red-500/90 text-white hover:bg-red-500"
                   onClick={(e) => {
                     e.stopPropagation();
                     onRequestChanges(task.id);
                   }}
-                >
-                  Request Changes
-                </Button>
+                />
               </div>
+              {isReviewManual ? (
+                <div className="flex shrink-0 items-center gap-1.5">{metaActions}</div>
+              ) : null}
             </div>
           ) : null}
 
           {columnId === 'approved' ? (
-            <Button
-              variant="outline"
-              size="sm"
-              aria-label={`Disapprove task ${task.id}`}
+            <TaskActionIconButton
+              label="Disapprove"
+              icon={<RotateCcw size={14} />}
+              className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
               onClick={(e) => {
                 e.stopPropagation();
                 onMoveBackToDone(task.id);
               }}
-            >
-              Disapprove
-            </Button>
+            />
           ) : null}
         </div>
 
         {!isReviewManual ? (
-          <div className={`flex items-center gap-1.5 ${multiButton ? 'justify-end' : ''}`}>
-            {metaActions}
-          </div>
+          <div className="flex shrink-0 flex-nowrap items-center gap-1.5">{metaActions}</div>
         ) : null}
       </div>
     </div>

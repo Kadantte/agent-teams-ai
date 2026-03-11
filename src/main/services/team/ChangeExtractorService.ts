@@ -1,10 +1,17 @@
 import { getTasksBasePath } from '@main/utils/pathDecoder';
 import { createLogger } from '@shared/utils/logger';
+import {
+  getTaskChangeStateBucket,
+  isTaskChangeSummaryCacheable,
+  type TaskChangeStateBucket,
+} from '@shared/utils/taskChangeState';
+import { createHash } from 'crypto';
 import { createReadStream } from 'fs';
 import { readFile, stat } from 'fs/promises';
 import * as path from 'path';
 import * as readline from 'readline';
 
+import { JsonTaskChangeSummaryCacheRepository } from './cache/JsonTaskChangeSummaryCacheRepository';
 import { TeamConfigReader } from './TeamConfigReader';
 import { countLineChanges } from './UnifiedLineCounter';
 
@@ -31,7 +38,7 @@ interface CacheEntry {
   expiresAt: number;
 }
 
-interface TaskChangeCacheEntry {
+interface TaskChangeSummaryCacheEntry {
   data: TaskChangeSetV2;
   expiresAt: number;
 }
@@ -50,16 +57,25 @@ interface LogFileRef {
 
 export class ChangeExtractorService {
   private cache = new Map<string, CacheEntry>();
-  private taskChangeCache = new Map<string, TaskChangeCacheEntry>();
+  private taskChangeSummaryCache = new Map<string, TaskChangeSummaryCacheEntry>();
+  private taskChangeSummaryInFlight = new Map<string, Promise<TaskChangeSetV2>>();
+  private taskChangeSummaryVersionByTask = new Map<string, number>();
+  private taskChangeSummaryValidationInFlight = new Set<string>();
   private parsedSnippetsCache = new Map<string, ParsedSnippetsCacheEntry>();
   private readonly cacheTtl = 30 * 1000; // 30 сек — shorter TTL to reduce stale data risk
-  private readonly taskChangeCacheTtl = 20 * 1000; // 20 сек для task changes
+  private readonly taskChangeSummaryCacheTtl = 60 * 1000;
+  private readonly emptyTaskChangeSummaryCacheTtl = 10 * 1000;
+  private readonly persistedTaskChangeSummaryTtl = 24 * 60 * 60 * 1000;
+  private readonly maxTaskChangeSummaryCacheEntries = 200;
   private readonly parsedSnippetsCacheTtl = 20 * 1000; // 20 сек для parsed JSONL snippets
+  private readonly isPersistedTaskChangeCacheEnabled =
+    process.env.CLAUDE_TEAM_ENABLE_PERSISTED_TASK_CHANGE_CACHE !== '0';
 
   constructor(
     private readonly logsFinder: TeamMemberLogsFinder,
     private readonly boundaryParser: TaskBoundaryParser,
-    private readonly configReader: TeamConfigReader = new TeamConfigReader()
+    private readonly configReader: TeamConfigReader = new TeamConfigReader(),
+    private readonly taskChangeSummaryRepository = new JsonTaskChangeSummaryCacheRepository()
   ) {}
 
   /** Получить все изменения агента */
@@ -128,7 +144,9 @@ export class ChangeExtractorService {
       status?: string;
       intervals?: { startedAt: string; completedAt?: string }[];
       since?: string;
+      stateBucket?: TaskChangeStateBucket;
       summaryOnly?: boolean;
+      forceFresh?: boolean;
     }
   ): Promise<TaskChangeSetV2> {
     const includeDetails = options?.summaryOnly !== true;
@@ -139,28 +157,130 @@ export class ChangeExtractorService {
       intervals: options?.intervals ?? taskMeta?.intervals,
       since: options?.since,
     };
-    const cacheKey = this.buildTaskChangeCacheKey(
+    const effectiveStateBucket = taskMeta
+      ? getTaskChangeStateBucket({
+          status: effectiveOptions.status,
+          reviewState: taskMeta.reviewState,
+          historyEvents: taskMeta.historyEvents,
+          kanbanColumn: taskMeta.kanbanColumn,
+        })
+      : (options?.stateBucket ??
+        getTaskChangeStateBucket({
+          status: effectiveOptions.status,
+        }));
+    const summaryCacheableState = isTaskChangeSummaryCacheable(effectiveStateBucket);
+    const shouldUseSummaryCache = !includeDetails && summaryCacheableState;
+
+    if (!summaryCacheableState || options?.forceFresh === true) {
+      await this.invalidateTaskChangeSummaries(teamName, [taskId], {
+        deletePersisted: true,
+      });
+    }
+
+    if (!shouldUseSummaryCache) {
+      return this.computeTaskChanges(teamName, taskId, effectiveOptions, includeDetails);
+    }
+
+    const cacheKey = this.buildTaskChangeSummaryCacheKey(
       teamName,
       taskId,
       effectiveOptions,
-      includeDetails
+      effectiveStateBucket
     );
-    const cached = includeDetails ? this.taskChangeCache.get(cacheKey) : undefined;
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.data;
+    const version = this.getTaskChangeSummaryVersion(teamName, taskId);
+
+    if (options?.forceFresh !== true) {
+      const cached = this.taskChangeSummaryCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return cached.data;
+      }
+      this.taskChangeSummaryCache.delete(cacheKey);
+
+      const inFlight = this.taskChangeSummaryInFlight.get(cacheKey);
+      if (inFlight) {
+        return inFlight;
+      }
+
+      const persisted = await this.readPersistedTaskChangeSummary(
+        teamName,
+        taskId,
+        effectiveOptions,
+        effectiveStateBucket,
+        taskMeta
+      );
+      if (persisted) {
+        this.setTaskChangeSummaryCache(cacheKey, persisted);
+        return persisted;
+      }
     }
 
+    const promise = this.computeTaskChanges(teamName, taskId, effectiveOptions, false)
+      .then(async (result) => {
+        if (this.getTaskChangeSummaryVersion(teamName, taskId) !== version) {
+          return result;
+        }
+
+        this.setTaskChangeSummaryCache(cacheKey, result);
+        await this.persistTaskChangeSummary(
+          teamName,
+          taskId,
+          effectiveOptions,
+          effectiveStateBucket,
+          result,
+          version
+        );
+        return result;
+      })
+      .finally(() => {
+        this.taskChangeSummaryInFlight.delete(cacheKey);
+      });
+
+    this.taskChangeSummaryInFlight.set(cacheKey, promise);
+    return promise;
+  }
+
+  async invalidateTaskChangeSummaries(
+    teamName: string,
+    taskIds: string[],
+    options?: { deletePersisted?: boolean }
+  ): Promise<void> {
+    const uniqueTaskIds = [...new Set(taskIds.filter((taskId) => taskId.length > 0))];
+    await Promise.all(
+      uniqueTaskIds.map(async (taskId) => {
+        this.bumpTaskChangeSummaryVersion(teamName, taskId);
+        for (const key of [...this.taskChangeSummaryCache.keys()]) {
+          if (this.isTaskChangeSummaryCacheKeyForTask(key, teamName, taskId)) {
+            this.taskChangeSummaryCache.delete(key);
+          }
+        }
+        for (const key of [...this.taskChangeSummaryInFlight.keys()]) {
+          if (this.isTaskChangeSummaryCacheKeyForTask(key, teamName, taskId)) {
+            this.taskChangeSummaryInFlight.delete(key);
+          }
+        }
+        if (options?.deletePersisted !== false && this.isPersistedTaskChangeCacheEnabled) {
+          await this.taskChangeSummaryRepository.delete(teamName, taskId);
+        }
+      })
+    );
+  }
+
+  private async computeTaskChanges(
+    teamName: string,
+    taskId: string,
+    effectiveOptions: {
+      owner?: string;
+      status?: string;
+      intervals?: { startedAt: string; completedAt?: string }[];
+      since?: string;
+    },
+    includeDetails: boolean
+  ): Promise<TaskChangeSetV2> {
+    const taskMeta = await this.readTaskMeta(teamName, taskId);
     const logs = await this.logsFinder.findLogsForTask(teamName, taskId, effectiveOptions);
     const logRefs = await this.resolveLogFileRefs(teamName, logs);
     if (logRefs.length === 0) {
-      const empty = this.emptyTaskChangeSet(teamName, taskId);
-      if (includeDetails) {
-        this.taskChangeCache.set(cacheKey, {
-          data: empty,
-          expiresAt: Date.now() + this.taskChangeCacheTtl,
-        });
-      }
-      return empty;
+      return this.emptyTaskChangeSet(teamName, taskId);
     }
 
     const projectPath = await this.resolveProjectPath(teamName);
@@ -182,23 +302,7 @@ export class ChangeExtractorService {
         const { files, toolUseIds, startTimestamp, endTimestamp } =
           await this.extractIntervalScopedChanges(logRefs, intervals, projectPath, includeDetails);
 
-        const intervalScope: TaskChangeScope = {
-          taskId,
-          memberName: taskMeta?.owner ?? logRefs[0]?.memberName ?? '',
-          startLine: 0,
-          endLine: 0,
-          startTimestamp,
-          endTimestamp,
-          toolUseIds,
-          filePaths: files.map((f) => f.filePath),
-          confidence: {
-            tier: 2,
-            label: 'medium',
-            reason: 'Scoped by persisted task workIntervals (timestamp-based)',
-          },
-        };
-
-        const intervalResult: TaskChangeSetV2 = {
+        return {
           teamName,
           taskId,
           files,
@@ -207,39 +311,32 @@ export class ChangeExtractorService {
           totalFiles: files.length,
           confidence: 'medium',
           computedAt: new Date().toISOString(),
-          scope: intervalScope,
+          scope: {
+            taskId,
+            memberName: taskMeta?.owner ?? logRefs[0]?.memberName ?? '',
+            startLine: 0,
+            endLine: 0,
+            startTimestamp,
+            endTimestamp,
+            toolUseIds,
+            filePaths: files.map((f) => f.filePath),
+            confidence: {
+              tier: 2,
+              label: 'medium',
+              reason: 'Scoped by persisted task workIntervals (timestamp-based)',
+            },
+          },
           warnings:
             files.length === 0
               ? ['No file edits found within persisted workIntervals.']
               : ['Task boundaries missing — scoped by workIntervals timestamps.'],
         };
-        if (includeDetails) {
-          this.taskChangeCache.set(cacheKey, {
-            data: intervalResult,
-            expiresAt: Date.now() + this.taskChangeCacheTtl,
-          });
-        }
-        return intervalResult;
       }
 
-      const fallbackResult = await this.fallbackSingleTaskScope(
-        teamName,
-        taskId,
-        logRefs,
-        projectPath,
-        includeDetails
-      );
-      if (includeDetails) {
-        this.taskChangeCache.set(cacheKey, {
-          data: fallbackResult,
-          expiresAt: Date.now() + this.taskChangeCacheTtl,
-        });
-      }
-      return fallbackResult;
+      return this.fallbackSingleTaskScope(teamName, taskId, logRefs, projectPath, includeDetails);
     }
 
-    // Фильтруем snippets по tool_use IDs из scope
-    const allowedToolUseIds = new Set(allScopes.flatMap((s) => s.toolUseIds));
+    const allowedToolUseIds = new Set(allScopes.flatMap((scope) => scope.toolUseIds));
     const files = await this.extractFilteredChanges(
       logRefs,
       allowedToolUseIds,
@@ -247,31 +344,19 @@ export class ChangeExtractorService {
       includeDetails
     );
 
-    const worstTier = Math.max(...allScopes.map((s) => s.confidence.tier));
-    const warnings: string[] = [];
-    if (worstTier >= 3) {
-      warnings.push('Some task boundaries could not be precisely determined.');
-    }
-
-    const result: TaskChangeSetV2 = {
+    const worstTier = Math.max(...allScopes.map((scope) => scope.confidence.tier));
+    return {
       teamName,
       taskId,
       files,
-      totalLinesAdded: files.reduce((sum, f) => sum + f.linesAdded, 0),
-      totalLinesRemoved: files.reduce((sum, f) => sum + f.linesRemoved, 0),
+      totalLinesAdded: files.reduce((sum, file) => sum + file.linesAdded, 0),
+      totalLinesRemoved: files.reduce((sum, file) => sum + file.linesRemoved, 0),
       totalFiles: files.length,
       confidence: worstTier <= 1 ? 'high' : worstTier <= 2 ? 'medium' : 'low',
       computedAt: new Date().toISOString(),
       scope: allScopes[0],
-      warnings,
+      warnings: worstTier >= 3 ? ['Some task boundaries could not be precisely determined.'] : [],
     };
-    if (includeDetails) {
-      this.taskChangeCache.set(cacheKey, {
-        data: result,
-        expiresAt: Date.now() + this.taskChangeCacheTtl,
-      });
-    }
-    return result;
   }
 
   /** Получить краткую статистику */
@@ -294,6 +379,9 @@ export class ChangeExtractorService {
     owner?: string;
     status?: string;
     intervals?: { startedAt: string; completedAt?: string }[];
+    reviewState?: 'review' | 'needsFix' | 'approved' | 'none';
+    historyEvents?: unknown[];
+    kanbanColumn?: 'review' | 'approved';
   } | null> {
     try {
       const taskPath = path.join(getTasksBasePath(), teamName, `${taskId}.json`);
@@ -350,6 +438,17 @@ export class ChangeExtractorService {
         owner: typeof parsed.owner === 'string' ? parsed.owner : undefined,
         status: typeof parsed.status === 'string' ? parsed.status : undefined,
         intervals: derivedIntervals,
+        reviewState:
+          parsed.reviewState === 'review' ||
+          parsed.reviewState === 'needsFix' ||
+          parsed.reviewState === 'approved'
+            ? parsed.reviewState
+            : 'none',
+        historyEvents: Array.isArray(parsed.historyEvents) ? parsed.historyEvents : undefined,
+        kanbanColumn:
+          parsed.kanbanColumn === 'review' || parsed.kanbanColumn === 'approved'
+            ? parsed.kanbanColumn
+            : undefined,
       };
     } catch (error) {
       logger.debug(`Failed to read task meta for ${teamName}/${taskId}: ${String(error)}`);
@@ -927,7 +1026,7 @@ export class ChangeExtractorService {
     };
   }
 
-  private buildTaskChangeCacheKey(
+  private buildTaskChangeSummaryCacheKey(
     teamName: string,
     taskId: string,
     options: {
@@ -936,7 +1035,24 @@ export class ChangeExtractorService {
       intervals?: { startedAt: string; completedAt?: string }[];
       since?: string;
     },
-    includeDetails: boolean
+    stateBucket: TaskChangeStateBucket
+  ): string {
+    return `${teamName}:${taskId}:${this.buildTaskSignature(options, stateBucket)}`;
+  }
+
+  private normalizeFilePathKey(filePath: string): string {
+    const normalized = filePath.replace(/\\/g, '/');
+    return normalized.replace(/^[A-Z]:/, (drive) => drive.toLowerCase());
+  }
+
+  private buildTaskSignature(
+    options: {
+      owner?: string;
+      status?: string;
+      intervals?: { startedAt: string; completedAt?: string }[];
+      since?: string;
+    },
+    stateBucket: TaskChangeStateBucket
   ): string {
     const owner = typeof options.owner === 'string' ? options.owner.trim() : '';
     const status = typeof options.status === 'string' ? options.status.trim() : '';
@@ -947,21 +1063,295 @@ export class ChangeExtractorService {
           completedAt: interval.completedAt ?? '',
         }))
       : [];
-
-    return JSON.stringify({
-      type: 'task',
-      teamName,
-      taskId,
-      includeDetails,
-      owner,
-      status,
-      since,
-      intervals,
-    });
+    return JSON.stringify({ owner, status, since, stateBucket, intervals });
   }
 
-  private normalizeFilePathKey(filePath: string): string {
-    const normalized = filePath.replace(/\\/g, '/');
-    return normalized.replace(/^[A-Z]:/, (drive) => drive.toLowerCase());
+  private setTaskChangeSummaryCache(cacheKey: string, result: TaskChangeSetV2): void {
+    this.pruneExpiredTaskChangeSummaryCache();
+    this.taskChangeSummaryCache.set(cacheKey, {
+      data: result,
+      expiresAt:
+        Date.now() +
+        (result.files.length > 0
+          ? this.taskChangeSummaryCacheTtl
+          : this.emptyTaskChangeSummaryCacheTtl),
+    });
+    while (this.taskChangeSummaryCache.size > this.maxTaskChangeSummaryCacheEntries) {
+      const oldestKey = this.taskChangeSummaryCache.keys().next().value;
+      if (!oldestKey) break;
+      this.taskChangeSummaryCache.delete(oldestKey);
+    }
+  }
+
+  private pruneExpiredTaskChangeSummaryCache(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.taskChangeSummaryCache.entries()) {
+      if (entry.expiresAt <= now) {
+        this.taskChangeSummaryCache.delete(key);
+      }
+    }
+  }
+
+  private getTaskChangeSummaryVersionKey(teamName: string, taskId: string): string {
+    return `${teamName}:${taskId}`;
+  }
+
+  private getTaskChangeSummaryVersion(teamName: string, taskId: string): number {
+    return (
+      this.taskChangeSummaryVersionByTask.get(
+        this.getTaskChangeSummaryVersionKey(teamName, taskId)
+      ) ?? 0
+    );
+  }
+
+  private bumpTaskChangeSummaryVersion(teamName: string, taskId: string): void {
+    const key = this.getTaskChangeSummaryVersionKey(teamName, taskId);
+    this.taskChangeSummaryVersionByTask.set(
+      key,
+      this.getTaskChangeSummaryVersion(teamName, taskId) + 1
+    );
+  }
+
+  private isTaskChangeSummaryCacheKeyForTask(
+    cacheKey: string,
+    teamName: string,
+    taskId: string
+  ): boolean {
+    return cacheKey.startsWith(`${teamName}:${taskId}:`);
+  }
+
+  private async readPersistedTaskChangeSummary(
+    teamName: string,
+    taskId: string,
+    effectiveOptions: {
+      owner?: string;
+      status?: string;
+      intervals?: { startedAt: string; completedAt?: string }[];
+      since?: string;
+    },
+    stateBucket: TaskChangeStateBucket,
+    taskMeta: {
+      status?: string;
+      reviewState?: 'review' | 'needsFix' | 'approved' | 'none';
+      historyEvents?: unknown[];
+      kanbanColumn?: 'review' | 'approved';
+    } | null
+  ): Promise<TaskChangeSetV2 | null> {
+    if (!this.isPersistedTaskChangeCacheEnabled) {
+      return null;
+    }
+    if (!taskMeta || !isTaskChangeSummaryCacheable(stateBucket)) {
+      await this.taskChangeSummaryRepository.delete(teamName, taskId);
+      return null;
+    }
+
+    const currentBucket = getTaskChangeStateBucket({
+      status: taskMeta.status,
+      reviewState: taskMeta.reviewState,
+      historyEvents: taskMeta.historyEvents,
+      kanbanColumn: taskMeta.kanbanColumn,
+    });
+    if (!isTaskChangeSummaryCacheable(currentBucket)) {
+      await this.taskChangeSummaryRepository.delete(teamName, taskId);
+      return null;
+    }
+
+    const entry = await this.taskChangeSummaryRepository.load(teamName, taskId);
+    if (!entry) {
+      return null;
+    }
+
+    const projectFingerprint = await this.computeProjectFingerprint(teamName);
+    const taskSignature = this.buildTaskSignature(effectiveOptions, currentBucket);
+
+    if (
+      !projectFingerprint ||
+      entry.taskSignature !== taskSignature ||
+      entry.projectFingerprint !== projectFingerprint ||
+      entry.stateBucket !== currentBucket
+    ) {
+      logger.debug(`Rejecting persisted task-change summary for ${teamName}/${taskId}`);
+      await this.taskChangeSummaryRepository.delete(teamName, taskId);
+      return null;
+    }
+
+    this.schedulePersistedTaskChangeSummaryValidation(
+      teamName,
+      taskId,
+      effectiveOptions,
+      currentBucket,
+      entry.sourceFingerprint
+    );
+
+    return entry.summary;
+  }
+
+  private schedulePersistedTaskChangeSummaryValidation(
+    teamName: string,
+    taskId: string,
+    effectiveOptions: {
+      owner?: string;
+      status?: string;
+      intervals?: { startedAt: string; completedAt?: string }[];
+      since?: string;
+    },
+    expectedBucket: TaskChangeStateBucket,
+    expectedSourceFingerprint: string
+  ): void {
+    const validationKey = `${teamName}:${taskId}`;
+    if (this.taskChangeSummaryValidationInFlight.has(validationKey)) {
+      return;
+    }
+
+    const version = this.getTaskChangeSummaryVersion(teamName, taskId);
+    this.taskChangeSummaryValidationInFlight.add(validationKey);
+
+    setTimeout(() => {
+      void this.validatePersistedTaskChangeSummary(
+        teamName,
+        taskId,
+        effectiveOptions,
+        expectedBucket,
+        expectedSourceFingerprint,
+        version
+      )
+        .catch((error) => {
+          logger.debug(
+            `Background persisted summary validation failed for ${teamName}/${taskId}: ${String(error)}`
+          );
+        })
+        .finally(() => {
+          this.taskChangeSummaryValidationInFlight.delete(validationKey);
+        });
+    }, 0);
+  }
+
+  private async validatePersistedTaskChangeSummary(
+    teamName: string,
+    taskId: string,
+    effectiveOptions: {
+      owner?: string;
+      status?: string;
+      intervals?: { startedAt: string; completedAt?: string }[];
+      since?: string;
+    },
+    expectedBucket: TaskChangeStateBucket,
+    expectedSourceFingerprint: string,
+    version: number
+  ): Promise<void> {
+    if (this.getTaskChangeSummaryVersion(teamName, taskId) !== version) {
+      return;
+    }
+
+    const taskMeta = await this.readTaskMeta(teamName, taskId);
+    if (!taskMeta) {
+      await this.invalidateTaskChangeSummaries(teamName, [taskId], { deletePersisted: true });
+      return;
+    }
+
+    const currentBucket = getTaskChangeStateBucket({
+      status: taskMeta.status ?? effectiveOptions.status,
+      reviewState: taskMeta.reviewState,
+      historyEvents: taskMeta.historyEvents,
+      kanbanColumn: taskMeta.kanbanColumn,
+    });
+    if (!isTaskChangeSummaryCacheable(currentBucket) || currentBucket !== expectedBucket) {
+      await this.invalidateTaskChangeSummaries(teamName, [taskId], { deletePersisted: true });
+      return;
+    }
+
+    const logs = await this.logsFinder.findLogsForTask(teamName, taskId, effectiveOptions);
+    const logRefs = await this.resolveLogFileRefs(teamName, logs);
+    const sourceFingerprint = await this.computeSourceFingerprint(logRefs);
+    if (!sourceFingerprint || sourceFingerprint !== expectedSourceFingerprint) {
+      await this.invalidateTaskChangeSummaries(teamName, [taskId], { deletePersisted: true });
+    }
+  }
+
+  private async persistTaskChangeSummary(
+    teamName: string,
+    taskId: string,
+    effectiveOptions: {
+      owner?: string;
+      status?: string;
+      intervals?: { startedAt: string; completedAt?: string }[];
+      since?: string;
+    },
+    stateBucket: TaskChangeStateBucket,
+    result: TaskChangeSetV2,
+    generation: number
+  ): Promise<void> {
+    if (!this.isPersistedTaskChangeCacheEnabled) return;
+    if (!isTaskChangeSummaryCacheable(stateBucket)) return;
+    if (result.files.length === 0) return;
+    if (result.confidence !== 'high' && result.confidence !== 'medium') {
+      await this.taskChangeSummaryRepository.delete(teamName, taskId);
+      return;
+    }
+    if (this.getTaskChangeSummaryVersion(teamName, taskId) !== generation) {
+      return;
+    }
+    const currentTaskMeta = await this.readTaskMeta(teamName, taskId);
+    if (!currentTaskMeta) return;
+    const currentBucket = getTaskChangeStateBucket({
+      status: currentTaskMeta.status ?? effectiveOptions.status,
+      reviewState: currentTaskMeta.reviewState,
+      historyEvents: currentTaskMeta.historyEvents,
+      kanbanColumn: currentTaskMeta.kanbanColumn,
+    });
+    if (!isTaskChangeSummaryCacheable(currentBucket)) {
+      await this.taskChangeSummaryRepository.delete(teamName, taskId);
+      return;
+    }
+
+    const logs = await this.logsFinder.findLogsForTask(teamName, taskId, effectiveOptions);
+    const logRefs = await this.resolveLogFileRefs(teamName, logs);
+    const sourceFingerprint = await this.computeSourceFingerprint(logRefs);
+    const projectFingerprint = await this.computeProjectFingerprint(teamName);
+    if (!sourceFingerprint || !projectFingerprint) {
+      return;
+    }
+
+    const expiresAt = new Date(Date.now() + this.persistedTaskChangeSummaryTtl).toISOString();
+    await this.taskChangeSummaryRepository.save(
+      {
+        version: 1,
+        teamName,
+        taskId,
+        stateBucket: currentBucket === 'approved' ? 'approved' : 'completed',
+        taskSignature: this.buildTaskSignature(effectiveOptions, currentBucket),
+        sourceFingerprint,
+        projectFingerprint,
+        writtenAt: new Date().toISOString(),
+        expiresAt,
+        extractorConfidence: result.confidence,
+        summary: result,
+        debugMeta: {
+          sourceCount: logRefs.length,
+          projectPathHash: projectFingerprint,
+        },
+      },
+      { generation }
+    );
+  }
+
+  private async computeSourceFingerprint(logRefs: LogFileRef[]): Promise<string | null> {
+    if (logRefs.length === 0) return null;
+    const parts: string[] = [];
+    for (const ref of [...logRefs].sort((a, b) => a.filePath.localeCompare(b.filePath))) {
+      try {
+        const stats = await stat(ref.filePath);
+        parts.push(`${this.normalizeFilePathKey(ref.filePath)}:${stats.size}:${stats.mtimeMs}`);
+      } catch {
+        return null;
+      }
+    }
+    return createHash('sha1').update(parts.join('|')).digest('hex');
+  }
+
+  private async computeProjectFingerprint(teamName: string): Promise<string | null> {
+    const projectPath = await this.resolveProjectPath(teamName);
+    if (!projectPath) return null;
+    return createHash('sha1').update(this.normalizeFilePathKey(projectPath)).digest('hex');
   }
 }

@@ -431,6 +431,9 @@ export const REVIEW_GET_AGENT_CHANGES = 'review:getAgentChanges';
 /** Получить изменения задачи */
 export const REVIEW_GET_TASK_CHANGES = 'review:getTaskChanges';
 
+/** Инвалидировать persisted/in-memory summary cache для задач */
+export const REVIEW_INVALIDATE_TASK_CHANGE_SUMMARIES = 'review:invalidateTaskChangeSummaries';
+
 /** Получить краткую статистику изменений */
 export const REVIEW_GET_CHANGE_STATS = 'review:getChangeStats';
 

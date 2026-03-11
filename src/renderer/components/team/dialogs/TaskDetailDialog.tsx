@@ -36,6 +36,7 @@ import {
 } from '@renderer/utils/memberHelpers';
 import { buildTaskChangeRequestOptions, deriveTaskSince } from '@renderer/utils/taskChangeRequest';
 import { getTaskKanbanColumn } from '@shared/utils/reviewState';
+import { isTaskChangeSummaryCacheable } from '@shared/utils/taskChangeState';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -265,8 +266,8 @@ export const TaskDetailDialog = ({
     return result;
   }, [currentTask?.comments]);
 
-  // Lazy-load task changes when dialog is open and task is completed
-  const isTaskCompleted = currentTask?.status === 'completed';
+  // Lazy-load task changes only for terminal, cacheable states.
+  const canShowTaskChanges = currentTask ? isTaskChangeSummaryCacheable(currentTask) : false;
   const taskSince = useMemo(() => deriveTaskSince(currentTask), [currentTask]);
   const taskChangeRequestOptions = useMemo(
     () => (currentTask ? buildTaskChangeRequestOptions(currentTask) : null),
@@ -284,27 +285,30 @@ export const TaskDetailDialog = ({
   );
   const setTaskNeedsClarification = useStore((s) => s.setTaskNeedsClarification);
 
-  const loadTaskChangeSummary = useCallback(async (): Promise<FileChangeSummary[] | null> => {
-    if (
-      !currentTask ||
-      !taskChangeSummaryOptions ||
-      variant !== 'team' ||
-      !isTaskCompleted ||
-      !onViewChanges
-    ) {
-      return null;
-    }
-    const data = await api.review.getTaskChanges(
-      teamName,
-      currentTask.id,
-      taskChangeSummaryOptions
-    );
-    return data.files;
-  }, [currentTask, isTaskCompleted, onViewChanges, taskChangeSummaryOptions, teamName, variant]);
+  const loadTaskChangeSummary = useCallback(
+    async (forceFresh = false): Promise<FileChangeSummary[] | null> => {
+      if (
+        !currentTask ||
+        !taskChangeSummaryOptions ||
+        variant !== 'team' ||
+        !canShowTaskChanges ||
+        !onViewChanges
+      ) {
+        return null;
+      }
+      const data = await api.review.getTaskChanges(teamName, currentTask.id, {
+        ...taskChangeSummaryOptions,
+        forceFresh,
+      });
+      return data.files;
+    },
+    [canShowTaskChanges, currentTask, onViewChanges, taskChangeSummaryOptions, teamName, variant]
+  );
 
   useEffect(() => {
     if (variant !== 'team') return;
-    if (!open || !currentTask || !isTaskCompleted || !onViewChanges || !changesSectionOpen) return;
+    if (!open || !currentTask || !canShowTaskChanges || !onViewChanges || !changesSectionOpen)
+      return;
 
     let cancelled = false;
     setTaskChangesLoading(true);
@@ -335,6 +339,22 @@ export const TaskDetailDialog = ({
         if (!cancelled) setTaskChangesLoading(false);
       });
 
+    void loadTaskChangeSummary(true)
+      .then((files) => {
+        if (!cancelled && files) {
+          setTaskChangesFiles(files);
+          if (currentTask && taskChangeRequestOptions) {
+            recordTaskHasChanges(
+              teamName,
+              currentTask.id,
+              taskChangeRequestOptions,
+              files.length > 0
+            );
+          }
+        }
+      })
+      .catch(() => undefined);
+
     return () => {
       cancelled = true;
     };
@@ -342,7 +362,7 @@ export const TaskDetailDialog = ({
     changesSectionOpen,
     open,
     currentTask,
-    isTaskCompleted,
+    canShowTaskChanges,
     teamName,
     onViewChanges,
     taskSince,
@@ -351,10 +371,10 @@ export const TaskDetailDialog = ({
   ]);
 
   const handleRefreshChanges = useCallback(() => {
-    if (!currentTask || variant !== 'team' || !isTaskCompleted || !onViewChanges) return;
+    if (!currentTask || variant !== 'team' || !canShowTaskChanges || !onViewChanges) return;
     setTaskChangesLoading(true);
     setTaskChangesError(null);
-    void loadTaskChangeSummary()
+    void loadTaskChangeSummary(true)
       .then((files) => {
         setTaskChangesFiles(files ?? null);
         if (currentTask && taskChangeRequestOptions) {
@@ -370,7 +390,7 @@ export const TaskDetailDialog = ({
       .finally(() => setTaskChangesLoading(false));
   }, [
     currentTask,
-    isTaskCompleted,
+    canShowTaskChanges,
     onViewChanges,
     loadTaskChangeSummary,
     recordTaskHasChanges,
@@ -810,7 +830,7 @@ export const TaskDetailDialog = ({
           </CollapsibleTeamSection>
 
           {/* Changes */}
-          {variant === 'team' && isTaskCompleted && onViewChanges ? (
+          {variant === 'team' && canShowTaskChanges && onViewChanges ? (
             <CollapsibleTeamSection
               key={`task-changes:${currentTask.id}`}
               title="Changes"
