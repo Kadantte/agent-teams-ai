@@ -193,13 +193,11 @@ export function buildMemberColorMap(members: MemberColorInput[]): Map<string, st
     usedColors.add(color);
   }
 
-  for (let i = 0; i < removed.length; i++) {
-    map.set(
-      removed[i].name,
-      removed[i].color
-        ? normalizeMemberColorName(removed[i].color)
-        : getMemberColorByName(removed[i].name)
-    );
+  for (const member of removed) {
+    const color = member.color
+      ? normalizeMemberColorName(member.color)
+      : getMemberColorByName(member.name);
+    map.set(member.name, color);
   }
 
   map.set('user', 'user');

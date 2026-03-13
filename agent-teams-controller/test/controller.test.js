@@ -123,6 +123,130 @@ describe('agent-teams-controller API', () => {
     expect(typeof stopped.stoppedAt).toBe('string');
   });
 
+  it('builds member briefing from team config language and known member metadata', async () => {
+    const claudeDir = makeClaudeDir();
+    const configPath = path.join(claudeDir, 'teams', 'my-team', 'config.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config.language = 'en';
+    config.projectPath = '/tmp/project-x';
+    config.members = [
+      { name: 'alice', role: 'team-lead' },
+      { name: 'bob', role: 'developer', workflow: 'Implement carefully', cwd: '/tmp/project-x' },
+    ];
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    const controller = createController({ teamName: 'my-team', claudeDir });
+    controller.tasks.createTask({ subject: 'Queued task', owner: 'bob' });
+    const briefing = await controller.tasks.memberBriefing('bob');
+
+    expect(briefing).toContain('Member briefing for bob on team "my-team" (my-team).');
+    expect(briefing).toContain('IMPORTANT: Communicate in English.');
+    expect(briefing).toContain('TURN ACTION MODE PROTOCOL (HIGHEST PRIORITY FOR EACH USER TURN):');
+    expect(briefing).toContain('Workflow:');
+    expect(briefing).toContain('Implement carefully');
+    expect(briefing).toContain('Working directory: /tmp/project-x');
+    expect(briefing).toContain('Task briefing for bob:');
+  });
+
+  it('resolves member briefing from members.meta.json when config members are missing', async () => {
+    const claudeDir = makeClaudeDir();
+    const configPath = path.join(claudeDir, 'teams', 'my-team', 'config.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config.language = 'en';
+    delete config.members;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    fs.writeFileSync(
+      path.join(claudeDir, 'teams', 'my-team', 'members.meta.json'),
+      JSON.stringify(
+        {
+          version: 1,
+          members: [{ name: 'bob', role: 'developer', workflow: 'Meta workflow' }],
+        },
+        null,
+        2
+      )
+    );
+
+    const controller = createController({ teamName: 'my-team', claudeDir });
+    const briefing = await controller.tasks.memberBriefing('bob');
+
+    expect(briefing).toContain('Role: developer.');
+    expect(briefing).toContain('Meta workflow');
+  });
+
+  it('resolves member briefing from inbox presence when member metadata is not persisted yet', async () => {
+    const claudeDir = makeClaudeDir();
+    const configPath = path.join(claudeDir, 'teams', 'my-team', 'config.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    delete config.members;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    fs.mkdirSync(path.join(claudeDir, 'teams', 'my-team', 'inboxes'), { recursive: true });
+    fs.writeFileSync(path.join(claudeDir, 'teams', 'my-team', 'inboxes', 'carol.json'), '[]');
+
+    const controller = createController({ teamName: 'my-team', claudeDir });
+    const fromInboxBriefing = await controller.tasks.memberBriefing('carol');
+
+    expect(fromInboxBriefing).toContain('Member briefing for carol on team "my-team" (my-team).');
+    expect(fromInboxBriefing).toContain('Role: team member.');
+  });
+
+  it('rejects member briefing when member is unknown to config, members.meta, and inboxes', async () => {
+    const claudeDir = makeClaudeDir();
+    const configPath = path.join(claudeDir, 'teams', 'my-team', 'config.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    delete config.members;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    const controller = createController({ teamName: 'my-team', claudeDir });
+    await expect(controller.tasks.memberBriefing('dave')).rejects.toThrow(
+      'Member not found in team metadata or inboxes: dave'
+    );
+  });
+
+  it('ignores pseudo-recipient inbox files when resolving members', async () => {
+    const claudeDir = makeClaudeDir();
+    const configPath = path.join(claudeDir, 'teams', 'my-team', 'config.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    delete config.members;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    const inboxDir = path.join(claudeDir, 'teams', 'my-team', 'inboxes');
+    fs.mkdirSync(inboxDir, { recursive: true });
+    fs.writeFileSync(path.join(inboxDir, 'cross-team:other-team.json'), '[]');
+    fs.writeFileSync(path.join(inboxDir, 'other-team.alice.json'), '[]');
+    fs.writeFileSync(path.join(inboxDir, 'cross_team_send.json'), '[]');
+
+    const controller = createController({ teamName: 'my-team', claudeDir });
+    await expect(controller.tasks.memberBriefing('cross-team:other-team')).rejects.toThrow(
+      'Member not found in team metadata or inboxes: cross-team:other-team'
+    );
+    await expect(controller.tasks.memberBriefing('other-team.alice')).rejects.toThrow(
+      'Member not found in team metadata or inboxes: other-team.alice'
+    );
+    await expect(controller.tasks.memberBriefing('cross_team_send')).rejects.toThrow(
+      'Member not found in team metadata or inboxes: cross_team_send'
+    );
+  });
+
+  it('rejects member briefing for explicitly removed members', async () => {
+    const claudeDir = makeClaudeDir();
+    fs.writeFileSync(
+      path.join(claudeDir, 'teams', 'my-team', 'members.meta.json'),
+      JSON.stringify(
+        {
+          version: 1,
+          members: [{ name: 'carol', role: 'developer', removedAt: Date.now() }],
+        },
+        null,
+        2
+      )
+    );
+
+    const controller = createController({ teamName: 'my-team', claudeDir });
+    await expect(controller.tasks.memberBriefing('carol')).rejects.toThrow(
+      'Member is removed from the team: carol'
+    );
+  });
+
   it('creates a fresh registry entry when an old pid was recycled without stoppedAt', () => {
     const claudeDir = makeClaudeDir();
     const controller = createController({ teamName: 'my-team', claudeDir });

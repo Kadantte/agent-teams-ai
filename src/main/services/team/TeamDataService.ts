@@ -1151,6 +1151,16 @@ export class TeamDataService {
     }
   }
 
+  async getTeamDisplayName(teamName: string): Promise<string> {
+    try {
+      const config = await this.configReader.getConfig(teamName);
+      const displayName = config?.name?.trim();
+      return displayName || teamName;
+    } catch {
+      return teamName;
+    }
+  }
+
   async requestReview(teamName: string, taskId: string): Promise<void> {
     const { leadSessionId } = await this.resolveLeadRuntimeContext(teamName);
     this.getController(teamName).review.requestReview(taskId, {

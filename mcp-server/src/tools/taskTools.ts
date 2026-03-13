@@ -279,6 +279,23 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
   });
 
   server.addTool({
+    name: 'member_briefing',
+    description: 'Get bootstrap briefing for a team member',
+    parameters: z.object({
+      ...toolContextSchema,
+      memberName: z.string().min(1),
+    }),
+    execute: async ({ teamName, claudeDir, memberName }) => ({
+      content: [
+        {
+          type: 'text' as const,
+          text: await getController(teamName, claudeDir).tasks.memberBriefing(memberName),
+        },
+      ],
+    }),
+  });
+
+  server.addTool({
     name: 'task_briefing',
     description: 'Get formatted task briefing for a member',
     parameters: z.object({

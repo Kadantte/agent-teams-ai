@@ -78,6 +78,12 @@ import type {
   ToolCallMeta,
 } from '@shared/types';
 
+export const MEMBER_BRIEFING_BOOTSTRAP_ENV = 'CLAUDE_TEAM_ENABLE_MEMBER_BRIEFING_BOOTSTRAP';
+
+export function isMemberBriefingBootstrapEnabled(): boolean {
+  return process.env[MEMBER_BRIEFING_BOOTSTRAP_ENV] === '1';
+}
+
 const logger = createLogger('Service:TeamProvisioning');
 const { createController } = agentTeamsControllerModule;
 const TEAM_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
@@ -387,7 +393,7 @@ function buildTeammateAgentBlockReminder(): string {
   ].join('\n');
 }
 
-function buildMemberSpawnPrompt(
+function buildLegacyMemberSpawnPrompt(
   member: TeamCreateRequest['members'][number],
   displayName: string,
   teamName: string,
@@ -412,6 +418,172 @@ Include the following agent-only instructions verbatim in the prompt:
 ${taskProtocol}
 
 ${processRegistration}`;
+}
+
+function buildMemberBootstrapPrompt(
+  member: TeamCreateRequest['members'][number],
+  displayName: string,
+  teamName: string,
+  leadName: string
+): string {
+  const role = member.role?.trim() || 'team member';
+  const workflowBlock = member.workflow?.trim()
+    ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '')}`
+    : '';
+  const actionModeProtocol = buildActionModeProtocol();
+  return `You are ${member.name}, a ${role} on team "${displayName}" (${teamName}).${workflowBlock}
+
+${getAgentLanguageInstruction()}
+Your FIRST action: call MCP tool member_briefing with:
+{ teamName: "${teamName}", memberName: "${member.name}" }
+Do NOT start work, claim tasks, or improvise workflow/task/process rules before member_briefing succeeds.
+If member_briefing fails, send a short message to your team lead "${leadName}" explaining that bootstrap failed, then wait.
+After member_briefing succeeds:
+- Introduce yourself briefly (name and role) and confirm you are ready.
+- Then wait for task assignments.
+- When you later receive work or reconnect after a restart, use task_briefing as your compact queue view. Use task_get when you need the full task context before starting a pending/needsFix task or when the in_progress briefing details are not enough.
+${buildTeammateAgentBlockReminder()}
+${actionModeProtocol}`;
+}
+
+function buildLegacyReconnectMemberSpawnPrompt(
+  member: TeamCreateRequest['members'][number],
+  teamName: string,
+  hasTasks: boolean
+): string {
+  const role = member.role?.trim() || 'team member';
+  const workflowBlock = member.workflow?.trim()
+    ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '     ')}`
+    : '';
+  const actionModeProtocol = indentMultiline(buildActionModeProtocol(), '     ');
+  return `   For "${member.name}":
+   - prompt:
+     You are ${member.name}, a ${role} on team "${teamName}".${workflowBlock}
+
+     ${getAgentLanguageInstruction()}
+     The team has been reconnected after a restart.
+     ${hasTasks ? `You may have assigned tasks in states like in_progress, needsFix, pending, review, completed, or approved from the previous session.` : 'You have no assigned tasks currently.'}
+     ${buildTeammateAgentBlockReminder()}
+${actionModeProtocol}
+
+     Your FIRST action: call MCP tool task_briefing with:
+     { teamName: "${teamName}", memberName: "${member.name}" }
+     Then:
+     - If task_briefing shows any in_progress task, resume/finish those first. Call task_get only if you need more context than task_briefing already gave you.
+     - After that, prioritize tasks marked Needs fixes after review, then normal pending tasks.
+     - Before you start any needsFix or pending task, call task_get for that specific task.
+     - If you are the one about to do the implementation/fixes and the owner is missing or someone else, run task_set_owner to yourself immediately before task_start.
+     - Only then run task_start when you truly begin.
+     - If you have no tasks, wait for new assignments.`;
+}
+
+function buildReconnectMemberBootstrapPrompt(
+  member: TeamCreateRequest['members'][number],
+  teamName: string,
+  leadName: string,
+  hasTasks: boolean
+): string {
+  const role = member.role?.trim() || 'team member';
+  const workflowBlock = member.workflow?.trim()
+    ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '     ')}`
+    : '';
+  const actionModeProtocol = indentMultiline(buildActionModeProtocol(), '     ');
+  return `   For "${member.name}":
+   - prompt:
+     You are ${member.name}, a ${role} on team "${teamName}" (${teamName}).${workflowBlock}
+
+     ${getAgentLanguageInstruction()}
+     The team has been reconnected after a restart.
+     ${
+       hasTasks
+         ? 'You may have assigned tasks in states like in_progress, needsFix, pending, review, completed, or approved from the previous session.'
+         : 'You have no assigned tasks currently.'
+     }
+     Your FIRST action: call MCP tool member_briefing with:
+     { teamName: "${teamName}", memberName: "${member.name}" }
+     Do NOT start work, claim tasks, or improvise workflow/task/process rules before member_briefing succeeds.
+     If member_briefing fails, send a short message to your team lead "${leadName}" explaining that bootstrap failed, then wait.
+     ${buildTeammateAgentBlockReminder()}
+${actionModeProtocol}
+
+     After member_briefing succeeds:
+     - Use task_briefing as your compact queue view.
+     - If task_briefing shows any in_progress task, resume/finish those first. Call task_get only if you need more context than task_briefing already gave you.
+     - After that, prioritize tasks marked Needs fixes after review, then normal pending tasks.
+     - Before you start any needsFix or pending task, call task_get for that specific task.
+     - If you are the one about to do the implementation/fixes and the owner is missing or someone else, run task_set_owner to yourself immediately before task_start.
+     - Only then run task_start when you truly begin.
+     - If you have no tasks, wait for new assignments.`;
+}
+
+function buildMemberSpawnPrompt(
+  member: TeamCreateRequest['members'][number],
+  displayName: string,
+  teamName: string,
+  leadName: string,
+  taskProtocol: string,
+  processRegistration: string
+): string {
+  return isMemberBriefingBootstrapEnabled()
+    ? buildMemberBootstrapPrompt(member, displayName, teamName, leadName)
+    : buildLegacyMemberSpawnPrompt(
+        member,
+        displayName,
+        teamName,
+        taskProtocol,
+        processRegistration
+      );
+}
+
+function buildReconnectMemberSpawnPrompt(
+  member: TeamCreateRequest['members'][number],
+  teamName: string,
+  leadName: string,
+  hasTasks: boolean
+): string {
+  return isMemberBriefingBootstrapEnabled()
+    ? buildReconnectMemberBootstrapPrompt(member, teamName, leadName, hasTasks)
+    : buildLegacyReconnectMemberSpawnPrompt(member, teamName, hasTasks);
+}
+
+export function buildAddMemberSpawnMessage(
+  teamName: string,
+  displayName: string,
+  leadName: string,
+  member: Pick<TeamCreateRequest['members'][number], 'name' | 'role' | 'workflow'>
+): string {
+  const roleHint =
+    typeof member.role === 'string' && member.role.trim()
+      ? ` with role "${member.role.trim()}"`
+      : '';
+  const workflowHint =
+    typeof member.workflow === 'string' && member.workflow.trim()
+      ? ` Their workflow: ${member.workflow.trim()}`
+      : '';
+
+  if (!isMemberBriefingBootstrapEnabled()) {
+    return (
+      `A new teammate "${member.name}"${roleHint} has been added to the team. ` +
+      `Please spawn them immediately using the Task tool with team_name="${teamName}" and name="${member.name}".${workflowHint}`
+    );
+  }
+
+  const prompt = buildMemberBootstrapPrompt(
+    {
+      name: member.name,
+      ...(member.role ? { role: member.role } : {}),
+      ...(member.workflow ? { workflow: member.workflow } : {}),
+    },
+    displayName,
+    teamName,
+    leadName
+  );
+
+  return (
+    `A new teammate "${member.name}"${roleHint} has been added to the team. ` +
+    `Please spawn them immediately using the Task tool with team_name="${teamName}", name="${member.name}", subagent_type="general-purpose", and the exact prompt below:${workflowHint}\n\n` +
+    indentMultiline(prompt, '  ')
+  );
 }
 
 function buildTaskStatusProtocol(teamName: string): string {
@@ -444,14 +616,15 @@ function buildTaskStatusProtocol(teamName: string): string {
    Do NOT comment on trivial coordination messages. Only comment when the information is valuable context for the task.
 9. When sending a message about a specific task, include its short display label like #<displayId> in your SendMessage summary field for traceability.
 10. In ALL human-facing or teammate-facing message text, when you mention a task reference, ALWAYS write it with a leading # (for example: #abcd1234, not abcd1234 or "task abcd1234").
-11. Review workflow clarity (IMPORTANT):
+11. In ALL human-facing or teammate-facing message text, when you mention a teammate, ALWAYS write their name with a leading @ (for example: @alice, not alice). When you mention another team, also use @ (for example: @signal-ops, not signal-ops).
+12. Review workflow clarity (IMPORTANT):
    - The work task (e.g. #1) is the thing that must end up APPROVED after review.
    - If you are reviewing work for task #X, run review_approve/review_request_changes on #X (the work task).
    - Do NOT approve a separate "review task" (e.g. #2 created just to ask for a review) — that will put the wrong task into APPROVED.
    - Typical flow:
      a) Owner finishes work on #X -> task_complete #X
      b) Reviewer accepts -> review_approve #X
-12. CLARIFICATION PROTOCOL (CRITICAL — MANDATORY):
+13. CLARIFICATION PROTOCOL (CRITICAL — MANDATORY):
    When you are blocked and need information to continue a task, you MUST do ALL steps below — skipping the board update or comment breaks traceability:
    a) STEP 1 — FIRST, set the clarification flag with MCP tool task_set_clarification:
       { teamName: "${teamName}", taskId: "<taskId>", value: "lead" }
@@ -463,10 +636,10 @@ function buildTaskStatusProtocol(teamName: string): string {
       If the lead replies via SendMessage instead, clear the flag yourself once you have the answer:
       { teamName: "${teamName}", taskId: "<taskId>", value: "clear" }
    e) Do NOT set clarification to "user" yourself — only the team lead escalates to the user.
-13. DEPENDENCY AWARENESS:
+14. DEPENDENCY AWARENESS:
     When your task has blockedBy dependencies, check if they are completed before starting.
     When you complete a task that blocks others, mention this in your completion message so blocked teammates can proceed.
-14. TASK QUEUE DISCIPLINE:
+15. TASK QUEUE DISCIPLINE:
     - Use task_briefing as a compact queue view of your assigned tasks.
     - task_briefing may include full description/comments only for in_progress tasks; needsFix/pending/review/completed entries may be minimal on purpose.
     - Finish existing in_progress tasks first.
@@ -803,17 +976,20 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
     ? '2) Skip — this is a solo team with no teammates to spawn.'
     : `2) Spawn each member as a live teammate using the Task tool. For each member below, use the exact prompt shown:
 
-// NOTE: taskProtocol & processRegistration are deliberately inlined into EACH member's spawn prompt
-// below, even though the text is identical across members. This duplicates ~4K chars per member
-// in the lead's context, but ensures the lead passes the EXACT protocol verbatim via Task tool.
-// Extracting them once and telling the lead to “insert the protocol block” risks hallucination
-// or omission — the lead may rephrase rules, skip items, or forget to include them.
-// Cost: ~1K tokens per extra member. At 200K context window this is negligible.
+// IMPORTANT: Use the exact prompt shown for each member.
+// With member_briefing bootstrap enabled, the teammate will fetch durable task/process rules after spawn.
 ${request.members
   .map(
     (m) => `   For “${m.name}”:
    - prompt:
-${buildMemberSpawnPrompt(m, displayName, request.teamName, taskProtocol, processRegistration)
+${buildMemberSpawnPrompt(
+  m,
+  displayName,
+  request.teamName,
+  leadName,
+  taskProtocol,
+  processRegistration
+)
   .split('\n')
   .map((line) => `     ${line}`)
   .join('\n')}`
@@ -860,9 +1036,7 @@ function buildLaunchPrompt(
   const userPromptBlock = request.prompt?.trim()
     ? `\nAdditional instructions from the user:\n${request.prompt.trim()}\n`
     : '';
-  const taskProtocol = buildTaskStatusProtocol(request.teamName);
-  const processRegistration = buildProcessRegistrationProtocol(request.teamName);
-  const languageInstruction = getAgentLanguageInstruction();
+  const bootstrapEnabled = isMemberBriefingBootstrapEnabled();
   const taskBoardSnapshot = buildTaskBoardSnapshot(tasks);
 
   const leadName = members.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
@@ -899,35 +1073,12 @@ function buildLaunchPrompt(
       if (snapshot) memberTaskBlocks.set(m.name, snapshot);
     }
 
-    // Build the teammate spawn prompt template with member-specific task injection
+    // Build the teammate spawn prompt template with member-specific task presence
     const memberSpawnInstructions = members
       .map((m) => {
         const taskBlock = memberTaskBlocks.get(m.name) || '';
         const hasTasks = Boolean(taskBlock);
-        const workflowBlock = m.workflow?.trim()
-          ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(m.workflow, '     ')}`
-          : '';
-        const actionModeProtocol = indentMultiline(buildActionModeProtocol(), '     ');
-
-        return `   For "${m.name}":
-   - prompt:
-     You are ${m.name}, a ${m.role || 'team member'} on team "${request.teamName}".${workflowBlock}
-
-     ${languageInstruction}
-     The team has been reconnected after a restart.
-     ${hasTasks ? `You may have assigned tasks in states like in_progress, needsFix, pending, review, completed, or approved from the previous session.` : 'You have no assigned tasks currently.'}
-     ${buildTeammateAgentBlockReminder()}
-${actionModeProtocol}
-
-     Your FIRST action: call MCP tool task_briefing with:
-     { teamName: "${request.teamName}", memberName: "${m.name}" }
-     Then:
-     - If task_briefing shows any in_progress task, resume/finish those first. Call task_get only if you need more context than task_briefing already gave you.
-     - After that, prioritize tasks marked Needs fixes after review, then normal pending tasks.
-     - Before you start any needsFix or pending task, call task_get for that specific task.
-     - If you are the one about to do the implementation/fixes and the owner is missing or someone else, run task_set_owner to yourself immediately before task_start.
-     - Only then run task_start when you truly begin.
-     - If you have no tasks, wait for new assignments.`;
+        return buildReconnectMemberSpawnPrompt(m, request.teamName, leadName, hasTasks);
       })
       .join('\n\n');
 
@@ -935,12 +1086,12 @@ ${actionModeProtocol}
    - team_name: "${request.teamName}"
    - name: the member's name
    - subagent_type: "general-purpose"
-   - IMPORTANT: Include each member's pending tasks in their spawn prompt so they resume work immediately.
-     Include the following agent-only instructions verbatim in each teammate's prompt:
-
-${taskProtocol}
-
-${processRegistration}
+   - IMPORTANT: Use the exact prompt shown for each member.
+     ${
+       bootstrapEnabled
+         ? 'With member_briefing bootstrap enabled, the teammate will fetch durable rules after spawn.'
+         : 'This prompt includes the full durable teammate rules directly.'
+     }
 
    Per-member spawn instructions:
 ${memberSpawnInstructions}

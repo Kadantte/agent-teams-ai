@@ -19,6 +19,16 @@ describe('HTTP team runtime routes', () => {
     const getProvisioningStatus = vi.fn<(runId: string) => Promise<TeamProvisioningProgress>>();
     const stopTeam = vi.fn<(teamName: string) => void>();
     const getAliveTeams = vi.fn<() => string[]>();
+    const teamProvisioningService = {
+      launchTeam,
+      getRuntimeState,
+      getProvisioningStatus,
+      stopTeam,
+      getAliveTeams,
+    } as Pick<
+      NonNullable<HttpServices['teamProvisioningService']>,
+      'launchTeam' | 'getRuntimeState' | 'getProvisioningStatus' | 'stopTeam' | 'getAliveTeams'
+    > as HttpServices['teamProvisioningService'];
 
     const services = {
       projectScanner: {} as HttpServices['projectScanner'],
@@ -28,13 +38,7 @@ describe('HTTP team runtime routes', () => {
       dataCache: {} as HttpServices['dataCache'],
       updaterService: {} as HttpServices['updaterService'],
       sshConnectionManager: {} as HttpServices['sshConnectionManager'],
-      teamProvisioningService: {
-        launchTeam,
-        getRuntimeState,
-        getProvisioningStatus,
-        stopTeam,
-        getAliveTeams,
-      },
+      teamProvisioningService,
     } satisfies HttpServices;
 
     return {

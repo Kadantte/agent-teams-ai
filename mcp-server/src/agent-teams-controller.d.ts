@@ -25,6 +25,7 @@ declare module 'agent-teams-controller' {
     setNeedsClarification(taskId: string, value: string | null): unknown;
     linkTask(taskId: string, targetId: string, linkType: string): unknown;
     unlinkTask(taskId: string, targetId: string, linkType: string): unknown;
+    memberBriefing(memberName: string): Promise<string>;
     taskBriefing(memberName: string): Promise<string>;
   }
 

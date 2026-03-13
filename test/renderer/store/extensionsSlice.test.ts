@@ -105,7 +105,7 @@ const makeSkill = (overrides: Partial<SkillCatalogItem>): SkillCatalogItem => ({
   ...overrides,
 });
 
-const makeSkillDetail = (overrides: Partial<SkillDetail>): SkillDetail => ({
+const makeSkillDetail = (overrides: Partial<SkillDetail> = {}): SkillDetail => ({
   item: makeSkill({ id: '/tmp/skills/demo', skillDir: '/tmp/skills/demo' }),
   body: 'body',
   rawContent: '# Demo',
@@ -340,7 +340,7 @@ describe('extensionsSlice', () => {
 
   describe('skills state hardening', () => {
     it('ignores stale catalog responses for the same project key', async () => {
-      let resolveFirst: ((value: SkillCatalogItem[]) => void) | null = null;
+      let resolveFirst!: (value: SkillCatalogItem[]) => void;
       const firstPromise = new Promise<SkillCatalogItem[]>((resolve) => {
         resolveFirst = resolve;
       });
@@ -364,7 +364,7 @@ describe('extensionsSlice', () => {
       const secondFetch = store.getState().fetchSkillsCatalog('/tmp/project');
 
       await secondFetch;
-      resolveFirst?.([
+      resolveFirst([
         makeSkill({
           id: '/tmp/project/.claude/skills/older',
           skillDir: '/tmp/project/.claude/skills/older',

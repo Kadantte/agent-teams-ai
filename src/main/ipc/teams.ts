@@ -81,6 +81,7 @@ import {
 } from '../services/team/actionModeInstructions';
 import { gitIdentityResolver } from '../services/parsing/GitIdentityResolver';
 import { TeamAttachmentStore } from '../services/team/TeamAttachmentStore';
+import { buildAddMemberSpawnMessage } from '../services/team/TeamProvisioningService';
 import { TeamTaskAttachmentStore } from '../services/team/TeamTaskAttachmentStore';
 
 import {
@@ -1950,14 +1951,24 @@ async function handleAddMember(
     // If team is alive, notify the lead to spawn the new teammate
     const provisioning = getTeamProvisioningService();
     if (provisioning.isTeamAlive(tn)) {
-      const roleHint = typeof role === 'string' && role.trim() ? ` with role "${role.trim()}"` : '';
-      const workflowHint =
-        typeof workflow === 'string' && workflow.trim()
-          ? ` Their workflow: ${workflow.trim()}`
-          : '';
-      const spawnMessage =
-        `A new teammate "${memberName}"${roleHint} has been added to the team. ` +
-        `Please spawn them immediately using the Task tool with team_name="${tn}" and name="${memberName}".${workflowHint}`;
+      const teamDataService = getTeamDataService();
+      let leadName = 'team-lead';
+      let displayName = tn;
+      try {
+        const [resolvedLeadName, resolvedDisplayName] = await Promise.all([
+          teamDataService.getLeadMemberName(tn),
+          teamDataService.getTeamDisplayName(tn),
+        ]);
+        leadName = resolvedLeadName || 'team-lead';
+        displayName = resolvedDisplayName || tn;
+      } catch {
+        // Best-effort: fall back to default lead and team names
+      }
+      const spawnMessage = buildAddMemberSpawnMessage(tn, displayName, leadName, {
+        name: memberName,
+        ...(typeof role === 'string' ? { role } : {}),
+        ...(typeof workflow === 'string' ? { workflow } : {}),
+      });
       try {
         await provisioning.sendMessageToTeam(tn, spawnMessage);
       } catch {

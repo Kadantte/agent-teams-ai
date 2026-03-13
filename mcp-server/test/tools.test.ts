@@ -40,6 +40,7 @@ describe('agent-teams-mcp tools', () => {
     'kanban_list_reviewers',
     'kanban_remove_reviewer',
     'kanban_set_column',
+    'member_briefing',
     'message_send',
     'process_list',
     'process_register',
@@ -74,6 +75,33 @@ describe('agent-teams-mcp tools', () => {
 
   function makeClaudeDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-teams-mcp-'));
+  }
+
+  function writeTeamConfig(
+    claudeDir: string,
+    teamName: string,
+    config: {
+      name?: string;
+      language?: string;
+      projectPath?: string;
+      members: Array<Record<string, unknown>>;
+    }
+  ) {
+    const teamDir = path.join(claudeDir, 'teams', teamName);
+    fs.mkdirSync(teamDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(teamDir, 'config.json'),
+      JSON.stringify(
+        {
+          name: config.name ?? teamName,
+          ...(config.language ? { language: config.language } : {}),
+          ...(config.projectPath ? { projectPath: config.projectPath } : {}),
+          members: config.members,
+        },
+        null,
+        2
+      )
+    );
   }
 
   async function startControlServer(
@@ -269,6 +297,13 @@ describe('agent-teams-mcp tools', () => {
   it('covers task lifecycle, attachments, relationships, kanban, and review flows', async () => {
     const claudeDir = makeClaudeDir();
     const teamName = 'alpha';
+    writeTeamConfig(claudeDir, teamName, {
+      language: 'en',
+      members: [
+        { name: 'lead', role: 'team-lead' },
+        { name: 'alice', role: 'developer' },
+      ],
+    });
     const attachmentPath = path.join(claudeDir, 'note.txt');
     fs.writeFileSync(attachmentPath, 'ship it');
 
@@ -476,11 +511,30 @@ describe('agent-teams-mcp tools', () => {
     expect((briefing as { content: Array<{ text: string }> }).content[0]?.text).toContain(
       'Review MCP adapter'
     );
+
+    const memberBriefing = await getTool('member_briefing').execute({
+      claudeDir,
+      teamName,
+      memberName: 'alice',
+    });
+    const memberBriefingText = (memberBriefing as { content: Array<{ text: string }> }).content[0]
+      ?.text;
+    expect(memberBriefingText).toContain('Member briefing for alice on team "alpha" (alpha).');
+    expect(memberBriefingText).toContain('Use task_briefing as your compact queue view');
+    expect(memberBriefingText).toContain('Review MCP adapter');
   });
 
   it('keeps owner-backed MCP tasks pending by default, supports explicit startImmediately, sends owner notifications, and returns compact task_briefing output', async () => {
     const claudeDir = makeClaudeDir();
     const teamName = 'gamma';
+    writeTeamConfig(claudeDir, teamName, {
+      language: 'en',
+      projectPath: '/tmp/gamma-project',
+      members: [
+        { name: 'lead', role: 'team-lead' },
+        { name: 'alice', role: 'developer', workflow: 'Stay focused' },
+      ],
+    });
 
     const queuedTask = parseJsonToolResult(
       await getTool('task_create').execute({
@@ -578,6 +632,59 @@ describe('agent-teams-mcp tools', () => {
     expect(briefingText).toContain('Completed:');
     expect(briefingText).toContain(`#${completedTask.displayId}`);
     expect(briefingText).not.toContain('Completed description should also stay compact');
+
+    const memberBriefing = (await getTool('member_briefing').execute({
+      claudeDir,
+      teamName,
+      memberName: 'alice',
+    })) as { content: Array<{ text: string }> };
+    const memberBriefingText = memberBriefing.content[0]?.text ?? '';
+    expect(memberBriefingText).toContain(
+      'You must NOT start work, claim tasks, or improvise task/process protocol'
+    );
+    expect(memberBriefingText).toContain('IMPORTANT: Communicate in English.');
+    expect(memberBriefingText).toContain('TURN ACTION MODE PROTOCOL (HIGHEST PRIORITY FOR EACH USER TURN):');
+    expect(memberBriefingText).toContain('Task briefing for alice:');
+    expect(memberBriefingText).toContain(`#${activeTask.displayId}`);
+
+    fs.mkdirSync(path.join(claudeDir, 'teams', teamName, 'inboxes'), { recursive: true });
+    fs.writeFileSync(path.join(claudeDir, 'teams', teamName, 'inboxes', 'carol.json'), '[]');
+    fs.writeFileSync(path.join(claudeDir, 'teams', teamName, 'inboxes', 'cross_team_send.json'), '[]');
+    fs.writeFileSync(path.join(claudeDir, 'teams', teamName, 'inboxes', 'other-team.alice.json'), '[]');
+
+    const inboxResolvedBriefing = (await getTool('member_briefing').execute({
+      claudeDir,
+      teamName,
+      memberName: 'carol',
+    })) as { content: Array<{ text: string }> };
+    const inboxResolvedBriefingText = inboxResolvedBriefing.content[0]?.text ?? '';
+    expect(inboxResolvedBriefingText).toContain('Member briefing for carol on team "gamma" (gamma).');
+    expect(inboxResolvedBriefingText).toContain('Role: team member.');
+
+    await expect(
+      getTool('member_briefing').execute({
+        claudeDir,
+        teamName,
+        memberName: 'dave',
+      })
+    ).rejects.toThrow('Member not found in team metadata or inboxes: dave');
+    await expect(
+      getTool('member_briefing').execute({
+        claudeDir,
+        teamName,
+        memberName: 'cross_team_send',
+      })
+    ).rejects.toThrow('Member not found in team metadata or inboxes: cross_team_send');
+    await expect(
+      getTool('member_briefing').execute({
+        claudeDir,
+        teamName,
+        memberName: 'other-team.alice',
+      })
+    ).rejects.toThrow('Member not found in team metadata or inboxes: other-team.alice');
+    expect(inboxResolvedBriefingText).not.toContain(
+      'Warning: Member metadata was not found in config.json, members.meta.json, or inbox files yet.'
+    );
   });
 
   it('covers review_request_changes and full process lifecycle tools', async () => {
