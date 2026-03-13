@@ -164,7 +164,9 @@ export const MentionSuggestionList = ({
           <UsersRound
             size={13}
             className="shrink-0"
-            style={{ color: colorSet?.text ?? 'var(--color-text-muted)' }}
+            style={{
+              color: colorSet ? getThemedText(colorSet, isLight) : 'var(--color-text-muted)',
+            }}
           />
         ) : (
           <span
@@ -180,7 +182,7 @@ export const MentionSuggestionList = ({
                 isTask
                   ? { color: 'var(--color-link, #60a5fa)' }
                   : colorSet
-                    ? { color: colorSet.text }
+                    ? { color: getThemedText(colorSet, isLight) }
                     : undefined
               }
             >

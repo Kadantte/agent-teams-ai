@@ -5,6 +5,8 @@
  * Used by TeammateMessageItem and SubagentItem when displaying team members.
  */
 
+import { MEMBER_COLOR_PALETTE } from '@shared/constants/memberColors';
+
 export interface TeamColorSet {
   /** Border accent color */
   border: string;
@@ -128,12 +130,42 @@ export function getSubagentTypeColorSet(
 /** Assignable visual colors (excludes reserved 'user'). */
 const ASSIGNABLE_COLORS = COLOR_NAMES.filter((c) => c !== 'user');
 
+function hsla(hue: number, saturation: number, lightness: number, alpha = 1): string {
+  return `hsla(${hue}, ${saturation}%, ${lightness}%, ${alpha})`;
+}
+
+function buildGeneratedMemberColorSet(colorName: string): TeamColorSet | null {
+  const paletteIndex = MEMBER_COLOR_PALETTE.indexOf(
+    colorName as (typeof MEMBER_COLOR_PALETTE)[number]
+  );
+  if (paletteIndex === -1) {
+    return null;
+  }
+
+  // Spread the extended member palette across the hue wheel so distinct palette
+  // names stay visually distinct instead of collapsing back into 8 base colors.
+  const hue = Math.round((paletteIndex / MEMBER_COLOR_PALETTE.length) * 360);
+  const saturation = 72;
+
+  return {
+    border: hsla(hue, saturation, 50),
+    borderLight: hsla(hue, saturation, 44),
+    badge: hsla(hue, saturation, 50, 0.15),
+    badgeLight: hsla(hue, saturation, 50, 0.12),
+    text: hsla(hue, 78, 66),
+    textLight: hsla(hue, 82, 36),
+  };
+}
+
 export function getTeamColorSet(colorName: string): TeamColorSet {
   if (!colorName) return DEFAULT_COLOR;
 
   // Check named colors
   const named = TEAMMATE_COLORS[colorName.toLowerCase()];
   if (named) return named;
+
+  const generatedMemberColor = buildGeneratedMemberColorSet(colorName.toLowerCase());
+  if (generatedMemberColor) return generatedMemberColor;
 
   // If it's a hex color, generate a set from it
   if (colorName.startsWith('#')) {

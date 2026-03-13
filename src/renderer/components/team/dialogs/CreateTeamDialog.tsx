@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from '@renderer/api';
 import {
+  buildMemberDraftColorMap,
+  buildMemberDraftSuggestions,
   buildMembersFromDrafts,
   createMemberDraft,
   MembersEditorSection,
@@ -25,10 +27,11 @@ import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors'
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
+import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
+import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import { normalizePath } from '@renderer/utils/pathNormalize';
-import { getMemberColorByName } from '@shared/constants/memberColors';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 
 import { AdvancedCliSection } from './AdvancedCliSection';
@@ -37,6 +40,7 @@ import { ExtendedContextCheckbox } from './ExtendedContextCheckbox';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
 import { ProjectPathSelector } from './ProjectPathSelector';
 import { SkipPermissionsCheckbox } from './SkipPermissionsCheckbox';
+import { getNextSuggestedTeamName } from './teamNameSets';
 import { computeEffectiveTeamModel, TeamModelSelector } from './TeamModelSelector';
 
 import type { MemberDraft } from '@renderer/components/team/members/membersEditorTypes';
@@ -52,7 +56,6 @@ const TEAM_COLOR_NAMES = [
   'pink',
 ] as const;
 
-import type { MentionSuggestion } from '@renderer/types/mention';
 import type {
   EffortLevel,
   Project,
@@ -97,10 +100,9 @@ interface ValidationResult {
   };
 }
 
-import { CUSTOM_ROLE, NO_ROLE, PRESET_ROLES } from '@renderer/constants/teamRoles';
+import { CUSTOM_ROLE, PRESET_ROLES } from '@renderer/constants/teamRoles';
 const DEV_DEFAULT_TEAM = {
-  teamName: 'team-alpha',
-  description: 'Dev test team for provisioning flow',
+  teamName: 'signal-ops',
 } as const;
 
 const DEV_DEFAULT_MEMBERS: { name: string; roleSelection: string }[] = [
@@ -132,6 +134,13 @@ function validateTeamNameInline(name: string): string | null {
     return 'Name is too long (max 128 chars)';
   }
   return null;
+}
+
+function buildDefaultTeamDescription(teamName: string): string {
+  const trimmedName = teamName.trim();
+  return trimmedName.length > 0
+    ? `${trimmedName} team for provisioning flow`
+    : 'Team for provisioning flow';
 }
 
 function validateRequest(
@@ -224,6 +233,7 @@ export const CreateTeamDialog = ({
   const [prepareMessage, setPrepareMessage] = useState<string | null>(null);
   const [prepareWarnings, setPrepareWarnings] = useState<string[]>([]);
   const prepareRequestSeqRef = useRef(0);
+  const lastAutoDescriptionRef = useRef<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{
     teamName?: string;
     members?: string;
@@ -313,6 +323,7 @@ export const CreateTeamDialog = ({
 
   const resetFormState = (): void => {
     setTeamName('');
+    lastAutoDescriptionRef.current = null;
     descriptionDraft.clearDraft();
     promptDraft.clearDraft();
     promptChipDraft.clearChipDraft();
@@ -328,6 +339,7 @@ export const CreateTeamDialog = ({
 
   const effectiveCwd = cwdMode === 'project' ? selectedProjectPath.trim() : customCwd.trim();
   const dialogTeamNameKey = sanitizeTeamName(teamName.trim());
+  const suggestedTeamName = getNextSuggestedTeamName(existingTeamNames);
 
   // Clear stale provisioning error when dialog opens
   useEffect(() => {
@@ -470,15 +482,33 @@ export const CreateTeamDialog = ({
   }, [open]);
 
   useEffect(() => {
+    if (!open || initialData) {
+      return;
+    }
+    setTeamName((prev) => (prev.trim().length === 0 ? suggestedTeamName : prev));
+  }, [initialData, open, suggestedTeamName]);
+
+  useEffect(() => {
     if (!open || !isDev || initialData) {
       return;
     }
-    setTeamName((prev) => (prev.trim().length === 0 ? DEV_DEFAULT_TEAM.teamName : prev));
-    if (descriptionDraft.value.trim().length === 0) {
-      descriptionDraft.setValue(DEV_DEFAULT_TEAM.description);
+    const resolvedTeamName = teamName.trim() || suggestedTeamName;
+    const nextAutoDescription = buildDefaultTeamDescription(resolvedTeamName);
+    const currentDescription = descriptionDraft.value.trim();
+    const previousAutoDescription = lastAutoDescriptionRef.current?.trim() ?? '';
+    const shouldSyncDescription =
+      currentDescription.length === 0 || currentDescription === previousAutoDescription;
+
+    if (shouldSyncDescription && descriptionDraft.value !== nextAutoDescription) {
+      lastAutoDescriptionRef.current = nextAutoDescription;
+      descriptionDraft.setValue(nextAutoDescription);
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dev defaults applied once on open
-  }, [open]);
+
+    if (currentDescription === nextAutoDescription) {
+      lastAutoDescriptionRef.current = nextAutoDescription;
+    }
+  }, [descriptionDraft, initialData, isDev, open, suggestedTeamName, teamName]);
 
   // Pre-select defaultProjectPath when projects loaded (only while dialog is open)
   useEffect(() => {
@@ -501,27 +531,19 @@ export const CreateTeamDialog = ({
 
   useFileListCacheWarmer(effectiveCwd || null);
 
+  const { suggestions: taskSuggestions } = useTaskSuggestions(null);
+  const { suggestions: teamMentionSuggestions } = useTeamSuggestions(null);
+
   const description = descriptionDraft.value;
   const prompt = promptDraft.value;
+  const memberColorMap = useMemo(() => buildMemberDraftColorMap(members), [members]);
 
-  const mentionSuggestions = useMemo<MentionSuggestion[]>(
+  const mentionSuggestions = useMemo(
     () =>
       soloTeam
         ? [{ id: 'team-lead', name: 'team-lead', subtitle: 'Team Lead', color: 'blue' }]
-        : members
-            .filter((m) => m.name.trim())
-            .map((m) => ({
-              id: m.id,
-              name: m.name.trim(),
-              subtitle:
-                m.roleSelection === CUSTOM_ROLE
-                  ? m.customRole.trim() || undefined
-                  : m.roleSelection && m.roleSelection !== NO_ROLE
-                    ? m.roleSelection
-                    : undefined,
-              color: getMemberColorByName(m.name.trim()),
-            })),
-    [members, soloTeam]
+        : buildMemberDraftSuggestions(members, memberColorMap),
+    [memberColorMap, members, soloTeam]
   );
 
   const effectiveModel = useMemo(
@@ -801,7 +823,7 @@ export const CreateTeamDialog = ({
               )}
               value={teamName}
               onChange={(event) => handleTeamNameChange(event.target.value)}
-              placeholder="team-alpha"
+              placeholder={suggestedTeamName}
             />
             {existingTeamNames.includes(sanitizedTeamName) ? (
               <p className="text-[11px]" style={{ color: 'var(--field-error-text)' }}>
@@ -833,6 +855,8 @@ export const CreateTeamDialog = ({
               showJsonEditor
               draftKeyPrefix="createTeam"
               projectPath={effectiveCwd || null}
+              taskSuggestions={taskSuggestions}
+              teamSuggestions={teamMentionSuggestions}
               hideContent={soloTeam}
               headerExtra={
                 <div className="space-y-2">
@@ -930,6 +954,8 @@ export const CreateTeamDialog = ({
                         value={prompt}
                         onValueChange={promptDraft.setValue}
                         suggestions={soloTeam ? [] : mentionSuggestions}
+                        teamSuggestions={teamMentionSuggestions}
+                        taskSuggestions={taskSuggestions}
                         projectPath={effectiveCwd || null}
                         chips={promptChipDraft.chips}
                         onChipRemove={promptChipDraft.removeChip}

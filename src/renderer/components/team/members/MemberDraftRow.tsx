@@ -20,6 +20,7 @@ import type { MentionSuggestion } from '@renderer/types/mention';
 interface MemberDraftRowProps {
   member: MemberDraft;
   index: number;
+  resolvedColor?: string;
   nameError: string | null;
   onNameChange: (id: string, name: string) => void;
   onRoleChange: (id: string, roleSelection: string) => void;
@@ -31,11 +32,14 @@ interface MemberDraftRowProps {
   draftKeyPrefix?: string;
   projectPath?: string | null;
   mentionSuggestions?: MentionSuggestion[];
+  taskSuggestions?: MentionSuggestion[];
+  teamSuggestions?: MentionSuggestion[];
 }
 
 export const MemberDraftRow = ({
   member,
   index,
+  resolvedColor,
   nameError,
   onNameChange,
   onRoleChange,
@@ -47,10 +51,12 @@ export const MemberDraftRow = ({
   draftKeyPrefix,
   projectPath,
   mentionSuggestions = [],
+  taskSuggestions,
+  teamSuggestions,
 }: MemberDraftRowProps): React.JSX.Element => {
   const { isLight } = useTheme();
   const memberColorSet = getTeamColorSet(
-    getMemberColorByName(member.name.trim() || `member-${index}`)
+    resolvedColor ?? getMemberColorByName(member.name.trim() || `member-${index}`)
   );
   const [workflowExpanded, setWorkflowExpanded] = useState(false);
   const [modelExpanded, setModelExpanded] = useState(false);
@@ -119,7 +125,7 @@ export const MemberDraftRow = ({
 
   return (
     <div
-      className="relative grid grid-cols-1 gap-2 overflow-hidden rounded-md p-2 shadow-sm md:grid-cols-[1fr_220px_auto]"
+      className="relative grid grid-cols-1 gap-2 rounded-md p-2 shadow-sm md:grid-cols-[1fr_220px_auto]"
       style={{
         backgroundColor: isLight
           ? 'color-mix(in srgb, var(--color-surface-raised) 22%, white 78%)'
@@ -128,7 +134,7 @@ export const MemberDraftRow = ({
       }}
     >
       <div
-        className="absolute inset-y-0 left-0 w-1"
+        className="absolute inset-y-0 left-0 w-1 rounded-l-md"
         style={{ backgroundColor: memberColorSet.border }}
         aria-hidden="true"
       />
@@ -215,6 +221,8 @@ export const MemberDraftRow = ({
             value={workflowDraft.value}
             onValueChange={handleWorkflowChange}
             suggestions={suggestionsExcludingSelf}
+            taskSuggestions={taskSuggestions}
+            teamSuggestions={teamSuggestions}
             chips={chips}
             onChipRemove={handleChipRemove}
             projectPath={projectPath ?? undefined}

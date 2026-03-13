@@ -56,6 +56,8 @@ interface TaskSegment {
   value: string;
   suggestion: MentionSuggestion;
   encoded: boolean;
+  /** Zero-width metadata chars rendered in backdrop for caret alignment */
+  hiddenSuffix?: string;
 }
 
 interface UrlSegment {
@@ -197,11 +199,16 @@ function parseSuggestionSegments(
     if (match.start > lastEnd) {
       segments.push(...parseMentionSegments(text.slice(lastEnd, match.start), mentionSuggestions));
     }
+    // Compute hidden suffix: zero-width metadata chars between visible text and match.end
+    const visibleEnd = match.start + match.raw.length;
+    const hiddenSuffix =
+      match.encoded && match.end > visibleEnd ? text.slice(visibleEnd, match.end) : undefined;
     segments.push({
       type: 'task',
       value: match.raw,
       suggestion: match.suggestion,
       encoded: match.encoded,
+      hiddenSuffix,
     });
     lastEnd = match.end;
   }
@@ -987,25 +994,26 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
                 }
                 if (seg.type === 'task') {
                   return (
-                    <span
-                      key={idx}
-                      className={
-                        seg.encoded
-                          ? 'rounded px-1.5 py-0.5 font-medium'
-                          : 'font-medium underline decoration-transparent'
-                      }
-                      style={
-                        seg.encoded
-                          ? {
-                              backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                              color: PROSE_LINK,
-                              boxShadow: '0 0 0 1.5px rgba(59, 130, 246, 0.15)',
-                            }
-                          : { color: PROSE_LINK }
-                      }
-                    >
-                      {seg.value}
-                    </span>
+                    <React.Fragment key={idx}>
+                      <span
+                        className={seg.encoded ? 'rounded' : 'underline decoration-transparent'}
+                        style={
+                          seg.encoded
+                            ? {
+                                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                color: PROSE_LINK,
+                                // Only vertical padding (doesn't affect inline text flow).
+                                // No horizontal padding/margin/box-shadow spread to avoid
+                                // caret drift or visual overlap with adjacent text.
+                                padding: '2px 0',
+                              }
+                            : { color: PROSE_LINK }
+                        }
+                      >
+                        {seg.value}
+                      </span>
+                      {seg.hiddenSuffix}
+                    </React.Fragment>
                   );
                 }
                 if (seg.type === 'url') {
@@ -1121,16 +1129,16 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
         </div>
 
         {showFooter ? (
-          <div className="mt-1 flex items-center justify-between">
+          <div className="mt-1 flex items-start justify-between gap-2">
             {showHintRow ? (
               <span
-                className="text-[10px] text-[var(--color-text-muted)] transition-opacity duration-300"
-                style={{ opacity: tipVisible ? 1 : 0 }}
+                className="block min-h-6 flex-1 overflow-hidden text-[10px] leading-3 text-[var(--color-text-muted)] transition-opacity duration-300"
+                style={{ opacity: tipVisible ? 1 : 0, maxHeight: '1.5rem' }}
               >
                 {resolvedHintText}
               </span>
             ) : (
-              <span />
+              <span className="min-h-6 flex-1" />
             )}
             {footerRight}
           </div>
