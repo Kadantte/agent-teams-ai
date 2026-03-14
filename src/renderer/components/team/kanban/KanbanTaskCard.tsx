@@ -474,7 +474,6 @@ export const KanbanTaskCard = ({
                     onRequestChanges(task.id);
                   }}
                 />
-                {isReviewManual ? metaActions : null}
               </div>
             </div>
           ) : null}
@@ -492,9 +491,7 @@ export const KanbanTaskCard = ({
           ) : null}
         </div>
 
-        {!isReviewManual ? (
-          <div className="flex shrink-0 flex-nowrap items-center gap-1.5">{metaActions}</div>
-        ) : null}
+        <div className="flex shrink-0 flex-nowrap items-center gap-1.5">{metaActions}</div>
       </div>
     </div>
   );

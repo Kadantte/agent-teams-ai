@@ -324,6 +324,8 @@ interface MentionableTextareaProps extends Omit<
   taskSuggestions?: MentionSuggestion[];
   /** Called when Enter (without Shift) is pressed. */
   onModEnter?: () => void;
+  /** Ref that receives the dismiss callback to close mention dropdown from outside */
+  dismissMentionsRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, MentionableTextareaProps>(
@@ -344,6 +346,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
       teamSuggestions = [],
       taskSuggestions = [],
       onModEnter,
+      dismissMentionsRef,
       style,
       className,
       ...textareaProps
@@ -395,6 +398,11 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
         return suggestions.length > 0 || enableFiles || teamSuggestions.length > 0;
       },
     });
+
+    // Expose dismiss to parent via ref for external close (e.g. Send button click)
+    React.useEffect(() => {
+      if (dismissMentionsRef) dismissMentionsRef.current = dismiss;
+    }, [dismiss, dismissMentionsRef]);
 
     // --- File suggestions ---
     const { suggestions: fileSuggestions, loading: filesLoading } = useFileSuggestions(
@@ -818,6 +826,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
         // Enter (without Shift) → submit; Shift+Enter → newline
         if (e.key === 'Enter' && !e.shiftKey && onModEnter) {
           e.preventDefault();
+          dismiss();
           onModEnter();
           return;
         }

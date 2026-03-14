@@ -1152,7 +1152,10 @@ function updateProgress(
   run: ProvisioningRun,
   state: Exclude<TeamProvisioningState, 'idle'>,
   message: string,
-  extras?: Pick<TeamProvisioningProgress, 'pid' | 'error' | 'warnings' | 'cliLogsTail'>
+  extras?: Pick<
+    TeamProvisioningProgress,
+    'pid' | 'error' | 'warnings' | 'cliLogsTail' | 'configReady'
+  >
 ): TeamProvisioningProgress {
   const assistantOutput =
     run.provisioningOutputParts.length > 0
@@ -1168,6 +1171,7 @@ function updateProgress(
     warnings: extras?.warnings,
     cliLogsTail: extras?.cliLogsTail ?? run.progress.cliLogsTail,
     assistantOutput,
+    configReady: extras?.configReady ?? run.progress.configReady,
   };
   return run.progress;
 }
@@ -5471,7 +5475,8 @@ export class TeamProvisioningService {
             const progress = updateProgress(
               run,
               'monitoring',
-              'Team config created, waiting for members'
+              'Team config created, waiting for members',
+              { configReady: true }
             );
             run.onProgress(progress);
           }

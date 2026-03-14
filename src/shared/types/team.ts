@@ -564,6 +564,8 @@ export interface TeamProvisioningProgress {
   cliLogsTail?: string;
   /** Accumulated assistant text output during provisioning (for live preview). */
   assistantOutput?: string;
+  /** True once provisioning has written a readable config.json for this team. */
+  configReady?: boolean;
 }
 
 export interface TeamRuntimeState {

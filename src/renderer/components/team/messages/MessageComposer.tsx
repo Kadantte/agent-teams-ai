@@ -81,6 +81,7 @@ export const MessageComposer = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [imageRestrictionError, setImageRestrictionError] = useState<string | null>(null);
   const imageRestrictionTimerRef = useRef(0);
+  const dismissMentionsRef = useRef<(() => void) | null>(null);
 
   // Cross-team state
   const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
@@ -246,6 +247,7 @@ export const MessageComposer = ({
 
   const handleSend = useCallback(() => {
     if (!canSend) return;
+    dismissMentionsRef.current?.();
     pendingSendRef.current = true;
     const taskRefs = extractTaskRefsFromText(draft.text, taskSuggestions);
     const serialized = serializeChipsWithText(trimmed, draft.chips);
@@ -833,6 +835,7 @@ export const MessageComposer = ({
         projectPath={projectPath}
         onFileChipInsert={draft.addChip}
         onModEnter={handleSend}
+        dismissMentionsRef={dismissMentionsRef}
         minRows={2}
         maxRows={6}
         maxLength={MAX_TEXT_LENGTH}

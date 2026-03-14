@@ -838,7 +838,7 @@ export class TeamDataService {
 
         // Skip inbox notification when lead starts their own task (solo teams)
         if (!this.isLeadOwner(task.owner, leadName)) {
-          const parts = [`Task ${this.getTaskLabel(task)} "${task.subject}" has been started.`];
+          const parts = [`**started task** ${this.getTaskLabel(task)} "${task.subject}"`];
           if (task.description?.trim()) {
             parts.push(`\nDetails:\n${task.description.trim()}`);
           }
@@ -908,7 +908,7 @@ export class TeamDataService {
       await this.sendMessage(teamName, {
         member: leadName,
         from: last.actor,
-        text: `Task ${this.getTaskLabel(task)} "${task.subject}" has been started by ${last.actor}.`,
+        text: `@${last.actor} **started task** ${this.getTaskLabel(task)} "${task.subject}"`,
         summary: `Task ${this.getTaskLabel(task)} started`,
         source: 'system_notification',
       });

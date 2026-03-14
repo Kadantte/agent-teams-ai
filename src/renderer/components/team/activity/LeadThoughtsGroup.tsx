@@ -932,10 +932,7 @@ const LeadThoughtsGroupRowComponent = ({
         ) : null}
       </article>
       {isBodyVisible && !expanded && needsTruncation ? (
-        <div
-          className="pointer-events-none flex justify-center pt-1"
-          style={{ transform: 'translateY(-20px)' }}
-        >
+        <div className="pointer-events-none flex justify-center pt-2">
           <button
             type="button"
             className="pointer-events-auto flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[11px] text-[var(--color-text-secondary)] shadow-sm transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)]"
@@ -950,10 +947,7 @@ const LeadThoughtsGroupRowComponent = ({
         </div>
       ) : null}
       {isBodyVisible && expanded && needsTruncation ? (
-        <div
-          className="pointer-events-none sticky bottom-0 z-10 flex justify-center pb-1 pt-2"
-          style={{ transform: 'translateY(-20px)' }}
-        >
+        <div className="pointer-events-none sticky bottom-0 z-10 flex justify-center pb-1 pt-2">
           <button
             type="button"
             className="pointer-events-auto flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2.5 py-1 text-[11px] text-[var(--color-text-muted)] shadow-sm transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text-secondary)]"

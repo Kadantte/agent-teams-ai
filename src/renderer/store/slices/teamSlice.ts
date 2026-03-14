@@ -346,6 +346,7 @@ export interface TeamSlice {
   selectedTeamName: string | null;
   selectedTeamData: TeamData | null;
   selectedTeamLoading: boolean;
+  selectedTeamLoadNonce: number;
   selectedTeamError: string | null;
   sendingMessage: boolean;
   sendMessageError: string | null;
@@ -378,7 +379,10 @@ export interface TeamSlice {
   openTeamsTab: () => void;
   openTeamTab: (teamName: string, projectPath?: string, taskId?: string) => void;
   clearKanbanFilter: () => void;
-  selectTeam: (teamName: string, opts?: { skipProjectAutoSelect?: boolean }) => Promise<void>;
+  selectTeam: (
+    teamName: string,
+    opts?: { skipProjectAutoSelect?: boolean; allowReloadWhileProvisioning?: boolean }
+  ) => Promise<void>;
   refreshTeamData: (teamName: string) => Promise<void>;
   sendTeamMessage: (teamName: string, request: SendMessageRequest) => Promise<void>;
   crossTeamTargets: {
@@ -596,6 +600,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   selectedTeamName: null,
   selectedTeamData: null,
   selectedTeamLoading: false,
+  selectedTeamLoadNonce: 0,
   selectedTeamError: null,
   sendingMessage: false,
   sendMessageError: null,
@@ -875,11 +880,17 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   },
 
   selectTeam: async (teamName: string, opts) => {
+    const allowReloadWhileProvisioning = opts?.allowReloadWhileProvisioning === true;
     // Guard: prevent duplicate in-flight fetches for the same team.
     // GlobalTaskDetailDialog + tab navigation can call selectTeam() in quick succession.
-    if (get().selectedTeamLoading && get().selectedTeamName === teamName) {
+    if (
+      get().selectedTeamLoading &&
+      get().selectedTeamName === teamName &&
+      !allowReloadWhileProvisioning
+    ) {
       return;
     }
+    const requestNonce = get().selectedTeamLoadNonce + 1;
     const previousSelectedTeamName = get().selectedTeamName;
     const previousData = previousSelectedTeamName === teamName ? get().selectedTeamData : null;
 
@@ -889,6 +900,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     set({
       selectedTeamName: teamName,
       selectedTeamLoading: true,
+      selectedTeamLoadNonce: requestNonce,
       selectedTeamError: null,
       reviewActionError: null,
     });
@@ -900,7 +912,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         `team:getData(${teamName})`
       );
       // Stale check: user may have switched to another team during the async call
-      if (get().selectedTeamName !== teamName) {
+      if (get().selectedTeamName !== teamName || get().selectedTeamLoadNonce !== requestNonce) {
         return;
       }
       // Eagerly patch teamByName with color/displayName from detailed data
@@ -988,7 +1000,14 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     } catch (error) {
       // If provisioning is in progress for this team, stay in loading state;
       // file watcher / progress callback will refresh once config is written.
-      const isProvisioning = isTeamProvisioningActive(get(), teamName);
+      const currentState = get();
+      if (
+        currentState.selectedTeamName !== teamName ||
+        currentState.selectedTeamLoadNonce !== requestNonce
+      ) {
+        return;
+      }
+      const isProvisioning = isTeamProvisioningActive(currentState, teamName);
 
       const msg = error instanceof Error ? error.message : String(error);
       // IPC can report provisioning state explicitly.
@@ -1665,6 +1684,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
     const currentRunId = get().currentProvisioningRunIdByTeam[progress.teamName];
     const existingProgress = get().provisioningRuns[progress.runId];
+    const becameConfigReady =
+      progress.configReady === true && existingProgress?.configReady !== true;
     const isDuplicateProgress =
       existingProgress?.updatedAt === progress.updatedAt &&
       existingProgress?.state === progress.state &&
@@ -1730,6 +1751,13 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
     const isCanonicalRun =
       get().currentProvisioningRunIdByTeam[progress.teamName] === progress.runId;
+
+    if (isCanonicalRun && becameConfigReady) {
+      const state = get();
+      if (state.selectedTeamName === progress.teamName && state.selectedTeamData == null) {
+        void state.selectTeam(progress.teamName, { allowReloadWhileProvisioning: true });
+      }
+    }
 
     if (isCanonicalRun && TERMINAL_PROVISIONING_STATES.has(progress.state)) {
       // Clear spawn statuses — provisioning is complete, members now tracked via normal status
