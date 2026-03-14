@@ -24,7 +24,6 @@ import {
 } from '@renderer/utils/agentMessageFormatting';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { linkifyAllMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
-import { cn } from '@renderer/lib/utils';
 import {
   areInboxMessagesEquivalentForRender,
   areStringArraysEqual,
@@ -176,6 +175,8 @@ interface ActivityItemProps {
   onExpand?: (key: string) => void;
   /** Stable key for expand identification. */
   expandItemKey?: string;
+  /** Called when ExpandableContent is expanded via "Show more". */
+  onExpandContent?: () => void;
 }
 
 function areMessagesEquivalentForActivityItem(prev: InboxMessage, next: InboxMessage): boolean {
@@ -332,6 +333,35 @@ function linkifyTaskIds(text: string, onClick: (taskId: string) => void): React.
   });
 }
 
+/**
+ * Render summary text with inline bold markdown and optional task-id linkification.
+ * Splits on bold markers first, then linkifies task IDs within each segment.
+ */
+function renderInlineBoldSummary(
+  text: string,
+  onTaskIdClick?: (taskId: string) => void
+): React.ReactNode {
+  // Split by **bold** segments, keeping delimiters
+  const boldPattern = /(\*\*[^*]+\*\*)/g;
+  const parts = text.split(boldPattern);
+  return parts.map((part, i) => {
+    const boldContent = /^\*\*(.+)\*\*$/.exec(part);
+    if (boldContent) {
+      const inner = boldContent[1];
+      return (
+        <strong key={i} className="font-semibold">
+          {onTaskIdClick ? linkifyTaskIds(inner, onTaskIdClick) : inner}
+        </strong>
+      );
+    }
+    return onTaskIdClick ? (
+      <Fragment key={i}>{linkifyTaskIds(part, onTaskIdClick)}</Fragment>
+    ) : (
+      <Fragment key={i}>{part}</Fragment>
+    );
+  });
+}
+
 export const ActivityItem = memo(
   function ActivityItem({
     message,
@@ -359,6 +389,7 @@ export const ActivityItem = memo(
     compactHeader = false,
     onExpand,
     expandItemKey,
+    onExpandContent,
   }: ActivityItemProps): React.JSX.Element {
     const colors = getTeamColorSet(memberColor ?? message.color ?? '');
     const { isLight } = useTheme();
@@ -686,16 +717,19 @@ export const ActivityItem = memo(
 
           {/* Summary */}
           <span className="min-w-0 flex-1 truncate text-xs" style={{ color: CARD_TEXT_LIGHT }}>
-            {onTaskIdClick ? linkifyTaskIds(summaryText, onTaskIdClick) : summaryText}
+            {onTaskIdClick
+              ? renderInlineBoldSummary(rawSummary, onTaskIdClick)
+              : renderInlineBoldSummary(rawSummary)}
           </span>
 
-          {/* Timestamp */}
-          <div className="relative flex shrink-0 items-center gap-1.5">
+          {/* Timestamp / expand */}
+          <div className="relative flex shrink-0 items-center">
             <span
-              className={cn(
-                'text-[10px] transition-opacity',
-                onExpand && expandItemKey && 'group-hover:opacity-0'
-              )}
+              className={
+                onExpand && expandItemKey
+                  ? 'text-[10px] transition-opacity group-hover:opacity-0'
+                  : 'text-[10px]'
+              }
               style={{ color: CARD_ICON_MUTED }}
             >
               {timestamp}
@@ -704,7 +738,7 @@ export const ActivityItem = memo(
               <button
                 type="button"
                 aria-label="Expand message"
-                className="absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
+                className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
                 style={{ color: CARD_ICON_MUTED }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -782,7 +816,7 @@ export const ActivityItem = memo(
                   ) : null}
                   <CopyButton text={displayText} inline />
                 </div>
-                <ExpandableContent>
+                <ExpandableContent onExpand={onExpandContent}>
                   <span
                     onClickCapture={
                       onTaskIdClick
@@ -877,5 +911,6 @@ export const ActivityItem = memo(
     prev.compactHeader === next.compactHeader &&
     prev.onExpand === next.onExpand &&
     prev.expandItemKey === next.expandItemKey &&
+    prev.onExpandContent === next.onExpandContent &&
     areMessagesEquivalentForActivityItem(prev.message, next.message)
 );

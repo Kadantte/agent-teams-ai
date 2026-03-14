@@ -642,6 +642,9 @@ describe('agent-teams-mcp tools', () => {
     expect(memberBriefingText).toContain(
       'You must NOT start work, claim tasks, or improvise task/process protocol'
     );
+    expect(memberBriefingText).toContain(
+      'leave a short task comment on the waiting task immediately with the reason and your best ETA'
+    );
     expect(memberBriefingText).toContain('IMPORTANT: Communicate in English.');
     expect(memberBriefingText).toContain('TURN ACTION MODE PROTOCOL (HIGHEST PRIORITY FOR EACH USER TURN):');
     expect(memberBriefingText).toContain('Task briefing for alice:');

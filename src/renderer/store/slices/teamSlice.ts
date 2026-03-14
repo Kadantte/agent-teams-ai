@@ -1439,9 +1439,15 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       set((state) => {
         const nextRuns = { ...state.provisioningRuns };
         const pendingRun = nextRuns[pendingRunId];
+        const realProgressAlreadyExists = response.runId in nextRuns;
         if (pendingRun) {
           delete nextRuns[pendingRunId];
-          nextRuns[response.runId] = { ...pendingRun, runId: response.runId };
+          // Only use pending data as fallback if real progress events haven't arrived yet.
+          // This prevents overwriting real progress (e.g. 'monitoring') with stale pending data ('spawning')
+          // when the invoke response arrives before IPC progress events.
+          if (!realProgressAlreadyExists) {
+            nextRuns[response.runId] = { ...pendingRun, runId: response.runId };
+          }
         }
         return {
           provisioningRuns: nextRuns,
@@ -1570,9 +1576,15 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       set((state) => {
         const nextRuns = { ...state.provisioningRuns };
         const pendingRun = nextRuns[pendingRunId];
+        const realProgressAlreadyExists = response.runId in nextRuns;
         if (pendingRun) {
           delete nextRuns[pendingRunId];
-          nextRuns[response.runId] = { ...pendingRun, runId: response.runId };
+          // Only use pending data as fallback if real progress events haven't arrived yet.
+          // This prevents overwriting real progress (e.g. 'monitoring') with stale pending data ('spawning')
+          // when the invoke response arrives before IPC progress events.
+          if (!realProgressAlreadyExists) {
+            nextRuns[response.runId] = { ...pendingRun, runId: response.runId };
+          }
         }
         return {
           provisioningRuns: nextRuns,

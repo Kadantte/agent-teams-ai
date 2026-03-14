@@ -311,7 +311,11 @@ export const TaskDetailDialog = ({
       return;
 
     let cancelled = false;
-    setTaskChangesLoading(true);
+    // Show full loading state only when no files are cached yet;
+    // otherwise let the refresh button spinner indicate background reload.
+    if (!taskChangesFiles || taskChangesFiles.length === 0) {
+      setTaskChangesLoading(true);
+    }
     setTaskChangesError(null);
     void loadTaskChangeSummary()
       .then((files) => {
@@ -878,7 +882,7 @@ export const TaskDetailDialog = ({
                 defaultOpen={false}
                 onOpenChange={handleChangesSectionOpenChange}
               >
-                {taskChangesLoading ? (
+                {taskChangesLoading && (!taskChangesFiles || taskChangesFiles.length === 0) ? (
                   <div className="flex items-center gap-2 py-2 text-xs text-[var(--color-text-muted)]">
                     <Loader2 size={14} className="animate-spin" />
                     Loading changes...
@@ -1011,7 +1015,8 @@ export const TaskDetailDialog = ({
             blocksIds.length > 0 ||
             relatedIds.length > 0 ||
             relatedByIds.length > 0 ||
-            kanbanTaskState ? (
+            kanbanTaskState?.reviewer ||
+            kanbanTaskState?.errorDescription ? (
               <div className="space-y-1">
                 {/* Dependencies */}
                 {blockedByIds.length > 0 ? (
@@ -1083,7 +1088,7 @@ export const TaskDetailDialog = ({
                 ) : null}
 
                 {/* Review info */}
-                {kanbanTaskState ? (
+                {kanbanTaskState?.reviewer || kanbanTaskState?.errorDescription ? (
                   <div className="flex items-center gap-2">
                     {kanbanTaskState.reviewer ? (
                       <span className="text-xs text-[var(--color-text-secondary)]">

@@ -237,6 +237,41 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     expect(service.getLiveLeadProcessMessages(teamName)).toHaveLength(1);
   });
 
+  it('adds task-first reply guidance for task comment notifications in lead relay prompts', async () => {
+    const service = new TeamProvisioningService();
+    const teamName = 'my-team';
+    seedConfig(teamName);
+    seedLeadInbox(teamName, [
+      {
+        from: 'alice',
+        text: 'Automated task comment notification from @alice on #abcd1234 "Investigate":\n\n> Root cause found.',
+        timestamp: '2026-02-23T10:00:00.000Z',
+        read: false,
+        summary: 'Comment on #abcd1234',
+        source: 'system_notification',
+        messageId: 'm-comment-1',
+      },
+    ]);
+
+    const { writeSpy } = attachAliveRun(service, teamName);
+    const relayPromise = service.relayLeadInboxMessages(teamName);
+    const run = await waitForCapture(service);
+    expect(run?.leadRelayCapture).toBeTruthy();
+
+    const payload = String(writeSpy.mock.calls[0]?.[0] ?? '');
+    expect(payload).toContain('Source: system_notification');
+    expect(payload).toContain('summary looks like \\"Comment on #...\\"');
+    expect(payload).toContain('Prefer replying on the task via task_add_comment');
+
+    (service as any).handleStreamJsonMessage(run, {
+      type: 'assistant',
+      content: [{ type: 'text', text: 'Will reply on the task.' }],
+    });
+    (service as any).handleStreamJsonMessage(run, { type: 'result', subtype: 'success' });
+
+    await relayPromise;
+  });
+
   it('dedups by messageId even if markRead fails', async () => {
     const service = new TeamProvisioningService();
     const teamName = 'my-team';

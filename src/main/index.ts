@@ -557,6 +557,13 @@ function wireFileWatcherEvents(context: ServiceContext): void {
               `[FileWatcher] task start notify failed for ${teamName}#${taskId}: ${String(e)}`
             )
           );
+        void teamDataService
+          .notifyLeadOnTeammateTaskComment(teamName, taskId)
+          .catch((e: unknown) =>
+            logger.warn(
+              `[FileWatcher] task comment notify failed for ${teamName}#${taskId}: ${String(e)}`
+            )
+          );
       }
     } catch {
       // ignore
@@ -700,6 +707,11 @@ function initializeServices(): void {
   ptyTerminalService = new PtyTerminalService();
   teamDataService = new TeamDataService();
   teamProvisioningService = new TeamProvisioningService();
+  void teamDataService
+    .initializeTaskCommentNotificationState()
+    .catch((error: unknown) =>
+      logger.warn(`[Init] task comment notification init failed: ${String(error)}`)
+    );
 
   // Cross-team communication service
   const crossTeamConfigReader = new TeamConfigReader();
@@ -909,6 +921,13 @@ async function startHttpServer(
  */
 function shutdownServices(): void {
   logger.info('Shutting down services...');
+
+  // Kill all team CLI processes via SIGTERM BEFORE anything else.
+  // This must happen before the OS closes stdin pipes (on app exit),
+  // because stdin EOF triggers CLI's graceful shutdown which deletes team files.
+  if (teamProvisioningService) {
+    teamProvisioningService.stopAllTeams();
+  }
 
   // Stop HTTP server
   if (httpServer?.isRunning()) {

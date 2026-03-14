@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
@@ -109,6 +109,11 @@ export const MessagesPanel = memo(function MessagesPanel({
   const lastSendMessageResult = useStore((s) => s.lastSendMessageResult);
   const teams = useStore((s) => s.teams);
   const openTeamTab = useStore((s) => s.openTeamTab);
+
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const handleExpandContent = useCallback(() => {
+    composerTextareaRef.current?.focus();
+  }, []);
 
   const [messagesSearchQuery, setMessagesSearchQuery] = useState('');
   const [messagesFilter, setMessagesFilter] = useState<MessagesFilterState>({
@@ -323,6 +328,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         sending={sendingMessage}
         sendError={sendMessageError}
         lastResult={lastSendMessageResult}
+        textareaRef={composerTextareaRef}
         onSend={handleSend}
         onCrossTeamSend={handleCrossTeamSend}
       />
@@ -357,6 +363,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         onRestartTeam={onRestartTeam}
         onTaskIdClick={onTaskIdClick}
         onExpandItem={handleExpandItem}
+        onExpandContent={handleExpandContent}
       />
       <MessageExpandDialog
         expandedItem={expandedItem}

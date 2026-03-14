@@ -83,18 +83,11 @@ const MODEL_OPTIONS = [
 ] as const;
 
 /**
- * Computes the effective model string for team provisioning.
- * - Without extended context: returns base model or undefined.
- * - With extended context: haiku stays as-is; opus/sonnet get [1m] suffix; default → sonnet[1m].
+ * Returns the effective model string for team provisioning.
+ * Simply maps empty selection to undefined.
  */
-export function computeEffectiveTeamModel(
-  selectedModel: string,
-  extendedContext: boolean
-): string | undefined {
-  const base = selectedModel || undefined;
-  if (!extendedContext) return base;
-  if (base === 'haiku') return base;
-  return base ? `${base}[1m]` : 'sonnet[1m]';
+export function computeEffectiveTeamModel(selectedModel: string): string | undefined {
+  return selectedModel || undefined;
 }
 
 export interface TeamModelSelectorProps {

@@ -14,6 +14,13 @@ interface ActiveTasksBlockProps {
   onTaskClick?: (task: TeamTaskWithKanban) => void;
 }
 
+interface ActivityEntry {
+  member: ResolvedTeamMember;
+  task: TeamTaskWithKanban | undefined;
+  taskId: string;
+  kind: 'working' | 'reviewing';
+}
+
 export const ActiveTasksBlock = ({
   members,
   tasks,
@@ -23,27 +30,46 @@ export const ActiveTasksBlock = ({
   const { isLight } = useTheme();
   const colorMap = buildMemberColorMap(members);
   const taskMap = new Map(tasks.map((t) => [t.id, t]));
-  const working = members.filter((m) => {
-    if (!m.currentTaskId) return false;
+
+  const entries: ActivityEntry[] = [];
+
+  // Members working on tasks
+  const workingMemberNames = new Set<string>();
+  for (const m of members) {
+    if (!m.currentTaskId) continue;
     const task = taskMap.get(m.currentTaskId);
     // Defense-in-depth: hide banner for approved/completed tasks even if currentTaskId is stale
-    if (task && (task.reviewState === 'approved' || task.status === 'completed')) return false;
-    return true;
-  });
-  if (working.length === 0) return null;
+    if (task && (task.reviewState === 'approved' || task.status === 'completed')) continue;
+    workingMemberNames.add(m.name);
+    entries.push({ member: m, task, taskId: m.currentTaskId, kind: 'working' });
+  }
+
+  // Members reviewing tasks (only if not already shown as working)
+  for (const m of members) {
+    if (workingMemberNames.has(m.name)) continue;
+    const reviewTask = tasks.find(
+      (t) => t.reviewer === m.name && (t.reviewState === 'review' || t.kanbanColumn === 'review')
+    );
+    if (reviewTask) {
+      entries.push({ member: m, task: reviewTask, taskId: reviewTask.id, kind: 'reviewing' });
+    }
+  }
+
+  if (entries.length === 0) return null;
 
   return (
     <div className="mb-3 space-y-1.5">
       <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
         In progress
       </p>
-      {working.map((member) => {
-        const taskId = member.currentTaskId!;
-        const task = taskMap.get(taskId);
+      {entries.map(({ member, task, taskId, kind }) => {
         const colors = getTeamColorSet(colorMap.get(member.name) ?? '');
         const roleLabel = formatAgentRole(
           member.role ?? (member.agentType !== 'general-purpose' ? member.agentType : undefined)
         );
+        const dotPing = kind === 'reviewing' ? 'bg-amber-400' : 'bg-emerald-400';
+        const dotSolid = kind === 'reviewing' ? 'bg-amber-500' : 'bg-emerald-500';
+        const activityLabel = kind === 'reviewing' ? 'reviewing' : 'working on';
 
         return (
           <article
@@ -64,8 +90,10 @@ export const ActiveTasksBlock = ({
                   loading="lazy"
                 />
                 <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5">
-                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-70" />
-                  <span className="relative inline-flex size-full rounded-full bg-emerald-500" />
+                  <span
+                    className={`absolute inline-flex size-full animate-ping rounded-full ${dotPing} opacity-70`}
+                  />
+                  <span className={`relative inline-flex size-full rounded-full ${dotSolid}`} />
                 </span>
               </span>
               {onMemberClick ? (
@@ -99,7 +127,7 @@ export const ActiveTasksBlock = ({
                 </span>
               ) : null}
               <span className="shrink-0 text-[10px]" style={{ color: CARD_ICON_MUTED }}>
-                working on
+                {activityLabel}
               </span>
               {task &&
                 (onTaskClick ? (

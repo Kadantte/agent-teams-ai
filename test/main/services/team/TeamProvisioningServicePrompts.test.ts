@@ -6,11 +6,13 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AGENT_BLOCK_CLOSE, AGENT_BLOCK_OPEN } from '@shared/constants/agentBlocks';
+import { TASK_COMMENT_FORWARDING_ENV } from '@main/services/team/TeamTaskCommentForwarding';
 
 let tempClaudeRoot = '';
 let tempTeamsBase = '';
 let tempTasksBase = '';
 let originalMemberBriefingBootstrapEnv: string | undefined;
+let originalTaskCommentForwardingEnv: string | undefined;
 
 vi.mock('@main/services/team/ClaudeBinaryResolver', () => ({
   ClaudeBinaryResolver: { resolve: vi.fn() },
@@ -72,7 +74,9 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
   beforeEach(() => {
     vi.clearAllMocks();
     originalMemberBriefingBootstrapEnv = process.env[MEMBER_BRIEFING_BOOTSTRAP_ENV];
+    originalTaskCommentForwardingEnv = process.env[TASK_COMMENT_FORWARDING_ENV];
     process.env[MEMBER_BRIEFING_BOOTSTRAP_ENV] = '1';
+    process.env[TASK_COMMENT_FORWARDING_ENV] = 'off';
     tempClaudeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-team-prompts-'));
     tempTeamsBase = path.join(tempClaudeRoot, 'teams');
     tempTasksBase = path.join(tempClaudeRoot, 'tasks');
@@ -85,6 +89,11 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
       delete process.env[MEMBER_BRIEFING_BOOTSTRAP_ENV];
     } else {
       process.env[MEMBER_BRIEFING_BOOTSTRAP_ENV] = originalMemberBriefingBootstrapEnv;
+    }
+    if (originalTaskCommentForwardingEnv === undefined) {
+      delete process.env[TASK_COMMENT_FORWARDING_ENV];
+    } else {
+      process.env[TASK_COMMENT_FORWARDING_ENV] = originalTaskCommentForwardingEnv;
     }
     // Best-effort cleanup of temp dir (per-test)
     try {
@@ -247,7 +256,53 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     expect(prompt).toContain('Introduce yourself briefly (name and role) and confirm you are ready');
     expect(prompt).toContain('use task_briefing as your compact queue view');
     expect(prompt).toContain('Use task_get when you need the full task context before starting a pending/needsFix task');
+    expect(prompt).toContain(
+      'If that teammate already has another in_progress task, create/keep the new task in pending/TODO. Do NOT mark it in_progress for them yet.'
+    );
+    expect(prompt).toContain(
+      'leave a short task comment on that waiting task right away with the reason and your best ETA, keep it in pending/TODO'
+    );
+    expect(prompt).toContain(
+      'Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.'
+    );
     expect(prompt).not.toContain('Include the following agent-only instructions verbatim in the prompt:');
+    expect(prompt).not.toContain('runtime forwards task comments to the lead automatically');
+    expect(prompt).not.toContain(
+      'do NOT send a duplicate SendMessage to the lead for the same task-scoped update'
+    );
+
+    await svc.cancelProvisioning(runId);
+  });
+
+  it('includes live task-comment forwarding wording only when live forwarding is enabled', async () => {
+    process.env[TASK_COMMENT_FORWARDING_ENV] = 'on';
+    vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/fake/claude');
+    const { child, writeSpy } = createFakeChild();
+    vi.mocked(spawnCli).mockReturnValue(child as any);
+
+    const svc = new TeamProvisioningService();
+    (svc as any).buildProvisioningEnv = vi.fn(async () => ({
+      env: { ANTHROPIC_API_KEY: 'test' },
+      authSource: 'anthropic_api_key',
+    }));
+    (svc as any).startFilesystemMonitor = vi.fn();
+    (svc as any).pathExists = vi.fn(async () => false);
+
+    const { runId } = await svc.createTeam(
+      {
+        teamName: 'forward-live-team',
+        cwd: process.cwd(),
+        members: [{ name: 'alice', role: 'developer' }],
+        description: 'Task comment forwarding live prompt test',
+      },
+      () => {}
+    );
+
+    const prompt = extractPromptFromWrite(writeSpy);
+    expect(prompt).toContain('task comments may already be auto-forwarded to you');
+    expect(prompt).toContain(
+      'do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.'
+    );
 
     await svc.cancelProvisioning(runId);
   });
@@ -315,6 +370,12 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     expect(prompt).toContain('resume/finish those first');
     expect(prompt).toContain('Call task_get only if you need more context than task_briefing already gave you');
     expect(prompt).toContain('Before you start any needsFix or pending task, call task_get');
+    expect(prompt).toContain(
+      'If you assign a task to a member who already has another in_progress task, keep the newly assigned task pending/TODO. Do NOT move it to in_progress until that member actually starts it.'
+    );
+    expect(prompt).toContain(
+      'leave a short task comment on that waiting task with the reason and your best ETA, keep it in pending/TODO'
+    );
 
     await svc.cancelProvisioning(runId);
   });
@@ -346,6 +407,9 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     const prompt = extractPromptFromWrite(writeSpy);
     expect(prompt).toContain('Include the following agent-only instructions verbatim in the prompt:');
     expect(prompt).toContain('Use task_briefing as a compact queue view of your assigned tasks.');
+    expect(prompt).toContain(
+      'If a newly assigned task must wait because you are still busy on another task, immediately add a short task comment on that waiting task with the reason and your best ETA.'
+    );
     expect(prompt).not.toContain('Your FIRST action: call MCP tool member_briefing');
 
     await svc.cancelProvisioning(runId);

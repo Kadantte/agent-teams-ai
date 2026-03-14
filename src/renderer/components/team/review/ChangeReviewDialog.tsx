@@ -108,6 +108,7 @@ export const ChangeReviewDialog = ({
     undoBulkReview,
     reviewUndoStack,
     hunkContextHashesByFile,
+    globalTasks,
   } = useStore();
 
   // Build scope keys (pure values — safe to compute before hooks that depend on them)
@@ -1063,10 +1064,13 @@ export const ChangeReviewDialog = ({
     return activeChangeSet.files.find((f) => f.filePath === activeFilePath) ?? null;
   }, [activeChangeSet, activeFilePath]);
 
-  const title =
-    mode === 'agent'
-      ? `Changes by ${memberName ?? 'unknown'}`
-      : `Changes for task #${taskId ?? '?'}`;
+  const title = useMemo(() => {
+    if (mode === 'agent') return `Changes by ${memberName ?? 'unknown'}`;
+    const task = taskId ? globalTasks.find((t) => t.id === taskId) : undefined;
+    const shortId = task?.displayId ?? taskId?.slice(0, 8) ?? '?';
+    const subject = task?.subject;
+    return subject ? `Changes for task #${shortId} — ${subject}` : `Changes for task #${shortId}`;
+  }, [mode, memberName, taskId, globalTasks]);
 
   const isMacElectron =
     isElectronMode() && window.navigator.userAgent.toLowerCase().includes('mac');

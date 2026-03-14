@@ -401,6 +401,8 @@ export interface TeamLaunchRequest {
   effort?: EffortLevel;
   /** When true, skip --resume and start a fresh session (clears context memory). */
   clearContext?: boolean;
+  /** When true, set CLAUDE_CODE_DISABLE_1M_CONTEXT=1 to limit context to 200K tokens. */
+  limitContext?: boolean;
   /** When false, run WITHOUT --dangerously-skip-permissions (manual tool approval). Default: true. */
   skipPermissions?: boolean;
   /** Worktree name — CLI: --worktree <name>. */
@@ -523,6 +525,8 @@ export interface TeamCreateRequest {
   prompt?: string;
   model?: string;
   effort?: EffortLevel;
+  /** When true, set CLAUDE_CODE_DISABLE_1M_CONTEXT=1 to limit context to 200K tokens. */
+  limitContext?: boolean;
   /** When false, run WITHOUT --dangerously-skip-permissions (manual tool approval). Default: true. */
   skipPermissions?: boolean;
   /** Worktree name — CLI: --worktree <name>. */

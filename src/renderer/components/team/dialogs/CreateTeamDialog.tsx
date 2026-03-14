@@ -36,7 +36,7 @@ import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 
 import { AdvancedCliSection } from './AdvancedCliSection';
 import { EffortLevelSelector } from './EffortLevelSelector';
-import { ExtendedContextCheckbox } from './ExtendedContextCheckbox';
+import { LimitContextCheckbox } from './ExtendedContextCheckbox';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
 import { ProjectPathSelector } from './ProjectPathSelector';
 import { SkipPermissionsCheckbox } from './SkipPermissionsCheckbox';
@@ -248,8 +248,8 @@ export const CreateTeamDialog = ({
     const stored = localStorage.getItem('team:lastSelectedModel') ?? '';
     return stored === '__default__' ? '' : stored;
   });
-  const [extendedContext, setExtendedContextRaw] = useState(
-    () => localStorage.getItem('team:lastExtendedContext') === 'true'
+  const [limitContext, setLimitContextRaw] = useState(
+    () => localStorage.getItem('team:lastLimitContext') === 'true'
   );
   const [skipPermissions, setSkipPermissionsRaw] = useState(
     () => localStorage.getItem('team:lastSkipPermissions') !== 'false'
@@ -279,9 +279,9 @@ export const CreateTeamDialog = ({
     localStorage.setItem('team:lastSelectedModel', value);
   };
 
-  const setExtendedContext = (value: boolean): void => {
-    setExtendedContextRaw(value);
-    localStorage.setItem('team:lastExtendedContext', String(value));
+  const setLimitContext = (value: boolean): void => {
+    setLimitContextRaw(value);
+    localStorage.setItem('team:lastLimitContext', String(value));
   };
 
   const setSkipPermissions = (value: boolean): void => {
@@ -546,10 +546,7 @@ export const CreateTeamDialog = ({
     [memberColorMap, members, soloTeam]
   );
 
-  const effectiveModel = useMemo(
-    () => computeEffectiveTeamModel(selectedModel, extendedContext),
-    [selectedModel, extendedContext]
-  );
+  const effectiveModel = useMemo(() => computeEffectiveTeamModel(selectedModel), [selectedModel]);
 
   const sanitizedTeamName = sanitizeTeamName(teamName.trim());
 
@@ -564,6 +561,7 @@ export const CreateTeamDialog = ({
       model: effectiveModel,
       effort: (selectedEffort as EffortLevel) || undefined,
       skipPermissions,
+      limitContext: limitContext || undefined,
       worktree: worktreeEnabled && worktreeName.trim() ? worktreeName.trim() : undefined,
       extraCliArgs: customArgs.trim() || undefined,
     }),
@@ -578,6 +576,7 @@ export const CreateTeamDialog = ({
       effectiveModel,
       selectedEffort,
       skipPermissions,
+      limitContext,
       worktreeEnabled,
       worktreeName,
       customArgs,
@@ -600,7 +599,7 @@ export const CreateTeamDialog = ({
     if (prompt.trim()) summary.push('Lead prompt');
     if (selectedModel) summary.push(`Model: ${selectedModel}`);
     if (selectedEffort) summary.push(`Effort: ${selectedEffort}`);
-    if (extendedContext) summary.push('Extended context');
+    if (limitContext) summary.push('Limited to 200K context');
     if (skipPermissions) summary.push('Auto-approve tools');
     if (worktreeEnabled && worktreeName.trim()) summary.push(`Worktree: ${worktreeName.trim()}`);
     if (customArgs.trim()) summary.push('Custom CLI args');
@@ -609,7 +608,7 @@ export const CreateTeamDialog = ({
     prompt,
     selectedModel,
     selectedEffort,
-    extendedContext,
+    limitContext,
     skipPermissions,
     worktreeEnabled,
     worktreeName,
@@ -982,11 +981,10 @@ export const CreateTeamDialog = ({
                         onValueChange={setSelectedEffort}
                         id="create-effort"
                       />
-                      <ExtendedContextCheckbox
-                        id="create-extended-context"
-                        checked={extendedContext}
-                        onCheckedChange={setExtendedContext}
-                        disabled={selectedModel === 'haiku'}
+                      <LimitContextCheckbox
+                        id="create-limit-context"
+                        checked={limitContext}
+                        onCheckedChange={setLimitContext}
                       />
                       <SkipPermissionsCheckbox
                         id="create-skip-permissions"

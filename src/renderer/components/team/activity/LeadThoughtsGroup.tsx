@@ -19,7 +19,6 @@ import {
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import { formatToolSummary, parseToolSummary } from '@shared/utils/toolSummary';
 import { extractMarkdownPlainText } from '@shared/utils/markdownTextSearch';
-import { cn } from '@renderer/lib/utils';
 import { ChevronDown, ChevronRight, ChevronUp, Maximize2 } from 'lucide-react';
 import {
   AnimatedHeightReveal,
@@ -810,12 +809,13 @@ const LeadThoughtsGroupRowComponent = ({
               </TooltipContent>
             </Tooltip>
           ) : null}
-          <div className="relative ml-auto flex shrink-0 items-center gap-1.5">
+          <div className="relative ml-auto flex shrink-0 items-center">
             <span
-              className={cn(
-                'text-[10px] transition-opacity',
-                onExpand && expandItemKey && 'group-hover:opacity-0'
-              )}
+              className={
+                onExpand && expandItemKey
+                  ? 'text-[10px] transition-opacity group-hover:opacity-0'
+                  : 'text-[10px]'
+              }
               style={{ color: CARD_ICON_MUTED }}
             >
               {formatTime(oldest.timestamp) === formatTime(newest.timestamp)
@@ -826,7 +826,7 @@ const LeadThoughtsGroupRowComponent = ({
               <button
                 type="button"
                 aria-label="Expand thoughts"
-                className="absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
+                className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
                 style={{ color: CARD_ICON_MUTED }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -878,7 +878,7 @@ const LeadThoughtsGroupRowComponent = ({
         ) : null}
       </article>
       {isBodyVisible && !expanded && needsTruncation ? (
-        <div className="pointer-events-none flex justify-center pt-2">
+        <div className="pointer-events-none flex justify-center" style={{ marginTop: -15 }}>
           <button
             type="button"
             className="pointer-events-auto flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[11px] text-[var(--color-text-secondary)] shadow-sm transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)]"

@@ -71,6 +71,8 @@ interface ActivityTimelineProps {
   onTeamClick?: (teamName: string) => void;
   /** Callback to expand a message/thought item into a fullscreen dialog. */
   onExpandItem?: (key: string) => void;
+  /** Called when ExpandableContent is expanded via "Show more" in any ActivityItem. */
+  onExpandContent?: () => void;
 }
 
 const VIEWPORT_THRESHOLD = 0.15;
@@ -138,6 +140,7 @@ const MessageRowWithObserver = ({
   onTeamClick,
   onExpand,
   expandItemKey,
+  onExpandContent,
 }: {
   message: InboxMessage;
   teamName: string;
@@ -166,6 +169,7 @@ const MessageRowWithObserver = ({
   onTeamClick?: (teamName: string) => void;
   onExpand?: (key: string) => void;
   expandItemKey?: string;
+  onExpandContent?: () => void;
 }): React.JSX.Element => {
   const ref = useRef<HTMLDivElement>(null);
   const reportedRef = useRef(false);
@@ -225,6 +229,7 @@ const MessageRowWithObserver = ({
         onTeamClick={onTeamClick}
         onExpand={onExpand}
         expandItemKey={expandItemKey}
+        onExpandContent={onExpandContent}
       />
     </AnimatedHeightReveal>
   );
@@ -259,6 +264,7 @@ const MemoizedMessageRowWithObserver = React.memo(
     prev.onTeamClick === next.onTeamClick &&
     prev.onExpand === next.onExpand &&
     prev.expandItemKey === next.expandItemKey &&
+    prev.onExpandContent === next.onExpandContent &&
     areInboxMessagesEquivalentForRender(prev.message, next.message)
 );
 
@@ -285,6 +291,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
   teamColorByName = EMPTY_TEAM_COLOR_MAP,
   onTeamClick,
   onExpandItem,
+  onExpandContent,
 }: ActivityTimelineProps): React.JSX.Element {
   const [visibleCount, setVisibleCount] = useState(MESSAGES_PAGE_SIZE);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -644,6 +651,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
               onTeamClick={onTeamClick}
               onExpand={compactHeader ? onExpandItem : undefined}
               expandItemKey={compactHeader ? messageKey : undefined}
+              onExpandContent={onExpandContent}
             />
           </React.Fragment>
         );

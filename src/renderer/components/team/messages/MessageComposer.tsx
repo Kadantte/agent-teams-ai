@@ -42,6 +42,8 @@ interface MessageComposerProps {
   sending: boolean;
   sendError: string | null;
   lastResult?: SendMessageResult | null;
+  /** Ref to the underlying textarea element for external focus management. */
+  textareaRef?: React.Ref<HTMLTextAreaElement>;
   onSend: (
     recipient: string,
     text: string,
@@ -66,6 +68,7 @@ export const MessageComposer = ({
   sending,
   sendError,
   lastResult,
+  textareaRef,
   onSend,
   onCrossTeamSend,
 }: MessageComposerProps): React.JSX.Element => {
@@ -823,6 +826,7 @@ export const MessageComposer = ({
       </div>
 
       <MentionableTextarea
+        ref={textareaRef}
         id={`compose-${teamName}`}
         placeholder={
           isProvisioning

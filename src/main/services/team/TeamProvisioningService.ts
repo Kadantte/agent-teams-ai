@@ -53,6 +53,7 @@ import { TeamInboxReader } from './TeamInboxReader';
 import { TeamMcpConfigBuilder } from './TeamMcpConfigBuilder';
 import { TeamMembersMetaStore } from './TeamMembersMetaStore';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
+import { isTaskCommentForwardingLive } from './TeamTaskCommentForwarding';
 import { TeamTaskReader } from './TeamTaskReader';
 
 import type {
@@ -442,7 +443,13 @@ After member_briefing succeeds:
 - Introduce yourself briefly (name and role) and confirm you are ready.
 - Then wait for task assignments.
 - When you later receive work or reconnect after a restart, use task_briefing as your compact queue view. Use task_get when you need the full task context before starting a pending/needsFix task or when the in_progress briefing details are not enough.
+- If a newly assigned task cannot be started immediately because you are still busy on another task, leave a short task comment on that waiting task right away with the reason and your best ETA, keep it in pending/TODO, and only move it to in_progress with task_start when you truly begin.
 - CRITICAL: If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on that same task, FIRST leave a short task comment saying what you are about to do, THEN move it to in_progress with task_start, THEN do the work, and when finished leave a short result comment and move it to done with task_complete. Never skip this comment -> reopen -> work -> comment -> done cycle.
+- Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.${
+    isTaskCommentForwardingLive()
+      ? '\n- If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.'
+      : ''
+  }
 ${buildTeammateAgentBlockReminder()}
 ${actionModeProtocol}`;
 }
@@ -473,6 +480,7 @@ ${actionModeProtocol}
      - If task_briefing shows any in_progress task, resume/finish those first. Call task_get only if you need more context than task_briefing already gave you.
      - After that, prioritize tasks marked Needs fixes after review, then normal pending tasks.
      - Before you start any needsFix or pending task, call task_get for that specific task.
+     - If a newly assigned needsFix or pending task must wait because you are still finishing another task, leave a short task comment on that waiting task with the reason and your best ETA, keep it in pending/TODO (use task_set_status pending if needed), and only run task_start when you truly begin.
      - If you are the one about to do the implementation/fixes and the owner is missing or someone else, run task_set_owner to yourself immediately before task_start.
      - Only then run task_start when you truly begin.
      - If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on it, FIRST leave a short task comment saying what you are about to do, THEN run task_start, then do the work, and when finished leave a short result comment and run task_complete again. Never skip this comment -> reopen -> work -> comment -> done cycle.
@@ -513,9 +521,15 @@ ${actionModeProtocol}
      - If task_briefing shows any in_progress task, resume/finish those first. Call task_get only if you need more context than task_briefing already gave you.
      - After that, prioritize tasks marked Needs fixes after review, then normal pending tasks.
      - Before you start any needsFix or pending task, call task_get for that specific task.
+     - If a newly assigned needsFix or pending task must wait because you are still finishing another task, leave a short task comment on that waiting task with the reason and your best ETA, keep it in pending/TODO (use task_set_status pending if needed), and only run task_start when you truly begin.
      - If you are the one about to do the implementation/fixes and the owner is missing or someone else, run task_set_owner to yourself immediately before task_start.
      - Only then run task_start when you truly begin.
      - If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on it, FIRST leave a short task comment saying what you are about to do, THEN run task_start, then do the work, and when finished leave a short result comment and run task_complete again. Never skip this comment -> reopen -> work -> comment -> done cycle.
+     - Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.${
+       isTaskCommentForwardingLive()
+         ? '\n     - If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.'
+         : ''
+     }
      - If you have no tasks, wait for new assignments.`;
 }
 
@@ -620,7 +634,12 @@ function buildTaskStatusProtocol(teamName: string): string {
    { teamName: "${teamName}", taskId: "<taskId>", text: "<your reply>", from: "<your-name>" }
 8. When discussing a task with a teammate and you have important findings, decisions, blockers, or progress updates — record them as a task comment:
    { teamName: "${teamName}", taskId: "<taskId>", text: "<summary of your finding or decision>", from: "<your-name>" }
-   Do NOT comment on trivial coordination messages. Only comment when the information is valuable context for the task.
+   Do NOT comment on trivial coordination messages. Only comment when the information is valuable context for the task.${
+     isTaskCommentForwardingLive()
+       ? '\n   When task-comment forwarding is enabled in this runtime, do NOT send a duplicate SendMessage to the lead for the same task-scoped update unless you need urgent non-task attention.'
+       : ''
+   }
+   Direct messages to the lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.
 9. When sending a message about a specific task, include its short display label like #<displayId> in your SendMessage summary field for traceability.
 10. In ALL human-facing or teammate-facing message text, when you mention a task reference, ALWAYS write it with a leading # (for example: #abcd1234, not abcd1234 or "task abcd1234").
 11. Review workflow clarity (IMPORTANT):
@@ -649,6 +668,8 @@ function buildTaskStatusProtocol(teamName: string): string {
     - Use task_briefing as a compact queue view of your assigned tasks.
     - task_briefing may include full description/comments only for in_progress tasks; needsFix/pending/review/completed entries may be minimal on purpose.
     - Finish existing in_progress tasks first.
+    - If a newly assigned task must wait because you are still busy on another task, immediately add a short task comment on that waiting task with the reason and your best ETA.
+    - Keep any task you have not actually started in pending/TODO (use task_set_status pending if it was moved too early).
     - If you need more context for an in_progress task, you MAY call task_get, but it is not mandatory when task_briefing already gives enough detail.
     - Before starting a needsFix or pending task, call task_get for that specific task first.
     - If you are the one doing the implementation/fixes and the owner is missing or someone else, run task_set_owner to yourself immediately before task_start.
@@ -679,6 +700,7 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
       `Execution discipline (CRITICAL — prevents misleading task boards):`,
       `- Start a task (move to in_progress) ONLY when you are actually beginning work on it.`,
       `- Complete a task ONLY when it is truly finished (and any required verification is done).`,
+      `- If you assign work to a teammate who already has another in_progress task, create/keep the newly assigned task in pending/TODO. Do NOT move it to in_progress on their behalf before they actually start.`,
       `- Never bulk-move many tasks at the end of a session — update status incrementally as you work.`,
       `- Record meaningful progress, decisions, and blockers as task comments so context is preserved on the board.`,
       ``,
@@ -724,6 +746,12 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
       `Notification policy:`,
       `- Task assignment notifications are handled by the board runtime, so do NOT send a separate SendMessage for the same assignment unless you have extra context that is not already on the task.`,
       `- Review requests are also handled by the board runtime: review_request already notifies the reviewer, so do NOT send a second manual SendMessage for the same review request unless you are adding materially new context that is not already on the task.`,
+      `- If you receive a task-scoped system notification like "Comment on #...", treat the task as the source of truth and prefer replying via task_add_comment instead of continuing the same task discussion in direct messages.`,
+      `${
+        isTaskCommentForwardingLive()
+          ? '- In this runtime, teammate task comments may already be auto-forwarded to you. When that happens, respond on-task first; use direct messages only for urgent wake-up pings or clearly non-task coordination.'
+          : '- Unless a runtime message explicitly says task-comment forwarding is active, do NOT assume task comments automatically notify you. Existing clarification/escalation paths still apply when someone needs guaranteed lead attention.'
+      }`,
       `- Ownership must reflect the person actually doing the implementation/fix work. If someone takes over execution, update the owner immediately before they start. Do NOT leave the lead/planner as owner when another member is doing the work.`,
       `- Set createdBy when creating tasks so workflow history shows who created the task.`,
       ``,
@@ -967,6 +995,7 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
    - Decompose the request into a small set of clear, outcome-based tasks (prefer fewer, broader tasks over many micro-tasks).
    - Assign each created task to an appropriate teammate as owner (NOT to yourself), based on role/workflow and current load.
      - If ownership is unclear, pick the best default owner and note assumptions in the task description or a task comment.
+     - If that teammate already has another in_progress task, create/keep the new task in pending/TODO. Do NOT mark it in_progress for them yet.
    - Avoid duplicate notifications for the same assignment (one message per member per topic is enough).
   - When tasks have natural ordering (e.g. setup -> implementation -> testing), use blockedBy relationships.
   - If a task is blocked (uses blockedBy), it MUST be created as pending (for example with task_create + startImmediately: false). Do NOT mark blocked tasks in_progress.
@@ -1102,7 +1131,8 @@ function buildLaunchPrompt(
    Per-member spawn instructions:
 ${memberSpawnInstructions}
 
-3) After spawning all members, check the task board. If any pending tasks are unassigned, assign them to appropriate members using the board MCP tools.`;
+3) After spawning all members, check the task board. If any pending tasks are unassigned, assign them to appropriate members using the board MCP tools.
+   - If you assign a task to a member who already has another in_progress task, keep the newly assigned task pending/TODO. Do NOT move it to in_progress until that member actually starts it.`;
   }
 
   const persistentContext = buildPersistentLeadContext({
@@ -3675,6 +3705,7 @@ export class TeamProvisioningService {
         `IMPORTANT: Your text response here is shown to the user. Always include a brief human-readable summary (e.g. "Delegated to carol." or "No action needed."). Do NOT respond with only an agent-only block.`,
         AGENT_BLOCK_OPEN,
         `Internal note: for task assignments, prefer task_create and rely on the board/runtime notification path instead of sending a separate SendMessage for the same assignment.`,
+        `If a message below is marked Source: system_notification and its summary looks like "Comment on #...", treat it as a task-comment notification. Prefer replying on the task via task_add_comment rather than continuing the same task discussion in direct messages.`,
         `If a message below is marked Source: cross_team, CALL the MCP tool named cross_team_send. Do NOT use SendMessage or message_send for cross-team replies.`,
         `NEVER set recipient="cross_team_send" or to="cross_team_send". "cross_team_send" is a tool name, not a teammate.`,
         AGENT_BLOCK_CLOSE,
@@ -4346,6 +4377,20 @@ export class TeamProvisioningService {
   }
 
   /**
+   * Stop all running team processes. Called during app shutdown to kill
+   * processes via SIGTERM before the OS closes stdin (which would trigger
+   * CLI's graceful cleanup and delete team files).
+   */
+  stopAllTeams(): void {
+    const alive = this.getAliveTeams();
+    if (alive.length === 0) return;
+    logger.info(`Stopping all team processes on shutdown: ${alive.join(', ')}`);
+    for (const teamName of alive) {
+      this.stopTeam(teamName);
+    }
+  }
+
+  /**
    * Process a parsed stream-json message from stdout.
    * Extracts assistant text for progress reporting and detects turn completion.
    */
@@ -4645,7 +4690,13 @@ export class TeamProvisioningService {
         }
 
         if (!run.provisioningComplete && !run.cancelRequested) {
-          void this.handleProvisioningTurnComplete(run);
+          void this.handleProvisioningTurnComplete(run).catch((err: unknown) => {
+            logger.error(
+              `[${run.teamName}] handleProvisioningTurnComplete threw unexpectedly: ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          });
         }
       } else if (subtype === 'error') {
         const errorMsg =
