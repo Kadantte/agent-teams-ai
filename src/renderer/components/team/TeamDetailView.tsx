@@ -1125,14 +1125,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
             </div>
           )}
 
-          <div
-            className="relative -mx-4 -mt-4 mb-3 overflow-hidden border-b border-[var(--color-border)] px-4 py-3"
-            style={
-              headerColorSet
-                ? { borderLeftWidth: '3px', borderLeftColor: headerColorSet.border }
-                : undefined
-            }
-          >
+          <div className="relative -mx-4 -mt-4 mb-3 overflow-hidden border-b border-[var(--color-border)] px-4 py-3">
             {headerColorSet ? (
               <div
                 className="pointer-events-none absolute inset-0 z-0"

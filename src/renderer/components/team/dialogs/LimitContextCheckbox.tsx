@@ -1,7 +1,15 @@
 import React from 'react';
 
+import { Info } from 'lucide-react';
+
 import { Checkbox } from '@renderer/components/ui/checkbox';
 import { Label } from '@renderer/components/ui/label';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@renderer/components/ui/tooltip';
 
 interface LimitContextCheckboxProps {
   id: string;
@@ -32,5 +40,20 @@ export const LimitContextCheckbox: React.FC<LimitContextCheckboxProps> = ({
       Limit context to 200K tokens
       {disabled && <span className="text-[10px] italic">(always 200K for this model)</span>}
     </Label>
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Info
+            className={`size-3.5 shrink-0 ${disabled ? 'text-text-muted opacity-50' : 'text-text-muted hover:text-text-secondary'} cursor-help`}
+          />
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[260px]">
+          <p>
+            Agents will use 200K context window instead of the default 1M. Useful if you want to
+            save tokens and reduce costs.
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   </div>
 );
