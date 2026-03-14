@@ -5,6 +5,7 @@ import { useTheme } from '@renderer/hooks/useTheme';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import {
   agentAvatarUrl,
+  displayMemberName,
   getSpawnAwareDotClass,
   getSpawnAwarePresenceLabel,
   getSpawnCardClass,
@@ -130,7 +131,7 @@ export const MemberCard = ({
             />
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm">
-            <span className="shrink-0 font-medium text-[var(--color-text)]">{member.name}</span>
+            <span className="shrink-0 font-medium text-[var(--color-text)]">{displayMemberName(member.name)}</span>
             {member.gitBranch ? (
               <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-[var(--color-text-muted)]">
                 <GitBranch size={10} />
@@ -187,7 +188,7 @@ export const MemberCard = ({
               </TooltipTrigger>
               <TooltipContent side="bottom">{spawnError ?? 'Spawn failed'}</TooltipContent>
             </Tooltip>
-          ) : (
+          ) : !activityTask ? (
             <Badge
               variant="secondary"
               className={`shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none ${isRemoved ? 'bg-zinc-600 text-zinc-300' : 'text-[var(--color-text-muted)]'}`}
@@ -195,7 +196,7 @@ export const MemberCard = ({
             >
               {isRemoved ? 'removed' : presenceLabel}
             </Badge>
-          )}
+          ) : null}
           <div
             className="shrink-0"
             title={totalTasks > 0 ? `${completed}/${totalTasks} completed` : undefined}

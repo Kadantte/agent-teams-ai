@@ -9,7 +9,12 @@ import {
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
-import { agentAvatarUrl, getMemberDotClass, getPresenceLabel } from '@renderer/utils/memberHelpers';
+import {
+  agentAvatarUrl,
+  displayMemberName,
+  getMemberDotClass,
+  getPresenceLabel,
+} from '@renderer/utils/memberHelpers';
 import { ExternalLink } from 'lucide-react';
 
 import { CurrentTaskIndicator } from './CurrentTaskIndicator';
@@ -105,7 +110,7 @@ export const MemberHoverCard = ({
                   className="truncate text-sm font-semibold"
                   style={{ color: getThemedText(colors, isLight) }}
                 >
-                  {member.name}
+                  {displayMemberName(member.name)}
                 </span>
                 <Badge
                   variant="secondary"

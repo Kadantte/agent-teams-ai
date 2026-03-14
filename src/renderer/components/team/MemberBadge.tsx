@@ -5,7 +5,7 @@ import {
   getThemedText,
 } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
-import { agentAvatarUrl } from '@renderer/utils/memberHelpers';
+import { agentAvatarUrl, displayMemberName } from '@renderer/utils/memberHelpers';
 
 import { MemberHoverCard } from './members/MemberHoverCard';
 
@@ -62,7 +62,7 @@ export const MemberBadge = ({
       className={`rounded ${paddingClass} ${textClass} font-medium tracking-wide`}
       style={badgeStyle}
     >
-      {name === 'team-lead' ? 'lead' : name}
+      {displayMemberName(name)}
     </span>
   );
 

@@ -5,7 +5,7 @@
  * Used by TeammateMessageItem and SubagentItem when displaying team members.
  */
 
-import { MEMBER_COLOR_PALETTE } from '@shared/constants/memberColors';
+import { MEMBER_COLOR_HUE, MEMBER_COLOR_PALETTE } from '@shared/constants/memberColors';
 
 export interface TeamColorSet {
   /** Border accent color */
@@ -135,16 +135,21 @@ function hsla(hue: number, saturation: number, lightness: number, alpha = 1): st
 }
 
 function buildGeneratedMemberColorSet(colorName: string): TeamColorSet | null {
-  const paletteIndex = MEMBER_COLOR_PALETTE.indexOf(
-    colorName as (typeof MEMBER_COLOR_PALETTE)[number]
-  );
-  if (paletteIndex === -1) {
-    return null;
+  const hue = MEMBER_COLOR_HUE[colorName];
+  if (hue === undefined) {
+    // Also accept palette names not in the hue map (shouldn't happen, but safe fallback)
+    const paletteIndex = MEMBER_COLOR_PALETTE.indexOf(
+      colorName as (typeof MEMBER_COLOR_PALETTE)[number]
+    );
+    if (paletteIndex === -1) return null;
+    // Fall back to index-based hue (legacy behavior)
+    return buildColorSetFromHue(Math.round((paletteIndex / MEMBER_COLOR_PALETTE.length) * 360));
   }
 
-  // Spread the extended member palette across the hue wheel so distinct palette
-  // names stay visually distinct instead of collapsing back into 8 base colors.
-  const hue = Math.round((paletteIndex / MEMBER_COLOR_PALETTE.length) * 360);
+  return buildColorSetFromHue(hue);
+}
+
+function buildColorSetFromHue(hue: number): TeamColorSet {
   const saturation = 72;
 
   return {

@@ -4,7 +4,12 @@ import { Badge } from '@renderer/components/ui/badge';
 import { DialogDescription, DialogTitle } from '@renderer/components/ui/dialog';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
-import { agentAvatarUrl, getMemberDotClass, getPresenceLabel } from '@renderer/utils/memberHelpers';
+import {
+  agentAvatarUrl,
+  displayMemberName,
+  getMemberDotClass,
+  getPresenceLabel,
+} from '@renderer/utils/memberHelpers';
 import { Pencil } from 'lucide-react';
 
 import { MemberRoleEditor } from './MemberRoleEditor';
@@ -60,7 +65,7 @@ export const MemberDetailHeader = ({
       </div>
       <div className="min-w-0 flex-1">
         <DialogTitle className="truncate" style={{ color: colors.text }}>
-          {member.name}
+          {displayMemberName(member.name)}
         </DialogTitle>
         <DialogDescription asChild className="mt-1 flex items-center gap-2">
           <div>

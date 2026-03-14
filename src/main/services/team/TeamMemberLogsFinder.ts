@@ -23,10 +23,13 @@ const ATTRIBUTION_SCAN_LINES = 50;
 
 /** Grace before task creation — logs cannot reference a task before it exists. */
 const TASK_SINCE_GRACE_MS = 2 * 60 * 1000;
-const FILE_MENTIONS_CACHE_MAX = 1000;
+const FILE_MENTIONS_CACHE_MAX = 10_000;
 
 /** Max concurrent file reads during parallel scan phases. */
 const SCAN_CONCURRENCY = 15;
+
+/** TTL for discoverProjectSessions cache — avoids re-reading config/dirs within rapid successive calls. */
+const DISCOVERY_CACHE_TTL = 5_000;
 
 /** Signal sources for subagent member attribution, ordered by reliability. */
 type AttributionSignalSource = 'process_team' | 'routing_sender' | 'teammate_id' | 'text_mention';
@@ -54,6 +57,7 @@ interface StreamedMetadata {
   firstTimestamp: string | null;
   lastTimestamp: string | null;
   messageCount: number;
+  lastOutputPreview: string | null;
 }
 
 /** Result of attributing a subagent file to a team member. */
@@ -79,6 +83,10 @@ function trimTrailingSlashes(value: string): string {
 
 export class TeamMemberLogsFinder {
   private readonly fileMentionsCache = new Map<string, boolean>();
+  private readonly discoveryCache = new Map<
+    string,
+    { result: NonNullable<Awaited<ReturnType<TeamMemberLogsFinder['discoverProjectSessions']>>>; expiresAt: number }
+  >();
 
   constructor(
     private readonly configReader: TeamConfigReader = new TeamConfigReader(),
@@ -86,7 +94,11 @@ export class TeamMemberLogsFinder {
     private readonly membersMetaStore: TeamMembersMetaStore = new TeamMembersMetaStore()
   ) {}
 
-  async findMemberLogs(teamName: string, memberName: string): Promise<MemberLogSummary[]> {
+  async findMemberLogs(
+    teamName: string,
+    memberName: string,
+    mtimeSinceMs?: number | null
+  ): Promise<MemberLogSummary[]> {
     const discovery = await this.discoverMemberFiles(teamName, memberName);
     if (!discovery) return [];
 
@@ -118,6 +130,15 @@ export class TeamMemberLogsFinder {
         const idx = nextIdx++;
         const c = candidates[idx];
         try {
+          // Skip files older than the caller's time window (cheap fs.stat, no file read)
+          if (mtimeSinceMs != null) {
+            try {
+              const stat = await fs.stat(c.filePath);
+              if (stat.mtimeMs < mtimeSinceMs) continue;
+            } catch {
+              continue;
+            }
+          }
           const summary = await this.parseSubagentSummary(
             c.filePath,
             projectId,
@@ -254,7 +275,7 @@ export class TeamMemberLogsFinder {
       normalizedOwner.length > 0 &&
       !isLeadOwner;
     if (includeOwnerSessions) {
-      const ownerLogs = await this.findMemberLogs(teamName, normalizedOwner);
+      const ownerLogs = await this.findMemberLogs(teamName, normalizedOwner, sinceMs);
 
       const TASK_LOG_INTERVAL_GRACE_MS = 10_000;
       const fallbackRecentMs = 30 * 60_000; // if caller doesn't supply intervals/since, avoid pulling in old owner history
@@ -444,7 +465,7 @@ export class TeamMemberLogsFinder {
       !isLeadOwner;
 
     if (includeOwnerSessions) {
-      const ownerLogs = await this.findMemberLogs(teamName, normalizedOwner);
+      const ownerLogs = await this.findMemberLogs(teamName, normalizedOwner, sinceMs);
       const TASK_LOG_INTERVAL_GRACE_MS = 10_000;
       const fallbackRecentMs = 30 * 60_000;
       const now = Date.now();
@@ -613,6 +634,12 @@ export class TeamMemberLogsFinder {
     sessionIds: string[];
     knownMembers: Set<string>;
   } | null> {
+    // Check discovery cache — avoids re-reading config/dirs within rapid successive calls
+    const cached = this.discoveryCache.get(teamName);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.result;
+    }
+
     const config = await this.configReader.getConfig(teamName);
     if (!config?.projectPath) {
       logger.debug(`No projectPath for team "${teamName}"`);
@@ -716,7 +743,12 @@ export class TeamMemberLogsFinder {
       // best-effort
     }
 
-    return { projectDir, projectId, config, sessionIds, knownMembers };
+    const discovery = { projectDir, projectId, config, sessionIds, knownMembers };
+    this.discoveryCache.set(teamName, {
+      result: discovery,
+      expiresAt: Date.now() + DISCOVERY_CACHE_TTL,
+    });
+    return discovery;
   }
 
   private async discoverMemberFiles(
@@ -1062,6 +1094,7 @@ export class TeamMemberLogsFinder {
       messageCount: metadata.messageCount,
       isOngoing,
       filePath,
+      lastOutputPreview: metadata.lastOutputPreview ?? undefined,
     };
   }
 
@@ -1308,17 +1341,19 @@ export class TeamMemberLogsFinder {
       messageCount: metadata.messageCount,
       isOngoing,
       filePath: jsonlPath,
+      lastOutputPreview: metadata.lastOutputPreview ?? undefined,
     };
   }
 
   /**
-   * Stream entire JSONL file collecting only timestamps and message count.
-   * Lightweight — uses regex to extract timestamp without full JSON parse.
+   * Stream entire JSONL file collecting timestamps, message count, and last assistant output.
+   * Lightweight — uses regex to extract fields without full JSON parse.
    */
   private async streamFileMetadata(filePath: string): Promise<StreamedMetadata> {
     let firstTimestamp: string | null = null;
     let lastTimestamp: string | null = null;
     let messageCount = 0;
+    let lastOutputPreview: string | null = null;
 
     try {
       const stream = createReadStream(filePath, { encoding: 'utf8' });
@@ -1331,11 +1366,16 @@ export class TeamMemberLogsFinder {
         messageCount++;
 
         // Fast timestamp extraction without full JSON parse.
-        // ISO prefix anchor avoids false positives from "timestamp" inside string values.
         const ts = this.extractTimestampFromLine(trimmed);
         if (ts) {
           if (!firstTimestamp) firstTimestamp = ts;
           lastTimestamp = ts;
+        }
+
+        // Track last assistant text output (cheap regex, overwrites on each match).
+        if (trimmed.includes('"role":"assistant"') || trimmed.includes('"role": "assistant"')) {
+          const preview = TeamMemberLogsFinder.extractAssistantPreview(trimmed);
+          if (preview) lastOutputPreview = preview;
         }
       }
       rl.close();
@@ -1344,12 +1384,40 @@ export class TeamMemberLogsFinder {
       // ignore — return whatever we collected so far
     }
 
-    return { firstTimestamp, lastTimestamp, messageCount };
+    return { firstTimestamp, lastTimestamp, messageCount, lastOutputPreview };
   }
 
   private extractTimestampFromLine(line: string): string | null {
     const tsMatch = /"timestamp"\s*:\s*"(\d{4}-\d{2}-\d{2}T[^"]+)"/.exec(line);
     return tsMatch?.[1] ?? null;
+  }
+
+  /**
+   * Extract a short text preview from an assistant message line.
+   * Looks for the first text block content via regex (avoids full JSON parse).
+   */
+  private static extractAssistantPreview(line: string): string | null {
+    // Match {"type":"text","text":"..."} blocks
+    const textMatch = /"type"\s*:\s*"text"[^}]*"text"\s*:\s*"([^"]{1,200})/.exec(line);
+    if (textMatch?.[1]) {
+      const raw = textMatch[1]
+        .replace(/\\n/g, ' ')
+        .replace(/\\t/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return raw.length > 120 ? raw.slice(0, 120) + '...' : raw;
+    }
+    // Fallback: top-level string content
+    const contentMatch = /"content"\s*:\s*"([^"]{1,200})/.exec(line);
+    if (contentMatch?.[1]) {
+      const raw = contentMatch[1]
+        .replace(/\\n/g, ' ')
+        .replace(/\\t/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return raw.length > 120 ? raw.slice(0, 120) + '...' : raw;
+    }
+    return null;
   }
 
   private async probeFirstTimestamp(

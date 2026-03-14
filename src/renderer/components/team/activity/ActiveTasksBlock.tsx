@@ -2,7 +2,11 @@ import { CARD_BG, CARD_BORDER_STYLE, CARD_ICON_MUTED } from '@renderer/constants
 import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
-import { agentAvatarUrl, buildMemberColorMap } from '@renderer/utils/memberHelpers';
+import {
+  agentAvatarUrl,
+  buildMemberColorMap,
+  displayMemberName,
+} from '@renderer/utils/memberHelpers';
 import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 
 import type { ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
@@ -107,7 +111,7 @@ export const ActiveTasksBlock = ({
                   }}
                   onClick={() => onMemberClick(member)}
                 >
-                  {member.name}
+                  {displayMemberName(member.name)}
                 </button>
               ) : (
                 <span
@@ -118,7 +122,7 @@ export const ActiveTasksBlock = ({
                     border: `1px solid ${colors.border}40`,
                   }}
                 >
-                  {member.name}
+                  {displayMemberName(member.name)}
                 </span>
               )}
               {roleLabel ? (

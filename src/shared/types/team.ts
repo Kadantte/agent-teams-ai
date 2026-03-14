@@ -609,6 +609,8 @@ export interface MemberLogSummaryBase {
   isOngoing: boolean;
   /** Absolute path to JSONL file when known (avoids redundant findMemberLogPaths scan). */
   filePath?: string;
+  /** Short preview of the last assistant output (truncated). */
+  lastOutputPreview?: string;
 }
 
 export interface MemberSubagentLogSummary extends MemberLogSummaryBase {

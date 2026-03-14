@@ -13,6 +13,7 @@ import { getFileHunkCount, REVIEW_INSTANT_APPLY } from '@renderer/store/slices/c
 import { buildSelectionAction } from '@renderer/utils/buildSelectionAction';
 import { buildSelectionInfo, SELECTION_DEBOUNCE_MS } from '@renderer/utils/codemirrorSelectionInfo';
 import { sortItemsAsTree } from '@renderer/utils/fileTreeBuilder';
+import { displayMemberName } from '@renderer/utils/memberHelpers';
 import { type TaskChangeRequestOptions } from '@renderer/utils/taskChangeRequest';
 import { ChevronDown, Clock, X } from 'lucide-react';
 
@@ -1065,7 +1066,7 @@ export const ChangeReviewDialog = ({
   }, [activeChangeSet, activeFilePath]);
 
   const title = useMemo(() => {
-    if (mode === 'agent') return `Changes by ${memberName ?? 'unknown'}`;
+    if (mode === 'agent') return `Changes by ${displayMemberName(memberName ?? 'unknown')}`;
     const task = taskId ? globalTasks.find((t) => t.id === taskId) : undefined;
     const shortId = task?.displayId ?? taskId?.slice(0, 8) ?? '?';
     const subject = task?.subject;

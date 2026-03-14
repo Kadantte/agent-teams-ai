@@ -11,12 +11,15 @@ import { asEnhancedChunkArray } from '@renderer/types/data';
 import { enhanceAIGroup } from '@renderer/utils/aiGroupEnhancer';
 import { formatDuration } from '@renderer/utils/formatters';
 import { transformChunksToConversation } from '@renderer/utils/groupTransformer';
+import { getMemberColorByName } from '@shared/constants/memberColors';
+import { getTeamColorSet } from '@renderer/constants/teamColors';
 import {
   AlertCircle,
   ChevronDown,
   ChevronRight,
   Clock,
   FileText,
+  Info,
   Loader2,
   MessageSquare,
 } from 'lucide-react';
@@ -516,10 +519,22 @@ const LogCard = ({
   detailLoading,
   onToggle,
 }: LogCardProps): React.JSX.Element => {
-  const timeAgo = formatRelativeTime(log.startTime);
+  const createdAgo = formatRelativeTime(log.startTime);
+  const lastActivityTime = useMemo(() => {
+    const startMs = new Date(log.startTime).getTime();
+    if (!Number.isFinite(startMs) || log.durationMs <= 0) return null;
+    return new Date(startMs + log.durationMs).toISOString();
+  }, [log.startTime, log.durationMs]);
+  const updatedAgo = lastActivityTime ? formatRelativeTime(lastActivityTime) : null;
+
+  const memberColorCss = useMemo(() => {
+    if (!log.memberName) return null;
+    const colorName = getMemberColorByName(log.memberName);
+    return getTeamColorSet(colorName).text;
+  }, [log.memberName]);
 
   return (
-    <div className="min-w-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] [overflow:clip]">
+    <div className="min-w-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -531,15 +546,51 @@ const LogCard = ({
             ) : (
               <ChevronRight size={12} className="shrink-0 text-[var(--color-text-muted)]" />
             )}
+            {memberColorCss && (
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: memberColorCss }}
+              />
+            )}
             <div className="min-w-0 flex-1 overflow-hidden">
-              <div className="truncate text-[var(--color-text)]" title={log.description}>
-                {log.description}
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-[var(--color-text)]" title={log.description}>
+                  {log.description}
+                </span>
+                {log.kind === 'lead_session' && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className="shrink-0 cursor-help text-[var(--color-text-muted)]"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Info size={11} />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[240px] text-center">
+                      Full team lead session logs — useful for global orchestration context, not
+                      specific to this agent
+                    </TooltipContent>
+                  </Tooltip>
+                )}
               </div>
               <div className="mt-0.5 flex items-center gap-3 text-[10px] text-[var(--color-text-muted)]">
-                <span className="flex items-center gap-1">
-                  <Clock size={10} />
-                  {timeAgo}
-                </span>
+                {updatedAgo && updatedAgo !== createdAgo ? (
+                  <>
+                    <span className="flex items-center gap-1">
+                      <Clock size={10} />
+                      {updatedAgo}
+                    </span>
+                    <span style={{ opacity: 0.4 }}>
+                      started {createdAgo}
+                    </span>
+                  </>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <Clock size={10} />
+                    {createdAgo}
+                  </span>
+                )}
                 {log.durationMs > 0 && <span>{formatDuration(log.durationMs)}</span>}
                 <span className="flex items-center gap-1">
                   <MessageSquare size={10} />
@@ -549,6 +600,11 @@ const LogCard = ({
                   <span className="rounded-full bg-green-500/20 px-1.5 text-green-400">active</span>
                 )}
               </div>
+              {log.lastOutputPreview && !expanded && (
+                <div className="mt-1 truncate text-[10px] text-[var(--color-text-muted)]" style={{ opacity: 0.6 }}>
+                  {log.lastOutputPreview}
+                </div>
+              )}
             </div>
           </button>
         </TooltipTrigger>

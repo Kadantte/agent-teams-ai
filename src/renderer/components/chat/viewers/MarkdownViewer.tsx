@@ -88,6 +88,49 @@ function allowCustomProtocols(url: string): string {
   return defaultUrlTransform(url);
 }
 
+/**
+ * Set of standard HTML element tag names.
+ * Used to filter out non-HTML XML-like tags (e.g. `<your-name>`, `<info_for_agent>`)
+ * that appear in agent messages and cause React "unrecognized tag" warnings.
+ */
+const STANDARD_HTML_TAGS = new Set([
+  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio',
+  'b', 'base', 'bdi', 'bdo', 'blockquote', 'body', 'br', 'button',
+  'canvas', 'caption', 'cite', 'code', 'col', 'colgroup',
+  'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt',
+  'em', 'embed',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html',
+  'i', 'iframe', 'img', 'input', 'ins',
+  'kbd',
+  'label', 'legend', 'li', 'link',
+  'main', 'map', 'mark', 'menu', 'meta', 'meter',
+  'nav', 'noscript',
+  'object', 'ol', 'optgroup', 'option', 'output',
+  'p', 'picture', 'pre', 'progress',
+  'q',
+  'rp', 'rt', 'ruby',
+  's', 'samp', 'script', 'search', 'section', 'select', 'slot', 'small', 'source', 'span',
+  'strong', 'style', 'sub', 'summary', 'sup',
+  'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track',
+  'u', 'ul',
+  'var', 'video',
+  'wbr',
+  // SVG elements commonly used inline
+  'svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'g', 'defs', 'use',
+  'text', 'tspan', 'clippath', 'mask', 'pattern', 'image', 'foreignobject',
+]);
+
+/**
+ * Filter for react-markdown's `allowElement` prop.
+ * Returns false for non-standard HTML tags (e.g. `<your-name>`, `<info_for_agent>`),
+ * which causes react-markdown to render their text content instead of the element.
+ * This prevents React "unrecognized tag" warnings from XML-like tags in agent messages.
+ */
+function isAllowedElement(element: { tagName: string }): boolean {
+  return STANDARD_HTML_TAGS.has(element.tagName.toLowerCase());
+}
+
 /** Resolve a relative path to an absolute path given a base directory */
 function resolveRelativePath(relativeSrc: string, baseDir: string): string {
   const cleaned = relativeSrc.startsWith('./') ? relativeSrc.slice(2) : relativeSrc;
@@ -768,6 +811,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
             rehypePlugins={disableHighlight ? REHYPE_PLUGINS_NO_HIGHLIGHT : REHYPE_PLUGINS}
             components={components}
             urlTransform={allowCustomProtocols}
+            allowElement={isAllowedElement}
           >
             {content}
           </ReactMarkdown>

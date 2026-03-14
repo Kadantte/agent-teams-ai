@@ -703,7 +703,7 @@ export const TaskDetailDialog = ({
           ) : null}
 
           {/* Sections container with uniform spacing */}
-          <div className="space-y-1">
+          <div className="min-w-0 space-y-1">
             {/* Description */}
             <CollapsibleTeamSection
               title="Description"
@@ -985,7 +985,7 @@ export const TaskDetailDialog = ({
                     </span>
                   ) : null
                 }
-                contentClassName="pl-2.5"
+                contentClassName="pl-2.5 overflow-visible"
                 headerClassName="-mx-6 w-[calc(100%+3rem)]"
                 headerContentClassName="pl-6"
                 defaultOpen={false}
