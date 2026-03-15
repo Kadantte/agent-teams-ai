@@ -65,10 +65,6 @@ function filterChunksByWorkIntervals(
       return cs <= end && ce >= i.startMs;
     });
   });
-  // DEBUG
-  console.log(
-    `[filterChunks] intervals=${parsed.length} chunks=${chunks.length}→${filtered.length}`
-  );
   return filtered;
 }
 
@@ -111,12 +107,6 @@ export const MemberLogsTab = ({
   showLeadPreview = false,
   onPreviewOnlineChange,
 }: MemberLogsTabProps): React.JSX.Element => {
-  // DEBUG: verify workIntervals reach this component
-  if (taskId && taskWorkIntervals) {
-    console.log(
-      `[MemberLogsTab] taskId=${taskId} workIntervals=${JSON.stringify(taskWorkIntervals)}`
-    );
-  }
   const MIN_REFRESH_VISIBLE_MS = 250;
   const intervalsKey = useMemo(
     () => (taskWorkIntervals ? JSON.stringify(taskWorkIntervals) : ''),
@@ -198,21 +188,52 @@ export const MemberLogsTab = ({
       if (!Number.isFinite(startMs)) return Number.NaN;
       const durationMs = Number.isFinite(log.durationMs) ? Math.max(0, log.durationMs) : 0;
       const endMs = startMs + durationMs;
-      // Keep actively-updating logs at the top even if duration lags slightly.
       return log.isOngoing ? Math.max(endMs, nowMs) : endMs;
     };
 
-    const withIndex = logs.map((log, index) => ({ log, index }));
+    // When viewing a task with workIntervals, sort by overlap (most relevant first).
+    // Fallback to endMs (most recent activity) when no intervals available.
+    const getOverlapMs = (log: MemberLogSummary): number => {
+      if (!taskWorkIntervals || taskWorkIntervals.length === 0) return 0;
+      const logStartMs = new Date(log.startTime).getTime();
+      if (!Number.isFinite(logStartMs)) return 0;
+      const logDurationMs = Number.isFinite(log.durationMs) ? Math.max(0, log.durationMs) : 0;
+      const logEndMs = log.isOngoing ? nowMs : logStartMs + logDurationMs;
+
+      let totalOverlap = 0;
+      for (const interval of taskWorkIntervals) {
+        const intStart = Date.parse(interval.startedAt);
+        if (!Number.isFinite(intStart)) continue;
+        const intEnd =
+          typeof interval.completedAt === 'string' ? Date.parse(interval.completedAt) : nowMs;
+        if (!Number.isFinite(intEnd)) continue;
+        const overlapStart = Math.max(logStartMs, intStart);
+        const overlapEnd = Math.min(logEndMs, intEnd);
+        if (overlapEnd > overlapStart) totalOverlap += overlapEnd - overlapStart;
+      }
+      return totalOverlap;
+    };
+
+    const withIndex = logs.map((log, index) => ({
+      log,
+      index,
+      overlap: getOverlapMs(log),
+      lastActivity: getLastActivityMs(log),
+    }));
+
     withIndex.sort((a, b) => {
-      const aTime = getLastActivityMs(a.log);
-      const bTime = getLastActivityMs(b.log);
+      // Primary: overlap with task workIntervals (more overlap = higher)
+      if (a.overlap !== b.overlap) return b.overlap - a.overlap;
+      // Secondary: last activity (most recent first)
+      const aTime = a.lastActivity;
+      const bTime = b.lastActivity;
       if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return bTime - aTime;
       if (Number.isFinite(aTime) && !Number.isFinite(bTime)) return -1;
       if (!Number.isFinite(aTime) && Number.isFinite(bTime)) return 1;
       return a.index - b.index;
     });
     return withIndex.map((x) => x.log);
-  }, [logs]);
+  }, [logs, taskWorkIntervals]);
 
   const shouldShowPreview = useMemo(() => {
     return taskId != null && (showSubagentPreview || showLeadPreview);

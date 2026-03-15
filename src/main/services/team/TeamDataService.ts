@@ -1891,7 +1891,7 @@ export class TeamDataService {
         const { leadSessionId } = await this.resolveLeadRuntimeContext(teamName);
         controller.review.approveReview(taskId, {
           from: 'user',
-          note: 'Approved from kanban',
+          suppressTaskComment: true,
           'notify-owner': true,
           ...(leadSessionId ? { leadSessionId } : {}),
         });

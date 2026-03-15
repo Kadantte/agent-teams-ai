@@ -183,6 +183,7 @@ function extractNotificationContent(text: string): { summary: string; body: stri
 }
 
 async function notifyNewInboxMessages(teamName: string, detail: string): Promise<void> {
+  logger.debug(`[inbox-notify] called: team=${teamName} detail=${detail}`);
   const config = configManager.getConfig();
 
   // Skip orphaned team directories without config.json (e.g., "default").
@@ -191,6 +192,7 @@ async function notifyNewInboxMessages(teamName: string, detail: string): Promise
   // correct team name via sentMessages.json, so inbox notifications from orphaned dirs
   // would be duplicates with a wrong team name.
   if (!existsSync(join(getTeamsBasePath(), teamName, 'config.json'))) {
+    logger.debug(`[inbox-notify] skipped: no config.json for team=${teamName}`);
     return; // No config.json → orphaned team dir, skip notification
   }
 
@@ -221,6 +223,7 @@ async function notifyNewInboxMessages(teamName: string, detail: string): Promise
 
     if (isFirstLoad) {
       // First load — seed count, don't notify for pre-existing messages
+      logger.debug(`[inbox-notify] first load for ${key}: seeding count=${messages.length}`);
       inboxMessageCounts.set(key, messages.length);
       return;
     }
@@ -233,6 +236,10 @@ async function notifyNewInboxMessages(teamName: string, detail: string): Promise
     // Messages are sorted newest-first, so new ones are at the beginning
     const newMessages = messages.slice(0, messages.length - prevCount);
     inboxMessageCounts.set(key, messages.length);
+
+    logger.debug(
+      `[inbox-notify] ${key}: prevCount=${prevCount} newCount=${messages.length} newMessages=${newMessages.length} suppressToast=${String(suppressToast)}`
+    );
 
     const teamDisplayName = await resolveTeamDisplayName(teamName);
 
@@ -729,9 +736,11 @@ function initializeServices(): void {
   // Fire-and-forget: initializeServices() is sync, cannot await.
   // Safe because TeamBackupService.initialized flag blocks all backup/restore
   // operations until initialize() completes internally (restore → prune → set flag).
-  void teamBackupService.initialize().catch((error: unknown) =>
-    logger.warn(`[Init] TeamBackupService init failed: ${String(error)}`)
-  );
+  void teamBackupService
+    .initialize()
+    .catch((error: unknown) =>
+      logger.warn(`[Init] TeamBackupService init failed: ${String(error)}`)
+    );
 
   // Cross-team communication service
   const crossTeamConfigReader = new TeamConfigReader();

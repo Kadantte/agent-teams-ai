@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-import type { RefObject } from 'react';
-
 /** Data attribute name used to store arbitrary string data on observed elements. */
 const DATA_ATTR = 'data-viewport-value';
 
 interface UseViewportObserverOptions {
   /**
-   * Scrollable ancestor element used as IntersectionObserver root.
-   * Required for elements inside Dialog portals where the default
-   * document viewport root would not detect intersections correctly.
+   * Scrollable ancestor DOM element used as IntersectionObserver root.
+   * Pass the actual element (not a RefObject) so that the hook can
+   * react to the element becoming available (e.g. after a Dialog portal mounts).
+   *
+   * Use a callback-ref + useState pattern in the consumer:
+   *   const [rootEl, setRootEl] = useState<HTMLElement | null>(null);
+   *   <DialogContent ref={setRootEl}>
+   *   useViewportObserver({ root: rootEl, ... })
    */
-  rootRef?: RefObject<HTMLElement | null>;
+  root?: HTMLElement | null;
   /** Visibility ratio threshold (0..1). Default: 0.1 (10% visible). */
   threshold?: number;
   /**
@@ -26,17 +29,21 @@ interface UseViewportObserverOptions {
  * scrollable container using IntersectionObserver.
  *
  * Usage:
- * 1. Call the hook with a root ref and a callback.
+ * 1. Call the hook with a root element and a callback.
  * 2. Attach `registerElement(value)` as a ref callback on each element.
  *    `value` is an arbitrary string stored in a data attribute for identification.
  * 3. The callback fires with the list of currently visible values whenever
  *    the intersection state changes.
  *
+ * Important: pass the root as a plain DOM element (not a RefObject) so the
+ * hook can recreate the observer when the element becomes available.
+ * Use `useState` + callback ref in the consumer for this.
+ *
  * The hook manages a single IntersectionObserver instance and handles
  * element registration/deregistration automatically.
  */
 export function useViewportObserver({
-  rootRef,
+  root,
   threshold = 0.1,
   onVisibleChange,
 }: UseViewportObserverOptions): {
@@ -50,9 +57,15 @@ export function useViewportObserver({
   const visibleValuesRef = useRef<Set<string>>(new Set());
   const elementsByValue = useRef<Map<string, HTMLElement>>(new Map());
 
-  // Create / recreate observer when root or threshold changes.
+  // Create / recreate observer when root element or threshold changes.
+  // root is a plain DOM element (not a RefObject), so when the consumer
+  // updates state (e.g. Dialog portal mounts), this effect re-runs and
+  // creates an IO with the correct root.
   useEffect(() => {
-    const root = rootRef?.current ?? null;
+    // When root is not yet available (e.g. portal not mounted), skip
+    // creating the observer — it would default to document viewport
+    // and produce false positives for all visible elements.
+    if (!root) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -94,7 +107,7 @@ export function useViewportObserver({
       observerRef.current = null;
       visibleValuesRef.current.clear();
     };
-  }, [rootRef, threshold]);
+  }, [root, threshold]);
 
   const registerElement = useCallback((value: string) => {
     return (el: HTMLElement | null) => {

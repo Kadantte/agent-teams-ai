@@ -566,7 +566,7 @@ describe('TeamDataService', () => {
     });
     expect(approveReviewMock).toHaveBeenCalledWith('task-1', {
       from: 'user',
-      note: 'Approved from kanban',
+      suppressTaskComment: true,
       'notify-owner': true,
       leadSessionId: 'lead-2',
     });

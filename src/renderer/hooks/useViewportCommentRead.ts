@@ -4,17 +4,17 @@ import { markCommentsRead } from '@renderer/services/commentReadStorage';
 
 import { useViewportObserver } from './useViewportObserver';
 
-import type { RefObject } from 'react';
-
 interface UseViewportCommentReadOptions {
   teamName: string;
   taskId: string;
   /**
-   * Scrollable ancestor element (e.g. DialogContent) used as IO root.
-   * Required for portalled Dialogs where the default viewport root
-   * would not detect intersections correctly.
+   * Scrollable ancestor DOM element (e.g. DialogContent) used as IO root.
+   * Pass the actual element (not a RefObject) so that the observer is
+   * recreated when the portal mounts. Use useState + callback ref:
+   *   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+   *   <DialogContent ref={setRootEl}>
    */
-  scrollContainerRef: RefObject<HTMLElement | null>;
+  scrollContainer: HTMLElement | null;
 }
 
 /**
@@ -34,7 +34,7 @@ interface UseViewportCommentReadOptions {
 export function useViewportCommentRead({
   teamName,
   taskId,
-  scrollContainerRef,
+  scrollContainer,
 }: UseViewportCommentReadOptions): {
   /** Ref callback factory. Call with the comment's unique ID. */
   registerComment: (commentId: string) => (el: HTMLElement | null) => void;
@@ -78,7 +78,7 @@ export function useViewportCommentRead({
   );
 
   const { registerElement } = useViewportObserver({
-    rootRef: scrollContainerRef,
+    root: scrollContainer,
     threshold: 0.1,
     onVisibleChange: handleVisibleChange,
   });

@@ -109,6 +109,7 @@ function approveReview(context, taskId, flags = {}) {
   const from =
     typeof flags.from === 'string' && flags.from.trim() ? flags.from.trim() : 'team-lead';
   const note = typeof flags.note === 'string' && flags.note.trim() ? flags.note.trim() : 'Approved';
+  const suppressTaskComment = flags.suppressTaskComment === true;
   const leadSessionId = resolveLeadSessionId(context, flags);
   const prevReviewState = getCurrentReviewState(task);
 
@@ -127,12 +128,14 @@ function approveReview(context, taskId, flags = {}) {
     return t;
   });
 
-  tasks.addTaskComment(context, task.id, {
-    text: note,
-    from,
-    type: 'review_approved',
-    notifyOwner: false,
-  });
+  if (!suppressTaskComment) {
+    tasks.addTaskComment(context, task.id, {
+      text: note,
+      from,
+      type: 'review_approved',
+      notifyOwner: false,
+    });
+  }
 
   if ((flags.notify === true || flags['notify-owner'] === true) && task.owner) {
     messages.sendMessage(context, {

@@ -224,8 +224,11 @@ export const TaskDetailDialog = ({
     lightboxOpenRef.current = isOpen;
   }, []);
 
-  // Ref for the scrollable DialogContent — needed as IO root for viewport-based read tracking.
-  const dialogContentRef = useRef<HTMLDivElement | null>(null);
+  // Callback-ref + useState for the scrollable DialogContent — needed as IO root
+  // for viewport-based read tracking. Using useState (not useRef) ensures that
+  // useViewportObserver recreates the IntersectionObserver when the portal mounts
+  // and the DOM element becomes available.
+  const [dialogContentEl, setDialogContentEl] = useState<HTMLDivElement | null>(null);
   const handleReply = useCallback(
     (author: string, text: string) => {
       if (currentTask) setReplyTo({ taskId: currentTask.id, author, text });
@@ -269,7 +272,7 @@ export const TaskDetailDialog = ({
   const { registerComment, flush: flushCommentRead } = useViewportCommentRead({
     teamName,
     taskId: currentTask?.id ?? '',
-    scrollContainerRef: dialogContentRef,
+    scrollContainer: dialogContentEl,
   });
 
   const handleClose = useCallback(() => {
@@ -525,7 +528,7 @@ export const TaskDetailDialog = ({
       }}
     >
       <DialogContent
-        ref={dialogContentRef}
+        ref={setDialogContentEl}
         className="sm:min-w-[500px] sm:max-w-4xl"
         onInteractOutside={(e) => {
           if (lightboxOpenRef.current) e.preventDefault();
