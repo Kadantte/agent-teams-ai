@@ -1,4 +1,5 @@
-import { useStore } from '@renderer/store';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 
 import { MemberCard } from './MemberCard';
@@ -45,8 +46,26 @@ export const MemberList = ({
   onAssignTask,
   onOpenTask,
 }: MemberListProps): React.JSX.Element => {
-  const sidebarCollapsed = useStore((s) => s.sidebarCollapsed);
-  const gridClass = sidebarCollapsed ? 'grid grid-cols-2 gap-1' : 'grid grid-cols-1 gap-1';
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isWide, setIsWide] = useState(false);
+
+  const handleResize = useCallback((entries: ResizeObserverEntry[]) => {
+    const entry = entries[0];
+    if (entry) {
+      setIsWide(entry.contentRect.width > 1000);
+    }
+  }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(handleResize);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [handleResize]);
+
+  const gridClass = isWide ? 'grid grid-cols-2 gap-1' : 'grid grid-cols-1 gap-1';
   const activeMembers = members
     .filter((m) => !m.removedAt)
     .sort((a, b) => {
@@ -106,7 +125,7 @@ export const MemberList = ({
   };
 
   return (
-    <div className="flex flex-col gap-1">
+    <div ref={containerRef} className="flex flex-col gap-1">
       <div className={gridClass}>{activeMembers.map((member) => renderCard(member, false))}</div>
       {removedMembers.length > 0 && (
         <>

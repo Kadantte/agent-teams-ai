@@ -24,18 +24,23 @@ import {
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
+import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useStore } from '@renderer/store';
 import { chipToken, serializeChipsWithText } from '@renderer/types/inlineChip';
 import { removeChipTokenFromText } from '@renderer/utils/chipUtils';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
+import {
+  extractTaskRefsFromText,
+  stripEncodedTaskReferenceMetadata,
+} from '@renderer/utils/taskReferenceUtils';
 import { getTaskKanbanColumn } from '@shared/utils/reviewState';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import { AlertTriangle, Search } from 'lucide-react';
 
 import type { InlineChip } from '@renderer/types/inlineChip';
 import type { MentionSuggestion } from '@renderer/types/mention';
-import type { ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
+import type { ResolvedTeamMember, TaskRef, TeamTaskWithKanban } from '@shared/types';
 
 interface CreateTaskDialogProps {
   open: boolean;
@@ -56,7 +61,9 @@ interface CreateTaskDialogProps {
     blockedBy?: string[],
     related?: string[],
     prompt?: string,
-    startImmediately?: boolean
+    startImmediately?: boolean,
+    descriptionTaskRefs?: TaskRef[],
+    promptTaskRefs?: TaskRef[]
   ) => void;
   submitting?: boolean;
 }
@@ -78,6 +85,7 @@ export const CreateTaskDialog = ({
 }: CreateTaskDialogProps): React.JSX.Element => {
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
   const projectPath = useStore((s) => s.selectedTeamData?.config.projectPath ?? null);
+  const { suggestions: taskSuggestions } = useTaskSuggestions(teamName);
   const [subject, setSubject] = useState(defaultSubject);
   const descriptionDraft = useDraftPersistence({
     key: `createTask:${teamName}:description`,
@@ -172,18 +180,23 @@ export const CreateTaskDialog = ({
 
   const handleSubmit = (): void => {
     if (!canSubmit) return;
-    const serializedDesc = serializeChipsWithText(
-      descriptionDraft.value.trim(),
-      descChipDraft.chips
-    );
+    const trimmedDescription = stripEncodedTaskReferenceMetadata(descriptionDraft.value.trim());
+    const trimmedPrompt = stripEncodedTaskReferenceMetadata(promptDraft.value.trim());
+    const serializedDesc = serializeChipsWithText(trimmedDescription, descChipDraft.chips);
+    const descriptionTaskRefs = extractTaskRefsFromText(descriptionDraft.value, taskSuggestions);
+    const promptTaskRefs = trimmedPrompt
+      ? extractTaskRefsFromText(promptDraft.value, taskSuggestions)
+      : [];
     onSubmit(
       subject.trim(),
       serializedDesc,
       owner || undefined,
       blockedBy.length > 0 ? blockedBy : undefined,
       related.length > 0 ? related : undefined,
-      promptDraft.value.trim() || undefined,
-      startImmediately
+      trimmedPrompt || undefined,
+      startImmediately,
+      descriptionTaskRefs,
+      promptTaskRefs
     );
     descriptionDraft.clearDraft();
     descChipDraft.clearChipDraft();
@@ -291,6 +304,7 @@ export const CreateTaskDialog = ({
               value={descriptionDraft.value}
               onValueChange={descriptionDraft.setValue}
               suggestions={mentionSuggestions}
+              taskSuggestions={taskSuggestions}
               chips={descChipDraft.chips}
               onChipRemove={handleDescChipRemove}
               projectPath={projectPath}
@@ -299,7 +313,7 @@ export const CreateTaskDialog = ({
               maxRows={12}
               footerRight={
                 descriptionDraft.isSaved ? (
-                  <span className="text-[10px] text-[var(--color-text-muted)]">Draft saved</span>
+                  <span className="text-[10px] text-[var(--color-text-muted)]">Saved</span>
                 ) : null
               }
             />
@@ -315,12 +329,13 @@ export const CreateTaskDialog = ({
               value={promptDraft.value}
               onValueChange={promptDraft.setValue}
               suggestions={mentionSuggestions}
+              taskSuggestions={taskSuggestions}
               projectPath={projectPath}
               minRows={3}
               maxRows={12}
               footerRight={
                 promptDraft.isSaved ? (
-                  <span className="text-[10px] text-[var(--color-text-muted)]">Draft saved</span>
+                  <span className="text-[10px] text-[var(--color-text-muted)]">Saved</span>
                 ) : null
               }
             />

@@ -155,7 +155,10 @@ function attachAliveRun(
   });
   const writable = opts?.writable ?? true;
 
-  (service as unknown as { activeByTeam: Map<string, string> }).activeByTeam.set(teamName, runId);
+  (service as unknown as { aliveRunByTeam: Map<string, string> }).aliveRunByTeam.set(
+    teamName,
+    runId
+  );
   (service as unknown as { runs: Map<string, unknown> }).runs.set(runId, {
     runId,
     teamName,
@@ -232,6 +235,41 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     expect(payload).toContain('"type":"user"');
     expect(payload).toContain('Please assign this to Alice.');
     expect(service.getLiveLeadProcessMessages(teamName)).toHaveLength(1);
+  });
+
+  it('adds task-first reply guidance for task comment notifications in lead relay prompts', async () => {
+    const service = new TeamProvisioningService();
+    const teamName = 'my-team';
+    seedConfig(teamName);
+    seedLeadInbox(teamName, [
+      {
+        from: 'alice',
+        text: 'Automated task comment notification from @alice on #abcd1234 "Investigate":\n\n> Root cause found.',
+        timestamp: '2026-02-23T10:00:00.000Z',
+        read: false,
+        summary: 'Comment on #abcd1234',
+        source: 'system_notification',
+        messageId: 'm-comment-1',
+      },
+    ]);
+
+    const { writeSpy } = attachAliveRun(service, teamName);
+    const relayPromise = service.relayLeadInboxMessages(teamName);
+    const run = await waitForCapture(service);
+    expect(run?.leadRelayCapture).toBeTruthy();
+
+    const payload = String(writeSpy.mock.calls[0]?.[0] ?? '');
+    expect(payload).toContain('Source: system_notification');
+    expect(payload).toContain('summary looks like \\"Comment on #...\\"');
+    expect(payload).toContain('Prefer replying on the task via task_add_comment');
+
+    (service as any).handleStreamJsonMessage(run, {
+      type: 'assistant',
+      content: [{ type: 'text', text: 'Will reply on the task.' }],
+    });
+    (service as any).handleStreamJsonMessage(run, { type: 'result', subtype: 'success' });
+
+    await relayPromise;
   });
 
   it('dedups by messageId even if markRead fails', async () => {
@@ -355,7 +393,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     expect(service.resolveCrossTeamReplyMetadata(teamName, 'other-team')).toBeNull();
   });
 
-  it('does not custom-relay incoming cross-team lead inbox messages', async () => {
+  it('includes explicit cross-team reply instructions in lead relay prompts', async () => {
     const service = new TeamProvisioningService();
     const teamName = 'my-team';
     seedConfig(teamName);
@@ -373,17 +411,24 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     ]);
 
     const { writeSpy } = attachAliveRun(service, teamName);
-    const relayed = await service.relayLeadInboxMessages(teamName);
+    const relayPromise = service.relayLeadInboxMessages(teamName);
+    const run = await waitForCapture(service);
+    expect(run?.leadRelayCapture).toBeTruthy();
 
-    expect(relayed).toBe(0);
-    expect(writeSpy).toHaveBeenCalledTimes(0);
+    const payload = String(writeSpy.mock.calls[0]?.[0] ?? '');
+    expect(payload).toContain('Source: cross_team');
+    expect(payload).toContain('Cross-team conversationId: conv-explicit');
+    expect(payload).toContain('Call the MCP tool named cross_team_send with toTeam=\\"other-team\\"');
+    expect(payload).toContain('replyToConversationId=\\"conv-explicit\\"');
+    expect(payload).toContain('NEVER set recipient/to to \\"cross_team_send\\"');
 
-    const updatedInbox = JSON.parse(
-      hoisted.files.get(`/mock/teams/${teamName}/inboxes/team-lead.json`) ?? '[]'
-    ) as Array<{ messageId?: string; read?: boolean }>;
-    expect(updatedInbox).toHaveLength(1);
-    expect(updatedInbox[0]?.messageId).toBe('m-cross-team-explicit');
-    expect(updatedInbox[0]?.read).toBe(false);
+    (service as any).handleStreamJsonMessage(run, {
+      type: 'assistant',
+      content: [{ type: 'text', text: 'Replying properly.' }],
+    });
+    (service as any).handleStreamJsonMessage(run, { type: 'result', subtype: 'success' });
+
+    await relayPromise;
   });
 
   it('does not relay cross-team sender copies back into the live lead', async () => {
@@ -482,7 +527,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     expect(writeSpy).toHaveBeenCalledTimes(0);
   });
 
-  it('leaves later cross-team follow-up messages for the native teammate-message path', async () => {
+  it('relays later follow-up messages after the first reply in a conversation was already received', async () => {
     const service = new TeamProvisioningService();
     const teamName = 'my-team';
     seedConfig(teamName);
@@ -522,17 +567,18 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     ]);
 
     const { writeSpy } = attachAliveRun(service, teamName);
-    const relayed = await service.relayLeadInboxMessages(teamName);
+    const relayPromise = service.relayLeadInboxMessages(teamName);
+    const run = await waitForCapture(service);
+    expect(run?.leadRelayCapture).toBeTruthy();
+    (service as any).handleStreamJsonMessage(run, {
+      type: 'assistant',
+      content: [{ type: 'text', text: 'I will answer the follow-up.' }],
+    });
+    (service as any).handleStreamJsonMessage(run, { type: 'result', subtype: 'success' });
 
-    expect(relayed).toBe(0);
-    expect(writeSpy).toHaveBeenCalledTimes(0);
-
-    const updatedInbox = JSON.parse(
-      hoisted.files.get(`/mock/teams/${teamName}/inboxes/team-lead.json`) ?? '[]'
-    ) as Array<{ messageId?: string; read?: boolean }>;
-    expect(updatedInbox).toHaveLength(3);
-    expect(updatedInbox[2]?.messageId).toBe('m-cross-team-followup');
-    expect(updatedInbox[2]?.read).toBe(false);
+    const relayed = await relayPromise;
+    expect(relayed).toBe(1);
+    expect(writeSpy).toHaveBeenCalledTimes(1);
   });
 
   it('relays unread teammate inbox messages through the live team process', async () => {

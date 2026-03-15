@@ -15,6 +15,10 @@ import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors'
 import { useBranchSync } from '@renderer/hooks/useBranchSync';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
+import {
+  getCurrentProvisioningProgressForTeam,
+  isTeamProvisioningActive,
+} from '@renderer/store/slices/teamSlice';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
 import { getBaseName } from '@renderer/utils/pathUtils';
@@ -39,12 +43,7 @@ import { EMPTY_TEAM_FILTER, TeamListFilterPopover } from './TeamListFilterPopove
 
 import type { ActiveTeamRef, TeamCopyData } from './dialogs/CreateTeamDialog';
 import type { TeamListFilterState } from './TeamListFilterPopover';
-import type {
-  TeamCreateRequest,
-  TeamProvisioningProgress,
-  TeamSummary,
-  TeamSummaryMember,
-} from '@shared/types';
+import type { TeamCreateRequest, TeamSummary, TeamSummaryMember } from '@shared/types';
 
 function generateUniqueName(sourceName: string, existingNames: string[]): string {
   const base = sourceName.replace(/-\d+$/, '');
@@ -129,17 +128,17 @@ function renderTeamRecentPaths(team: TeamSummary, status: TeamStatus): React.JSX
 function resolveTeamStatus(
   teamName: string,
   aliveTeams: string[],
-  provisioningRuns: Record<string, TeamProvisioningProgress>,
+  currentProgress: ReturnType<typeof getCurrentProvisioningProgressForTeam>,
   leadActivityByTeam: Record<string, string>
 ): TeamStatus {
   if (aliveTeams.includes(teamName)) {
     return leadActivityByTeam[teamName] === 'active' ? 'active' : 'idle';
   }
-  const activeStates = new Set(['validating', 'spawning', 'monitoring', 'verifying']);
-  for (const run of Object.values(provisioningRuns)) {
-    if (run.teamName === teamName && activeStates.has(run.state)) {
-      return 'provisioning';
-    }
+  if (
+    currentProgress &&
+    ['validating', 'spawning', 'monitoring', 'verifying'].includes(currentProgress.state)
+  ) {
+    return 'provisioning';
   }
   return 'offline';
 }
@@ -223,21 +222,47 @@ export const TeamListView = (): React.JSX.Element => {
   const {
     connectionMode,
     createTeam,
-    provisioningError,
+    launchTeam,
+    provisioningErrorByTeam,
     clearProvisioningError,
     provisioningRuns,
+    provisioningSnapshotByTeam,
+    currentProvisioningRunIdByTeam,
     leadActivityByTeam,
   } = useStore(
     useShallow((s) => ({
       connectionMode: s.connectionMode,
       createTeam: s.createTeam,
-      provisioningError: s.provisioningError,
+      launchTeam: s.launchTeam,
+      provisioningErrorByTeam: s.provisioningErrorByTeam,
       clearProvisioningError: s.clearProvisioningError,
       provisioningRuns: s.provisioningRuns,
+      provisioningSnapshotByTeam: s.provisioningSnapshotByTeam,
+      currentProvisioningRunIdByTeam: s.currentProvisioningRunIdByTeam,
       leadActivityByTeam: s.leadActivityByTeam,
     }))
   );
   const canCreate = electronMode && connectionMode === 'local';
+  const provisioningState = useMemo(
+    () => ({ currentProvisioningRunIdByTeam, provisioningRuns }),
+    [currentProvisioningRunIdByTeam, provisioningRuns]
+  );
+
+  /** Team names currently in active provisioning — prevents name conflicts in create dialog. */
+  const provisioningTeamNames = useMemo(() => {
+    return Object.keys(currentProvisioningRunIdByTeam).filter((teamName) =>
+      isTeamProvisioningActive(provisioningState, teamName)
+    );
+  }, [currentProvisioningRunIdByTeam, provisioningState]);
+
+  /** Merge real teams with synthetic launching cards for active provisioning. */
+  const teamsWithProvisioning = useMemo(() => {
+    const existingNames = new Set(teams.map((t) => t.teamName));
+    const synthetic = provisioningTeamNames
+      .filter((name) => !existingNames.has(name) && provisioningSnapshotByTeam[name])
+      .map((name) => provisioningSnapshotByTeam[name]);
+    return synthetic.length > 0 ? [...teams, ...synthetic] : teams;
+  }, [teams, provisioningTeamNames, provisioningSnapshotByTeam]);
 
   // Fetch alive teams on mount and when teams list changes
   useEffect(() => {
@@ -291,7 +316,7 @@ export const TeamListView = (): React.JSX.Element => {
   ]);
 
   const filteredTeams = useMemo<TeamSummary[]>(() => {
-    let result = teams;
+    let result = teamsWithProvisioning;
 
     const q = searchQuery.trim().toLowerCase();
     if (q) {
@@ -308,7 +333,7 @@ export const TeamListView = (): React.JSX.Element => {
         const status = resolveTeamStatus(
           t.teamName,
           aliveTeams,
-          provisioningRuns,
+          getCurrentProvisioningProgressForTeam(provisioningState, t.teamName),
           leadActivityByTeam
         );
         const isRunning = status !== 'offline';
@@ -352,11 +377,12 @@ export const TeamListView = (): React.JSX.Element => {
 
     return result;
   }, [
-    teams,
+    teamsWithProvisioning,
     searchQuery,
     currentProjectPath,
     aliveTeams,
     filter,
+    currentProvisioningRunIdByTeam,
     provisioningRuns,
     leadActivityByTeam,
   ]);
@@ -478,6 +504,24 @@ export const TeamListView = (): React.JSX.Element => {
     }
   }, []);
 
+  const [launchingTeamName, setLaunchingTeamName] = useState<string | null>(null);
+  const handleLaunchTeam = useCallback(
+    async (teamName: string, projectPath: string | undefined, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!projectPath) return;
+      setLaunchingTeamName(teamName);
+      try {
+        await launchTeam({ teamName, cwd: projectPath });
+        openTeamTab(teamName, projectPath);
+      } catch (err) {
+        console.error('Failed to launch team:', err);
+      } finally {
+        setLaunchingTeamName(null);
+      }
+    },
+    [launchTeam, openTeamTab]
+  );
+
   useEffect(() => {
     if (!electronMode) {
       return;
@@ -530,9 +574,10 @@ export const TeamListView = (): React.JSX.Element => {
     <CreateTeamDialog
       open={showCreateDialog}
       canCreate={canCreate}
-      provisioningError={provisioningError}
+      provisioningErrorsByTeam={provisioningErrorByTeam}
       clearProvisioningError={clearProvisioningError}
       existingTeamNames={teams.map((t) => t.teamName)}
+      provisioningTeamNames={provisioningTeamNames}
       activeTeams={activeTeams}
       initialData={copyData ?? undefined}
       defaultProjectPath={currentProjectPath}
@@ -563,7 +608,7 @@ export const TeamListView = (): React.JSX.Element => {
         </p>
       ) : null}
 
-      {teams.length > 0 ? (
+      {teamsWithProvisioning.length > 0 ? (
         <div className="mt-3 flex items-center gap-2">
           <div className="relative flex-1">
             <Search
@@ -580,7 +625,7 @@ export const TeamListView = (): React.JSX.Element => {
           </div>
           <TeamListFilterPopover
             filter={filter}
-            teams={teams}
+            teams={teamsWithProvisioning}
             aliveTeams={aliveTeams}
             onFilterChange={setFilter}
           />
@@ -619,7 +664,7 @@ export const TeamListView = (): React.JSX.Element => {
       );
     }
 
-    if (teams.length === 0) {
+    if (teamsWithProvisioning.length === 0) {
       return <TeamEmptyState />;
     }
 
@@ -642,7 +687,7 @@ export const TeamListView = (): React.JSX.Element => {
             const status = resolveTeamStatus(
               team.teamName,
               aliveTeams,
-              provisioningRuns,
+              getCurrentProvisioningProgressForTeam(provisioningState, team.teamName),
               leadActivityByTeam
             );
             const teamColorSet = team.color
@@ -695,8 +740,40 @@ export const TeamListView = (): React.JSX.Element => {
                         {team.displayName}
                       </h3>
                       <StatusBadge status={status} />
+                      {team.projectPath &&
+                        (() => {
+                          const branch = branchByPath[normalizePath(team.projectPath)];
+                          if (!branch) return null;
+                          return (
+                            <span
+                              className="flex shrink-0 items-center gap-1 rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                              title={branch}
+                            >
+                              <GitBranch size={10} />
+                              <span className="max-w-24 truncate">{branch}</span>
+                            </span>
+                          );
+                        })()}
                     </div>
                     <div className="flex shrink-0 gap-1">
+                      {status === 'offline' && team.projectPath && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-50 group-hover:opacity-100"
+                              onClick={(e) => handleLaunchTeam(team.teamName, team.projectPath, e)}
+                              disabled={launchingTeamName === team.teamName}
+                              aria-label="Launch team"
+                            >
+                              <Play size={14} fill="currentColor" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">
+                            {launchingTeamName === team.teamName ? 'Launching…' : 'Launch team'}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                       {(status === 'active' || status === 'idle') && (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -745,20 +822,6 @@ export const TeamListView = (): React.JSX.Element => {
                     <p className="line-clamp-2 min-w-0 flex-1 text-xs text-[var(--color-text-muted)]">
                       {team.description || 'No description'}
                     </p>
-                    {team.projectPath &&
-                      (() => {
-                        const branch = branchByPath[normalizePath(team.projectPath)];
-                        if (!branch) return null;
-                        return (
-                          <span
-                            className="flex shrink-0 items-center gap-1 rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
-                            title={branch}
-                          >
-                            <GitBranch size={10} />
-                            <span className="max-w-24 truncate">{branch}</span>
-                          </span>
-                        );
-                      })()}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-1.5">
                     {team.members && team.members.length > 0 ? (

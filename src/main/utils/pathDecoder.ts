@@ -369,12 +369,12 @@ export function getSchedulesBasePath(): string {
   return path.join(getClaudeBasePath(), 'claude-devtools-schedules');
 }
 
+export function getTaskChangeSummariesBasePath(): string {
+  return path.join(getClaudeBasePath(), 'task-change-summaries');
+}
+
 /**
  * Get the backups directory path for the app's own storage.
- * Uses Electron's app.getPath('userData') for cross-platform correctness:
- *   macOS:   ~/Library/Application Support/Claude Agent Teams UI/backups
- *   Linux:   ~/.config/Claude Agent Teams UI/backups
- *   Windows: C:\Users\Name\AppData\Roaming\Claude Agent Teams UI\backups
  */
 export function getBackupsBasePath(): string {
   return path.join(getAppDataBasePath(), 'backups');
