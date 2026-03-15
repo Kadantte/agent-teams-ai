@@ -44,10 +44,11 @@ import {
   displayMemberName,
 } from '@renderer/utils/memberHelpers';
 import { buildTaskChangeRequestOptions, deriveTaskSince } from '@renderer/utils/taskChangeRequest';
+import { linkifyTaskIdsInMarkdown } from '@renderer/utils/taskReferenceUtils';
 import { getTaskKanbanColumn } from '@shared/utils/reviewState';
 import { isTaskChangeSummaryCacheable } from '@shared/utils/taskChangeState';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
-import { formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import {
   AlignLeft,
   ArrowLeftFromLine,
@@ -510,10 +511,14 @@ export const TaskDetailDialog = ({
                 {formatTaskDisplayLabel(currentTask)}
               </Badge>
               {(currentTask.reviewState === 'approved' || currentTask.reviewState === 'review') &&
-              currentTask.reviewer ? (
+              currentTask.reviewer &&
+              currentTask.reviewer !== 'user' ? (
                 (() => {
                   const reviewerColor = colorMap.get(currentTask.reviewer);
-                  const colors = getTeamColorSet(reviewerColor ?? '');
+                  const colors =
+                    currentTask.reviewState === 'review'
+                      ? getTeamColorSet('blue')
+                      : getTeamColorSet(reviewerColor ?? '');
                   const reviewerBadgeStyle = {
                     backgroundColor: getThemedBadge(colors, isLight),
                     color: getThemedText(colors, isLight),
@@ -521,7 +526,21 @@ export const TaskDetailDialog = ({
                     borderRight: `1px solid ${getThemedBorder(colors, isLight)}40`,
                     borderBottom: `1px solid ${getThemedBorder(colors, isLight)}40`,
                   };
-                  return (
+                  const reviewEventType =
+                    currentTask.reviewState === 'approved' ? 'review_approved' : 'review_requested';
+                  const lastReviewEvent = currentTask.historyEvents
+                    ?.filter((e) => e.type === reviewEventType)
+                    .at(-1);
+                  const reviewDate = lastReviewEvent
+                    ? new Date(lastReviewEvent.timestamp)
+                    : undefined;
+                  const reviewTimeLabel =
+                    reviewDate && !isNaN(reviewDate.getTime())
+                      ? Date.now() - reviewDate.getTime() < 24 * 60 * 60 * 1000
+                        ? formatDistanceToNow(reviewDate, { addSuffix: true })
+                        : format(reviewDate, 'MMM d, yyyy HH:mm')
+                      : undefined;
+                  const badge = (
                     <span className="inline-flex items-stretch">
                       <span
                         className={`inline-flex items-center rounded-l-full px-2 py-0.5 text-[10px] font-medium ${statusStyle.bg} ${statusStyle.text}`}
@@ -541,6 +560,14 @@ export const TaskDetailDialog = ({
                         {displayMemberName(currentTask.reviewer)}
                       </span>
                     </span>
+                  );
+                  return reviewTimeLabel ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+                      <TooltipContent side="bottom">{reviewTimeLabel}</TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    badge
                   );
                 })()
               ) : (
@@ -566,7 +593,10 @@ export const TaskDetailDialog = ({
                   value={subjectDraft}
                   onChange={(e) => setSubjectDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') void saveSubject();
+                    if (e.key === 'Enter') {
+                      e.stopPropagation();
+                      void saveSubject();
+                    }
                     if (e.key === 'Escape') setEditingSubject(false);
                   }}
                   onBlur={() => void saveSubject()}
@@ -796,7 +826,14 @@ export const TaskDetailDialog = ({
               ) : currentTask.description ? (
                 <div className="group relative">
                   <ExpandableContent collapsedHeight={200}>
-                    <MarkdownViewer content={currentTask.description} maxHeight="max-h-none" bare />
+                    <MarkdownViewer
+                      content={linkifyTaskIdsInMarkdown(
+                        currentTask.description,
+                        currentTask.descriptionTaskRefs
+                      )}
+                      maxHeight="max-h-none"
+                      bare
+                    />
                   </ExpandableContent>
                   <Tooltip>
                     <TooltipTrigger asChild>

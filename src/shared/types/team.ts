@@ -399,6 +399,8 @@ export interface TeamLaunchRequest {
   prompt?: string;
   model?: string;
   effort?: EffortLevel;
+  /** When true, context window is limited to 200K tokens instead of the default. */
+  limitContext?: boolean;
   /** When true, skip --resume and start a fresh session (clears context memory). */
   clearContext?: boolean;
   /** When false, run WITHOUT --dangerously-skip-permissions (manual tool approval). Default: true. */
@@ -523,6 +525,8 @@ export interface TeamCreateRequest {
   prompt?: string;
   model?: string;
   effort?: EffortLevel;
+  /** When true, context window is limited to 200K tokens instead of the default. */
+  limitContext?: boolean;
   /** When false, run WITHOUT --dangerously-skip-permissions (manual tool approval). Default: true. */
   skipPermissions?: boolean;
   /** Worktree name — CLI: --worktree <name>. */

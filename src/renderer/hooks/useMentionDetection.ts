@@ -331,6 +331,7 @@ export function useMentionDetection({
         case 'Enter':
           if (!e.shiftKey) {
             e.preventDefault();
+            e.stopPropagation();
             onSelectSuggestion(selectedIndex);
           }
           break;

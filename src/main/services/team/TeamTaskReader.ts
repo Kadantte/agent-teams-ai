@@ -16,11 +16,22 @@ import type {
   TaskRef,
   TaskWorkInterval,
   TeamTask,
-  TeamTaskStatus,
 } from '@shared/types';
 
 const logger = createLogger('Service:TeamTaskReader');
 const MAX_TASK_FILE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Normalise escaped newline sequences (`\\n`) that some MCP/CLI sources
+ * write as literal two-character strings instead of real line-breaks.
+ * Also handles `\\t` for consistency.  Only operates on isolated escape
+ * sequences — already-real newlines are left untouched.
+ */
+function unescapeLiteralNewlines(text: string): string {
+  // Replace literal two-char sequences \n and \t with real control chars.
+  // The regex matches a single backslash followed by 'n' or 't'.
+  return text.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+}
 
 function isValidMimeTypeString(value: unknown): value is string {
   if (typeof value !== 'string') return false;
@@ -170,7 +181,10 @@ export class TeamTaskReader {
                     : ''
                 ),
           subject,
-          description: typeof parsed.description === 'string' ? parsed.description : undefined,
+          description:
+            typeof parsed.description === 'string'
+              ? unescapeLiteralNewlines(parsed.description)
+              : undefined,
           descriptionTaskRefs: normalizeTaskRefs(parsed.descriptionTaskRefs),
           activeForm: typeof parsed.activeForm === 'string' ? parsed.activeForm : undefined,
           prompt: typeof parsed.prompt === 'string' ? parsed.prompt : undefined,
@@ -209,6 +223,7 @@ export class TeamTaskReader {
                 )
                 .map((c) => ({
                   ...c,
+                  text: unescapeLiteralNewlines(c.text),
                   type: (['regular', 'review_request', 'review_approved'] as const).includes(c.type)
                     ? c.type
                     : ('regular' as const),
@@ -369,7 +384,10 @@ export class TeamTaskReader {
                     : ''
                 ),
           subject,
-          description: typeof parsed.description === 'string' ? parsed.description : undefined,
+          description:
+            typeof parsed.description === 'string'
+              ? unescapeLiteralNewlines(parsed.description)
+              : undefined,
           owner: typeof parsed.owner === 'string' ? parsed.owner : undefined,
           status: 'deleted',
           deletedAt: typeof parsed.deletedAt === 'string' ? parsed.deletedAt : undefined,

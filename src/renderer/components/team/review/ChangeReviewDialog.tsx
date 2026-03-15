@@ -229,11 +229,13 @@ export const ChangeReviewDialog = ({
     );
 
     return {
+      totalFilesCount: sortedFiles.length,
+      readyFilesCount: sortedFiles.filter((file) => file.filePath in fileContents).length,
       loadingFilesCount: loadingFiles.length,
       snippetCount,
       activeFileName: preferredFile?.relativePath ?? preferredFile?.filePath,
     };
-  }, [activeFilePath, loadingFiles]);
+  }, [activeFilePath, loadingFiles, sortedFiles, fileContents]);
 
   // File paths for viewed tracking
   const allFilePaths = useMemo(() => sortedFiles.map((f) => f.filePath), [sortedFiles]);

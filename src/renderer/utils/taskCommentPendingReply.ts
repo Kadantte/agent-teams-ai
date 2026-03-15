@@ -21,9 +21,9 @@ const NO_AWAITING: AwaitingReplyResult = {
  * Logic:
  * 1. Find the latest comment authored by "user".
  * 2. Collect the set of expected responders (task owner + task creator), deduplicated.
- * 3. For each responder, check if they posted a comment AFTER the user's latest comment.
+ * 3. If ANY responder posted a comment AFTER the user's latest comment → not awaiting.
  *    Any comment type counts as a response (regular, review_approved, review_request).
- * 4. If at least one responder has NOT replied → isAwaiting = true.
+ * 4. If NO responder has replied → isAwaiting = true, awaitingFrom lists all responders.
  *
  * Edge cases:
  * - No user comments → not awaiting.
@@ -55,24 +55,20 @@ export function computeAwaitingReply(
   }
   if (latestUserCommentMs === 0) return NO_AWAITING;
 
-  // Check which responders have NOT replied after the user's comment
-  const awaitingFrom: string[] = [];
+  // Check if ANY responder has replied after the user's comment.
+  // The indicator hides as soon as at least one responder (owner OR lead) replies.
   for (const responder of responders) {
     const hasReplied = comments.some((c) => {
       if (c.author !== responder) return false;
       const ts = Date.parse(c.createdAt);
       return Number.isFinite(ts) && ts > latestUserCommentMs;
     });
-    if (!hasReplied) {
-      awaitingFrom.push(responder);
-    }
+    if (hasReplied) return NO_AWAITING;
   }
-
-  if (awaitingFrom.length === 0) return NO_AWAITING;
 
   return {
     isAwaiting: true,
-    awaitingFrom,
+    awaitingFrom: Array.from(responders),
     userCommentAtMs: latestUserCommentMs,
   };
 }

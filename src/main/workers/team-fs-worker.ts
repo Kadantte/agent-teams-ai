@@ -38,6 +38,14 @@ function deriveTaskDisplayId(taskId: string): string {
   return UUID_TASK_ID_PATTERN.test(normalized) ? normalized.slice(0, 8).toLowerCase() : normalized;
 }
 
+/**
+ * Normalise escaped newline sequences (`\\n`) that some MCP/CLI sources
+ * write as literal two-character strings instead of real line-breaks.
+ */
+function unescapeLiteralNewlines(text: string): string {
+  return text.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+}
+
 // ---------------------------------------------------------------------------
 // Diagnostic types
 // ---------------------------------------------------------------------------
@@ -549,7 +557,7 @@ function normalizeComments(parsed: ParsedTask): unknown[] | undefined {
     .map((c) => ({
       id: c.id as string,
       author: c.author as string,
-      text: c.text as string,
+      text: unescapeLiteralNewlines(c.text as string),
       createdAt: c.createdAt as string,
       taskRefs: Array.isArray(c.taskRefs) ? c.taskRefs : undefined,
       type:
@@ -651,7 +659,10 @@ async function readTasksDirForTeam(
                   : ''
               ),
         subject,
-        description: typeof parsed.description === 'string' ? parsed.description : undefined,
+        description:
+          typeof parsed.description === 'string'
+            ? unescapeLiteralNewlines(parsed.description)
+            : undefined,
         descriptionTaskRefs: Array.isArray(parsed.descriptionTaskRefs)
           ? (parsed.descriptionTaskRefs as unknown[])
           : undefined,

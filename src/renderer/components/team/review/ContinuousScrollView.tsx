@@ -24,6 +24,8 @@ interface ContinuousScrollViewProps {
   fileContents: Record<string, FileChangeWithContent>;
   fileContentsLoading: Record<string, boolean>;
   globalDiffLoadingState?: {
+    totalFilesCount: number;
+    readyFilesCount: number;
     loadingFilesCount: number;
     snippetCount: number;
     activeFileName?: string;
@@ -242,6 +244,8 @@ export const ContinuousScrollView = ({
     <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
       {globalDiffLoadingState ? (
         <FullDiffLoadingBanner
+          totalFilesCount={globalDiffLoadingState.totalFilesCount}
+          readyFilesCount={globalDiffLoadingState.readyFilesCount}
           loadingFilesCount={globalDiffLoadingState.loadingFilesCount}
           snippetCount={globalDiffLoadingState.snippetCount}
           activeFileName={globalDiffLoadingState.activeFileName}

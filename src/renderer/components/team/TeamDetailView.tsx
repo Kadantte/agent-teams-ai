@@ -44,13 +44,11 @@ import {
   Pencil,
   Play,
   Plus,
-  Search,
   Square,
   Terminal,
   Trash2,
   UserPlus,
   Users,
-  X,
 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -64,6 +62,7 @@ import { SendMessageDialog } from './dialogs/SendMessageDialog';
 import { TaskDetailDialog } from './dialogs/TaskDetailDialog';
 import { KanbanBoard } from './kanban/KanbanBoard';
 import { UNASSIGNED_OWNER } from './kanban/KanbanFilterPopover';
+import { KanbanSearchInput } from './kanban/KanbanSearchInput';
 import { TrashDialog } from './kanban/TrashDialog';
 import { MemberDetailDialog } from './members/MemberDetailDialog';
 
@@ -1432,33 +1431,12 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
               onFilterChange={setKanbanFilter}
               onSortChange={setKanbanSort}
               toolbarLeft={
-                <div className="relative max-w-[240px]">
-                  <Search
-                    size={14}
-                    className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Search tasks… (#id or text)"
-                    value={kanbanSearch}
-                    onChange={(e) => setKanbanSearch(e.target.value)}
-                    className="h-8 w-full min-w-[140px] max-w-[240px] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-8 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-border-emphasis)] focus:outline-none"
-                  />
-                  {kanbanSearch && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                          onClick={() => setKanbanSearch('')}
-                        >
-                          <X size={14} />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Clear search</TooltipContent>
-                    </Tooltip>
-                  )}
-                </div>
+                <KanbanSearchInput
+                  value={kanbanSearch}
+                  onChange={setKanbanSearch}
+                  tasks={filteredTasks}
+                  members={activeMembers}
+                />
               }
               onRequestReview={(taskId) => {
                 void (async () => {

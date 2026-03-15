@@ -3,12 +3,16 @@ import React from 'react';
 import { Clock3, FileDiff, LoaderCircle, Sparkles } from 'lucide-react';
 
 interface FullDiffLoadingBannerProps {
+  totalFilesCount: number;
+  readyFilesCount: number;
   loadingFilesCount: number;
   snippetCount: number;
   activeFileName?: string;
 }
 
 export const FullDiffLoadingBanner = ({
+  totalFilesCount,
+  readyFilesCount,
   loadingFilesCount,
   snippetCount,
   activeFileName,
@@ -21,6 +25,9 @@ export const FullDiffLoadingBanner = ({
         ? `Finalizing the exact editor diff for ${activeFileName}.`
         : 'Finalizing the exact editor diff for the current file.'
       : 'Resolving exact before/after baselines for the files currently loading.';
+  const showFileProgress = totalFilesCount > 1;
+  const progressPercent =
+    totalFilesCount > 0 ? Math.max(0, Math.min(100, (readyFilesCount / totalFilesCount) * 100)) : 0;
 
   return (
     <div className="bg-surface/95 border-b border-border px-4 py-3">
@@ -60,19 +67,32 @@ export const FullDiffLoadingBanner = ({
                 <FileDiff className="size-3.5" strokeWidth={1.8} />
                 {loadingFilesCount} file{loadingFilesCount === 1 ? '' : 's'} in progress
               </span>
+              {showFileProgress ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-sidebar px-2 py-1 text-[11px] text-text-secondary">
+                  <FileDiff className="size-3.5" strokeWidth={1.8} />
+                  {readyFilesCount}/{totalFilesCount} files ready
+                </span>
+              ) : null}
             </div>
           </div>
         </div>
 
         <div className="px-3 pb-3">
-          <div className="h-1.5 overflow-hidden rounded-full bg-surface-sidebar">
+          <div className="h-2 overflow-hidden rounded-full bg-surface-sidebar">
             <div
-              className="h-full w-1/3 rounded-full bg-gradient-to-r from-emerald-400/20 via-emerald-300/80 to-emerald-400/20"
-              style={{ animation: 'full-diff-loader-slide 1.6s ease-in-out infinite' }}
-            />
+              className="relative h-full rounded-full bg-emerald-500/20 transition-[width] duration-500 ease-out"
+              style={{ width: `${showFileProgress ? progressPercent : 100}%` }}
+            >
+              <div
+                className="absolute inset-0 rounded-full bg-gradient-to-r from-emerald-400/20 via-emerald-300/80 to-emerald-400/20"
+                style={{ animation: 'full-diff-loader-slide 1.6s ease-in-out infinite' }}
+              />
+            </div>
           </div>
           <p className="mt-2 text-[11px] text-text-muted">
-            Snippet previews stay visible below while the exact baselines are reconstructed.
+            {showFileProgress
+              ? `${readyFilesCount} ready, ${loadingFilesCount} still loading. Snippet previews stay visible below while the remaining baselines are reconstructed.`
+              : 'Snippet previews stay visible below while the exact baseline is reconstructed.'}
           </p>
         </div>
       </div>

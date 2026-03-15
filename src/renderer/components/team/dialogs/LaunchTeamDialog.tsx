@@ -592,6 +592,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             prompt: promptDraft.value.trim() || undefined,
             model: computeEffectiveTeamModel(selectedModel, limitContext),
             effort: (selectedEffort as EffortLevel) || undefined,
+            limitContext,
             clearContext: clearContext || undefined,
             skipPermissions,
             worktree: worktreeEnabled && worktreeName.trim() ? worktreeName.trim() : undefined,

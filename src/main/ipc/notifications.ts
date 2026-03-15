@@ -194,8 +194,11 @@ async function handleGetUnreadCount(_event: IpcMainInvokeEvent): Promise<number>
  */
 function handleTestNotification(_event: IpcMainInvokeEvent): { success: boolean; error?: string } {
   try {
+    logger.debug('Handling notifications:testNotification request');
     const manager = NotificationManager.getInstance();
-    return manager.sendTestNotification();
+    const result = manager.sendTestNotification();
+    logger.debug(`notifications:testNotification result: success=${String(result.success)}`);
+    return result;
   } catch (error) {
     logger.error('Error in notifications:testNotification:', error);
     return { success: false, error: getErrorMessage(error) };

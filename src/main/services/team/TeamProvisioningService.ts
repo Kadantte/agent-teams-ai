@@ -456,6 +456,7 @@ After member_briefing succeeds:
 - Then wait for task assignments.
 - When you later receive work or reconnect after a restart, use task_briefing as your compact queue view. Use task_get when you need the full task context before starting a pending/needsFix task or when the in_progress briefing details are not enough.
 - If a newly assigned task cannot be started immediately because you are still busy on another task, leave a short task comment on that waiting task right away with the reason and your best ETA, keep it in pending/TODO, and only move it to in_progress with task_start when you truly begin.
+- CRITICAL: If someone comments on your task, you MUST reply on that same task via task_add_comment. Never leave a user/lead/teammate task comment unanswered, even if the reply is only a short acknowledgement or status update. Do NOT treat status changes or direct messages as a substitute for an on-task reply.
 - CRITICAL: If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on that same task, FIRST leave a short task comment saying what you are about to do, THEN move it to in_progress with task_start, THEN do the work, and when finished leave a short result comment and move it to done with task_complete. Never skip this comment -> reopen -> work -> comment -> done cycle.
 - Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.
 - If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.
@@ -490,6 +491,7 @@ ${actionModeProtocol}
      - After that, prioritize tasks marked Needs fixes after review, then normal pending tasks.
      - Before you start any needsFix or pending task, call task_get for that specific task.
      - If a newly assigned needsFix or pending task must wait because you are still finishing another task, leave a short task comment on that waiting task with the reason and your best ETA, keep it in pending/TODO (use task_set_status pending if needed), and only run task_start when you truly begin.
+     - CRITICAL: If someone comments on your task, you MUST reply on that same task via task_add_comment. Never leave a user/lead/teammate task comment unanswered, even if the reply is only a short acknowledgement or status update. Do NOT treat status changes or direct messages as a substitute for an on-task reply.
      - If you are the one about to do the implementation/fixes and the owner is missing or someone else, run task_set_owner to yourself immediately before task_start.
      - Only then run task_start when you truly begin.
      - If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on it, FIRST leave a short task comment saying what you are about to do, THEN run task_start, then do the work, and when finished leave a short result comment and run task_complete again. Never skip this comment -> reopen -> work -> comment -> done cycle.
@@ -531,6 +533,7 @@ ${actionModeProtocol}
      - After that, prioritize tasks marked Needs fixes after review, then normal pending tasks.
      - Before you start any needsFix or pending task, call task_get for that specific task.
      - If a newly assigned needsFix or pending task must wait because you are still finishing another task, leave a short task comment on that waiting task with the reason and your best ETA, keep it in pending/TODO (use task_set_status pending if needed), and only run task_start when you truly begin.
+     - CRITICAL: If someone comments on your task, you MUST reply on that same task via task_add_comment. Never leave a user/lead/teammate task comment unanswered, even if the reply is only a short acknowledgement or status update. Do NOT treat status changes or direct messages as a substitute for an on-task reply.
      - If you are the one about to do the implementation/fixes and the owner is missing or someone else, run task_set_owner to yourself immediately before task_start.
      - Only then run task_start when you truly begin.
      - If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on it, FIRST leave a short task comment saying what you are about to do, THEN run task_start, then do the work, and when finished leave a short result comment and run task_complete again. Never skip this comment -> reopen -> work -> comment -> done cycle.
@@ -638,6 +641,9 @@ function buildTaskStatusProtocol(teamName: string): string {
    - Never "bulk-complete" a batch of tasks at the end. Update status incrementally as you work.
 7. To reply to a comment on a task, use MCP tool task_add_comment:
    { teamName: "${teamName}", taskId: "<taskId>", text: "<your reply>", from: "<your-name>" }
+   - If a user, lead, or teammate comments on a task you own, are reviewing, or are actively handling, you MUST reply on that task. Never leave task comments unanswered.
+   - If more work is needed, reply in the task comments FIRST, then reopen/start the task if needed, do the work, and finish with another task comment.
+   - Direct messages and status changes are optional supplements only; they NEVER replace the required on-task reply.
 8. When discussing a task with a teammate and you have important findings, decisions, blockers, or progress updates — record them as a task comment:
    { teamName: "${teamName}", taskId: "<taskId>", text: "<summary of your finding or decision>", from: "<your-name>" }
    Do NOT comment on trivial coordination messages. Only comment when the information is valuable context for the task.
@@ -754,14 +760,15 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
       `Notification policy:`,
       `- Task assignment notifications are handled by the board runtime, so do NOT send a separate SendMessage for the same assignment unless you have extra context that is not already on the task.`,
       `- Review requests are also handled by the board runtime: review_request already notifies the reviewer, so do NOT send a second manual SendMessage for the same review request unless you are adding materially new context that is not already on the task.`,
-      `- If you receive a task-scoped system notification like "Comment on #...", treat the task as the source of truth and prefer replying via task_add_comment instead of continuing the same task discussion in direct messages.`,
-      `- Teammate task comments are auto-forwarded to you. When that happens, respond on-task first; use direct messages only for urgent wake-up pings or clearly non-task coordination.`,
+      `- If you receive a task-scoped system notification like "Comment on #...", treat it as requiring an on-task reply. Reply via task_add_comment on that task; do NOT continue the same discussion only in direct messages.`,
+      `- Teammate task comments are auto-forwarded to you. When that happens, you MUST reply on-task first. Direct messages are allowed only as an additional urgent wake-up ping or clearly non-task coordination, never as the only reply to the task comment.`,
       `- Ownership must reflect the person actually doing the implementation/fix work. If someone takes over execution, update the owner immediately before they start. Do NOT leave the lead/planner as owner when another member is doing the work.`,
       `- Set createdBy when creating tasks so workflow history shows who created the task.`,
       ``,
       `Clarification handling (CRITICAL — MANDATORY for correct task board state):`,
-      `- When a teammate needs clarification (needsClarification: "lead"), reply via task comment (preferred — auto-clears the flag and wakes the owner) or SendMessage.`,
-      `- If you reply via SendMessage instead of task comment, also clear the flag manually:`,
+      `- When a teammate needs clarification (needsClarification: "lead"), you MUST reply via task comment first. This is the durable answer, auto-clears the flag, and wakes the owner.`,
+      `- If you also send a SendMessage for urgency/visibility, treat it as an extra notification only — never as a substitute for the task-comment reply.`,
+      `- If you somehow reply via SendMessage before commenting, add the missing task comment immediately, and if needed also clear the flag manually:`,
       `  task_set_clarification { teamName: "${teamName}", taskId: "<taskId>", value: "clear" }`,
       `- If you cannot answer and the user needs to decide — ESCALATION PROTOCOL:`,
       `  1) FIRST, set the flag to "user" via MCP tool task_set_clarification (this updates the task board):`,
@@ -3710,7 +3717,7 @@ export class TeamProvisioningService {
         `IMPORTANT: Your text response here is shown to the user. Always include a brief human-readable summary (e.g. "Delegated to carol." or "No action needed."). Do NOT respond with only an agent-only block.`,
         AGENT_BLOCK_OPEN,
         `Internal note: for task assignments, prefer task_create and rely on the board/runtime notification path instead of sending a separate SendMessage for the same assignment.`,
-        `If a message below is marked Source: system_notification and its summary looks like "Comment on #...", treat it as a task-comment notification. Prefer replying on the task via task_add_comment rather than continuing the same task discussion in direct messages.`,
+        `If a message below is marked Source: system_notification and its summary looks like "Comment on #...", treat it as a task-comment notification that REQUIRES an on-task reply via task_add_comment. Do NOT treat a direct message as a sufficient substitute.`,
         `If a message below is marked Source: cross_team, CALL the MCP tool named cross_team_send. Do NOT use SendMessage or message_send for cross-team replies.`,
         `NEVER set recipient="cross_team_send" or to="cross_team_send". "cross_team_send" is a tool name, not a teammate.`,
         AGENT_BLOCK_CLOSE,

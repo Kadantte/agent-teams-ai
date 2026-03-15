@@ -835,6 +835,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
         // Enter (without Shift) → submit; Shift+Enter → newline
         if (e.key === 'Enter' && !e.shiftKey && onModEnter) {
           e.preventDefault();
+          e.stopPropagation();
           dismiss();
           onModEnter();
           return;

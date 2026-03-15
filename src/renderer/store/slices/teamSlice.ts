@@ -598,16 +598,12 @@ function saveLaunchParams(teamName: string, params: TeamLaunchParams): void {
 }
 
 /**
- * Parse raw model string from TeamCreateRequest/TeamLaunchRequest.
- * E.g. 'opus[1m]' → { model: 'opus', limitContext: false }
- *      'sonnet' → { model: 'sonnet', limitContext: true }
- * Models without [1m] suffix mean context is limited to 200K.
+ * Extract the base model name from the raw model string sent to CLI.
+ * E.g. 'opus[1m]' → 'opus', 'sonnet' → 'sonnet', undefined → undefined.
  */
-function parseModelString(raw?: string): { model?: string; limitContext: boolean } {
-  if (!raw) return { limitContext: true };
-  const match = raw.match(/^(\w+)\[1m\]$/);
-  if (match) return { model: match[1], limitContext: false };
-  return { model: raw, limitContext: true };
+function extractBaseModel(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  return raw.replace(/\[1m\]$/, '') || undefined;
 }
 
 function loadToolApprovalSettings(): ToolApprovalSettings {
@@ -1516,11 +1512,11 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       const response = await unwrapIpc('team:create', () => api.teams.createTeam(request));
 
       // Persist per-team launch params (model, effort, limit context)
-      const { model: baseModel, limitContext } = parseModelString(request.model);
+      const baseModel = extractBaseModel(request.model);
       const params: TeamLaunchParams = {
         model: baseModel || 'default',
         effort: request.effort,
-        limitContext,
+        limitContext: request.limitContext ?? false,
       };
       saveLaunchParams(request.teamName, params);
       set((state) => ({
@@ -1653,11 +1649,11 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       const response = await unwrapIpc('team:launch', () => api.teams.launchTeam(request));
 
       // Persist per-team launch params (model, effort, limit context)
-      const { model: baseModel, limitContext } = parseModelString(request.model);
+      const baseModel = extractBaseModel(request.model);
       const params: TeamLaunchParams = {
         model: baseModel || 'default',
         effort: request.effort,
-        limitContext,
+        limitContext: request.limitContext ?? false,
       };
       saveLaunchParams(request.teamName, params);
       set((state) => ({

@@ -495,11 +495,13 @@ export class NotificationManager extends EventEmitter {
    */
   sendTestNotification(): { success: boolean; error?: string } {
     if (!this.isNativeNotificationSupported()) {
+      logger.warn('[test-notification] native notifications not supported');
       return { success: false, error: 'Native notifications are not supported on this platform' };
     }
 
     const isMac = process.platform === 'darwin';
     const iconPath = isMac ? undefined : getAppIconPath();
+    logger.debug(`[test-notification] creating Notification (platform=${process.platform})`);
     const notification = new Notification({
       title: 'Test Notification',
       ...(isMac ? { subtitle: 'Claude Agent Teams UI' } : {}),

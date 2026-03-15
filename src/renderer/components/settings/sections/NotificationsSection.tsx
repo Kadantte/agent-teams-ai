@@ -112,9 +112,11 @@ export const NotificationsSection = ({
         setTestError(result.error ?? 'Unknown error');
         setTimeout(() => setTestStatus('idle'), 5000);
       }
-    } catch {
+    } catch (err) {
+      console.error('[notifications] testNotification failed:', err);
       setTestStatus('error');
-      setTestError('Failed to send test notification');
+      const message = err instanceof Error ? err.message : 'Failed to send test notification';
+      setTestError(message);
       setTimeout(() => setTestStatus('idle'), 5000);
     }
   };
@@ -361,7 +363,7 @@ export const NotificationsSection = ({
                   />
                 </div>
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-1.5">
                 <div>
                   <div
                     className="text-sm font-medium"
@@ -373,13 +375,11 @@ export const NotificationsSection = ({
                     Which target statuses trigger a notification
                   </div>
                 </div>
-                <div className="shrink-0">
-                  <StatusCheckboxGroup
-                    selected={safeConfig.notifications.statusChangeStatuses}
-                    onChange={onStatusChangeStatusesUpdate}
-                    disabled={saving}
-                  />
-                </div>
+                <StatusCheckboxGroup
+                  selected={safeConfig.notifications.statusChangeStatuses}
+                  onChange={onStatusChangeStatusesUpdate}
+                  disabled={saving}
+                />
               </div>
             </div>
           ) : null}
