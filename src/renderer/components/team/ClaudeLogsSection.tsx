@@ -123,7 +123,7 @@ export const ClaudeLogsSection = ({
             </Tooltip>
           ) : undefined
         }
-        headerContentClassName={isSidebar ? 'flex-wrap items-center gap-y-1 py-1 pr-3' : 'pr-3'}
+        headerContentClassName={isSidebar ? 'flex-wrap items-center gap-y-1 py-1 pr-1' : 'pr-1'}
         headerExtra={sectionHeaderExtra}
         defaultOpen={false}
         contentClassName="pt-0 [overflow-anchor:none]"

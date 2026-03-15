@@ -12,7 +12,6 @@ import {
 } from './CodeMirrorDiffUtils';
 import { FileSectionDiff } from './FileSectionDiff';
 import { FileSectionHeader } from './FileSectionHeader';
-import { FileSectionPlaceholder } from './FileSectionPlaceholder';
 
 import type { EditorView } from '@codemirror/view';
 import type { FileChangeWithContent, HunkDecision } from '@shared/types';
@@ -256,28 +255,25 @@ export const ContinuousScrollView = ({
               onRestoreMissingFile={onRestoreMissingFile}
             />
 
-            {!isCollapsed &&
-              (hasContent ? (
-                <FileSectionDiff
-                  file={file}
-                  fileContent={content}
-                  isLoading={false}
-                  collapseUnchanged={collapseUnchanged}
-                  onHunkAccepted={onHunkAccepted}
-                  onHunkRejected={onHunkRejected}
-                  onFullyViewed={onFullyViewed}
-                  onContentChanged={onContentChanged}
-                  onEditorViewReady={handleEditorViewReady}
-                  discardCounter={discardCounters[filePath] ?? 0}
-                  autoViewed={autoViewed}
-                  isViewed={isViewed}
-                  onSelectionChange={onSelectionChange}
-                  globalHunkOffset={globalHunkOffsets?.[filePath] ?? 0}
-                  totalReviewHunks={totalReviewHunks}
-                />
-              ) : (
-                <FileSectionPlaceholder fileName={file.relativePath} />
-              ))}
+            {!isCollapsed && (
+              <FileSectionDiff
+                file={file}
+                fileContent={content}
+                isLoading={!hasContent}
+                collapseUnchanged={collapseUnchanged}
+                onHunkAccepted={onHunkAccepted}
+                onHunkRejected={onHunkRejected}
+                onFullyViewed={onFullyViewed}
+                onContentChanged={onContentChanged}
+                onEditorViewReady={handleEditorViewReady}
+                discardCounter={discardCounters[filePath] ?? 0}
+                autoViewed={autoViewed}
+                isViewed={isViewed}
+                onSelectionChange={onSelectionChange}
+                globalHunkOffset={globalHunkOffsets?.[filePath] ?? 0}
+                totalReviewHunks={totalReviewHunks}
+              />
+            )}
           </div>
         );
       })}

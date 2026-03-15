@@ -85,7 +85,7 @@ export const CollapsibleTeamSection = ({
       >
         <button
           type="button"
-          className={`absolute inset-0 z-0 cursor-pointer transition-colors ${isOpen ? 'rounded-t-md bg-[var(--color-section-bg-open)] hover:bg-[var(--color-section-hover-open)]' : 'rounded-md bg-[var(--color-section-bg)] hover:bg-[var(--color-section-hover)]'}`}
+          className={`absolute inset-0 z-0 cursor-pointer transition-colors ${isOpen ? 'rounded-t-xl bg-[var(--color-section-bg-open)] hover:bg-[var(--color-section-hover-open)]' : 'rounded-xl bg-[var(--color-section-bg)] hover:bg-[var(--color-section-hover)]'}`}
           onClick={() =>
             setOpen((prev) => {
               const next = !prev;

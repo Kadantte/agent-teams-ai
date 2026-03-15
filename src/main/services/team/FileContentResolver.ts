@@ -74,6 +74,19 @@ export class FileContentResolver {
       logger.debug(`Файл недоступен на диске: ${filePath}`);
     }
 
+    // Fast path: if the agent created the file and it still exists on disk,
+    // the original content is definitely empty, so skip expensive history lookup.
+    const hasWriteNew = snippets.some((s) => !s.isError && s.type === 'write-new');
+    if (hasWriteNew && currentContent !== null) {
+      const result = {
+        original: '',
+        modified: currentContent,
+        source: 'snippet-reconstruction' as const,
+      };
+      this.cacheResult(cacheKey, result);
+      return result;
+    }
+
     // Strategy 1: Try file-history backup
     const historyResult = await this.tryFileHistoryBackup(teamName, memberName, filePath);
     if (historyResult) {

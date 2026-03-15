@@ -80,7 +80,20 @@ export const FileSectionDiff = ({
 
   // Loading state
   if (isLoading) {
-    return <FileSectionPlaceholder fileName={file.relativePath} />;
+    const hasSnippetPreview = file.snippets.some((snippet) => !snippet.isError);
+    if (!hasSnippetPreview) {
+      return <FileSectionPlaceholder fileName={file.relativePath} />;
+    }
+
+    return (
+      <div className="overflow-auto">
+        <div className="bg-surface-raised/40 border-b border-border px-4 py-2 text-xs text-text-muted">
+          Loading full diff...
+        </div>
+        <ReviewDiffContent file={file} />
+        <div ref={sentinelRef} className="h-1 shrink-0" />
+      </div>
+    );
   }
 
   // Resolve modified content: prefer full content, fall back to write-type snippet
