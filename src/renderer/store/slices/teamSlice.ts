@@ -353,6 +353,8 @@ export interface TeamSlice {
   lastSendMessageResult: SendMessageResult | null;
   reviewActionError: string | null;
   provisioningRuns: Record<string, TeamProvisioningProgress>;
+  /** Synthetic TeamSummary snapshots for teams currently being provisioned (before config.json exists). */
+  provisioningSnapshotByTeam: Record<string, TeamSummary>;
   currentProvisioningRunIdByTeam: Record<string, string | null>;
   currentRuntimeRunIdByTeam: Record<string, string | null>;
   /** Runs explicitly cleared after Unknown runId polling; late events/progress for them are ignored. */
@@ -610,6 +612,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   crossTeamTargetsLoading: false,
   reviewActionError: null,
   provisioningRuns: {},
+  provisioningSnapshotByTeam: {},
   currentProvisioningRunIdByTeam: {},
   currentRuntimeRunIdByTeam: {},
   ignoredProvisioningRunIds: {},
@@ -743,7 +746,22 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
           }
         }
       }
-      set({ teams, teamByName, teamBySessionId, teamsLoading: false, teamsError: null });
+      // Atomic update: set teams AND clean up provisioning snapshots in one call
+      // to prevent any render cycle with duplicate cards.
+      set((state) => {
+        const nextSnapshots = { ...state.provisioningSnapshotByTeam };
+        for (const team of teams) {
+          delete nextSnapshots[team.teamName];
+        }
+        return {
+          teams,
+          teamByName,
+          teamBySessionId,
+          teamsLoading: false,
+          teamsError: null,
+          provisioningSnapshotByTeam: nextSnapshots,
+        };
+      });
     } catch (error) {
       // On refresh failure, keep existing teams visible
       set({
@@ -1413,6 +1431,21 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         ...state.currentProvisioningRunIdByTeam,
         [request.teamName]: pendingRunId,
       },
+      // Synthetic card for the team list — visible until fetchTeams() picks up the real team.
+      provisioningSnapshotByTeam: {
+        ...state.provisioningSnapshotByTeam,
+        [request.teamName]: {
+          teamName: request.teamName,
+          displayName: request.displayName || request.teamName,
+          description: request.description || '',
+          color: request.color,
+          memberCount: request.members.length,
+          members: request.members.map((m) => ({ name: m.name, role: m.role })),
+          taskCount: 0,
+          lastActivity: null,
+          projectPath: request.cwd || undefined,
+        },
+      },
     }));
     try {
       if (typeof api.teams.createTeam !== 'function') {
@@ -1751,6 +1784,15 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       } else {
         delete nextErrors[progress.teamName];
       }
+      // Clean up provisioning snapshot on terminal failure states
+      const nextSnapshots =
+        progress.state === 'failed' || progress.state === 'cancelled'
+          ? (() => {
+              const s = { ...state.provisioningSnapshotByTeam };
+              delete s[progress.teamName];
+              return s;
+            })()
+          : state.provisioningSnapshotByTeam;
       return {
         provisioningRuns: nextRuns,
         currentProvisioningRunIdByTeam: nextCurrentRunIdByTeam,
@@ -1759,6 +1801,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
           [progress.teamName]: progress.runId,
         },
         provisioningErrorByTeam: nextErrors,
+        provisioningSnapshotByTeam: nextSnapshots,
       };
     });
 

@@ -225,6 +225,7 @@ export const TeamListView = (): React.JSX.Element => {
     provisioningErrorByTeam,
     clearProvisioningError,
     provisioningRuns,
+    provisioningSnapshotByTeam,
     currentProvisioningRunIdByTeam,
     leadActivityByTeam,
   } = useStore(
@@ -234,6 +235,7 @@ export const TeamListView = (): React.JSX.Element => {
       provisioningErrorByTeam: s.provisioningErrorByTeam,
       clearProvisioningError: s.clearProvisioningError,
       provisioningRuns: s.provisioningRuns,
+      provisioningSnapshotByTeam: s.provisioningSnapshotByTeam,
       currentProvisioningRunIdByTeam: s.currentProvisioningRunIdByTeam,
       leadActivityByTeam: s.leadActivityByTeam,
     }))
@@ -250,6 +252,15 @@ export const TeamListView = (): React.JSX.Element => {
       isTeamProvisioningActive(provisioningState, teamName)
     );
   }, [currentProvisioningRunIdByTeam, provisioningState]);
+
+  /** Merge real teams with synthetic launching cards for active provisioning. */
+  const teamsWithProvisioning = useMemo(() => {
+    const existingNames = new Set(teams.map((t) => t.teamName));
+    const synthetic = provisioningTeamNames
+      .filter((name) => !existingNames.has(name) && provisioningSnapshotByTeam[name])
+      .map((name) => provisioningSnapshotByTeam[name]);
+    return synthetic.length > 0 ? [...teams, ...synthetic] : teams;
+  }, [teams, provisioningTeamNames, provisioningSnapshotByTeam]);
 
   // Fetch alive teams on mount and when teams list changes
   useEffect(() => {
@@ -303,7 +314,7 @@ export const TeamListView = (): React.JSX.Element => {
   ]);
 
   const filteredTeams = useMemo<TeamSummary[]>(() => {
-    let result = teams;
+    let result = teamsWithProvisioning;
 
     const q = searchQuery.trim().toLowerCase();
     if (q) {
@@ -364,7 +375,7 @@ export const TeamListView = (): React.JSX.Element => {
 
     return result;
   }, [
-    teams,
+    teamsWithProvisioning,
     searchQuery,
     currentProjectPath,
     aliveTeams,
@@ -577,7 +588,7 @@ export const TeamListView = (): React.JSX.Element => {
         </p>
       ) : null}
 
-      {teams.length > 0 ? (
+      {teamsWithProvisioning.length > 0 ? (
         <div className="mt-3 flex items-center gap-2">
           <div className="relative flex-1">
             <Search
@@ -594,7 +605,7 @@ export const TeamListView = (): React.JSX.Element => {
           </div>
           <TeamListFilterPopover
             filter={filter}
-            teams={teams}
+            teams={teamsWithProvisioning}
             aliveTeams={aliveTeams}
             onFilterChange={setFilter}
           />
@@ -633,7 +644,7 @@ export const TeamListView = (): React.JSX.Element => {
       );
     }
 
-    if (teams.length === 0) {
+    if (teamsWithProvisioning.length === 0) {
       return <TeamEmptyState />;
     }
 
