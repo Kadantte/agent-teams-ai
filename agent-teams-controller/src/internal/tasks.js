@@ -40,7 +40,8 @@ function buildAssignmentMessage(context, task, options = {}) {
   const taskLabel = `#${task.displayId || task.id}`;
   const lines = [
     `New task assigned to you: ${taskLabel} "${task.subject}".`,
-    `If you are not currently working on another task, start this one now. If you are busy, start it as soon as your current task is finished.`,
+    ``,
+    `*If you are not currently working on another task, start this one now. If you are busy, start it as soon as your current task is finished.*`,
   ];
 
   if (description) {

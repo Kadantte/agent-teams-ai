@@ -222,6 +222,7 @@ export const TeamListView = (): React.JSX.Element => {
   const {
     connectionMode,
     createTeam,
+    launchTeam,
     provisioningErrorByTeam,
     clearProvisioningError,
     provisioningRuns,
@@ -232,6 +233,7 @@ export const TeamListView = (): React.JSX.Element => {
     useShallow((s) => ({
       connectionMode: s.connectionMode,
       createTeam: s.createTeam,
+      launchTeam: s.launchTeam,
       provisioningErrorByTeam: s.provisioningErrorByTeam,
       clearProvisioningError: s.clearProvisioningError,
       provisioningRuns: s.provisioningRuns,
@@ -502,6 +504,24 @@ export const TeamListView = (): React.JSX.Element => {
     }
   }, []);
 
+  const [launchingTeamName, setLaunchingTeamName] = useState<string | null>(null);
+  const handleLaunchTeam = useCallback(
+    async (teamName: string, projectPath: string | undefined, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!projectPath) return;
+      setLaunchingTeamName(teamName);
+      try {
+        await launchTeam({ teamName, cwd: projectPath });
+        openTeamTab(teamName, projectPath);
+      } catch (err) {
+        console.error('Failed to launch team:', err);
+      } finally {
+        setLaunchingTeamName(null);
+      }
+    },
+    [launchTeam, openTeamTab]
+  );
+
   useEffect(() => {
     if (!electronMode) {
       return;
@@ -720,8 +740,40 @@ export const TeamListView = (): React.JSX.Element => {
                         {team.displayName}
                       </h3>
                       <StatusBadge status={status} />
+                      {team.projectPath &&
+                        (() => {
+                          const branch = branchByPath[normalizePath(team.projectPath)];
+                          if (!branch) return null;
+                          return (
+                            <span
+                              className="flex shrink-0 items-center gap-1 rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                              title={branch}
+                            >
+                              <GitBranch size={10} />
+                              <span className="max-w-24 truncate">{branch}</span>
+                            </span>
+                          );
+                        })()}
                     </div>
                     <div className="flex shrink-0 gap-1">
+                      {status === 'offline' && team.projectPath && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-50 group-hover:opacity-100"
+                              onClick={(e) => handleLaunchTeam(team.teamName, team.projectPath, e)}
+                              disabled={launchingTeamName === team.teamName}
+                              aria-label="Launch team"
+                            >
+                              <Play size={14} fill="currentColor" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">
+                            {launchingTeamName === team.teamName ? 'Launching…' : 'Launch team'}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                       {(status === 'active' || status === 'idle') && (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -770,20 +822,6 @@ export const TeamListView = (): React.JSX.Element => {
                     <p className="line-clamp-2 min-w-0 flex-1 text-xs text-[var(--color-text-muted)]">
                       {team.description || 'No description'}
                     </p>
-                    {team.projectPath &&
-                      (() => {
-                        const branch = branchByPath[normalizePath(team.projectPath)];
-                        if (!branch) return null;
-                        return (
-                          <span
-                            className="flex shrink-0 items-center gap-1 rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
-                            title={branch}
-                          >
-                            <GitBranch size={10} />
-                            <span className="max-w-24 truncate">{branch}</span>
-                          </span>
-                        );
-                      })()}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-1.5">
                     {team.members && team.members.length > 0 ? (

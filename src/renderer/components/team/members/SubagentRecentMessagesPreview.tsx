@@ -53,7 +53,8 @@ export const SubagentRecentMessagesPreview = ({
         {messages.map((m, index) => (
           <div
             key={m.id}
-            className={`rounded px-2 py-1.5 ${index % 2 === 0 ? 'bg-white/[0.02]' : ''}`}
+            className="rounded px-2 py-1.5"
+            style={index % 2 === 0 ? { backgroundColor: 'var(--card-bg-zebra)' } : undefined}
           >
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1 text-xs text-[var(--color-text)]">

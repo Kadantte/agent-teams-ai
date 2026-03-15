@@ -678,6 +678,11 @@ function buildTaskStatusProtocol(teamName: string): string {
     - If you are the one doing the implementation/fixes and the owner is missing or someone else, run task_set_owner to yourself immediately before task_start.
     - Then run task_start only when you truly begin.
     - If you complete fixes for a needsFix task, mark it completed and then send it back through review_request when ready for another review pass.
+15. INVESTIGATION / TASK REFINEMENT:
+    - If the lead assigns you a broad investigation/triage task, you own the code inspection and scope discovery for that work.
+    - If you discover distinct substantial follow-up work that should be tracked separately, create the follow-up board task(s) yourself with task_create, assign them to the actual owner, and link them with related or blockedBy when useful.
+    - If you plan to execute one of those follow-up tasks yourself, make sure the owner is set to you before you start it.
+    - Record the new task refs in a task comment on the original investigation task so the lead can see the decomposition.
 Failure to follow this protocol means the task board will show incorrect status.`);
 }
 
@@ -830,6 +835,9 @@ Constraints:
 - Keep the task board high-signal: avoid creating tasks for trivial micro-items.
 - Use the team task board for assigned/substantial work.
 - DELEGATION-FIRST (behavior rule for ALL future turns): When "user" gives you work, your top priority is to (a) decompose into tasks, (b) create tasks on the team board, (c) assign them to teammates, and (d) SendMessage "user" a short confirmation (task IDs + owners). Do NOT start implementing yourself unless the team is truly in SOLO MODE (no teammates).
+- In a non-solo team, your default first move is delegation, NOT personal investigation. Do NOT read/search the codebase, inspect files, or do root-cause research yourself just to figure out ownership or scope before delegating.
+- If the request is ambiguous or still needs technical discovery, immediately create a coarse investigation/triage task for the best-fit teammate. That teammate owns the code inspection, scope refinement, and creation of any follow-up tasks needed for execution.
+- Only do lead-side research first if the human explicitly asked YOU for analysis/planning, or if there is genuinely no appropriate teammate to own the investigation.
 - TaskCreate is optional for private planning only; do NOT use it for team-board tasks.
 - When messaging "user" (the human): NEVER mention internal MCP tools, scripts, CLI commands, or file paths under ~/.claude/. The user sees messages in the UI — write plain human language. If a task needs a status update, do it yourself via the board MCP tools; never ask the user to run a command.${soloConstraint}
 
@@ -993,7 +1001,9 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
      - Exception: only if the team is truly SOLO (no teammates) may you execute tasks yourself. This is NOT the case here.
    - Decompose the request into a small set of clear, outcome-based tasks (prefer fewer, broader tasks over many micro-tasks).
    - Assign each created task to an appropriate teammate as owner (NOT to yourself), based on role/workflow and current load.
-     - If ownership is unclear, pick the best default owner and note assumptions in the task description or a task comment.
+    - If ownership or scope is unclear, do NOT block on researching the code yourself first.
+      Pick the best default owner, create an investigation/triage task for that teammate immediately, and note assumptions in the task description or a task comment.
+      That teammate should inspect the codebase, refine scope, and create follow-up tasks if needed.
      - If that teammate already has another in_progress task, create/keep the new task in pending/TODO. Do NOT mark it in_progress for them yet.
    - Avoid duplicate notifications for the same assignment (one message per member per topic is enough).
   - When tasks have natural ordering (e.g. setup -> implementation -> testing), use blockedBy relationships.

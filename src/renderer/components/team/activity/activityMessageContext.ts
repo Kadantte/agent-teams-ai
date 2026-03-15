@@ -37,12 +37,7 @@ export function buildMessageContext(members?: ResolvedTeamMember[]): MessageCont
     }
   }
 
-  const leadMember = members.find(
-    (m) => m.agentType === 'team-lead' || m.role?.toLowerCase().includes('lead')
-  );
-  if (leadMember && memberInfo.has(leadMember.name)) {
-    memberInfo.set('user', { role: undefined, color: colorMap.get('user') });
-  }
+  memberInfo.set('user', { role: undefined, color: colorMap.get('user') });
 
   return { colorMap, localMemberNames, memberInfo };
 }
