@@ -649,8 +649,17 @@ export class TeamMemberLogsFinder {
     const stream = createReadStream(filePath, { encoding: 'utf8' });
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
-    const escapedTaskId = taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`"taskId"\\s*:\\s*"${escapedTaskId}"`);
+    const trimmedId = taskId.trim();
+    // CLI agents may use displayId (first 8 chars of UUID) in tool inputs.
+    // Build regex that matches either form.
+    const displayId =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmedId)
+        ? trimmedId.slice(0, 8).toLowerCase()
+        : null;
+    const idAlternation = displayId
+      ? `(?:${trimmedId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|${displayId})`
+      : trimmedId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`"taskId"\\s*:\\s*"${idAlternation}"`);
 
     try {
       for await (const line of rl) {
@@ -926,6 +935,17 @@ export class TeamMemberLogsFinder {
     const teamLower = teamName.trim().toLowerCase();
     const taskIdStr = taskId.trim();
 
+    // CLI agents often use the short displayId (first 8 chars of UUID) in tool inputs,
+    // while the UI passes the full UUID. Match both forms to bridge this gap.
+    const taskIdDisplayForm =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskIdStr)
+        ? taskIdStr.slice(0, 8).toLowerCase()
+        : null;
+
+    const matchesTaskId = (candidate: string): boolean =>
+      candidate === taskIdStr ||
+      (taskIdDisplayForm !== null && candidate.toLowerCase() === taskIdDisplayForm);
+
     const extractTaskIdFromUnknown = (raw: unknown): string | null => {
       if (typeof raw === 'string') return raw.trim();
       if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw);
@@ -1045,7 +1065,7 @@ export class TeamMemberLogsFinder {
             const inputTeam = extractTeamFromInput(input);
             const rawTaskId = input.taskId ?? input.task_id;
             const inputTaskId = extractTaskIdFromUnknown(rawTaskId);
-            if (inputTaskId && inputTaskId === taskIdStr) {
+            if (inputTaskId && matchesTaskId(inputTaskId)) {
               // If team is present in the input, require exact match.
               if (inputTeam) {
                 if (inputTeam.toLowerCase() === teamLower) {
