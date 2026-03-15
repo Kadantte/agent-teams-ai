@@ -35,7 +35,6 @@ import { TeamMemberResolver } from './TeamMemberResolver';
 import { TeamMembersMetaStore } from './TeamMembersMetaStore';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskCommentNotificationJournal } from './TeamTaskCommentNotificationJournal';
-import { getTaskCommentForwardingMode } from './TeamTaskCommentForwarding';
 import { TeamTaskReader } from './TeamTaskReader';
 import { TeamTaskWriter } from './TeamTaskWriter';
 
@@ -1341,9 +1340,6 @@ export class TeamDataService {
       recoverPending?: boolean;
     }
   ): Promise<void> {
-    const mode = getTaskCommentForwardingMode();
-    if (mode === 'off') return;
-
     const seedHistoricalIfJournalMissing = options?.seedHistoricalIfJournalMissing === true;
     const recoverPending = options?.recoverPending === true;
     let config: TeamConfig | null = null;
@@ -1358,18 +1354,13 @@ export class TeamDataService {
     const leadSessionId = config.leadSessionId;
     if (!leadName.trim()) return;
 
-    const mutateLiveJournal = mode === 'on';
-    const journalExists = mutateLiveJournal
-      ? await this.taskCommentNotificationJournal.exists(teamName)
-      : false;
-    if (mutateLiveJournal && !journalExists) {
+    const journalExists = await this.taskCommentNotificationJournal.exists(teamName);
+    if (!journalExists) {
       await this.taskCommentNotificationJournal.ensureFile(teamName);
     }
 
-    const leadInboxMessageIds =
-      mode === 'on' ? await this.getLeadInboxMessageIds(teamName, leadName) : new Set<string>();
-    const shouldSeedHistorical =
-      seedHistoricalIfJournalMissing && mutateLiveJournal && !journalExists;
+    const leadInboxMessageIds = await this.getLeadInboxMessageIds(teamName, leadName);
+    const shouldSeedHistorical = seedHistoricalIfJournalMissing && !journalExists;
     const tasks = await this.taskReader.getTasks(teamName);
     const scopedTasks =
       taskId && !shouldSeedHistorical ? tasks.filter((task) => task.id === taskId) : tasks;
@@ -1388,15 +1379,6 @@ export class TeamDataService {
       );
       if (notifications.length === 0) continue;
 
-      if (mode === 'dry-run') {
-        for (const notification of notifications) {
-          logger.info(
-            `[TeamDataService] Dry-run would forward task comment for ${teamName}#${notification.taskRef.displayId}:${notification.comment.id}`
-          );
-        }
-        continue;
-      }
-
       const pending = await this.taskCommentNotificationJournal.withEntries(teamName, (entries) => {
         const toSend: EligibleTaskCommentNotification[] = [];
         let changed = false;
@@ -1413,7 +1395,7 @@ export class TeamDataService {
               author: notification.comment.author,
               commentCreatedAt: notification.comment.createdAt,
               messageId: notification.messageId,
-              state: shouldSeedHistorical || mode !== 'on' ? 'seeded' : 'pending_send',
+              state: shouldSeedHistorical ? 'seeded' : 'pending_send',
               createdAt: now,
               updatedAt: now,
             });
@@ -1422,7 +1404,7 @@ export class TeamDataService {
               logger.info(
                 `[TeamDataService] Seeded historical task comment notification for ${teamName}#${notification.taskRef.displayId}:${notification.comment.id}`
               );
-            } else if (mode === 'on') {
+            } else {
               logger.info(
                 `[TeamDataService] Queued task comment notification for ${teamName}#${notification.taskRef.displayId}:${notification.comment.id}`
               );

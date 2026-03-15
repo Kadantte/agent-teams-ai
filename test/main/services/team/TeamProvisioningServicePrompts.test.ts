@@ -6,13 +6,11 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AGENT_BLOCK_CLOSE, AGENT_BLOCK_OPEN } from '@shared/constants/agentBlocks';
-import { TASK_COMMENT_FORWARDING_ENV } from '@main/services/team/TeamTaskCommentForwarding';
 
 let tempClaudeRoot = '';
 let tempTeamsBase = '';
 let tempTasksBase = '';
 let originalMemberBriefingBootstrapEnv: string | undefined;
-let originalTaskCommentForwardingEnv: string | undefined;
 
 vi.mock('@main/services/team/ClaudeBinaryResolver', () => ({
   ClaudeBinaryResolver: { resolve: vi.fn() },
@@ -74,9 +72,7 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
   beforeEach(() => {
     vi.clearAllMocks();
     originalMemberBriefingBootstrapEnv = process.env[MEMBER_BRIEFING_BOOTSTRAP_ENV];
-    originalTaskCommentForwardingEnv = process.env[TASK_COMMENT_FORWARDING_ENV];
     process.env[MEMBER_BRIEFING_BOOTSTRAP_ENV] = '1';
-    process.env[TASK_COMMENT_FORWARDING_ENV] = 'off';
     tempClaudeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-team-prompts-'));
     tempTeamsBase = path.join(tempClaudeRoot, 'teams');
     tempTasksBase = path.join(tempClaudeRoot, 'tasks');
@@ -89,11 +85,6 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
       delete process.env[MEMBER_BRIEFING_BOOTSTRAP_ENV];
     } else {
       process.env[MEMBER_BRIEFING_BOOTSTRAP_ENV] = originalMemberBriefingBootstrapEnv;
-    }
-    if (originalTaskCommentForwardingEnv === undefined) {
-      delete process.env[TASK_COMMENT_FORWARDING_ENV];
-    } else {
-      process.env[TASK_COMMENT_FORWARDING_ENV] = originalTaskCommentForwardingEnv;
     }
     // Best-effort cleanup of temp dir (per-test)
     try {
@@ -265,17 +256,16 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     expect(prompt).toContain(
       'Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.'
     );
+    expect(prompt).toContain(
+      'do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.'
+    );
     expect(prompt).not.toContain('Include the following agent-only instructions verbatim in the prompt:');
     expect(prompt).not.toContain('runtime forwards task comments to the lead automatically');
-    expect(prompt).not.toContain(
-      'do NOT send a duplicate SendMessage to the lead for the same task-scoped update'
-    );
 
     await svc.cancelProvisioning(runId);
   });
 
-  it('includes live task-comment forwarding wording only when live forwarding is enabled', async () => {
-    process.env[TASK_COMMENT_FORWARDING_ENV] = 'on';
+  it('includes task-comment forwarding wording by default', async () => {
     vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/fake/claude');
     const { child, writeSpy } = createFakeChild();
     vi.mocked(spawnCli).mockReturnValue(child as any);
@@ -299,7 +289,6 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     );
 
     const prompt = extractPromptFromWrite(writeSpy);
-    expect(prompt).toContain('task comments may already be auto-forwarded to you');
     expect(prompt).toContain(
       'do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.'
     );

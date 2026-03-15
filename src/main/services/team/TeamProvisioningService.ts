@@ -53,7 +53,6 @@ import { TeamInboxReader } from './TeamInboxReader';
 import { TeamMcpConfigBuilder } from './TeamMcpConfigBuilder';
 import { TeamMembersMetaStore } from './TeamMembersMetaStore';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
-import { isTaskCommentForwardingLive } from './TeamTaskCommentForwarding';
 import { TeamTaskReader } from './TeamTaskReader';
 
 /**
@@ -458,11 +457,8 @@ After member_briefing succeeds:
 - When you later receive work or reconnect after a restart, use task_briefing as your compact queue view. Use task_get when you need the full task context before starting a pending/needsFix task or when the in_progress briefing details are not enough.
 - If a newly assigned task cannot be started immediately because you are still busy on another task, leave a short task comment on that waiting task right away with the reason and your best ETA, keep it in pending/TODO, and only move it to in_progress with task_start when you truly begin.
 - CRITICAL: If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on that same task, FIRST leave a short task comment saying what you are about to do, THEN move it to in_progress with task_start, THEN do the work, and when finished leave a short result comment and move it to done with task_complete. Never skip this comment -> reopen -> work -> comment -> done cycle.
-- Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.${
-    isTaskCommentForwardingLive()
-      ? '\n- If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.'
-      : ''
-  }
+- Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.
+- If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.
 ${buildTeammateAgentBlockReminder()}
 ${actionModeProtocol}`;
 }
@@ -538,11 +534,8 @@ ${actionModeProtocol}
      - If you are the one about to do the implementation/fixes and the owner is missing or someone else, run task_set_owner to yourself immediately before task_start.
      - Only then run task_start when you truly begin.
      - If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on it, FIRST leave a short task comment saying what you are about to do, THEN run task_start, then do the work, and when finished leave a short result comment and run task_complete again. Never skip this comment -> reopen -> work -> comment -> done cycle.
-     - Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.${
-       isTaskCommentForwardingLive()
-         ? '\n     - If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.'
-         : ''
-     }
+     - Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.
+     - If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.
      - If you have no tasks, wait for new assignments.`;
 }
 
@@ -647,11 +640,8 @@ function buildTaskStatusProtocol(teamName: string): string {
    { teamName: "${teamName}", taskId: "<taskId>", text: "<your reply>", from: "<your-name>" }
 8. When discussing a task with a teammate and you have important findings, decisions, blockers, or progress updates — record them as a task comment:
    { teamName: "${teamName}", taskId: "<taskId>", text: "<summary of your finding or decision>", from: "<your-name>" }
-   Do NOT comment on trivial coordination messages. Only comment when the information is valuable context for the task.${
-     isTaskCommentForwardingLive()
-       ? '\n   When task-comment forwarding is enabled in this runtime, do NOT send a duplicate SendMessage to the lead for the same task-scoped update unless you need urgent non-task attention.'
-       : ''
-   }
+   Do NOT comment on trivial coordination messages. Only comment when the information is valuable context for the task.
+   Do NOT send a duplicate SendMessage to the lead for the same task-scoped update unless you need urgent non-task attention.
    Direct messages to the lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.
 9. When sending a message about a specific task, include its short display label like #<displayId> in your SendMessage summary field for traceability.
 10. In ALL human-facing or teammate-facing message text, when you mention a task reference, ALWAYS write it with a leading # (for example: #abcd1234, not abcd1234 or "task abcd1234").
@@ -760,11 +750,7 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
       `- Task assignment notifications are handled by the board runtime, so do NOT send a separate SendMessage for the same assignment unless you have extra context that is not already on the task.`,
       `- Review requests are also handled by the board runtime: review_request already notifies the reviewer, so do NOT send a second manual SendMessage for the same review request unless you are adding materially new context that is not already on the task.`,
       `- If you receive a task-scoped system notification like "Comment on #...", treat the task as the source of truth and prefer replying via task_add_comment instead of continuing the same task discussion in direct messages.`,
-      `${
-        isTaskCommentForwardingLive()
-          ? '- In this runtime, teammate task comments may already be auto-forwarded to you. When that happens, respond on-task first; use direct messages only for urgent wake-up pings or clearly non-task coordination.'
-          : '- Unless a runtime message explicitly says task-comment forwarding is active, do NOT assume task comments automatically notify you. Existing clarification/escalation paths still apply when someone needs guaranteed lead attention.'
-      }`,
+      `- Teammate task comments are auto-forwarded to you. When that happens, respond on-task first; use direct messages only for urgent wake-up pings or clearly non-task coordination.`,
       `- Ownership must reflect the person actually doing the implementation/fix work. If someone takes over execution, update the owner immediately before they start. Do NOT leave the lead/planner as owner when another member is doing the work.`,
       `- Set createdBy when creating tasks so workflow history shows who created the task.`,
       ``,
