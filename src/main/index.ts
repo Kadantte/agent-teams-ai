@@ -23,6 +23,7 @@ import { ChangeExtractorService } from '@main/services/team/ChangeExtractorServi
 import { FileContentResolver } from '@main/services/team/FileContentResolver';
 import { GitDiffFallback } from '@main/services/team/GitDiffFallback';
 import { ReviewApplierService } from '@main/services/team/ReviewApplierService';
+import { TeamBackupService } from '@main/services/team/TeamBackupService';
 import { JsonScheduleRepository } from '@main/services/schedule/JsonScheduleRepository';
 import { ScheduledTaskExecutor } from '@main/services/schedule/ScheduledTaskExecutor';
 import { SchedulerService } from '@main/services/schedule/SchedulerService';
@@ -338,6 +339,7 @@ let cliInstallerService: CliInstallerService;
 let ptyTerminalService: PtyTerminalService;
 let httpServer: HttpServer;
 let schedulerService: SchedulerService;
+let teamBackupService: TeamBackupService | null = null;
 
 // File watcher event cleanup functions
 let fileChangeCleanup: (() => void) | null = null;
@@ -528,6 +530,16 @@ function wireFileWatcherEvents(context: ServiceContext): void {
               `[FileWatcher] task start notify failed for ${teamName}#${taskId}: ${String(e)}`
             )
           );
+
+        // Schedule debounced backup for changed task file
+        if (teamBackupService) {
+          teamBackupService.scheduleTaskBackup(teamName, detail);
+        }
+      }
+
+      // Backup on config changes (covers team ready, config updates)
+      if (row.type === 'config' && detail === 'config.json' && teamBackupService) {
+        void teamBackupService.backupTeam(teamName).catch(() => undefined);
       }
     } catch {
       // ignore
@@ -671,6 +683,13 @@ function initializeServices(): void {
   ptyTerminalService = new PtyTerminalService();
   teamDataService = new TeamDataService();
   teamProvisioningService = new TeamProvisioningService();
+  teamBackupService = new TeamBackupService();
+  // Fire-and-forget: initializeServices() is sync, cannot await.
+  // Safe because TeamBackupService.initialized flag blocks all backup/restore
+  // operations until initialize() completes internally (restore → prune → set flag).
+  void teamBackupService.initialize().catch((error: unknown) =>
+    logger.warn(`[Init] TeamBackupService init failed: ${String(error)}`)
+  );
 
   // Cross-team communication service
   const crossTeamConfigReader = new TeamConfigReader();
@@ -783,7 +802,8 @@ function initializeServices(): void {
     pluginInstallService,
     mcpInstallService,
     apiKeyService,
-    crossTeamService
+    crossTeamService,
+    teamBackupService ?? undefined
   );
 
   // Forward SSH state changes to renderer and HTTP SSE clients
@@ -848,6 +868,16 @@ async function startHttpServer(
 function shutdownServices(): void {
   logger.info('Shutting down services...');
 
+  // 1. Kill all team CLI processes via SIGKILL BEFORE anything else.
+  if (teamProvisioningService) {
+    teamProvisioningService.stopAllTeams();
+  }
+
+  // 2. Sync backup all team data (files are stable after SIGKILL).
+  if (teamBackupService) {
+    teamBackupService.runShutdownBackupSync();
+  }
+
   // Stop HTTP server
   if (httpServer?.isRunning()) {
     void httpServer.stop();
@@ -880,13 +910,6 @@ function shutdownServices(): void {
     sshConnectionManager.dispose();
   }
 
-  // Stop all running team provisioning processes
-  if (teamProvisioningService) {
-    for (const teamName of teamProvisioningService.getAliveTeams()) {
-      teamProvisioningService.stopTeam(teamName);
-    }
-  }
-
   // Stop background polling timers (prevents hanging shutdown).
   if (teamDataService) {
     teamDataService.stopProcessHealthPolling();
@@ -904,6 +927,9 @@ function shutdownServices(): void {
 
   // Remove IPC handlers
   removeIpcHandlers();
+
+  // Dispose backup service timers
+  teamBackupService?.dispose();
 
   logger.info('Services shut down successfully');
 }

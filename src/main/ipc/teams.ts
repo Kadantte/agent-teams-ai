@@ -1,5 +1,6 @@
 import { setCurrentMainOp } from '@main/services/infrastructure/EventLoopLagMonitor';
 import { getAppIconPath } from '@main/utils/appIcon';
+import { getAppDataPath } from '@main/utils/pathDecoder';
 import { stripMarkdown } from '@main/utils/textFormatting';
 import {
   TEAM_ADD_MEMBER,
@@ -97,6 +98,7 @@ import type {
   TeamMemberLogsFinder,
   TeamProvisioningService,
 } from '../services';
+import type { TeamBackupService } from '../services/team/TeamBackupService';
 import type {
   AgentActionMode,
   AttachmentFileData,
@@ -193,6 +195,7 @@ let teamDataService: TeamDataService | null = null;
 let teamProvisioningService: TeamProvisioningService | null = null;
 let teamMemberLogsFinder: TeamMemberLogsFinder | null = null;
 let memberStatsComputer: MemberStatsComputer | null = null;
+let teamBackupService: TeamBackupService | null = null;
 
 const attachmentStore = new TeamAttachmentStore();
 const taskAttachmentStore = new TeamTaskAttachmentStore();
@@ -206,12 +209,14 @@ export function initializeTeamHandlers(
   service: TeamDataService,
   provisioningService: TeamProvisioningService,
   logsFinder?: TeamMemberLogsFinder,
-  statsComputer?: MemberStatsComputer
+  statsComputer?: MemberStatsComputer,
+  backupService?: TeamBackupService
 ): void {
   teamDataService = service;
   teamProvisioningService = provisioningService;
   teamMemberLogsFinder = logsFinder ?? null;
   memberStatsComputer = statsComputer ?? null;
+  teamBackupService = backupService ?? null;
 }
 
 export function registerTeamHandlers(ipcMain: IpcMain): void {
@@ -521,9 +526,21 @@ async function handlePermanentlyDeleteTeam(
   if (!validated.valid) {
     return { success: false, error: validated.error ?? 'Invalid teamName' };
   }
-  return wrapTeamHandler('permanentlyDeleteTeam', () =>
-    getTeamDataService().permanentlyDeleteTeam(validated.value!)
-  );
+  return wrapTeamHandler('permanentlyDeleteTeam', async () => {
+    await getTeamDataService().permanentlyDeleteTeam(validated.value!);
+    // Clean up app-owned data (attachments, task-attachments) that lives outside ~/.claude/
+    const appData = getAppDataPath();
+    await fs.promises
+      .rm(path.join(appData, 'attachments', validated.value!), { recursive: true, force: true })
+      .catch(() => undefined);
+    await fs.promises
+      .rm(path.join(appData, 'task-attachments', validated.value!), { recursive: true, force: true })
+      .catch(() => undefined);
+    // Mark in backup registry AFTER successful deletion
+    if (teamBackupService) {
+      await teamBackupService.markDeletedByUser(validated.value!);
+    }
+  });
 }
 
 async function handleUpdateConfig(

@@ -368,3 +368,43 @@ export function getToolsBasePath(): string {
 export function getSchedulesBasePath(): string {
   return path.join(getClaudeBasePath(), 'claude-devtools-schedules');
 }
+
+/**
+ * Get the backups directory path for the app's own storage.
+ * Uses Electron's app.getPath('userData') for cross-platform correctness:
+ *   macOS:   ~/Library/Application Support/Claude Agent Teams UI/backups
+ *   Linux:   ~/.config/Claude Agent Teams UI/backups
+ *   Windows: C:\Users\Name\AppData\Roaming\Claude Agent Teams UI\backups
+ */
+export function getBackupsBasePath(): string {
+  return path.join(getAppDataBasePath(), 'backups');
+}
+
+/**
+ * Get the app's own data directory (attachments, task-attachments).
+ * Separate from ~/.claude/ so CLI cannot delete our data.
+ */
+export function getAppDataPath(): string {
+  return path.join(getAppDataBasePath(), 'data');
+}
+
+// ── App data root (Electron userData) ──
+
+let appDataBasePathOverride: string | null = null;
+
+export function setAppDataBasePath(p: string): void {
+  appDataBasePathOverride = p;
+}
+
+function getAppDataBasePath(): string {
+  if (appDataBasePathOverride) return appDataBasePathOverride;
+  // Fallback: resolve lazily from Electron app (safe after app.whenReady)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { app } = require('electron') as typeof import('electron');
+    return app.getPath('userData');
+  } catch {
+    // Outside Electron (tests, CLI) — fall back to home dir
+    return path.join(getHomeDir(), '.claude-agent-teams-ui');
+  }
+}
