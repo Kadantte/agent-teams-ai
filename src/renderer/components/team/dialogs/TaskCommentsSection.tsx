@@ -66,6 +66,11 @@ interface TaskCommentsSectionProps {
   containerClassName?: string;
   /** Snapshot of unread comment IDs captured when the dialog opened. Blue dot is shown for these. */
   unreadCommentIds?: Set<string>;
+  /**
+   * Ref callback factory from useViewportCommentRead.
+   * When provided, each comment element is registered for viewport-based read tracking.
+   */
+  registerCommentForViewport?: (timestampMs: number) => (el: HTMLElement | null) => void;
 }
 
 export const TaskCommentsSection = ({
@@ -79,6 +84,7 @@ export const TaskCommentsSection = ({
   onTaskIdClick,
   containerClassName,
   unreadCommentIds,
+  registerCommentForViewport,
 }: TaskCommentsSectionProps): React.JSX.Element => {
   const addTaskComment = useStore((s) => s.addTaskComment);
   const addingComment = useStore((s) => s.addingComment);
@@ -209,6 +215,11 @@ export const TaskCommentsSection = ({
             {visibleComments.map((comment, index) => (
               <AnimatedHeightReveal key={comment.id} animate={newCommentIds.has(comment.id)}>
                 <div
+                  ref={
+                    registerCommentForViewport
+                      ? registerCommentForViewport(new Date(comment.createdAt).getTime())
+                      : undefined
+                  }
                   className={[
                     'group min-w-0 overflow-hidden px-4 py-2.5',
                     comment.type === 'review_approved'

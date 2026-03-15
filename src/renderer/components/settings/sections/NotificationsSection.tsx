@@ -147,37 +147,6 @@ export const NotificationsSection = ({
         </div>
       ) : null}
 
-      {/* Task Completion Notifications */}
-      <SettingsSectionHeader
-        title="Task Completion Notifications"
-        icon={<PartyPopper className="size-3.5" />}
-      />
-      <div
-        className="mb-4 rounded-lg border p-4"
-        style={{
-          borderColor: 'var(--color-border)',
-          backgroundColor: 'var(--color-surface-raised)',
-        }}
-      >
-        <p className="mb-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          Get native OS notifications when Claude finishes tasks — sounds, banners, and Dock/taskbar
-          badges. Works on macOS, Linux, and Windows.
-        </p>
-        <button
-          onClick={() =>
-            void api.openExternal('https://github.com/777genius/claude-notifications-go')
-          }
-          className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:brightness-125"
-          style={{
-            backgroundColor: 'var(--color-border-emphasis)',
-            color: 'var(--color-text)',
-          }}
-        >
-          <ExternalLink className="size-3.5" />
-          Install claude-notifications-go plugin
-        </button>
-      </div>
-
       {/* Notification Settings */}
       <SettingsSectionHeader title="Notification Settings" icon={<Bell className="size-3.5" />} />
       <SettingRow
@@ -427,6 +396,37 @@ export const NotificationsSection = ({
         disabled={saving}
         dropUp
       />
+
+      {/* Task Completion Notifications */}
+      <SettingsSectionHeader
+        title="Task Completion Notifications"
+        icon={<PartyPopper className="size-3.5" />}
+      />
+      <div
+        className="mb-4 rounded-lg border p-4"
+        style={{
+          borderColor: 'var(--color-border)',
+          backgroundColor: 'var(--color-surface-raised)',
+        }}
+      >
+        <p className="mb-3 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          Get native OS notifications when Claude finishes tasks — sounds, banners, and Dock/taskbar
+          badges. Works on macOS, Linux, and Windows.
+        </p>
+        <button
+          onClick={() =>
+            void api.openExternal('https://github.com/777genius/claude-notifications-go')
+          }
+          className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:brightness-125"
+          style={{
+            backgroundColor: 'var(--color-border-emphasis)',
+            color: 'var(--color-text)',
+          }}
+        >
+          <ExternalLink className="size-3.5" />
+          Install claude-notifications-go plugin
+        </button>
+      </div>
     </div>
   );
 };

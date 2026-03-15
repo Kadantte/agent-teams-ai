@@ -33,6 +33,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { getLastReadTimestamp } from '@renderer/services/commentReadStorage';
 import { useStore } from '@renderer/store';
 import { useTheme } from '@renderer/hooks/useTheme';
+import { useViewportCommentRead } from '@renderer/hooks/useViewportCommentRead';
 import { isImageMimeType } from '@renderer/utils/attachmentUtils';
 import {
   buildMemberColorMap,
@@ -44,10 +45,14 @@ import {
   displayMemberName,
 } from '@renderer/utils/memberHelpers';
 import { buildTaskChangeRequestOptions, deriveTaskSince } from '@renderer/utils/taskChangeRequest';
-import { linkifyTaskIdsInMarkdown } from '@renderer/utils/taskReferenceUtils';
+import { linkifyTaskIdsInMarkdown, parseTaskLinkHref } from '@renderer/utils/taskReferenceUtils';
 import { getTaskKanbanColumn } from '@shared/utils/reviewState';
 import { isTaskChangeSummaryCacheable } from '@shared/utils/taskChangeState';
-import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
+import {
+  deriveTaskDisplayId,
+  formatTaskDisplayLabel,
+  taskMatchesRef,
+} from '@shared/utils/taskIdentity';
 import { format, formatDistanceToNow } from 'date-fns';
 import {
   AlignLeft,
@@ -217,6 +222,9 @@ export const TaskDetailDialog = ({
   const setLightboxOpen = useCallback((isOpen: boolean) => {
     lightboxOpenRef.current = isOpen;
   }, []);
+
+  // Ref for the scrollable DialogContent — needed as IO root for viewport-based read tracking.
+  const dialogContentRef = useRef<HTMLDivElement | null>(null);
   const handleReply = useCallback(
     (author: string, text: string) => {
       if (currentTask) setReplyTo({ taskId: currentTask.id, author, text });
@@ -224,11 +232,6 @@ export const TaskDetailDialog = ({
     [currentTask]
   );
   const clearReply = useCallback(() => setReplyTo(null), []);
-
-  const handleClose = useCallback(() => {
-    setReplyTo(null);
-    onClose();
-  }, [onClose]);
 
   const effectiveReplyTo =
     replyTo && replyTo.taskId === currentTask?.id
@@ -258,6 +261,19 @@ export const TaskDetailDialog = ({
     }
     unreadSnapshotRef.current = unread;
   }, [open, teamName, currentTask?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Viewport-based comment read tracking (replaces mark-all-on-mount)
+  const { registerComment, flush: flushCommentRead } = useViewportCommentRead({
+    teamName,
+    taskId: currentTask?.id ?? '',
+    scrollContainerRef: dialogContentRef,
+  });
+
+  const handleClose = useCallback(() => {
+    flushCommentRead();
+    setReplyTo(null);
+    onClose();
+  }, [onClose, flushCommentRead]);
 
   // Collect image attachments from comments for the Attachments section
   const commentImageAttachments = useMemo(() => {
@@ -413,8 +429,19 @@ export const TaskDetailDialog = ({
   ]);
 
   const handleDependencyClick = (taskId: string): void => {
+    // Resolve short displayId (e.g. "8ce74455") to full UUID via taskMap,
+    // since kanban cards use the full UUID in data-task-id.
+    let resolvedId = taskId;
+    if (!taskMap.has(taskId)) {
+      for (const [fullId, t] of taskMap) {
+        if (taskMatchesRef(t, taskId)) {
+          resolvedId = fullId;
+          break;
+        }
+      }
+    }
     handleClose();
-    onScrollToTask?.(taskId);
+    onScrollToTask?.(resolvedId);
   };
 
   const handleChangesSectionOpenChange = useCallback((isOpen: boolean): void => {
@@ -496,6 +523,7 @@ export const TaskDetailDialog = ({
       }}
     >
       <DialogContent
+        ref={dialogContentRef}
         className="sm:min-w-[500px] sm:max-w-4xl"
         onInteractOutside={(e) => {
           if (lightboxOpenRef.current) e.preventDefault();
@@ -824,7 +852,25 @@ export const TaskDetailDialog = ({
                   </div>
                 </div>
               ) : currentTask.description ? (
-                <div className="group relative">
+                <div
+                  className="group relative"
+                  onClickCapture={
+                    onScrollToTask
+                      ? (e) => {
+                          const link = (e.target as HTMLElement).closest<HTMLAnchorElement>(
+                            'a[href^="task://"]'
+                          );
+                          if (link) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const href = link.getAttribute('href');
+                            const parsed = href ? parseTaskLinkHref(href) : null;
+                            if (parsed?.taskId) handleDependencyClick(parsed.taskId);
+                          }
+                        }
+                      : undefined
+                  }
+                >
                   <ExpandableContent collapsedHeight={200}>
                     <MarkdownViewer
                       content={linkifyTaskIdsInMarkdown(
@@ -1210,6 +1256,7 @@ export const TaskDetailDialog = ({
                 }
                 containerClassName="-mx-6"
                 unreadCommentIds={unreadSnapshotRef.current}
+                registerCommentForViewport={registerComment}
               />
             </CollapsibleTeamSection>
           </div>
