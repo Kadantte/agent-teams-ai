@@ -9,7 +9,7 @@
 
 import type { CliArgsValidationResult } from '../utils/cliArgsParser';
 import type { CliInstallerAPI } from './cliInstaller';
-import type { EditorAPI, ProjectAPI } from './editor';
+import type { EditorAPI, EditorFileChangeEvent, ProjectAPI } from './editor';
 import type { McpCatalogAPI, PluginCatalogAPI, ApiKeysAPI, SkillsCatalogAPI } from './extensions';
 import type {
   AppConfig,
@@ -636,6 +636,9 @@ export interface ReviewAPI {
     content: string,
     projectPath?: string
   ) => Promise<{ success: boolean }>;
+  watchFiles: (projectPath: string, filePaths: string[]) => Promise<void>;
+  unwatchFiles: () => Promise<void>;
+  onExternalFileChange: (callback: (event: EditorFileChangeEvent) => void) => () => void;
   // Decision persistence
   loadDecisions: (
     teamName: string,

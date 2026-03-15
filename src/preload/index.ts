@@ -55,6 +55,7 @@ import {
   REVIEW_GET_AGENT_CHANGES,
   REVIEW_GET_CHANGE_STATS,
   REVIEW_GET_FILE_CONTENT,
+  REVIEW_FILE_CHANGE,
   REVIEW_GET_GIT_FILE_LOG,
   REVIEW_GET_TASK_CHANGES,
   REVIEW_INVALIDATE_TASK_CHANGE_SUMMARIES,
@@ -64,6 +65,8 @@ import {
   REVIEW_REJECT_HUNKS,
   REVIEW_SAVE_DECISIONS,
   REVIEW_SAVE_EDITED_FILE,
+  REVIEW_UNWATCH_FILES,
+  REVIEW_WATCH_FILES,
   SSH_CONNECT,
   SSH_DISCONNECT,
   SSH_GET_CONFIG_HOSTS,
@@ -1205,6 +1208,20 @@ const electronAPI: ElectronAPI = {
         content,
         projectPath
       );
+    },
+    watchFiles: async (projectPath: string, filePaths: string[]) => {
+      return invokeIpcWithResult<void>(REVIEW_WATCH_FILES, projectPath, filePaths);
+    },
+    unwatchFiles: async () => {
+      return invokeIpcWithResult<void>(REVIEW_UNWATCH_FILES);
+    },
+    onExternalFileChange: (callback: (event: EditorFileChangeEvent) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: EditorFileChangeEvent): void =>
+        callback(data);
+      ipcRenderer.on(REVIEW_FILE_CHANGE, handler);
+      return (): void => {
+        ipcRenderer.removeListener(REVIEW_FILE_CHANGE, handler);
+      };
     },
     // Decision persistence
     loadDecisions: async (teamName: string, scopeKey: string) => {

@@ -28,6 +28,7 @@ interface ContinuousScrollViewProps {
     snippetCount: number;
     activeFileName?: string;
   } | null;
+  reviewExternalChangesByFile: Record<string, { type: 'change' | 'add' | 'unlink' }>;
   viewedSet: Set<string>;
   editedContents: Record<string, string>;
   hunkDecisions: Record<string, HunkDecision>;
@@ -43,6 +44,8 @@ interface ContinuousScrollViewProps {
   onContentChanged: (filePath: string, content: string) => void;
   onDiscard: (filePath: string) => void;
   onSave: (filePath: string) => void;
+  onReloadFromDisk: (filePath: string) => void;
+  onKeepDraft: (filePath: string) => void;
   onAcceptFile: (filePath: string) => void;
   onRejectFile: (filePath: string) => void;
   onRestoreMissingFile?: (filePath: string, content: string) => void;
@@ -74,6 +77,7 @@ export const ContinuousScrollView = ({
   fileContents,
   fileContentsLoading,
   globalDiffLoadingState,
+  reviewExternalChangesByFile,
   viewedSet,
   editedContents,
   hunkDecisions,
@@ -89,6 +93,8 @@ export const ContinuousScrollView = ({
   onContentChanged,
   onDiscard,
   onSave,
+  onReloadFromDisk,
+  onKeepDraft,
   onAcceptFile,
   onRejectFile,
   onRestoreMissingFile,
@@ -257,6 +263,7 @@ export const ContinuousScrollView = ({
               file={file}
               fileContent={content}
               fileDecision={decision}
+              externalChange={reviewExternalChangesByFile[filePath]}
               pathChangeLabel={pathChangeLabels?.[filePath]}
               hasEdits={hasEdits}
               applying={applying}
@@ -264,6 +271,8 @@ export const ContinuousScrollView = ({
               onToggleCollapse={handleToggleCollapse}
               onDiscard={onDiscard}
               onSave={onSave}
+              onReloadFromDisk={onReloadFromDisk}
+              onKeepDraft={onKeepDraft}
               onAcceptFile={onAcceptFile}
               onRejectFile={onRejectFile}
               onRestoreMissingFile={onRestoreMissingFile}

@@ -47,6 +47,10 @@ interface DecisionSnapshot {
   fileDecisions: Record<string, HunkDecision>;
 }
 
+export interface ReviewExternalChange {
+  type: 'change' | 'add' | 'unlink';
+}
+
 type ReviewChangeSet = AgentChangeSet | TaskChangeSet | TaskChangeSetV2;
 
 const MAX_REVIEW_UNDO_DEPTH = 10;
@@ -95,6 +99,7 @@ export interface ChangeReviewSlice {
   fileContentsLoading: Record<string, boolean>;
   changeSetEpoch: number;
   fileContentVersionByPath: Record<string, number>;
+  reviewExternalChangesByFile: Record<string, ReviewExternalChange>;
   collapseUnchanged: boolean;
   applyError: string | null;
   applying: boolean;
@@ -170,6 +175,10 @@ export interface ChangeReviewSlice {
    * Prevents stale decisions from being re-applied later and forces fresh content resolve.
    */
   clearReviewStateForFile: (filePath: string) => void;
+  invalidateResolvedFileContent: (filePath: string) => void;
+  markReviewFileExternallyChanged: (filePath: string, type: ReviewExternalChange['type']) => void;
+  clearReviewFileExternalChange: (filePath: string) => void;
+  reloadReviewFileFromDisk: (filePath: string) => void;
   invalidateChangeStats: (teamName: string) => void;
 
   // Editable diff actions
@@ -312,6 +321,41 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
   set,
   get
 ) => {
+  const buildResolvedFileInvalidation = (
+    s: ChangeReviewSlice,
+    filePath: string
+  ): Pick<
+    ChangeReviewSlice,
+    | 'fileChunkCounts'
+    | 'fileContents'
+    | 'fileContentsLoading'
+    | 'hunkContextHashesByFile'
+    | 'fileContentVersionByPath'
+  > => {
+    const nextFileChunkCounts = { ...s.fileChunkCounts };
+    delete nextFileChunkCounts[filePath];
+
+    const nextFileContents = { ...s.fileContents };
+    delete nextFileContents[filePath];
+
+    const nextFileContentsLoading = { ...s.fileContentsLoading };
+    delete nextFileContentsLoading[filePath];
+
+    const nextHunkContextHashesByFile = { ...s.hunkContextHashesByFile };
+    delete nextHunkContextHashesByFile[filePath];
+
+    return {
+      fileChunkCounts: nextFileChunkCounts,
+      fileContents: nextFileContents,
+      fileContentsLoading: nextFileContentsLoading,
+      hunkContextHashesByFile: nextHunkContextHashesByFile,
+      fileContentVersionByPath: {
+        ...s.fileContentVersionByPath,
+        [filePath]: (s.fileContentVersionByPath[filePath] ?? 0) + 1,
+      },
+    };
+  };
+
   const installActiveChangeSetForLoad = (
     data: ReviewChangeSet,
     extraState?: Partial<ChangeReviewSlice>
@@ -327,6 +371,7 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
       applyError: null,
       changeSetEpoch: s.changeSetEpoch + 1,
       fileContentVersionByPath: {},
+      reviewExternalChangesByFile: {},
       ...extraState,
     }));
   };
@@ -350,6 +395,7 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
       editedContents: {},
       changeSetEpoch: s.changeSetEpoch + 1,
       fileContentVersionByPath: {},
+      reviewExternalChangesByFile: {},
     }));
   };
 
@@ -407,6 +453,7 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
     fileContentsLoading: {},
     changeSetEpoch: 0,
     fileContentVersionByPath: {},
+    reviewExternalChangesByFile: {},
     collapseUnchanged: true,
     applyError: null,
     applying: false,
@@ -494,6 +541,7 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
         fileContentsLoading: {},
         changeSetEpoch: s.changeSetEpoch + 1,
         fileContentVersionByPath: {},
+        reviewExternalChangesByFile: {},
         applyError: null,
         applying: false,
         editedContents: {},
@@ -515,6 +563,7 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
         fileContentsLoading: {},
         changeSetEpoch: s.changeSetEpoch + 1,
         fileContentVersionByPath: {},
+        reviewExternalChangesByFile: {},
         applyError: null,
         applying: false,
         editedContents: {},
@@ -538,6 +587,7 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
         fileContentsLoading: {},
         changeSetEpoch: s.changeSetEpoch + 1,
         fileContentVersionByPath: {},
+        reviewExternalChangesByFile: {},
         applyError: null,
         applying: false,
         editedContents: {},
@@ -1031,6 +1081,9 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
         const nextHashes = { ...s.hunkContextHashesByFile };
         delete nextHashes[filePath];
 
+        const nextReviewExternalChangesByFile = { ...s.reviewExternalChangesByFile };
+        delete nextReviewExternalChangesByFile[filePath];
+
         const nextFileContentVersionByPath = {
           ...s.fileContentVersionByPath,
           [filePath]: (s.fileContentVersionByPath[filePath] ?? 0) + 1,
@@ -1058,6 +1111,7 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
           editedContents: nextEditedContents,
           hunkContextHashesByFile: nextHashes,
           fileContentVersionByPath: nextFileContentVersionByPath,
+          reviewExternalChangesByFile: nextReviewExternalChangesByFile,
         };
       });
     },
@@ -1094,6 +1148,9 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
           [file.filePath]: s.fileContentVersionByPath[file.filePath] ?? 0,
         };
 
+        const nextReviewExternalChangesByFile = { ...s.reviewExternalChangesByFile };
+        delete nextReviewExternalChangesByFile[file.filePath];
+
         return {
           activeChangeSet: {
             ...s.activeChangeSet,
@@ -1106,6 +1163,7 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
           fileContents: nextFileContents,
           fileContentsLoading: nextFileContentsLoading,
           fileContentVersionByPath: nextFileContentVersionByPath,
+          reviewExternalChangesByFile: nextReviewExternalChangesByFile,
         };
       });
     },
@@ -1125,35 +1183,53 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
           delete nextFileDecisions[filePath];
         }
 
-        const nextFileChunkCounts = { ...s.fileChunkCounts };
-        delete nextFileChunkCounts[filePath];
-
-        const nextFileContents = { ...s.fileContents };
-        delete nextFileContents[filePath];
-
-        const nextFileContentsLoading = { ...s.fileContentsLoading };
-        delete nextFileContentsLoading[filePath];
-
         const nextEditedContents = { ...s.editedContents };
         delete nextEditedContents[filePath];
-
-        const nextHunkContextHashesByFile = { ...s.hunkContextHashesByFile };
-        delete nextHunkContextHashesByFile[filePath];
-
-        const nextFileContentVersionByPath = {
-          ...s.fileContentVersionByPath,
-          [filePath]: (s.fileContentVersionByPath[filePath] ?? 0) + 1,
-        };
+        const nextReviewExternalChangesByFile = { ...s.reviewExternalChangesByFile };
+        delete nextReviewExternalChangesByFile[filePath];
 
         return {
           hunkDecisions: nextHunkDecisions,
           fileDecisions: nextFileDecisions,
-          fileChunkCounts: nextFileChunkCounts,
-          fileContents: nextFileContents,
-          fileContentsLoading: nextFileContentsLoading,
           editedContents: nextEditedContents,
-          hunkContextHashesByFile: nextHunkContextHashesByFile,
-          fileContentVersionByPath: nextFileContentVersionByPath,
+          reviewExternalChangesByFile: nextReviewExternalChangesByFile,
+          ...buildResolvedFileInvalidation(s, filePath),
+        };
+      });
+    },
+
+    invalidateResolvedFileContent: (filePath: string) => {
+      set((s) => buildResolvedFileInvalidation(s, filePath));
+    },
+
+    markReviewFileExternallyChanged: (filePath: string, type: ReviewExternalChange['type']) => {
+      set((s) => ({
+        reviewExternalChangesByFile: {
+          ...s.reviewExternalChangesByFile,
+          [filePath]: { type },
+        },
+      }));
+    },
+
+    clearReviewFileExternalChange: (filePath: string) => {
+      set((s) => {
+        if (!(filePath in s.reviewExternalChangesByFile)) return s;
+        const next = { ...s.reviewExternalChangesByFile };
+        delete next[filePath];
+        return { reviewExternalChangesByFile: next };
+      });
+    },
+
+    reloadReviewFileFromDisk: (filePath: string) => {
+      set((s) => {
+        const nextEditedContents = { ...s.editedContents };
+        delete nextEditedContents[filePath];
+        const nextReviewExternalChangesByFile = { ...s.reviewExternalChangesByFile };
+        delete nextReviewExternalChangesByFile[filePath];
+        return {
+          editedContents: nextEditedContents,
+          reviewExternalChangesByFile: nextReviewExternalChangesByFile,
+          ...buildResolvedFileInvalidation(s, filePath),
         };
       });
     },
@@ -1200,6 +1276,9 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
           const nextHunkContextHashesByFile = { ...s.hunkContextHashesByFile };
           delete nextHunkContextHashesByFile[filePath];
 
+          const nextReviewExternalChangesByFile = { ...s.reviewExternalChangesByFile };
+          delete nextReviewExternalChangesByFile[filePath];
+
           // Update cached content in-place to avoid skeleton flash.
           // Replace modifiedFullContent with saved version so CodeMirror
           // reflects the new baseline without a full re-fetch cycle.
@@ -1217,6 +1296,7 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
             fileChunkCounts: nextFileChunkCounts,
             hunkContextHashesByFile: nextHunkContextHashesByFile,
             fileContents: nextContents,
+            reviewExternalChangesByFile: nextReviewExternalChangesByFile,
             applying: false,
           };
         });

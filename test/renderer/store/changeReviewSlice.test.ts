@@ -643,6 +643,78 @@ describe('changeReviewSlice task changes', () => {
     expect(store.getState().fileContentVersionByPath['/repo/file.ts']).toBe(1);
   });
 
+  it('invalidates resolved file content without clearing draft or review decisions', async () => {
+    const store = createSliceStore();
+
+    store.setState({
+      activeChangeSet: makeAgentChangeSet('/repo/file.ts'),
+      hunkDecisions: { '/repo/file.ts:0': 'rejected' },
+      fileDecisions: { '/repo/file.ts': 'rejected' },
+      fileChunkCounts: { '/repo/file.ts': 2 },
+      hunkContextHashesByFile: { '/repo/file.ts': { 0: 'ctx' } },
+      fileContents: {
+        '/repo/file.ts': {
+          ...makeFile('/repo/file.ts'),
+          originalFullContent: 'before',
+          modifiedFullContent: 'after',
+          contentSource: 'snippet-reconstruction',
+        },
+      },
+      fileContentsLoading: { '/repo/file.ts': true },
+      editedContents: { '/repo/file.ts': 'draft' },
+      reviewExternalChangesByFile: { '/repo/file.ts': { type: 'change' } },
+      fileContentVersionByPath: {},
+    });
+
+    store.getState().invalidateResolvedFileContent('/repo/file.ts');
+
+    expect(store.getState().fileContents).toEqual({});
+    expect(store.getState().fileContentsLoading).toEqual({});
+    expect(store.getState().fileChunkCounts).toEqual({});
+    expect(store.getState().hunkContextHashesByFile).toEqual({});
+    expect(store.getState().editedContents).toEqual({ '/repo/file.ts': 'draft' });
+    expect(store.getState().hunkDecisions).toEqual({ '/repo/file.ts:0': 'rejected' });
+    expect(store.getState().fileDecisions).toEqual({ '/repo/file.ts': 'rejected' });
+    expect(store.getState().reviewExternalChangesByFile).toEqual({
+      '/repo/file.ts': { type: 'change' },
+    });
+    expect(store.getState().fileContentVersionByPath['/repo/file.ts']).toBe(1);
+  });
+
+  it('reloadReviewFileFromDisk clears the draft but preserves review decisions', async () => {
+    const store = createSliceStore();
+
+    store.setState({
+      activeChangeSet: makeAgentChangeSet('/repo/file.ts'),
+      hunkDecisions: { '/repo/file.ts:0': 'rejected' },
+      fileDecisions: { '/repo/file.ts': 'rejected' },
+      fileChunkCounts: { '/repo/file.ts': 2 },
+      hunkContextHashesByFile: { '/repo/file.ts': { 0: 'ctx' } },
+      fileContents: {
+        '/repo/file.ts': {
+          ...makeFile('/repo/file.ts'),
+          originalFullContent: 'before',
+          modifiedFullContent: 'after',
+          contentSource: 'snippet-reconstruction',
+        },
+      },
+      editedContents: { '/repo/file.ts': 'draft' },
+      reviewExternalChangesByFile: { '/repo/file.ts': { type: 'unlink' } },
+      fileContentVersionByPath: {},
+    });
+
+    store.getState().reloadReviewFileFromDisk('/repo/file.ts');
+
+    expect(store.getState().fileContents).toEqual({});
+    expect(store.getState().fileChunkCounts).toEqual({});
+    expect(store.getState().hunkContextHashesByFile).toEqual({});
+    expect(store.getState().editedContents).toEqual({});
+    expect(store.getState().reviewExternalChangesByFile).toEqual({});
+    expect(store.getState().hunkDecisions).toEqual({ '/repo/file.ts:0': 'rejected' });
+    expect(store.getState().fileDecisions).toEqual({ '/repo/file.ts': 'rejected' });
+    expect(store.getState().fileContentVersionByPath['/repo/file.ts']).toBe(1);
+  });
+
   it('ignores stale fetchFileContent responses after removing a review file', async () => {
     const store = createSliceStore();
     const pending = deferred<any>();

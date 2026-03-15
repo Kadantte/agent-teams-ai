@@ -50,6 +50,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 
 import { cleanupEditorState, setEditorMainWindow } from './ipc/editor';
+import { setReviewMainWindow } from './ipc/review';
 import { initializeIpcHandlers, removeIpcHandlers } from './ipc/handlers';
 import { startEventLoopLagMonitor } from './services/infrastructure/EventLoopLagMonitor';
 import { HttpServer } from './services/infrastructure/HttpServer';
@@ -1219,6 +1220,7 @@ function createWindow(): void {
       ptyTerminalService.setMainWindow(null);
     }
     setEditorMainWindow(null);
+    setReviewMainWindow(null);
     cleanupEditorState();
   });
 
@@ -1242,6 +1244,7 @@ function createWindow(): void {
     ptyTerminalService.setMainWindow(mainWindow);
   }
   setEditorMainWindow(mainWindow);
+  setReviewMainWindow(mainWindow);
 
   logger.info('Main window created');
 }

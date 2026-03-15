@@ -457,6 +457,15 @@ export const REVIEW_APPLY_DECISIONS = 'review:applyDecisions';
 /** Получить полное содержимое файла для diff view */
 export const REVIEW_GET_FILE_CONTENT = 'review:getFileContent';
 
+/** Start/update focused file watcher for review surface */
+export const REVIEW_WATCH_FILES = 'review:watchFiles';
+
+/** Stop focused file watcher for review surface */
+export const REVIEW_UNWATCH_FILES = 'review:unwatchFiles';
+
+/** File change event for review watcher (main -> renderer) */
+export const REVIEW_FILE_CHANGE = 'review:fileChange';
+
 // Phase 4 — Git fallback
 
 /** Save edited file content to disk */
