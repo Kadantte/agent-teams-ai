@@ -85,7 +85,10 @@ export class TeamMemberLogsFinder {
   private readonly fileMentionsCache = new Map<string, boolean>();
   private readonly discoveryCache = new Map<
     string,
-    { result: NonNullable<Awaited<ReturnType<TeamMemberLogsFinder['discoverProjectSessions']>>>; expiresAt: number }
+    {
+      result: NonNullable<Awaited<ReturnType<TeamMemberLogsFinder['discoverProjectSessions']>>>;
+      expiresAt: number;
+    }
   >();
 
   constructor(
@@ -345,6 +348,29 @@ export class TeamMemberLogsFinder {
     }
     const tOwner = performance.now();
 
+    // Dedup cumulative subagent snapshots: keep 1 file per sessionId+memberName (largest).
+    // In-process teammates produce cumulative JSONL files where each successive file
+    // contains ALL lines from the previous + a new delta. The largest file is a superset.
+    const preDedupCount = results.length;
+    {
+      const subagentsByKey = new Map<string, MemberSubagentLogSummary>();
+      const nonSubagent: MemberLogSummary[] = [];
+      for (const r of results) {
+        if (r.kind !== 'subagent') {
+          nonSubagent.push(r);
+          continue;
+        }
+        const memberKey = r.memberName ? r.memberName.toLowerCase() : `_${r.subagentId}`;
+        const key = `${r.sessionId}:${memberKey}`;
+        const existing = subagentsByKey.get(key);
+        if (!existing || r.messageCount > existing.messageCount) {
+          subagentsByKey.set(key, r);
+        }
+      }
+      results.length = 0;
+      results.push(...nonSubagent, ...subagentsByKey.values());
+    }
+
     const sorted = results.sort(
       (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
     );
@@ -353,7 +379,8 @@ export class TeamMemberLogsFinder {
     console.log(
       `[findLogsForTask] task=${taskId}@${teamName} | ` +
         `step2=${step2Count} (scan ${mentionHits}/${totalFiles} files) | ` +
-        `step3=${sorted.length - step2Count} (owner=${normalizedOwner ?? 'none'}, includeOwner=${includeOwnerSessions}) | ` +
+        `step3=${preDedupCount - step2Count} (owner=${normalizedOwner ?? 'none'}, includeOwner=${includeOwnerSessions}) | ` +
+        `dedup=${preDedupCount}→${sorted.length} | ` +
         `total=${sorted.length} | ` +
         `${(tTotal - t0).toFixed(0)}ms`
     );
@@ -524,6 +551,28 @@ export class TeamMemberLogsFinder {
       }
     }
     const tOwner = performance.now();
+
+    // Dedup cumulative subagent snapshots (same logic as findLogsForTask).
+    {
+      const refsByKey = new Map<string, (typeof refs)[0]>();
+      const leadRefs: (typeof refs)[0][] = [];
+      for (const ref of refs) {
+        if (ref.memberName.toLowerCase() === leadMemberName.toLowerCase()) {
+          leadRefs.push(ref);
+          continue;
+        }
+        const parts = ref.filePath.split(path.sep);
+        const subagentsIdx = parts.lastIndexOf('subagents');
+        const sessionId = subagentsIdx > 0 ? parts[subagentsIdx - 1] : '';
+        const key = `${sessionId}:${ref.memberName.toLowerCase()}`;
+        const existing = refsByKey.get(key);
+        if (!existing || ref.sortTime > existing.sortTime) {
+          refsByKey.set(key, ref);
+        }
+      }
+      refs.length = 0;
+      refs.push(...leadRefs, ...refsByKey.values());
+    }
 
     const sortedRefs = [...refs].sort((a, b) => b.sortTime - a.sortTime);
     const tTotal = performance.now();
@@ -978,7 +1027,12 @@ export class TeamMemberLogsFinder {
             // that this session actually WORKED on the task. Agents commonly call
             // task_get to check dependencies from other tasks, producing false matches.
             const toolName = typeof b.name === 'string' ? b.name : '';
-            if (toolName === 'task_get' || toolName === 'mcp__agent-teams__task_get') continue;
+            if (
+              toolName === 'task_get' ||
+              toolName === 'mcp__agent-teams__task_get' ||
+              toolName === 'TaskGet'
+            )
+              continue;
 
             const input = b.input as Record<string, unknown> | undefined;
             if (!input) continue;

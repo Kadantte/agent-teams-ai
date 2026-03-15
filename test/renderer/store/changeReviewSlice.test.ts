@@ -805,4 +805,110 @@ describe('changeReviewSlice task changes', () => {
     expect(store.getState().changeSetEpoch).toBe(3);
     expect(store.getState().fileContentVersionByPath).toEqual({});
   });
+
+  it('forces re-review when snippet order changes even if file paths stay the same', async () => {
+    const store = createSliceStore();
+    const first = makeSnippet({
+      toolUseId: 'tool-1',
+      filePath: '/repo/file.ts',
+      oldString: 'a',
+      newString: 'b',
+      timestamp: '2026-03-01T10:00:00.000Z',
+    });
+    const second = makeSnippet({
+      toolUseId: 'tool-2',
+      filePath: '/repo/file.ts',
+      oldString: 'c',
+      newString: 'd',
+      timestamp: '2026-03-01T10:01:00.000Z',
+    });
+    const current = {
+      memberName: 'alice',
+      teamName: 'team-a',
+      files: [
+        {
+          ...makeFile('/repo/file.ts'),
+          snippets: [first, second],
+        },
+      ],
+      totalFiles: 1,
+      totalLinesAdded: 1,
+      totalLinesRemoved: 1,
+    };
+    const fresh = {
+      ...current,
+      files: [
+        {
+          ...current.files[0],
+          snippets: [second, first],
+        },
+      ],
+    };
+    hoisted.getAgentChanges.mockResolvedValueOnce(fresh);
+
+    store.setState({
+      activeChangeSet: current,
+      hunkDecisions: { '/repo/file.ts:0': 'rejected' },
+      fileDecisions: { '/repo/file.ts': 'rejected' },
+      changeSetEpoch: 0,
+      fileContentVersionByPath: {},
+    });
+
+    await store.getState().applyReview('team-a', undefined, 'alice');
+
+    expect(hoisted.applyDecisions).not.toHaveBeenCalled();
+    expect(store.getState().activeChangeSet).toEqual(fresh);
+    expect(store.getState().applyError).toBe(
+      'Changes have been updated since you started reviewing. Please re-review.'
+    );
+  });
+
+  it('does not force re-review when only top-level file order changes', async () => {
+    const store = createSliceStore();
+    const firstFile = makeFile('/repo/a.ts', { newString: 'after-a' });
+    const secondFile = makeFile('/repo/b.ts', { newString: 'after-b' });
+    const current = {
+      memberName: 'alice',
+      teamName: 'team-a',
+      files: [firstFile, secondFile],
+      totalFiles: 2,
+      totalLinesAdded: firstFile.linesAdded + secondFile.linesAdded,
+      totalLinesRemoved: firstFile.linesRemoved + secondFile.linesRemoved,
+    };
+    const fresh = {
+      ...current,
+      files: [secondFile, firstFile],
+    };
+    hoisted.getAgentChanges.mockResolvedValueOnce(fresh);
+    hoisted.applyDecisions.mockResolvedValueOnce({
+      applied: 0,
+      skipped: 0,
+      conflicts: 0,
+      errors: [],
+    });
+
+    store.setState({
+      activeChangeSet: current,
+      hunkDecisions: { '/repo/a.ts:0': 'rejected' },
+      fileDecisions: { '/repo/a.ts': 'rejected' },
+      changeSetEpoch: 0,
+      fileContentVersionByPath: {},
+    });
+
+    await store.getState().applyReview('team-a', undefined, 'alice');
+
+    expect(store.getState().applyError).toBeNull();
+    expect(hoisted.applyDecisions).toHaveBeenCalledTimes(1);
+    expect(hoisted.applyDecisions).toHaveBeenCalledWith({
+      teamName: 'team-a',
+      taskId: undefined,
+      memberName: 'alice',
+      decisions: [
+        expect.objectContaining({
+          filePath: '/repo/a.ts',
+        }),
+      ],
+    });
+    expect(store.getState().activeChangeSet).toEqual(current);
+  });
 });

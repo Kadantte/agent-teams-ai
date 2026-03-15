@@ -27,6 +27,46 @@ import {
 import type { EnhancedChunk } from '@renderer/types/data';
 import type { MemberLogSummary } from '@shared/types';
 
+// ---------------------------------------------------------------------------
+// Chunk filtering by task work intervals
+// ---------------------------------------------------------------------------
+
+const CHUNK_GRACE_BEFORE_MS = 30_000; // 30s before startedAt
+const CHUNK_GRACE_AFTER_MS = 10_000; // 10s after completedAt
+
+function filterChunksByWorkIntervals(
+  chunks: EnhancedChunk[] | null,
+  intervals: { startedAt: string; completedAt?: string }[] | undefined
+): EnhancedChunk[] | null {
+  if (!chunks) return null;
+  if (!intervals || intervals.length === 0) return chunks;
+
+  const now = Date.now();
+  const parsed = intervals
+    .map((i) => {
+      const s = Date.parse(i.startedAt);
+      if (!Number.isFinite(s)) return null;
+      const e = typeof i.completedAt === 'string' ? Date.parse(i.completedAt) : null;
+      return {
+        startMs: s - CHUNK_GRACE_BEFORE_MS,
+        endMs: e != null && Number.isFinite(e) ? e + CHUNK_GRACE_AFTER_MS : null,
+      };
+    })
+    .filter((v): v is { startMs: number; endMs: number | null } => v !== null);
+
+  if (parsed.length === 0) return chunks;
+
+  return chunks.filter((chunk) => {
+    const cs = chunk.startTime.getTime();
+    const ce = chunk.endTime.getTime();
+    if (!Number.isFinite(cs) || !Number.isFinite(ce)) return true;
+    return parsed.some((i) => {
+      const end = i.endMs ?? now;
+      return cs <= end && ce >= i.startMs;
+    });
+  });
+}
+
 interface MemberLogsTabProps {
   teamName: string;
   memberName?: string;
@@ -342,7 +382,8 @@ export const MemberLogsTab = ({
       try {
         const next = await fetchDetailForLog(previewLog);
         if (cancelled) return;
-        setPreviewChunks(next ? [...next] : null);
+        const filtered = taskId ? filterChunksByWorkIntervals(next, taskWorkIntervals) : next;
+        setPreviewChunks(filtered ? [...filtered] : null);
       } catch {
         if (cancelled) return;
         setPreviewChunks(null);
@@ -352,7 +393,7 @@ export const MemberLogsTab = ({
     return () => {
       cancelled = true;
     };
-  }, [fetchDetailForLog, previewLog, shouldShowPreview]);
+  }, [fetchDetailForLog, previewLog, shouldShowPreview, intervalsKey]);
 
   useEffect(() => {
     if (!shouldShowPreview) return;
@@ -367,7 +408,8 @@ export const MemberLogsTab = ({
       try {
         const next = await fetchDetailForLog(previewLog, { bypassCache: true });
         if (cancelled) return;
-        setPreviewChunks(next ? [...next] : null);
+        const filtered = taskId ? filterChunksByWorkIntervals(next, taskWorkIntervals) : next;
+        setPreviewChunks(filtered ? [...filtered] : null);
       } catch {
         // keep last successful preview
       } finally {
@@ -386,6 +428,7 @@ export const MemberLogsTab = ({
     previewLog,
     shouldShowPreview,
     taskStatus,
+    intervalsKey,
   ]);
 
   useEffect(() => {
@@ -400,8 +443,8 @@ export const MemberLogsTab = ({
       try {
         const next = await fetchDetailForLog(expandedLogSummary, { bypassCache: true });
         if (cancelled) return;
-        // Ensure new reference so memoized transforms update.
-        setDetailChunks(next ? [...next] : null);
+        const filtered = taskId ? filterChunksByWorkIntervals(next, taskWorkIntervals) : next;
+        setDetailChunks(filtered ? [...filtered] : null);
       } catch {
         // Keep last successful data; avoid flicker during transient errors.
       } finally {
@@ -416,7 +459,15 @@ export const MemberLogsTab = ({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [beginRefreshing, endRefreshing, expandedLogSummary, fetchDetailForLog, taskId, taskStatus]);
+  }, [
+    beginRefreshing,
+    endRefreshing,
+    expandedLogSummary,
+    fetchDetailForLog,
+    taskId,
+    taskStatus,
+    intervalsKey,
+  ]);
 
   const handleExpand = useCallback(
     async (log: MemberLogSummary) => {
@@ -436,14 +487,15 @@ export const MemberLogsTab = ({
           log,
           shouldBypassCache ? { bypassCache: true } : undefined
         );
-        setDetailChunks(chunks ? [...chunks] : null);
+        const filtered = taskId ? filterChunksByWorkIntervals(chunks, taskWorkIntervals) : chunks;
+        setDetailChunks(filtered ? [...filtered] : null);
       } catch {
         setDetailChunks(null);
       } finally {
         setDetailLoading(false);
       }
     },
-    [expandedId, fetchDetailForLog, getRowId, taskStatus]
+    [expandedId, fetchDetailForLog, getRowId, taskStatus, intervalsKey]
   );
 
   if (loading && logs.length === 0) {
@@ -581,9 +633,7 @@ const LogCard = ({
                       <Clock size={10} />
                       {updatedAgo}
                     </span>
-                    <span style={{ opacity: 0.4 }}>
-                      started {createdAgo}
-                    </span>
+                    <span style={{ opacity: 0.4 }}>started {createdAgo}</span>
                   </>
                 ) : (
                   <span className="flex items-center gap-1">
@@ -601,7 +651,10 @@ const LogCard = ({
                 )}
               </div>
               {log.lastOutputPreview && !expanded && (
-                <div className="mt-1 truncate text-[10px] text-[var(--color-text-muted)]" style={{ opacity: 0.6 }}>
+                <div
+                  className="mt-1 truncate text-[10px] text-[var(--color-text-muted)]"
+                  style={{ opacity: 0.6 }}
+                >
                   {log.lastOutputPreview}
                 </div>
               )}
