@@ -56,10 +56,10 @@ describe('createCliProvisionerNameGuard', () => {
     expect(keep('bob-provisioner')).toBe(false);
   });
 
-  it('keeps provisioner names when the base member is absent', () => {
+  it('drops provisioner names even when the base member is absent', () => {
     const keep = createCliProvisionerNameGuard(['carol-provisioner']);
 
-    expect(keep('carol-provisioner')).toBe(true);
+    expect(keep('carol-provisioner')).toBe(false);
   });
 
   it('treats base-name collisions case-insensitively', () => {

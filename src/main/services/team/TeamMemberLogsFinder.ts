@@ -370,6 +370,9 @@ export class TeamMemberLogsFinder {
       results.length = 0;
       results.push(...nonSubagent, ...subagentsByKey.values());
     }
+    // NOTE: dedup assumes cumulative snapshots (largest file = superset of all smaller ones).
+    // Safety net: filterChunksByWorkIntervals on frontend still filters content by time,
+    // so even if the wrong file is picked, only task-relevant chunks are shown.
 
     const sorted = results.sort(
       (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()

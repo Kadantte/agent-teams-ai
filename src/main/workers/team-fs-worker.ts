@@ -285,6 +285,26 @@ function dropCliAutoSuffixedMembers(
   }
 }
 
+const PROVISIONER_SUFFIX = '-provisioner';
+
+/**
+ * Drop CLI provisioner artifacts ("{name}-provisioner") unconditionally.
+ * These are temporary internal agents created during team provisioning
+ * and should never be shown to the user.
+ */
+function dropCliProvisionerMembers(
+  memberMap: Map<string, { name: string; role?: string; color?: string }>
+): void {
+  for (const [key, member] of Array.from(memberMap.entries())) {
+    const lower = member.name.trim().toLowerCase();
+    if (!lower.endsWith(PROVISIONER_SUFFIX)) continue;
+    const base = lower.slice(0, -PROVISIONER_SUFFIX.length);
+    if (base) {
+      memberMap.delete(key);
+    }
+  }
+}
+
 async function listTeams(
   payload: ListTeamsPayload
 ): Promise<{ teams: unknown[]; diag: ListTeamsDiag }> {
@@ -428,6 +448,7 @@ async function listTeams(
     }
 
     dropCliAutoSuffixedMembers(memberMap);
+    dropCliProvisionerMembers(memberMap);
 
     const members = Array.from(memberMap.values());
     const summary = {
