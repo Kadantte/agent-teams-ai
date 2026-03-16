@@ -114,6 +114,7 @@ function validateNotificationsSection(
     'snoozeMinutes',
     'notifyOnStatusChange',
     'notifyOnTaskComments',
+    'notifyOnTaskCreated',
     'statusChangeOnlySolo',
     'statusChangeStatuses',
     'triggers',
@@ -177,6 +178,12 @@ function validateNotificationsSection(
           return { valid: false, error: `notifications.${key} must be a boolean` };
         }
         result.notifyOnTaskComments = value;
+        break;
+      case 'notifyOnTaskCreated':
+        if (typeof value !== 'boolean') {
+          return { valid: false, error: `notifications.${key} must be a boolean` };
+        }
+        result.notifyOnTaskCreated = value;
         break;
       case 'statusChangeOnlySolo':
         if (typeof value !== 'boolean') {

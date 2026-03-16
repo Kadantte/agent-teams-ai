@@ -713,7 +713,7 @@ export interface TeamMessageNotificationData {
   /** Optional sender color for visual context. */
   color?: string;
   /** Team event sub-type for notification categorization. */
-  teamEventType?: 'task_clarification' | 'task_status_change' | 'task_comment';
+  teamEventType?: 'task_clarification' | 'task_status_change' | 'task_comment' | 'task_created';
   /** Stable key for storage deduplication. Required — no fallback to Date.now(). */
   dedupeKey?: string;
   /**

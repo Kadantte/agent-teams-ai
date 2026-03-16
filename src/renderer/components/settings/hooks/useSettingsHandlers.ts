@@ -300,6 +300,7 @@ export function useSettingsHandlers({
           notifyOnClarifications: true,
           notifyOnStatusChange: true,
           notifyOnTaskComments: true,
+          notifyOnTaskCreated: true,
           statusChangeOnlySolo: true,
           statusChangeStatuses: ['in_progress', 'completed'],
           triggers: defaultTriggers,

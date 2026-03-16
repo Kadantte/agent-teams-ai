@@ -47,6 +47,7 @@ export interface SafeConfig {
     notifyOnClarifications: boolean;
     notifyOnStatusChange: boolean;
     notifyOnTaskComments: boolean;
+    notifyOnTaskCreated: boolean;
     statusChangeOnlySolo: boolean;
     statusChangeStatuses: string[];
     triggers: AppConfig['notifications']['triggers'];
@@ -181,6 +182,7 @@ export function useSettingsConfig(): UseSettingsConfigReturn {
         notifyOnClarifications: displayConfig?.notifications?.notifyOnClarifications ?? true,
         notifyOnStatusChange: displayConfig?.notifications?.notifyOnStatusChange ?? true,
         notifyOnTaskComments: displayConfig?.notifications?.notifyOnTaskComments ?? true,
+        notifyOnTaskCreated: displayConfig?.notifications?.notifyOnTaskCreated ?? true,
         statusChangeOnlySolo: displayConfig?.notifications?.statusChangeOnlySolo ?? true,
         statusChangeStatuses: displayConfig?.notifications?.statusChangeStatuses ?? [
           'in_progress',

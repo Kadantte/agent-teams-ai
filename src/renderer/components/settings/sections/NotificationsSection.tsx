@@ -23,6 +23,7 @@ import {
   Mail,
   MessageSquare,
   PartyPopper,
+  CirclePlus,
   Send,
   Users,
   Volume2,
@@ -64,6 +65,7 @@ interface NotificationsSectionProps {
       | 'notifyOnClarifications'
       | 'notifyOnStatusChange'
       | 'notifyOnTaskComments'
+      | 'notifyOnTaskCreated'
       | 'statusChangeOnlySolo',
     value: boolean
   ) => void;
@@ -290,6 +292,17 @@ export const NotificationsSection = ({
           <SettingsToggle
             enabled={safeConfig.notifications.notifyOnTaskComments}
             onChange={(v) => onNotificationToggle('notifyOnTaskComments', v)}
+            disabled={saving || !safeConfig.notifications.enabled}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Task created notifications"
+          description="Show native OS notifications when a new task is created"
+          icon={<CirclePlus className="size-4" />}
+        >
+          <SettingsToggle
+            enabled={safeConfig.notifications.notifyOnTaskCreated}
+            onChange={(v) => onNotificationToggle('notifyOnTaskCreated', v)}
             disabled={saving || !safeConfig.notifications.enabled}
           />
         </SettingRow>

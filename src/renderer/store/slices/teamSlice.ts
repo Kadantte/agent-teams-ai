@@ -116,6 +116,7 @@ import type { StateCreator } from 'zustand';
 const notifiedClarificationTaskKeys = new Set<string>();
 const notifiedStatusChangeKeys = new Set<string>();
 const notifiedCommentKeys = new Set<string>();
+const notifiedCreatedTaskKeys = new Set<string>();
 
 let isFirstFetchAllTasks = true;
 
@@ -290,6 +291,39 @@ function fireTaskCommentNotification(
       body: preview,
       teamEventType: 'task_comment',
       dedupeKey: `comment:${task.teamName}:${task.id}:${comment.id}`,
+      suppressToast,
+    })
+    .catch(() => undefined);
+}
+
+function detectTaskCreatedNotifications(
+  oldTasks: GlobalTask[],
+  newTasks: GlobalTask[],
+  notifyEnabled: boolean
+): void {
+  const oldTaskKeys = new Set(oldTasks.map((t) => `${t.teamName}:${t.id}`));
+
+  for (const task of newTasks) {
+    const key = `${task.teamName}:${task.id}`;
+    if (oldTaskKeys.has(key)) continue;
+    if (notifiedCreatedTaskKeys.has(key)) continue;
+    notifiedCreatedTaskKeys.add(key);
+
+    fireTaskCreatedNotification(task, !notifyEnabled);
+  }
+}
+
+function fireTaskCreatedNotification(task: GlobalTask, suppressToast: boolean): void {
+  void api.teams
+    ?.showMessageNotification({
+      teamName: task.teamName,
+      teamDisplayName: task.teamDisplayName,
+      from: task.owner ?? 'system',
+      to: 'user',
+      summary: `New task ${formatTaskDisplayLabel(task)}: ${task.subject}`,
+      body: task.description || task.subject,
+      teamEventType: 'task_created',
+      dedupeKey: `created:${task.teamName}:${task.id}`,
       suppressToast,
     })
     .catch(() => undefined);
@@ -852,6 +886,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         detectStatusChangeNotifications(oldTasks, tasks, get().appConfig, get().teamByName);
         const notifyOnTaskComments = get().appConfig?.notifications?.notifyOnTaskComments ?? true;
         detectTaskCommentNotifications(oldTasks, tasks, notifyOnTaskComments);
+        const notifyOnTaskCreated = get().appConfig?.notifications?.notifyOnTaskCreated ?? true;
+        detectTaskCreatedNotifications(oldTasks, tasks, notifyOnTaskCreated);
       } else {
         // Initial load — seed the Sets to prevent false notifications on next update
         for (const task of tasks) {
@@ -869,6 +905,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
           for (const comment of task.comments ?? []) {
             notifiedCommentKeys.add(`${task.teamName}:${task.id}:${comment.id}`);
           }
+          // Seed created task keys to prevent false notifications
+          notifiedCreatedTaskKeys.add(`${task.teamName}:${task.id}`);
         }
       }
 
