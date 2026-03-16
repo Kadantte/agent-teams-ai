@@ -11,7 +11,7 @@ import { REVIEW_STATE_DISPLAY, buildMemberColorMap } from '@renderer/utils/membe
 import {
   buildTaskChangePresenceKey,
   buildTaskChangeRequestOptions,
-  isTaskSummaryCacheableForOptions,
+  canDisplayTaskChangesForOptions,
 } from '@renderer/utils/taskChangeRequest';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
@@ -240,13 +240,11 @@ export const KanbanTaskCard = ({
   const hasBlockedBy = blockedByIds.length > 0;
   const hasBlocks = blocksIds.length > 0;
 
-  // Lazy-check if task has file changes (only for done/review/approved columns)
-  const showChangesColumn =
-    (columnId === 'done' || columnId === 'review' || columnId === 'approved') && !!onViewChanges;
+  // Lazy-check if task has file changes
   const taskChangeRequestOptions = useMemo(() => buildTaskChangeRequestOptions(task), [task]);
-  const useTerminalSummaryCache = useMemo(
-    () => isTaskSummaryCacheableForOptions(taskChangeRequestOptions),
-    [taskChangeRequestOptions]
+  const canDisplay = useMemo(
+    () => canDisplayTaskChangesForOptions(taskChangeRequestOptions) && !!onViewChanges,
+    [taskChangeRequestOptions, onViewChanges]
   );
   const cacheKey = useMemo(
     () => buildTaskChangePresenceKey(teamName, task.id, taskChangeRequestOptions),
@@ -256,12 +254,11 @@ export const KanbanTaskCard = ({
   const checkTaskHasChanges = useStore((s) => s.checkTaskHasChanges);
 
   useEffect(() => {
-    if (showChangesColumn && useTerminalSummaryCache && taskHasChanges !== true) {
+    if (canDisplay && taskHasChanges === undefined) {
       void checkTaskHasChanges(teamName, task.id, taskChangeRequestOptions);
     }
   }, [
-    showChangesColumn,
-    useTerminalSummaryCache,
+    canDisplay,
     task.id,
     teamName,
     taskHasChanges,
@@ -269,10 +266,10 @@ export const KanbanTaskCard = ({
     taskChangeRequestOptions,
   ]);
 
-  const isReviewManual = columnId === 'review' && !hasReviewers;
+  const isReviewManual = columnId === 'review' && !hasReviewers && !task.reviewer;
   const metaActions = (
     <>
-      {showChangesColumn && taskHasChanges === true ? (
+      {canDisplay && taskHasChanges === true ? (
         <TaskActionIconButton
           label="Changes"
           icon={<FileCode className="size-2.5" />}
@@ -280,7 +277,7 @@ export const KanbanTaskCard = ({
           className="text-sky-400 hover:bg-sky-500/10 hover:text-sky-300"
           onClick={(e) => {
             e.stopPropagation();
-            onViewChanges(task.id);
+            onViewChanges!(task.id);
           }}
         />
       ) : null}

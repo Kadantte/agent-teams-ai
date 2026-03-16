@@ -873,12 +873,15 @@ export class TeamDataService {
 
         // Skip inbox notification when lead starts their own task (solo teams)
         if (!this.isLeadOwner(task.owner, leadName)) {
-          const parts = [`**started task** ${this.getTaskLabel(task)} "${task.subject}"`];
+          const parts = [
+            `**start working on task now** ${this.getTaskLabel(task)} "${task.subject}"`,
+          ];
           if (task.description?.trim()) {
             parts.push(`\nDetails:\n${task.description.trim()}`);
           }
           parts.push(
             `\n${AGENT_BLOCK_OPEN}`,
+            `Begin work on this task immediately. Keep it moving until it is completed or clearly blocked. Do not leave it idle.`,
             `Update task status using the board MCP tools:`,
             `task_complete { teamName: "${teamName}", taskId: "${task.id}" }`,
             AGENT_BLOCK_CLOSE
@@ -888,7 +891,7 @@ export class TeamDataService {
             from: leadName,
             text: parts.join('\n'),
             taskRefs: task.descriptionTaskRefs,
-            summary: `Task ${this.getTaskLabel(task)} started`,
+            summary: `Start working on ${this.getTaskLabel(task)}`,
             source: 'system_notification',
           });
         }
@@ -1510,7 +1513,8 @@ export class TeamDataService {
     text: string,
     summary?: string,
     attachments?: AttachmentMeta[],
-    taskRefs?: TaskRef[]
+    taskRefs?: TaskRef[],
+    messageId?: string
   ): Promise<SendMessageResult> {
     let leadSessionId: string | undefined;
     try {
@@ -1529,6 +1533,7 @@ export class TeamDataService {
       source: 'user_sent',
       attachments: attachments?.length ? attachments : undefined,
       leadSessionId,
+      ...(messageId ? { messageId } : {}),
     }) as InboxMessage;
     return {
       deliveredToInbox: false,

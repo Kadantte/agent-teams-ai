@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 import { setCurrentMainOp } from '@main/services/infrastructure/EventLoopLagMonitor';
 import { getAppIconPath } from '@main/utils/appIcon';
 import { getAppDataPath } from '@main/utils/pathDecoder';
@@ -1204,12 +1206,19 @@ async function handleSendMessage(
     // Smart routing: lead + alive → stdin direct, else → inbox
     if (isLeadRecipient && isAlive) {
       const resolvedLeadName = leadName ?? memberName;
+      // Pre-generate stable messageId so both stdin and persistence use the same identity.
+      // This allows the lead to call task_create_from_message with the exact messageId.
+      const preGeneratedMessageId = crypto.randomUUID();
       // Separate try blocks: stdin delivery vs persistence
       // If stdin succeeds but persistence fails, do NOT fallback to inbox (would duplicate)
       // Wrap with instructions so lead responds with visible text (not just agent-only blocks)
       const wrappedText = [
         `You received a direct message from the user.`,
         `IMPORTANT: Your text response here is shown to the user in the Messages panel. Always include a brief human-readable reply. Do NOT respond with only an agent-only block.`,
+        AGENT_BLOCK_OPEN,
+        `MessageId: ${preGeneratedMessageId}`,
+        `When creating a task from this user message, prefer task_create_from_message with messageId="${preGeneratedMessageId}" for reliable provenance. Only use this exact messageId — never guess or fabricate one.`,
+        AGENT_BLOCK_CLOSE,
         ``,
         `Message from user:`,
         buildMessageDeliveryText(payload.text!, {
@@ -1252,11 +1261,12 @@ async function handleSendMessage(
             payload.text!,
             payload.summary,
             attachmentMeta,
-            validatedTaskRefs.value
+            validatedTaskRefs.value,
+            preGeneratedMessageId
           );
         } catch (persistError) {
           logger.warn(`Persistence failed after stdin delivery for ${tn}: ${String(persistError)}`);
-          result = { deliveredToInbox: false, messageId: `stdin-${Date.now()}` };
+          result = { deliveredToInbox: false, messageId: preGeneratedMessageId };
         }
 
         // Save attachment binary data to disk (best-effort)

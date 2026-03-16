@@ -130,3 +130,12 @@ export function isTaskSummaryCacheableForOptions(
 ): boolean {
   return isTaskChangeSummaryCacheable(getTaskChangeStateBucketFromOptions(options));
 }
+
+export function canDisplayTaskChangesForOptions(
+  options: TaskChangeRequestOptions | null | undefined
+): boolean {
+  const bucket = getTaskChangeStateBucketFromOptions(options);
+  if (bucket !== 'active') return true;
+  // 'active' bucket includes both pending and in_progress — show for in_progress only
+  return options?.status === 'in_progress';
+}

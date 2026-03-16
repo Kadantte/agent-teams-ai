@@ -1314,10 +1314,8 @@ export const createChangeReviewSlice: StateCreator<AppState, [], [], ChangeRevie
       const summaryCacheable = isTaskSummaryCacheableForOptions(options);
       if (summaryCacheable && get().taskHasChanges[cacheKey] === true) return;
       if (taskChangesCheckInFlight.has(cacheKey)) return;
-      if (summaryCacheable) {
-        const negativeTs = taskChangesNegativeCache.get(cacheKey);
-        if (negativeTs && Date.now() - negativeTs < NEGATIVE_CACHE_TTL) return;
-      }
+      const negativeTs = taskChangesNegativeCache.get(cacheKey);
+      if (negativeTs && Date.now() - negativeTs < NEGATIVE_CACHE_TTL) return;
 
       taskChangesCheckInFlight.add(cacheKey);
       try {

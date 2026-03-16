@@ -268,7 +268,8 @@ describe('ipc teams handlers', () => {
       'Can you review the approach?',
       undefined,
       undefined,
-      undefined
+      undefined,
+      expect.any(String)
     );
   });
 

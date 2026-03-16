@@ -466,7 +466,7 @@ After member_briefing succeeds:
 - CRITICAL: If someone comments on your task, you MUST reply on that same task via task_add_comment. Never leave a user/lead/teammate task comment unanswered, even if the reply is only a short acknowledgement or status update. Do NOT treat status changes or direct messages as a substitute for an on-task reply.
 - CRITICAL: If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on that same task, FIRST leave a short task comment saying what you are about to do, THEN move it to in_progress with task_start, THEN do the work, and when finished leave a short result comment and move it to done with task_complete. Never skip this comment -> reopen -> work -> comment -> done cycle.
 - Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.
-- If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.
+- If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention. When skipping a message, stay silent — never output meta-commentary about skipped or already-delivered messages.
 ${buildTeammateAgentBlockReminder()}
 ${actionModeProtocol}`;
 }
@@ -545,7 +545,7 @@ ${actionModeProtocol}
      - Only then run task_start when you truly begin.
      - If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on it, FIRST leave a short task comment saying what you are about to do, THEN run task_start, then do the work, and when finished leave a short result comment and run task_complete again. Never skip this comment -> reopen -> work -> comment -> done cycle.
      - Direct messages to your team lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.
-     - If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention.
+     - If a task-scoped update is already recorded in a task comment, do NOT send a duplicate SendMessage to the lead with the same content unless you need urgent non-task attention. When skipping a message, stay silent — never output meta-commentary about skipped or already-delivered messages.
      - If you have no tasks, wait for new assignments.`;
 }
 
@@ -640,6 +640,12 @@ function buildTaskStatusProtocol(teamName: string): string {
    - After that follow-up work finishes, add a short task comment with the result, what changed, or what you verified.
    - After that, run task_complete again before your reply.
    - Never do comment-driven implementation/fix work while the task is still shown as pending, review, completed, or approved.
+   - After task_complete, if the task needs review AND the team has a member whose role includes reviewing (e.g. "reviewer", "tech-lead", "qa"), IMMEDIATELY call review_request to move it to the review column and notify the reviewer:
+     { teamName: "${teamName}", taskId: "<taskId>", from: "<your-name>", reviewer: "<reviewer-name>" }
+     Do NOT leave a completed task without sending it to review when review is expected and a reviewer exists.
+     If no team member has a reviewer role, skip review_request — the task stays completed.` +
+     // No reviewer in team → user can manually drag to review from kanban if needed
+     `
 4. If you are asked to review and the task is accepted, move it to APPROVED (not DONE) with MCP tool review_approve:
    { teamName: "${teamName}", taskId: "<taskId>", note?: "<optional note>", notifyOwner: true }
 5. If review fails and changes are needed, use MCP tool review_request_changes:
@@ -654,7 +660,7 @@ function buildTaskStatusProtocol(teamName: string): string {
 8. When discussing a task with a teammate and you have important findings, decisions, blockers, or progress updates — record them as a task comment:
    { teamName: "${teamName}", taskId: "<taskId>", text: "<summary of your finding or decision>", from: "<your-name>" }
    Do NOT comment on trivial coordination messages. Only comment when the information is valuable context for the task.
-   Do NOT send a duplicate SendMessage to the lead for the same task-scoped update unless you need urgent non-task attention.
+   Do NOT send a duplicate SendMessage to the lead for the same task-scoped update unless you need urgent non-task attention. When skipping a message, stay silent — never output meta-commentary about skipped or already-delivered messages.
    Direct messages to the lead are only for urgent attention, no-task situations, or when the lead explicitly asked for a direct reply.
 9. When sending a message about a specific task, include its short display label like #<displayId> in your SendMessage summary field for traceability.
 10. In ALL human-facing or teammate-facing message text, when you mention a task reference, ALWAYS write it with a leading # (for example: #abcd1234, not abcd1234 or "task abcd1234").
@@ -663,8 +669,10 @@ function buildTaskStatusProtocol(teamName: string): string {
    - If you are reviewing work for task #X, run review_approve/review_request_changes on #X (the work task).
    - Do NOT approve a separate "review task" (e.g. #2 created just to ask for a review) — that will put the wrong task into APPROVED.
    - Typical flow:
-     a) Owner finishes work on #X -> task_complete #X
-     b) Reviewer accepts -> review_approve #X
+     a) Owner finishes work on #X -> task_complete #X -> review_request #X (moves to review column, notifies reviewer)
+     b) Reviewer receives notification, reviews the work
+     c) Reviewer accepts -> review_approve #X
+     d) Reviewer rejects -> review_request_changes #X
 12. CLARIFICATION PROTOCOL (CRITICAL — MANDATORY):
    When you are blocked and need information to continue a task, you MUST do ALL steps below — skipping the board update or comment breaks traceability:
    a) STEP 1 — FIRST, set the clarification flag with MCP tool task_set_clarification:
@@ -770,6 +778,7 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
       `- Review requests are also handled by the board runtime: review_request already notifies the reviewer, so do NOT send a second manual SendMessage for the same review request unless you are adding materially new context that is not already on the task.`,
       `- If you receive a task-scoped system notification like "Comment on #...", treat it as requiring an on-task reply. Reply via task_add_comment on that task; do NOT continue the same discussion only in direct messages.`,
       `- Teammate task comments are auto-forwarded to you. When that happens, you MUST reply on-task first. Direct messages are allowed only as an additional urgent wake-up ping or clearly non-task coordination, never as the only reply to the task comment.`,
+      `- When you skip sending a message because it would be a duplicate or was already delivered, produce NO text output about it. Do not write meta-commentary like "(Already relayed…)", "(No additional relay needed…)", or similar. Just silently move on.`,
       `- Ownership must reflect the person actually doing the implementation/fix work. If someone takes over execution, update the owner immediately before they start. Do NOT leave the lead/planner as owner when another member is doing the work.`,
       `- Set createdBy when creating tasks so workflow history shows who created the task.`,
       ``,
@@ -845,7 +854,7 @@ Constraints:
 - Do NOT send shutdown_request messages (SendMessage type: "shutdown_request" is FORBIDDEN).
 - Do NOT shut down, terminate, or clean up the team or its members.
 - Do NOT spawn or create a member named "user". "user" is a reserved system name for the human operator — it is NOT a teammate.
-- Keep assistant text minimal.
+- Keep assistant text minimal. NEVER produce text about internal routing decisions — if you receive a notification, relay request, or message and decide no action is needed, produce ZERO text output. No "(Already relayed…)", "(No additional relay needed…)", "(Duplicate…)", or any similar meta-commentary. If there is nothing to do, say nothing.
 - NEVER send duplicate messages to the same member. One SendMessage per member per topic is enough.
 - Keep the task board high-signal: avoid creating tasks for trivial micro-items.
 - Use the team task board for assigned/substantial work.
@@ -1020,7 +1029,7 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
       Pick the best default owner, create an investigation/triage task for that teammate immediately, and note assumptions in the task description or a task comment.
       That teammate should inspect the codebase, refine scope, and create follow-up tasks if needed.
      - If that teammate already has another in_progress task, create/keep the new task in pending/TODO. Do NOT mark it in_progress for them yet.
-   - Avoid duplicate notifications for the same assignment (one message per member per topic is enough).
+   - Avoid duplicate notifications for the same assignment (one message per member per topic is enough). When skipping a message, stay silent — never output meta-commentary about skipped or already-delivered messages.
   - When tasks have natural ordering (e.g. setup -> implementation -> testing), use blockedBy relationships.
   - If a task is blocked (uses blockedBy), it MUST be created as pending (for example with task_create + startImmediately: false). Do NOT mark blocked tasks in_progress.
      - Review guidance:
@@ -1031,15 +1040,24 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
       - There is no automatic status transition when dependencies resolve — the owner must explicitly start it (task_start / task_set_status in_progress) when ready.
   - Use related to connect tasks working on the same feature without blocking.`;
 
+  const bootstrapEnabledForCreate = isMemberBriefingBootstrapEnabled();
   const step2Block = isSolo
     ? '2) Skip — this is a solo team with no teammates to spawn.'
-    : `2) Spawn each member as a live teammate using the Task tool. For each member below, use the exact prompt shown:
+    : `2) Spawn each member as a live teammate using the Task tool:
+   - team_name: “${request.teamName}”
+   - name: the member's name (see per-member list below)
+   - subagent_type: “general-purpose”
+   - IMPORTANT: Use the exact prompt shown for each member.
+     ${
+       bootstrapEnabledForCreate
+         ? 'With member_briefing bootstrap enabled, the teammate will fetch durable rules after spawn.'
+         : 'This prompt includes the full durable teammate rules directly.'
+     }
 
-// IMPORTANT: Use the exact prompt shown for each member.
-// With member_briefing bootstrap enabled, the teammate will fetch durable task/process rules after spawn.
+   Per-member spawn instructions:
 ${request.members
   .map(
-    (m) => `   For “${m.name}”:
+    (m) => `   For “${m.name}” (name: “${m.name}”):
    - prompt:
 ${buildMemberSpawnPrompt(
   m,
@@ -4157,6 +4175,7 @@ export class TeamProvisioningService {
   /**
    * Intercept Task tool_use blocks that spawn team members.
    * Sets member spawn status to 'spawning' when the lead issues a Task call with team_name + name.
+   * Detects bad spawns (missing team_name/name) and marks them as 'error'.
    */
   private captureTeamSpawnEvents(run: ProvisioningRun, content: Record<string, unknown>[]): void {
     for (const part of content) {
@@ -4166,10 +4185,39 @@ export class TeamProvisioningService {
       const inp = input as Record<string, unknown>;
       const teamName = typeof inp.team_name === 'string' ? inp.team_name.trim() : '';
       const memberName = typeof inp.name === 'string' ? inp.name.trim() : '';
-      if (!teamName || !memberName) continue;
-      // Only track spawns for this team
-      if (teamName !== run.teamName) continue;
-      this.setMemberSpawnStatus(run, memberName, 'spawning');
+
+      if (teamName && memberName) {
+        // Good spawn — has both required params
+        if (teamName !== run.teamName) continue;
+        this.setMemberSpawnStatus(run, memberName, 'spawning');
+        continue;
+      }
+
+      // Bad spawn — Task tool_use without team_name or name.
+      // Try to identify which member this was supposed to be from prompt/description text.
+      if (run.expectedMembers.length === 0) continue;
+      const desc = typeof inp.description === 'string' ? inp.description : '';
+      const prompt = typeof inp.prompt === 'string' ? inp.prompt : '';
+      const haystack = `${desc}\n${prompt}`.toLowerCase();
+      for (const expected of run.expectedMembers) {
+        if (haystack.includes(expected.toLowerCase())) {
+          const missing = !teamName && !memberName
+            ? 'team_name and name'
+            : !teamName
+              ? 'team_name'
+              : 'name';
+          logger.warn(
+            `[${run.teamName}] Bad teammate spawn for "${expected}": missing ${missing} param(s) in Task tool_use`
+          );
+          this.setMemberSpawnStatus(
+            run,
+            expected,
+            'error',
+            `Teammate spawned without ${missing} — will not join the team. Restart the team to fix.`
+          );
+          break;
+        }
+      }
     }
   }
 

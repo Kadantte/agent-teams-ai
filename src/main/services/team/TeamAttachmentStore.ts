@@ -101,4 +101,7 @@ export class TeamAttachmentStore {
 
     return result;
   }
+
+  // TODO: add deleteAttachments(teamName, messageId) for cleanup on failed/cancelled sends.
+  // Best-effort removal of the attachment JSON file — useful for retry/cancel flows.
 }

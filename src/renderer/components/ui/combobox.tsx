@@ -24,6 +24,8 @@ interface ComboboxProps {
   disabled?: boolean;
   className?: string;
   renderOption?: (option: ComboboxOption, isSelected: boolean, query: string) => React.ReactNode;
+  /** Custom label renderer for the trigger button (closed state). */
+  renderTriggerLabel?: (option: ComboboxOption) => React.ReactNode;
   /** Label for the reset item shown at the top of the dropdown. */
   resetLabel?: string;
   /** Called when the user clicks the reset item. */
@@ -40,6 +42,7 @@ export const Combobox = ({
   disabled = false,
   className,
   renderOption,
+  renderTriggerLabel,
   resetLabel,
   onReset,
 }: ComboboxProps): React.JSX.Element => {
@@ -64,7 +67,9 @@ export const Combobox = ({
           )}
         >
           <span className="min-w-0 truncate text-left">
-            {selectedOption ? selectedOption.label : placeholder}
+            {selectedOption
+              ? (renderTriggerLabel?.(selectedOption) ?? selectedOption.label)
+              : placeholder}
           </span>
           <ChevronsUpDown className="ml-2 size-3.5 shrink-0 opacity-50" />
         </button>

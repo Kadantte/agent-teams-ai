@@ -119,6 +119,24 @@ export const RoleSelect = ({
     return opt?.label;
   }, [value]);
 
+  const renderTriggerLabel = useCallback(
+    (option: ComboboxOption) => {
+      const Icon =
+        option.value === CUSTOM_ROLE
+          ? CUSTOM_ICON
+          : option.value === NO_ROLE
+            ? null
+            : (ROLE_ICONS[option.value] ?? null);
+      return (
+        <span className="flex items-center gap-1.5">
+          {Icon ? <Icon className="size-3 text-[var(--color-text-muted)]" /> : null}
+          {option.label}
+        </span>
+      );
+    },
+    []
+  );
+
   return (
     <div className="space-y-1">
       <Combobox
@@ -131,6 +149,7 @@ export const RoleSelect = ({
         disabled={disabled}
         className={triggerClassName}
         renderOption={renderRoleOption}
+        renderTriggerLabel={renderTriggerLabel}
       />
       {value === CUSTOM_ROLE && onCustomRoleChange ? (
         <div>

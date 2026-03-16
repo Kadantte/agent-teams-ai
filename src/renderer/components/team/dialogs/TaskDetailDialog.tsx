@@ -48,7 +48,7 @@ import { buildTaskChangeRequestOptions, deriveTaskSince } from '@renderer/utils/
 import { linkifyTaskIdsInMarkdown, parseTaskLinkHref } from '@renderer/utils/taskReferenceUtils';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { getTaskKanbanColumn } from '@shared/utils/reviewState';
-import { isTaskChangeSummaryCacheable } from '@shared/utils/taskChangeState';
+import { canDisplayTaskChanges } from '@shared/utils/taskChangeState';
 import {
   deriveTaskDisplayId,
   formatTaskDisplayLabel,
@@ -80,6 +80,7 @@ import {
 
 import { WorkflowTimeline } from './StatusHistoryTimeline';
 import { TaskAttachments } from './TaskAttachments';
+import { SourceMessageAttachments } from '../attachments/SourceMessageAttachments';
 import { TaskCommentAwaitingReply } from './TaskCommentAwaitingReply';
 import { TaskCommentInput } from './TaskCommentInput';
 import { TaskCommentsSection } from './TaskCommentsSection';
@@ -297,8 +298,13 @@ export const TaskDetailDialog = ({
     return result;
   }, [currentTask?.comments]);
 
-  // Lazy-load task changes only for terminal, cacheable states.
-  const canShowTaskChanges = currentTask ? isTaskChangeSummaryCacheable(currentTask) : false;
+  const sourceAttachmentCount =
+    currentTask?.sourceMessageId && currentTask?.sourceMessage?.attachments?.length
+      ? currentTask.sourceMessage.attachments.length
+      : 0;
+
+  // Lazy-load task changes for any displayable state (in_progress, review, approved, completed).
+  const canShowTaskChanges = currentTask ? canDisplayTaskChanges(currentTask) : false;
   const taskSince = useMemo(() => deriveTaskSince(currentTask), [currentTask]);
   const taskChangeRequestOptions = useMemo(
     () => (currentTask ? buildTaskChangeRequestOptions(currentTask) : null),
@@ -915,17 +921,31 @@ export const TaskDetailDialog = ({
               title="Attachments"
               icon={<ImageIcon size={14} />}
               badge={
-                (currentTask.attachments?.length ?? 0) + commentImageAttachments.length > 0
-                  ? (currentTask.attachments?.length ?? 0) + commentImageAttachments.length
+                (currentTask.attachments?.length ?? 0) +
+                  commentImageAttachments.length +
+                  sourceAttachmentCount >
+                0
+                  ? (currentTask.attachments?.length ?? 0) +
+                    commentImageAttachments.length +
+                    sourceAttachmentCount
                   : undefined
               }
               contentClassName="pl-2.5"
               headerClassName="-mx-6 w-[calc(100%+3rem)]"
               headerContentClassName="pl-6"
               defaultOpen={
-                (currentTask.attachments?.length ?? 0) > 0 || commentImageAttachments.length > 0
+                (currentTask.attachments?.length ?? 0) > 0 ||
+                commentImageAttachments.length > 0 ||
+                sourceAttachmentCount > 0
               }
             >
+              {currentTask.sourceMessageId && currentTask.sourceMessage ? (
+                <SourceMessageAttachments
+                  teamName={teamName}
+                  sourceMessageId={currentTask.sourceMessageId}
+                  sourceMessage={currentTask.sourceMessage}
+                />
+              ) : null}
               <TaskAttachments
                 teamName={teamName}
                 taskId={currentTask.id}
