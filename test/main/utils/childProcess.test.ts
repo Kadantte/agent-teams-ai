@@ -44,7 +44,11 @@ describe('cli child process helpers', () => {
       (child.spawn as unknown as Mock).mockReturnValue({} as any);
 
       const result = spawnCli('C:\\bin\\claude.exe', ['--version'], { cwd: 'x' });
-      expect(child.spawn).toHaveBeenCalledWith('C:\\bin\\claude.exe', ['--version'], { cwd: 'x' });
+      expect(child.spawn).toHaveBeenCalledWith(
+        'C:\\bin\\claude.exe',
+        ['--version'],
+        expect.objectContaining({ cwd: 'x', env: expect.objectContaining({ CLAUDE_HOOK_JUDGE_MODE: 'true' }) })
+      );
       expect(result).toEqual({} as any);
     });
 
@@ -91,7 +95,11 @@ describe('cli child process helpers', () => {
       setPlatform('linux');
       (child.spawn as unknown as Mock).mockReturnValue({} as any);
       const result = spawnCli('/usr/bin/claude', ['--help']);
-      expect(child.spawn).toHaveBeenCalledWith('/usr/bin/claude', ['--help'], {});
+      expect(child.spawn).toHaveBeenCalledWith(
+        '/usr/bin/claude',
+        ['--help'],
+        expect.objectContaining({ env: expect.objectContaining({ CLAUDE_HOOK_JUDGE_MODE: 'true' }) })
+      );
       expect(result).toEqual({} as any);
     });
   });
@@ -110,7 +118,7 @@ describe('cli child process helpers', () => {
       expect(execFileMock).toHaveBeenCalledWith(
         'C:\\bin\\claude.exe',
         ['--version'],
-        {},
+        expect.objectContaining({ env: expect.objectContaining({ CLAUDE_HOOK_JUDGE_MODE: 'true' }) }),
         expect.any(Function)
       );
       expect(result.stdout).toBe('ok');

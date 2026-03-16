@@ -290,7 +290,10 @@ describe('changeReviewSlice task changes', () => {
     });
 
     await store.getState().checkTaskHasChanges('team-a', '1', REVIEW_OPTIONS);
+    // Expire the 30s negative-cache TTL so the second call actually hits the API
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31_000);
     await store.getState().checkTaskHasChanges('team-a', '1', REVIEW_OPTIONS);
+    vi.mocked(Date.now).mockRestore();
 
     expect(hoisted.getTaskChanges).toHaveBeenCalledTimes(2);
   });

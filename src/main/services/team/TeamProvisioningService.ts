@@ -1057,7 +1057,8 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
    Per-member spawn instructions:
 ${request.members
   .map(
-    (m) => `   For “${m.name}” (name: “${m.name}”):
+    (m) => `   For “${m.name}”:
+   - name: “${m.name}”
    - prompt:
 ${buildMemberSpawnPrompt(
   m,
@@ -4175,7 +4176,6 @@ export class TeamProvisioningService {
   /**
    * Intercept Task tool_use blocks that spawn team members.
    * Sets member spawn status to 'spawning' when the lead issues a Task call with team_name + name.
-   * Detects bad spawns (missing team_name/name) and marks them as 'error'.
    */
   private captureTeamSpawnEvents(run: ProvisioningRun, content: Record<string, unknown>[]): void {
     for (const part of content) {
@@ -4185,39 +4185,10 @@ export class TeamProvisioningService {
       const inp = input as Record<string, unknown>;
       const teamName = typeof inp.team_name === 'string' ? inp.team_name.trim() : '';
       const memberName = typeof inp.name === 'string' ? inp.name.trim() : '';
-
-      if (teamName && memberName) {
-        // Good spawn — has both required params
-        if (teamName !== run.teamName) continue;
-        this.setMemberSpawnStatus(run, memberName, 'spawning');
-        continue;
-      }
-
-      // Bad spawn — Task tool_use without team_name or name.
-      // Try to identify which member this was supposed to be from prompt/description text.
-      if (run.expectedMembers.length === 0) continue;
-      const desc = typeof inp.description === 'string' ? inp.description : '';
-      const prompt = typeof inp.prompt === 'string' ? inp.prompt : '';
-      const haystack = `${desc}\n${prompt}`.toLowerCase();
-      for (const expected of run.expectedMembers) {
-        if (haystack.includes(expected.toLowerCase())) {
-          const missing = !teamName && !memberName
-            ? 'team_name and name'
-            : !teamName
-              ? 'team_name'
-              : 'name';
-          logger.warn(
-            `[${run.teamName}] Bad teammate spawn for "${expected}": missing ${missing} param(s) in Task tool_use`
-          );
-          this.setMemberSpawnStatus(
-            run,
-            expected,
-            'error',
-            `Teammate spawned without ${missing} — will not join the team. Restart the team to fix.`
-          );
-          break;
-        }
-      }
+      if (!teamName || !memberName) continue;
+      // Only track spawns for this team
+      if (teamName !== run.teamName) continue;
+      this.setMemberSpawnStatus(run, memberName, 'spawning');
     }
   }
 
@@ -4234,6 +4205,63 @@ export class TeamProvisioningService {
     // Only transition spawning → online (not offline → online, to avoid false positives)
     if (entry?.status === 'spawning') {
       this.setMemberSpawnStatus(run, memberName, 'online');
+    }
+  }
+
+  /**
+   * Post-provisioning audit: read config.json members and flag any expectedMember
+   * that was NOT registered by Claude Code as a team member.
+   *
+   * This is the ground-truth check — when Agent(team_name=X, name=Y) succeeds,
+   * the CLI adds Y to config.json members[]. If a member is missing, the spawn
+   * was incorrect (e.g., missing team_name/name params) and the agent ran as a
+   * one-shot subagent instead of a persistent teammate.
+   */
+  private async auditMemberSpawnStatuses(run: ProvisioningRun): Promise<void> {
+    if (!run.expectedMembers || run.expectedMembers.length === 0) return;
+
+    // Read config.json to get the actual registered members
+    const configPath = path.join(getTeamsBasePath(), run.teamName, 'config.json');
+    let registeredNames: Set<string>;
+    try {
+      const raw = await tryReadRegularFileUtf8(configPath, {
+        timeoutMs: TEAM_JSON_READ_TIMEOUT_MS,
+        maxBytes: TEAM_CONFIG_MAX_BYTES,
+      });
+      if (!raw) {
+        logger.warn(`[${run.teamName}] auditMemberSpawnStatuses: config.json not readable`);
+        return;
+      }
+      const config = JSON.parse(raw) as {
+        members?: { name?: string; agentType?: string }[];
+      };
+      registeredNames = new Set(
+        (config.members ?? [])
+          .map((m) => (typeof m.name === 'string' ? m.name.trim() : ''))
+          .filter(Boolean)
+      );
+    } catch {
+      logger.warn(`[${run.teamName}] auditMemberSpawnStatuses: failed to parse config.json`);
+      return;
+    }
+
+    // Flag any expected member not found in config.json (excluding the lead)
+    for (const expected of run.expectedMembers) {
+      if (registeredNames.has(expected)) continue;
+
+      // Skip if already in a terminal status (e.g., previously set 'error')
+      const current = run.memberSpawnStatuses.get(expected);
+      if (current?.status === 'error') continue;
+
+      logger.warn(
+        `[${run.teamName}] Member "${expected}" not found in config.json members after provisioning`
+      );
+      this.setMemberSpawnStatus(
+        run,
+        expected,
+        'error',
+        'Teammate not registered after provisioning — spawned incorrectly. Restart the team to fix.'
+      );
     }
   }
 
@@ -5504,6 +5532,9 @@ export class TeamProvisioningService {
         /* best-effort */
       }
 
+      // Audit: flag any expected member not registered in config.json after launch.
+      await this.auditMemberSpawnStatuses(run);
+
       const readyMessage = 'Team launched — process alive and ready';
       const progress = updateProgress(run, 'ready', readyMessage, {
         cliLogsTail: extractCliLogsFromRun(run),
@@ -5594,6 +5625,9 @@ export class TeamProvisioningService {
       run.detectedSessionId,
       run.request.color
     );
+
+    // Audit: flag any expected member not registered in config.json after provisioning.
+    await this.auditMemberSpawnStatuses(run);
 
     const progress = updateProgress(run, 'ready', 'Team provisioned — process alive and ready', {
       cliLogsTail: extractCliLogsFromRun(run),

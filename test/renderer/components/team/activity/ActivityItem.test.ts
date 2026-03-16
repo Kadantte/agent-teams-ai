@@ -10,7 +10,7 @@ import {
 describe('ActivityItem legacy system message fallback', () => {
   it('recognizes historical assignment and review message wording', () => {
     expect(getSystemMessageLabel('New task assigned to you: #abcd1234 "Implement feature".')).toBe(
-      'Task assignment'
+      'Task'
     );
     expect(getSystemMessageLabel('Task #abcd1234 approved by reviewer.')).toBe('Task approved');
     expect(getSystemMessageLabel('Task #abcd1234 needs fixes before approval.')).toBe(

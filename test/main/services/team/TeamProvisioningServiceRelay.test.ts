@@ -274,7 +274,7 @@ describe('TeamProvisioningService relayLeadInboxMessages', () => {
     const payload = String(writeSpy.mock.calls[0]?.[0] ?? '');
     expect(payload).toContain('Source: system_notification');
     expect(payload).toContain('summary looks like \\"Comment on #...\\"');
-    expect(payload).toContain('Prefer replying on the task via task_add_comment');
+    expect(payload).toContain('REQUIRES an on-task reply via task_add_comment');
 
     (service as any).handleStreamJsonMessage(run, {
       type: 'assistant',
