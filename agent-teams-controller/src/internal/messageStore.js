@@ -165,8 +165,66 @@ function appendSentMessage(paths, flags) {
   return payload;
 }
 
+/**
+ * Exact readonly lookup by messageId across sent messages and all inbox files.
+ *
+ * Rules:
+ * - Match only rows where row.messageId === requestedMessageId.
+ * - Ignore rows where only relayOfMessageId matches.
+ * - If more than one exact match exists, reject as ambiguous.
+ * - Returns { message, store } or throws.
+ */
+function lookupMessage(paths, messageId) {
+  const id = typeof messageId === 'string' ? messageId.trim() : '';
+  if (!id) {
+    throw new Error('Missing messageId');
+  }
+
+  const matches = [];
+
+  // 1. Search sentMessages.json
+  const sentRows = readJson(getSentMessagesPath(paths), []);
+  if (Array.isArray(sentRows)) {
+    for (const row of sentRows) {
+      if (row && row.messageId === id) {
+        matches.push({ message: row, store: 'sent' });
+      }
+    }
+  }
+
+  // 2. Search all inbox files
+  const inboxDir = path.join(paths.teamDir, 'inboxes');
+  let inboxFiles = [];
+  try {
+    inboxFiles = fs.readdirSync(inboxDir).filter((f) => f.endsWith('.json'));
+  } catch {
+    // No inboxes directory — that's fine.
+  }
+
+  for (const file of inboxFiles) {
+    const rows = readJson(path.join(inboxDir, file), []);
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (row && row.messageId === id) {
+        matches.push({ message: row, store: `inbox:${file.replace('.json', '')}` });
+      }
+    }
+  }
+
+  if (matches.length === 0) {
+    throw new Error(`Message not found: ${id}`);
+  }
+
+  if (matches.length > 1) {
+    throw new Error(`Ambiguous messageId: ${id} found in ${matches.length} stores`);
+  }
+
+  return matches[0];
+}
+
 module.exports = {
   appendSentMessage,
+  lookupMessage,
   sendInboxMessage,
 };
 

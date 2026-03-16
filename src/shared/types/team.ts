@@ -134,6 +134,23 @@ export interface TaskComment {
   attachments?: TaskAttachmentMeta[];
 }
 
+/**
+ * Snapshot of a user message captured at task-creation time.
+ * Stored as provenance — the original message identity is `sourceMessageId`.
+ */
+export interface SourceMessageSnapshot {
+  /** Sanitized message text (agent-only blocks stripped). */
+  text: string;
+  /** Who sent the message. */
+  from: string;
+  /** ISO timestamp of the original message. */
+  timestamp: string;
+  /** Message source type (e.g. "user_sent", "inbox"). */
+  source?: string;
+  /** Attachment metadata references (IDs only, no blobs). */
+  attachments?: Array<{ id: string; filename: string; mimeType: string; size: number }>;
+}
+
 // Fields are validated in TeamTaskReader.getTasks() using `satisfies Record<keyof TeamTask, unknown>`.
 // Adding a field here without mapping it there will cause a compile error.
 export interface TeamTask {
@@ -179,6 +196,10 @@ export interface TeamTask {
   attachments?: TaskAttachmentMeta[];
   /** Derived review state — computed from historyEvents, not persisted as authority. */
   reviewState?: TeamReviewState;
+  /** Exact messageId of the user message this task was created from. */
+  sourceMessageId?: string;
+  /** Snapshot of the source message at creation time (sanitized, no blobs). */
+  sourceMessage?: SourceMessageSnapshot;
 }
 
 /** Task enriched for UI/DTO use (overlay from kanban-state.json). */

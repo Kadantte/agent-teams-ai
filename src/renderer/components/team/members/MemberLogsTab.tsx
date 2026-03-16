@@ -92,7 +92,7 @@ interface MemberLogsTabProps {
   onPreviewOnlineChange?: (isOnline: boolean) => void;
 }
 
-const PREVIEW_PAGE_SIZE = 4;
+const PREVIEW_PAGE_SIZE = 8;
 
 export const MemberLogsTab = ({
   teamName,

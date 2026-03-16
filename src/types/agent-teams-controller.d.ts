@@ -46,6 +46,7 @@ declare module 'agent-teams-controller' {
 
   export interface ControllerMessageApi {
     appendSentMessage(flags: Record<string, unknown>): unknown;
+    lookupMessage(messageId: string): { message: Record<string, unknown>; store: string };
     sendMessage(flags: Record<string, unknown>): unknown;
   }
 

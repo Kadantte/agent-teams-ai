@@ -10,6 +10,7 @@ import * as path from 'path';
 import { getTeamFsWorkerClient } from './TeamFsWorkerClient';
 
 import type {
+  SourceMessageSnapshot,
   TaskAttachmentMeta,
   TaskComment,
   TaskHistoryEvent,
@@ -293,6 +294,18 @@ export class TeamTaskReader {
             historyEvents,
             reviewState: parsed.reviewState as TeamTask['reviewState'],
           }),
+          sourceMessageId:
+            typeof parsed.sourceMessageId === 'string' && parsed.sourceMessageId.trim()
+              ? parsed.sourceMessageId.trim()
+              : undefined,
+          sourceMessage:
+            parsed.sourceMessage &&
+            typeof parsed.sourceMessage === 'object' &&
+            typeof (parsed.sourceMessage as Record<string, unknown>).text === 'string' &&
+            typeof (parsed.sourceMessage as Record<string, unknown>).from === 'string' &&
+            typeof (parsed.sourceMessage as Record<string, unknown>).timestamp === 'string'
+              ? (parsed.sourceMessage as SourceMessageSnapshot)
+              : undefined,
         } satisfies Record<keyof TeamTask, unknown>;
         if (task.status === 'deleted') {
           continue;

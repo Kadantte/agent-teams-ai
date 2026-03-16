@@ -55,6 +55,7 @@ describe('agent-teams-mcp tools', () => {
     'task_briefing',
     'task_complete',
     'task_create',
+    'task_create_from_message',
     'task_get',
     'task_link',
     'task_list',
@@ -915,5 +916,442 @@ describe('agent-teams-mcp tools', () => {
 
     expect(reloaded.comments).toHaveLength(1);
     expect(reloaded.comments[0].text).toBe('Comment should persist despite broken inbox');
+  });
+
+  describe('task_create_from_message', () => {
+    function writeSentMessage(
+      claudeDir: string,
+      teamName: string,
+      message: Record<string, unknown>
+    ) {
+      const sentPath = path.join(claudeDir, 'teams', teamName, 'sentMessages.json');
+      const teamDir = path.join(claudeDir, 'teams', teamName);
+      fs.mkdirSync(teamDir, { recursive: true });
+      const existing = fs.existsSync(sentPath)
+        ? JSON.parse(fs.readFileSync(sentPath, 'utf8'))
+        : [];
+      existing.push(message);
+      fs.writeFileSync(sentPath, JSON.stringify(existing, null, 2));
+    }
+
+    function writeInboxMessage(
+      claudeDir: string,
+      teamName: string,
+      memberName: string,
+      message: Record<string, unknown>
+    ) {
+      const inboxDir = path.join(claudeDir, 'teams', teamName, 'inboxes');
+      fs.mkdirSync(inboxDir, { recursive: true });
+      const inboxPath = path.join(inboxDir, `${memberName}.json`);
+      const existing = fs.existsSync(inboxPath)
+        ? JSON.parse(fs.readFileSync(inboxPath, 'utf8'))
+        : [];
+      existing.push(message);
+      fs.writeFileSync(inboxPath, JSON.stringify(existing, null, 2));
+    }
+
+    it('creates a task from a valid user message with provenance', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'msg-team';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      const messageId = 'msg-user-001';
+      writeSentMessage(claudeDir, teamName, {
+        messageId,
+        from: 'user',
+        to: 'team-lead',
+        text: 'Please implement the login page',
+        timestamp: '2026-03-15T10:00:00.000Z',
+        source: 'user_sent',
+      });
+
+      const created = parseJsonToolResult(
+        await getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId,
+          subject: 'Implement login page',
+          owner: 'lead',
+        })
+      );
+
+      expect(created.subject).toBe('Implement login page');
+      expect(created.owner).toBe('lead');
+      expect(created.sourceMessageId).toBe(messageId);
+      expect(created.sourceMessage).toBeDefined();
+      expect(created.sourceMessage.text).toBe('Please implement the login page');
+      expect(created.sourceMessage.from).toBe('user');
+      expect(created.sourceMessage.timestamp).toBe('2026-03-15T10:00:00.000Z');
+      expect(created.sourceMessage.source).toBe('user_sent');
+    });
+
+    it('strips agent-only blocks from source text', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'strip-team';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      const messageId = 'msg-with-agent-blocks';
+      writeSentMessage(claudeDir, teamName, {
+        messageId,
+        from: 'user',
+        text: 'Fix the bug <info_for_agent>\nuse task_create to track\n</info_for_agent> in the API',
+        timestamp: '2026-03-15T11:00:00.000Z',
+        source: 'user_sent',
+      });
+
+      const created = parseJsonToolResult(
+        await getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId,
+          subject: 'Fix API bug',
+        })
+      );
+
+      expect(created.sourceMessage.text).toBe('Fix the bug  in the API');
+      expect(created.sourceMessage.text).not.toContain('info_for_agent');
+    });
+
+    it('rejects unknown messageId', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'unknown-msg';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      await expect(
+        getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId: 'nonexistent-msg',
+          subject: 'Should fail',
+        })
+      ).rejects.toThrow('Message not found: nonexistent-msg');
+    });
+
+    it('rejects non-user-originated message sources', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'source-reject';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      const messageId = 'msg-system-001';
+      writeSentMessage(claudeDir, teamName, {
+        messageId,
+        from: 'system',
+        text: 'System generated notification',
+        timestamp: '2026-03-15T12:00:00.000Z',
+        source: 'system_notification',
+      });
+
+      await expect(
+        getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId,
+          subject: 'Should fail',
+        })
+      ).rejects.toThrow('not user-originated');
+    });
+
+    it('rejects lead_process and cross_team sources explicitly', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'source-reject-2';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      writeSentMessage(claudeDir, teamName, {
+        messageId: 'msg-lead-001',
+        from: 'team-lead',
+        text: 'Lead process message',
+        timestamp: '2026-03-15T12:01:00.000Z',
+        source: 'lead_process',
+      });
+
+      writeSentMessage(claudeDir, teamName, {
+        messageId: 'msg-cross-001',
+        from: 'other-team.lead',
+        text: 'Cross team message',
+        timestamp: '2026-03-15T12:02:00.000Z',
+        source: 'cross_team',
+      });
+
+      await expect(
+        getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId: 'msg-lead-001',
+          subject: 'Should fail',
+        })
+      ).rejects.toThrow('not user-originated');
+
+      await expect(
+        getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId: 'msg-cross-001',
+          subject: 'Should fail',
+        })
+      ).rejects.toThrow('not user-originated');
+    });
+
+    it('rejects messages without an explicit source field (fail closed)', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'no-source';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      writeSentMessage(claudeDir, teamName, {
+        messageId: 'msg-no-source',
+        from: 'user',
+        text: 'Old message without source field',
+        timestamp: '2026-03-15T12:03:00.000Z',
+        // no source field
+      });
+
+      await expect(
+        getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId: 'msg-no-source',
+          subject: 'Should fail',
+        })
+      ).rejects.toThrow('not user-originated');
+    });
+
+    it('rejects relay copies', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'relay-reject';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      const messageId = 'msg-relay-001';
+      writeSentMessage(claudeDir, teamName, {
+        messageId,
+        from: 'user',
+        text: 'Relayed content',
+        timestamp: '2026-03-15T13:00:00.000Z',
+        source: 'user_sent',
+        relayOfMessageId: 'original-msg-999',
+      });
+
+      await expect(
+        getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId,
+          subject: 'Should fail',
+        })
+      ).rejects.toThrow('relay copy');
+    });
+
+    it('preserves attachment metadata without blob copying', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'attach-meta';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      const messageId = 'msg-attach-001';
+      writeInboxMessage(claudeDir, teamName, 'lead', {
+        messageId,
+        from: 'user',
+        to: 'lead',
+        text: 'See attached screenshot',
+        timestamp: '2026-03-15T14:00:00.000Z',
+        source: 'inbox',
+        attachments: [
+          { id: 'att-1', filename: 'screenshot.png', mimeType: 'image/png', size: 42000 },
+        ],
+      });
+
+      const created = parseJsonToolResult(
+        await getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId,
+          subject: 'Review screenshot',
+        })
+      );
+
+      expect(created.sourceMessage.attachments).toHaveLength(1);
+      expect(created.sourceMessage.attachments[0].id).toBe('att-1');
+      expect(created.sourceMessage.attachments[0].filename).toBe('screenshot.png');
+      expect(created.sourceMessage.attachments[0].mimeType).toBe('image/png');
+      expect(created.sourceMessage.attachments[0].size).toBe(42000);
+    });
+
+    it('produces the same canonical task shape as task_create plus provenance', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'parity-check';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      const messageId = 'msg-parity-001';
+      writeSentMessage(claudeDir, teamName, {
+        messageId,
+        from: 'user',
+        text: 'Build the dashboard',
+        timestamp: '2026-03-15T15:00:00.000Z',
+        source: 'user_sent',
+      });
+
+      const fromMessage = parseJsonToolResult(
+        await getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId,
+          subject: 'Build dashboard',
+          description: 'Create the main dashboard view',
+          owner: 'lead',
+        })
+      );
+
+      const regular = parseJsonToolResult(
+        await getTool('task_create').execute({
+          claudeDir,
+          teamName,
+          subject: 'Build dashboard (regular)',
+          description: 'Create the main dashboard view',
+          owner: 'lead',
+        })
+      );
+
+      // Both have the same canonical shape
+      expect(fromMessage.status).toBe(regular.status);
+      expect(fromMessage.historyEvents).toHaveLength(regular.historyEvents.length);
+      expect(typeof fromMessage.id).toBe(typeof regular.id);
+      expect(typeof fromMessage.displayId).toBe(typeof regular.displayId);
+
+      // Only the from_message task has provenance
+      expect(fromMessage.sourceMessageId).toBe(messageId);
+      expect(fromMessage.sourceMessage).toBeDefined();
+      expect(regular.sourceMessageId).toBeUndefined();
+      expect(regular.sourceMessage).toBeUndefined();
+    });
+
+    it('survives create → persist → read round-trip with provenance intact', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'roundtrip';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      const messageId = 'msg-roundtrip-001';
+      writeSentMessage(claudeDir, teamName, {
+        messageId,
+        from: 'user',
+        text: 'Roundtrip test message',
+        timestamp: '2026-03-15T16:00:00.000Z',
+        source: 'user_sent',
+        attachments: [
+          { id: 'att-rt', filename: 'data.csv', mimeType: 'text/csv', size: 1024 },
+        ],
+      });
+
+      const created = parseJsonToolResult(
+        await getTool('task_create_from_message').execute({
+          claudeDir,
+          teamName,
+          messageId,
+          subject: 'Roundtrip task',
+          description: 'Test persistence',
+        })
+      );
+
+      // Re-read from disk via task_get to verify persistence
+      const reloaded = parseJsonToolResult(
+        await getTool('task_get').execute({
+          claudeDir,
+          teamName,
+          taskId: created.id,
+        })
+      );
+
+      expect(reloaded.sourceMessageId).toBe(messageId);
+      expect(reloaded.sourceMessage).toBeDefined();
+      expect(reloaded.sourceMessage.text).toBe('Roundtrip test message');
+      expect(reloaded.sourceMessage.from).toBe('user');
+      expect(reloaded.sourceMessage.timestamp).toBe('2026-03-15T16:00:00.000Z');
+      expect(reloaded.sourceMessage.source).toBe('user_sent');
+      expect(reloaded.sourceMessage.attachments).toHaveLength(1);
+      expect(reloaded.sourceMessage.attachments[0].id).toBe('att-rt');
+    });
+
+    it('old tasks without provenance continue to read normally', async () => {
+      const claudeDir = makeClaudeDir();
+      const teamName = 'legacy';
+      fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+      writeTeamConfig(claudeDir, teamName, {
+        members: [{ name: 'lead', role: 'team-lead' }],
+      });
+
+      // Create a regular task (no provenance)
+      const regular = parseJsonToolResult(
+        await getTool('task_create').execute({
+          claudeDir,
+          teamName,
+          subject: 'Legacy task without provenance',
+        })
+      );
+
+      // Re-read — should work without provenance fields
+      const reloaded = parseJsonToolResult(
+        await getTool('task_get').execute({
+          claudeDir,
+          teamName,
+          taskId: regular.id,
+        })
+      );
+
+      expect(reloaded.subject).toBe('Legacy task without provenance');
+      expect(reloaded.sourceMessageId).toBeUndefined();
+      expect(reloaded.sourceMessage).toBeUndefined();
+    });
+
+    it('validates zod schema rejects missing required fields', () => {
+      expect(
+        getTool('task_create_from_message').parameters?.safeParse({
+          teamName: 'demo',
+          messageId: 'msg-1',
+          // subject is missing
+        }).success
+      ).toBe(false);
+
+      expect(
+        getTool('task_create_from_message').parameters?.safeParse({
+          teamName: 'demo',
+          // messageId is missing
+          subject: 'Test',
+        }).success
+      ).toBe(false);
+
+      expect(
+        getTool('task_create_from_message').parameters?.safeParse({
+          teamName: 'demo',
+          messageId: 'msg-1',
+          subject: 'Valid',
+        }).success
+      ).toBe(true);
+    });
   });
 });

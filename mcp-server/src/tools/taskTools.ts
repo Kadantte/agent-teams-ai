@@ -11,6 +11,52 @@ const toolContextSchema = {
 
 const relationshipTypeSchema = z.enum(['blocked-by', 'blocks', 'related']);
 
+/** Agent-only block tag used for hidden instructions — must be stripped from provenance snapshots. */
+const AGENT_BLOCK_RE = /<info_for_agent>[\s\S]*?<\/info_for_agent>/g;
+
+/** Allowed message source types for task_create_from_message provenance. Fail closed — only explicit user-originated sources. */
+const USER_ORIGINATED_SOURCES = new Set(['user_sent', 'inbox']);
+
+/**
+ * Shared payload builder for both task_create and task_create_from_message.
+ * Keeps the canonical create-task shape in one place to avoid divergence.
+ */
+function buildCreateTaskPayload(params: {
+  subject: string;
+  description?: string;
+  owner?: string;
+  createdBy?: string;
+  from?: string;
+  blockedBy?: string[];
+  related?: string[];
+  prompt?: string;
+  startImmediately?: boolean;
+  sourceMessageId?: string;
+  sourceMessage?: Record<string, unknown>;
+}): Record<string, unknown> {
+  return {
+    subject: params.subject,
+    ...(params.description ? { description: params.description } : {}),
+    ...(params.owner ? { owner: params.owner } : {}),
+    ...(params.createdBy ? { createdBy: params.createdBy } : {}),
+    ...(!params.createdBy && params.from ? { from: params.from } : {}),
+    ...(params.blockedBy?.length ? { 'blocked-by': params.blockedBy.join(',') } : {}),
+    ...(params.related?.length ? { related: params.related.join(',') } : {}),
+    ...(params.prompt ? { prompt: params.prompt } : {}),
+    ...(params.startImmediately !== undefined ? { startImmediately: params.startImmediately } : {}),
+    ...(params.sourceMessageId ? { sourceMessageId: params.sourceMessageId } : {}),
+    ...(params.sourceMessage ? { sourceMessage: params.sourceMessage } : {}),
+  };
+}
+
+/**
+ * Strip agent-only `<info_for_agent>` blocks from message text.
+ * Returns trimmed text with agent blocks removed.
+ */
+function stripAgentBlocks(text: string): string {
+  return text.replace(AGENT_BLOCK_RE, '').trim();
+}
+
 export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
   server.addTool({
     name: 'task_create',
@@ -43,17 +89,116 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
       const controller = getController(teamName, claudeDir);
       return await Promise.resolve(
         jsonTextContent(
-          controller.tasks.createTask({
-            subject,
-            ...(description ? { description } : {}),
-            ...(owner ? { owner } : {}),
-            ...(createdBy ? { createdBy } : {}),
-            ...(!createdBy && from ? { from } : {}),
-            ...(blockedBy?.length ? { 'blocked-by': blockedBy.join(',') } : {}),
-            ...(related?.length ? { related: related.join(',') } : {}),
-            ...(prompt ? { prompt } : {}),
-            ...(startImmediately !== undefined ? { startImmediately } : {}),
-          })
+          controller.tasks.createTask(
+            buildCreateTaskPayload({
+              subject,
+              description,
+              owner,
+              createdBy,
+              from,
+              blockedBy,
+              related,
+              prompt,
+              startImmediately,
+            })
+          )
+        )
+      );
+    },
+  });
+
+  server.addTool({
+    name: 'task_create_from_message',
+    description:
+      'Create a task from a persisted user message. Resolves the message by exact messageId, builds sanitized provenance, and creates the task through the canonical path.',
+    parameters: z.object({
+      ...toolContextSchema,
+      messageId: z.string().min(1),
+      subject: z.string().min(1),
+      description: z.string().optional(),
+      owner: z.string().optional(),
+      blockedBy: z.array(z.string().min(1)).optional(),
+      related: z.array(z.string().min(1)).optional(),
+      prompt: z.string().optional(),
+      startImmediately: z.boolean().optional(),
+    }),
+    execute: async ({
+      teamName,
+      claudeDir,
+      messageId,
+      subject,
+      description,
+      owner,
+      blockedBy,
+      related,
+      prompt,
+      startImmediately,
+    }) => {
+      const controller = getController(teamName, claudeDir);
+
+      // 1. Lookup message by exact messageId
+      const { message } = controller.messages.lookupMessage(messageId);
+
+      // 2. Reject if message source is not user-originated
+      const source = typeof message.source === 'string' ? message.source : '';
+      if (!USER_ORIGINATED_SOURCES.has(source)) {
+        throw new Error(
+          `Message source "${source}" is not user-originated. Only user_sent and inbox messages are eligible.`
+        );
+      }
+
+      // 3. Reject relay copies explicitly
+      if (typeof message.relayOfMessageId === 'string' && message.relayOfMessageId.trim()) {
+        throw new Error(
+          'Cannot create task from a relay copy. Use the original message instead.'
+        );
+      }
+
+      // 4. Build sanitized source snapshot
+      const rawText = typeof message.text === 'string' ? message.text : '';
+      const sanitizedText = stripAgentBlocks(rawText);
+
+      const sourceMessage: Record<string, unknown> = {
+        text: sanitizedText,
+        from: typeof message.from === 'string' ? message.from : 'unknown',
+        timestamp: typeof message.timestamp === 'string' ? message.timestamp : '',
+        ...(source ? { source } : {}),
+      };
+
+      // Preserve attachment metadata by reference only — no blob copying
+      if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+        sourceMessage.attachments = (message.attachments as Array<Record<string, unknown>>)
+          .filter(
+            (a) =>
+              a &&
+              typeof a === 'object' &&
+              typeof a.id === 'string' &&
+              typeof a.filename === 'string'
+          )
+          .map((a) => ({
+            id: String(a.id),
+            filename: String(a.filename),
+            mimeType: typeof a.mimeType === 'string' ? a.mimeType : '',
+            size: typeof a.size === 'number' ? a.size : 0,
+          }));
+      }
+
+      // 5. Forward into canonical create-task path
+      return await Promise.resolve(
+        jsonTextContent(
+          controller.tasks.createTask(
+            buildCreateTaskPayload({
+              subject,
+              description,
+              owner,
+              blockedBy,
+              related,
+              prompt,
+              startImmediately,
+              sourceMessageId: messageId,
+              sourceMessage,
+            })
+          )
         )
       );
     },

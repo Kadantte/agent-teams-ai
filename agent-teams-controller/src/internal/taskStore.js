@@ -330,6 +330,12 @@ function createTask(paths, input = {}) {
     deletedAt:
       status === 'deleted' && typeof input.deletedAt === 'string' ? input.deletedAt : undefined,
     attachments: Array.isArray(input.attachments) ? input.attachments : undefined,
+    ...(typeof input.sourceMessageId === 'string' && input.sourceMessageId.trim()
+      ? { sourceMessageId: input.sourceMessageId.trim() }
+      : {}),
+    ...(input.sourceMessage && typeof input.sourceMessage === 'object'
+      ? { sourceMessage: input.sourceMessage }
+      : {}),
   });
 
   if (!task.subject) {
