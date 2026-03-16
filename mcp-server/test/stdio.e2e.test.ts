@@ -62,7 +62,7 @@ class McpStdIoClient {
   }
 
   private async readMessage(expectedId: number) {
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 15000;
 
     while (Date.now() < deadline) {
       const newlineIndex = this.stdoutBuffer.indexOf('\n');

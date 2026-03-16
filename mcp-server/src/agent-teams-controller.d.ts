@@ -49,6 +49,7 @@ declare module 'agent-teams-controller' {
   export interface ControllerMessageApi {
     appendSentMessage(flags: Record<string, unknown>): unknown;
     sendMessage(flags: Record<string, unknown>): unknown;
+    lookupMessage(messageId: string): { message: Record<string, unknown> };
   }
 
   export interface ControllerProcessApi {
@@ -86,4 +87,15 @@ declare module 'agent-teams-controller' {
   }
 
   export function createController(options: ControllerContextOptions): AgentTeamsController;
+
+  export interface AgentBlocksApi {
+    AGENT_BLOCK_TAG: string;
+    AGENT_BLOCK_OPEN: string;
+    AGENT_BLOCK_CLOSE: string;
+    AGENT_BLOCK_RE: RegExp;
+    stripAgentBlocks(text: string): string;
+    wrapAgentBlock(text: string): string;
+  }
+
+  export const agentBlocks: AgentBlocksApi;
 }
