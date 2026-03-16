@@ -135,6 +135,8 @@ interface ParsedTask {
   workIntervals?: unknown;
   historyEvents?: unknown;
   attachments?: unknown;
+  sourceMessageId?: unknown;
+  sourceMessage?: unknown;
 }
 
 interface RawWorkInterval {
@@ -699,6 +701,18 @@ async function readTasksDirForTeam(
         attachments: Array.isArray(parsed.attachments)
           ? (parsed.attachments as unknown[])
           : undefined,
+        sourceMessageId:
+          typeof parsed.sourceMessageId === 'string' && (parsed.sourceMessageId as string).trim()
+            ? (parsed.sourceMessageId as string).trim()
+            : undefined,
+        sourceMessage:
+          parsed.sourceMessage &&
+          typeof parsed.sourceMessage === 'object' &&
+          typeof (parsed.sourceMessage as Record<string, unknown>).text === 'string' &&
+          typeof (parsed.sourceMessage as Record<string, unknown>).from === 'string' &&
+          typeof (parsed.sourceMessage as Record<string, unknown>).timestamp === 'string'
+            ? (parsed.sourceMessage as Record<string, unknown>)
+            : undefined,
         teamName,
       });
     } catch (error) {

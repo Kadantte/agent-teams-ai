@@ -7,6 +7,7 @@ const processes = require('./internal/processes.js');
 const maintenance = require('./internal/maintenance.js');
 const crossTeam = require('./internal/crossTeam.js');
 const runtime = require('./internal/runtime.js');
+const agentBlocks = require('./internal/agentBlocks.js');
 
 function bindModule(context, moduleApi) {
   return Object.fromEntries(
@@ -36,6 +37,7 @@ function createController(options) {
 module.exports = {
   createController,
   createControllerContext,
+  agentBlocks,
   tasks,
   kanban,
   review,

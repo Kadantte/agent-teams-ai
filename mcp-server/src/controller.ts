@@ -8,6 +8,9 @@ const controllerModule =
   (agentTeamsControllerModule as ControllerModule).default ?? agentTeamsControllerModule;
 const { createController } = controllerModule;
 
+/** Re-export agentBlocks utilities (stripAgentBlocks, wrapAgentBlock, etc.) */
+export const agentBlocks = controllerModule.agentBlocks;
+
 export function getController(teamName: string, claudeDir?: string) {
   return createController({
     teamName,

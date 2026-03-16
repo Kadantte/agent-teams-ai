@@ -1047,7 +1047,7 @@ describe('agent-teams-controller API', () => {
       fs.writeFileSync(inboxPath, JSON.stringify([{ messageId: dupeId, text: 'copy-2' }]));
 
       expect(() => controller.messages.lookupMessage(dupeId)).toThrow(
-        'Ambiguous messageId: dupe-message-id found in 2 stores'
+        'Ambiguous messageId: dupe-message-id found in multiple stores'
       );
     });
   });

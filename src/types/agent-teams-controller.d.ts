@@ -67,6 +67,15 @@ declare module 'agent-teams-controller' {
     getCrossTeamOutbox(): unknown;
   }
 
+  export interface AgentBlocksApi {
+    AGENT_BLOCK_TAG: string;
+    AGENT_BLOCK_OPEN: string;
+    AGENT_BLOCK_CLOSE: string;
+    AGENT_BLOCK_RE: RegExp;
+    stripAgentBlocks(text: string): string;
+    wrapAgentBlock(text: string): string;
+  }
+
   export interface AgentTeamsController {
     tasks: ControllerTaskApi;
     kanban: ControllerKanbanApi;
@@ -78,4 +87,6 @@ declare module 'agent-teams-controller' {
   }
 
   export function createController(options: ControllerContextOptions): AgentTeamsController;
+
+  export const agentBlocks: AgentBlocksApi;
 }

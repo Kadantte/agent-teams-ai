@@ -180,19 +180,24 @@ function lookupMessage(paths, messageId) {
     throw new Error('Missing messageId');
   }
 
-  const matches = [];
+  let match = null;
+  let matchCount = 0;
 
   // 1. Search sentMessages.json
   const sentRows = readJson(getSentMessagesPath(paths), []);
   if (Array.isArray(sentRows)) {
     for (const row of sentRows) {
       if (row && row.messageId === id) {
-        matches.push({ message: row, store: 'sent' });
+        match = { message: row, store: 'sent' };
+        matchCount++;
+        if (matchCount > 1) {
+          throw new Error(`Ambiguous messageId: ${id} found in multiple stores`);
+        }
       }
     }
   }
 
-  // 2. Search all inbox files
+  // 2. Search all inbox files (early-exit on ambiguity)
   const inboxDir = path.join(paths.teamDir, 'inboxes');
   let inboxFiles = [];
   try {
@@ -206,20 +211,20 @@ function lookupMessage(paths, messageId) {
     if (!Array.isArray(rows)) continue;
     for (const row of rows) {
       if (row && row.messageId === id) {
-        matches.push({ message: row, store: `inbox:${file.replace('.json', '')}` });
+        matchCount++;
+        if (matchCount > 1) {
+          throw new Error(`Ambiguous messageId: ${id} found in multiple stores`);
+        }
+        match = { message: row, store: `inbox:${file.replace('.json', '')}` };
       }
     }
   }
 
-  if (matches.length === 0) {
+  if (matchCount === 0) {
     throw new Error(`Message not found: ${id}`);
   }
 
-  if (matches.length > 1) {
-    throw new Error(`Ambiguous messageId: ${id} found in ${matches.length} stores`);
-  }
-
-  return matches[0];
+  return match;
 }
 
 module.exports = {

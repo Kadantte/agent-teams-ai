@@ -1,8 +1,11 @@
 import type { FastMCP } from 'fastmcp';
 import { z } from 'zod';
 
-import { getController } from '../controller';
+import { agentBlocks, getController } from '../controller';
 import { jsonTextContent } from '../utils/format';
+
+/** stripAgentBlocks from canonical agentBlocks module — single source of truth for the tag format. */
+const { stripAgentBlocks } = agentBlocks;
 
 const toolContextSchema = {
   teamName: z.string().min(1),
@@ -11,11 +14,8 @@ const toolContextSchema = {
 
 const relationshipTypeSchema = z.enum(['blocked-by', 'blocks', 'related']);
 
-/** Agent-only block tag used for hidden instructions — must be stripped from provenance snapshots. */
-const AGENT_BLOCK_RE = /<info_for_agent>[\s\S]*?<\/info_for_agent>/g;
-
 /** Allowed message source types for task_create_from_message provenance. Fail closed — only explicit user-originated sources. */
-const USER_ORIGINATED_SOURCES = new Set(['user_sent', 'inbox']);
+const USER_ORIGINATED_SOURCES = new Set(['user_sent']);
 
 /**
  * Shared payload builder for both task_create and task_create_from_message.
@@ -47,14 +47,6 @@ function buildCreateTaskPayload(params: {
     ...(params.sourceMessageId ? { sourceMessageId: params.sourceMessageId } : {}),
     ...(params.sourceMessage ? { sourceMessage: params.sourceMessage } : {}),
   };
-}
-
-/**
- * Strip agent-only `<info_for_agent>` blocks from message text.
- * Returns trimmed text with agent blocks removed.
- */
-function stripAgentBlocks(text: string): string {
-  return text.replace(AGENT_BLOCK_RE, '').trim();
 }
 
 export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
@@ -117,6 +109,7 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
       subject: z.string().min(1),
       description: z.string().optional(),
       owner: z.string().optional(),
+      createdBy: z.string().optional(),
       blockedBy: z.array(z.string().min(1)).optional(),
       related: z.array(z.string().min(1)).optional(),
       prompt: z.string().optional(),
@@ -129,6 +122,7 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
       subject,
       description,
       owner,
+      createdBy,
       blockedBy,
       related,
       prompt,
@@ -143,7 +137,7 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
       const source = typeof message.source === 'string' ? message.source : '';
       if (!USER_ORIGINATED_SOURCES.has(source)) {
         throw new Error(
-          `Message source "${source}" is not user-originated. Only user_sent and inbox messages are eligible.`
+          `Message source "${source}" is not user-originated. Only user_sent messages are eligible.`
         );
       }
 
@@ -191,6 +185,7 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
               subject,
               description,
               owner,
+              createdBy,
               blockedBy,
               related,
               prompt,

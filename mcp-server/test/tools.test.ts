@@ -1175,7 +1175,7 @@ describe('agent-teams-mcp tools', () => {
         to: 'lead',
         text: 'See attached screenshot',
         timestamp: '2026-03-15T14:00:00.000Z',
-        source: 'inbox',
+        source: 'user_sent',
         attachments: [
           { id: 'att-1', filename: 'screenshot.png', mimeType: 'image/png', size: 42000 },
         ],
