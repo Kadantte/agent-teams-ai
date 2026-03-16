@@ -661,14 +661,14 @@ describe('agent-teams-controller API', () => {
     });
 
     controller.tasks.addTaskComment(task.id, {
-      from: 'alice',
+      from: 'bob',
       text: 'Need your decision here.',
     });
 
     const inboxPath = path.join(claudeDir, 'teams', 'my-team', 'inboxes', 'team-lead.json');
     const rows = JSON.parse(fs.readFileSync(inboxPath, 'utf8'));
     expect(rows).toHaveLength(1);
-    expect(rows[0].from).toBe('alice');
+    expect(rows[0].from).toBe('bob');
     expect(rows[0].text).toContain('Need your decision here.');
   });
 

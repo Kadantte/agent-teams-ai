@@ -52,10 +52,10 @@ describe('TeamMcpConfigBuilder', () => {
     expect(server?.command).toBe('pnpm');
     expect(server?.args).toEqual([
       '--dir',
-      `${process.cwd()}/mcp-server`,
+      path.join(process.cwd(), 'mcp-server'),
       'exec',
       'tsx',
-      `${process.cwd()}/mcp-server/src/index.ts`,
+      path.join(process.cwd(), 'mcp-server', 'src', 'index.ts'),
     ]);
   });
 
@@ -178,10 +178,10 @@ describe('TeamMcpConfigBuilder', () => {
       command: 'pnpm',
       args: [
         '--dir',
-        `${process.cwd()}/mcp-server`,
+        path.join(process.cwd(), 'mcp-server'),
         'exec',
         'tsx',
-        `${process.cwd()}/mcp-server/src/index.ts`,
+        path.join(process.cwd(), 'mcp-server', 'src', 'index.ts'),
       ],
     });
   });

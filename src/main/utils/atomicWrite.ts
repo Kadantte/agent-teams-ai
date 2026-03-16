@@ -2,9 +2,37 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const EPERM_MAX_RETRIES = 3;
+const EPERM_RETRY_DELAY_MS = 50;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function renameWithRetry(src: string, dest: string): Promise<void> {
+  for (let attempt = 0; attempt <= EPERM_MAX_RETRIES; attempt++) {
+    try {
+      await fs.promises.rename(src, dest);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EXDEV') {
+        await fs.promises.copyFile(src, dest);
+        await fs.promises.unlink(src).catch(() => undefined);
+        return;
+      }
+      if (code === 'EPERM' && attempt < EPERM_MAX_RETRIES) {
+        await sleep(EPERM_RETRY_DELAY_MS * (attempt + 1));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 /**
  * Async atomic write: write tmp file then rename over target.
- * Uses best-effort fsync and EXDEV fallback for safety.
+ * Uses best-effort fsync and EXDEV/EPERM fallback for safety.
  */
 export async function atomicWriteAsync(targetPath: string, data: string): Promise<void> {
   const dir = path.dirname(targetPath);
@@ -24,16 +52,7 @@ export async function atomicWriteAsync(targetPath: string, data: string): Promis
       await fd?.close();
     }
 
-    try {
-      await fs.promises.rename(tmpPath, targetPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EXDEV') {
-        await fs.promises.copyFile(tmpPath, targetPath);
-        await fs.promises.unlink(tmpPath).catch(() => undefined);
-      } else {
-        throw error;
-      }
-    }
+    await renameWithRetry(tmpPath, targetPath);
   } catch (error) {
     await fs.promises.unlink(tmpPath).catch(() => undefined);
     throw error;

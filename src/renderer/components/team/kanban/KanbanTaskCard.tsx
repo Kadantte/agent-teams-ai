@@ -216,7 +216,7 @@ export const KanbanTaskCard = ({
   task,
   teamName,
   columnId,
-  kanbanTaskState: _kanbanTaskState,
+  kanbanTaskState,
   hasReviewers,
   compact,
   taskMap,
@@ -266,7 +266,7 @@ export const KanbanTaskCard = ({
     taskChangeRequestOptions,
   ]);
 
-  const isReviewManual = columnId === 'review' && !hasReviewers && !task.reviewer;
+  const isReviewManual = columnId === 'review' && !hasReviewers && !kanbanTaskState?.reviewer;
   const metaActions = (
     <>
       {canDisplay && taskHasChanges === true ? (
