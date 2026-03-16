@@ -2,7 +2,7 @@ import type { FastMCP } from 'fastmcp';
 import { z } from 'zod';
 
 import { agentBlocks, getController } from '../controller';
-import { jsonTextContent, taskWriteResult, slimTask } from '../utils/format';
+import { jsonTextContent, taskWriteResult, slimTask, slimTaskForList } from '../utils/format';
 
 /** stripAgentBlocks from canonical agentBlocks module — single source of truth for the tag format. */
 const { stripAgentBlocks } = agentBlocks;
@@ -228,7 +228,11 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
       ...toolContextSchema,
     }),
     execute: async ({ teamName, claudeDir }) =>
-      await Promise.resolve(jsonTextContent(getController(teamName, claudeDir).tasks.listTasks())),
+      await Promise.resolve(
+        jsonTextContent(
+          (getController(teamName, claudeDir).tasks.listTasks() as Record<string, unknown>[]).map(slimTaskForList)
+        )
+      ),
   });
 
   server.addTool({

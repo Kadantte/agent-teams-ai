@@ -918,6 +918,98 @@ describe('agent-teams-mcp tools', () => {
     expect(reloaded.comments[0].text).toBe('Comment should persist despite broken inbox');
   });
 
+  it('write operations return slim task (no comments/historyEvents arrays)', async () => {
+    const claudeDir = makeClaudeDir();
+    const teamName = 'slim-check';
+
+    fs.mkdirSync(path.join(claudeDir, 'tasks', teamName), { recursive: true });
+    writeTeamConfig(claudeDir, teamName, { members: [{ name: 'lead' }] });
+
+    const task = parseJsonToolResult(
+      await getTool('task_create').execute({
+        claudeDir,
+        teamName,
+        subject: 'Slim task test',
+        owner: 'lead',
+        notifyOwner: false,
+      })
+    );
+
+    // task_create returns full task (read operation)
+    expect(task.historyEvents).toBeDefined();
+
+    // Add a comment so commentCount > 0
+    const commented = parseJsonToolResult(
+      await getTool('task_add_comment').execute({
+        claudeDir,
+        teamName,
+        taskId: task.id,
+        text: 'test comment',
+        from: 'lead',
+      })
+    );
+
+    // task_add_comment: nested task should be slim
+    expect(commented.commentId).toBeTruthy();
+    expect(commented.comment.text).toBe('test comment');
+    expect(commented.task.commentCount).toBe(1);
+    expect(commented.task.comments).toBeUndefined();
+    expect(commented.task.historyEvents).toBeUndefined();
+
+    // task_start: returns slim task directly
+    const started = parseJsonToolResult(
+      await getTool('task_start').execute({
+        claudeDir,
+        teamName,
+        taskId: task.id,
+        actor: 'lead',
+      })
+    );
+    expect(started.status).toBe('in_progress');
+    expect(started.commentCount).toBe(1);
+    expect(started.comments).toBeUndefined();
+    expect(started.historyEvents).toBeUndefined();
+    expect(started.workIntervals).toBeUndefined();
+
+    // task_complete: returns slim task directly
+    const completed = parseJsonToolResult(
+      await getTool('task_complete').execute({
+        claudeDir,
+        teamName,
+        taskId: task.id,
+        actor: 'lead',
+      })
+    );
+    expect(completed.status).toBe('completed');
+    expect(completed.comments).toBeUndefined();
+
+    // task_list: uses blocklist, includes description but not comments array
+    const listed = parseJsonToolResult(
+      await getTool('task_list').execute({ claudeDir, teamName })
+    );
+    const listedTask = listed.find((t: { id: string }) => t.id === task.id);
+    expect(listedTask).toBeDefined();
+    expect(listedTask.subject).toBe('Slim task test');
+    expect(listedTask.commentCount).toBe(1);
+    expect(listedTask.comments).toBeUndefined();
+    expect(listedTask.historyEvents).toBeUndefined();
+    expect(listedTask.workIntervals).toBeUndefined();
+    // task_list preserves non-heavy fields
+    expect(listedTask.status).toBeDefined();
+    expect(listedTask.id).toBeDefined();
+
+    // task_get: still returns full task with comments
+    const full = parseJsonToolResult(
+      await getTool('task_get').execute({
+        claudeDir,
+        teamName,
+        taskId: task.id,
+      })
+    );
+    expect(full.comments).toHaveLength(1);
+    expect(full.historyEvents).toBeDefined();
+  });
+
   describe('task_create_from_message', () => {
     function writeSentMessage(
       claudeDir: string,

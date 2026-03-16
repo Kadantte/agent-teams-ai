@@ -2,7 +2,7 @@ import type { FastMCP } from 'fastmcp';
 import { z } from 'zod';
 
 import { getController } from '../controller';
-import { jsonTextContent } from '../utils/format';
+import { jsonTextContent, slimTask } from '../utils/format';
 
 const toolContextSchema = {
   teamName: z.string().min(1),
@@ -23,11 +23,13 @@ export function registerReviewTools(server: Pick<FastMCP, 'addTool'>) {
     execute: async ({ teamName, claudeDir, taskId, from, reviewer, leadSessionId }) =>
       await Promise.resolve(
         jsonTextContent(
-          getController(teamName, claudeDir).review.requestReview(taskId, {
-            ...(from ? { from } : {}),
-            ...(reviewer ? { reviewer } : {}),
-            ...(leadSessionId ? { leadSessionId } : {}),
-          })
+          slimTask(
+            getController(teamName, claudeDir).review.requestReview(taskId, {
+              ...(from ? { from } : {}),
+              ...(reviewer ? { reviewer } : {}),
+              ...(leadSessionId ? { leadSessionId } : {}),
+            }) as Record<string, unknown>
+          )
         )
       ),
   });
@@ -46,12 +48,14 @@ export function registerReviewTools(server: Pick<FastMCP, 'addTool'>) {
     execute: async ({ teamName, claudeDir, taskId, from, note, notifyOwner, leadSessionId }) =>
       await Promise.resolve(
         jsonTextContent(
-          getController(teamName, claudeDir).review.approveReview(taskId, {
-            ...(from ? { from } : {}),
-            ...(note ? { note } : {}),
-            ...(notifyOwner !== false ? { 'notify-owner': true } : {}),
-            ...(leadSessionId ? { leadSessionId } : {}),
-          })
+          slimTask(
+            getController(teamName, claudeDir).review.approveReview(taskId, {
+              ...(from ? { from } : {}),
+              ...(note ? { note } : {}),
+              ...(notifyOwner !== false ? { 'notify-owner': true } : {}),
+              ...(leadSessionId ? { leadSessionId } : {}),
+            }) as Record<string, unknown>
+          )
         )
       ),
   });
@@ -69,11 +73,13 @@ export function registerReviewTools(server: Pick<FastMCP, 'addTool'>) {
     execute: async ({ teamName, claudeDir, taskId, from, comment, leadSessionId }) =>
       await Promise.resolve(
         jsonTextContent(
-          getController(teamName, claudeDir).review.requestChanges(taskId, {
-            ...(from ? { from } : {}),
-            ...(comment ? { comment } : {}),
-            ...(leadSessionId ? { leadSessionId } : {}),
-          })
+          slimTask(
+            getController(teamName, claudeDir).review.requestChanges(taskId, {
+              ...(from ? { from } : {}),
+              ...(comment ? { comment } : {}),
+              ...(leadSessionId ? { leadSessionId } : {}),
+            }) as Record<string, unknown>
+          )
         )
       ),
   });

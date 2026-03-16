@@ -407,7 +407,7 @@ function buildTeammateAgentBlockReminder(): string {
   ].join('\n');
 }
 
-function buildMemberBootstrapPrompt(
+function buildMemberSpawnPrompt(
   member: TeamCreateRequest['members'][number],
   displayName: string,
   teamName: string,
@@ -438,7 +438,7 @@ ${buildTeammateAgentBlockReminder()}
 ${actionModeProtocol}`;
 }
 
-function buildReconnectMemberBootstrapPrompt(
+function buildReconnectMemberSpawnPrompt(
   member: TeamCreateRequest['members'][number],
   teamName: string,
   leadName: string,
@@ -482,24 +482,6 @@ ${actionModeProtocol}
      - If you have no tasks, wait for new assignments.`;
 }
 
-function buildMemberSpawnPrompt(
-  member: TeamCreateRequest['members'][number],
-  displayName: string,
-  teamName: string,
-  leadName: string
-): string {
-  return buildMemberBootstrapPrompt(member, displayName, teamName, leadName);
-}
-
-function buildReconnectMemberSpawnPrompt(
-  member: TeamCreateRequest['members'][number],
-  teamName: string,
-  leadName: string,
-  hasTasks: boolean
-): string {
-  return buildReconnectMemberBootstrapPrompt(member, teamName, leadName, hasTasks);
-}
-
 export function buildAddMemberSpawnMessage(
   teamName: string,
   displayName: string,
@@ -515,7 +497,7 @@ export function buildAddMemberSpawnMessage(
       ? ` Their workflow: ${member.workflow.trim()}`
       : '';
 
-  const prompt = buildMemberBootstrapPrompt(
+  const prompt = buildMemberSpawnPrompt(
     {
       name: member.name,
       ...(member.role ? { role: member.role } : {}),
@@ -866,12 +848,7 @@ ${request.members
     (m) => `   For “${m.name}”:
    - name: “${m.name}”
    - prompt:
-${buildMemberSpawnPrompt(
-  m,
-  displayName,
-  request.teamName,
-  leadName
-)
+${buildMemberSpawnPrompt(m, displayName, request.teamName, leadName)
   .split('\n')
   .map((line) => `     ${line}`)
   .join('\n')}`
