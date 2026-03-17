@@ -393,6 +393,7 @@ function buildMemberTaskProtocol(teamName) {
    This is MANDATORY before review_approve or review_request_changes. Without this step, the kanban board may not show the task in REVIEW during your review.
 4. If you are asked to review and the task is accepted, move it to APPROVED (not DONE) with MCP tool review_approve:
    { teamName: "${teamName}", taskId: "<taskId>", note?: "<optional note>", notifyOwner: true }
+   CRITICAL: Text comments like "approved" or "LGTM" do NOT change the kanban board. You MUST call review_approve to move a task from REVIEW to APPROVED. Without the tool call the task stays stuck in the REVIEW column.
 5. If review fails and changes are needed, use MCP tool review_request_changes:
    { teamName: "${teamName}", taskId: "<taskId>", comment: "<what to fix>" }
 6. NEVER skip status updates. A task is NOT done until completed status is written.

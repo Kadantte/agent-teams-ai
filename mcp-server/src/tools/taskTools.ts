@@ -170,7 +170,7 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
         ...(source ? { source } : {}),
       };
 
-      // Preserve attachment metadata by reference only — no blob copying
+      // Preserve attachment metadata — filePath included when available
       if (Array.isArray(message.attachments) && message.attachments.length > 0) {
         sourceMessage.attachments = (message.attachments as Record<string, unknown>[])
           .filter(
@@ -185,6 +185,7 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
             filename: String(a.filename),
             mimeType: typeof a.mimeType === 'string' ? a.mimeType : '',
             size: typeof a.size === 'number' ? a.size : 0,
+            ...(typeof a.filePath === 'string' ? { filePath: a.filePath } : {}),
           }));
       }
 
@@ -212,7 +213,11 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
 
   server.addTool({
     name: 'task_get',
-    description: 'Get a task by id',
+    description:
+      'Get a task by id. Response includes:\n' +
+      '- sourceMessage.attachments: from original user message (filePath = absolute path to file on disk, use Read tool to view)\n' +
+      '- attachments: files attached to the task (filePath = absolute path, use Read tool to view)\n' +
+      '- comments[].attachments: files on comments (filePath = absolute path, use Read tool to view)',
     parameters: z.object({
       ...toolContextSchema,
       taskId: z.string().min(1),
@@ -314,7 +319,8 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
 
   server.addTool({
     name: 'task_attach_file',
-    description: 'Attach a file to a task',
+    description:
+      'Attach a file to a task. Returns attachment metadata with filePath for future access via Read tool.',
     parameters: z.object({
       ...toolContextSchema,
       taskId: z.string().min(1),
@@ -351,7 +357,8 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
 
   server.addTool({
     name: 'task_attach_comment_file',
-    description: 'Attach a file to a task comment',
+    description:
+      'Attach a file to a task comment. Returns attachment metadata with filePath for future access via Read tool.',
     parameters: z.object({
       ...toolContextSchema,
       taskId: z.string().min(1),

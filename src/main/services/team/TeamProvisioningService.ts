@@ -558,6 +558,13 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
       `- Link related: task_link { teamName: "${teamName}", taskId: "<id>", targetId: "<targetId>", relationship: "related" }`,
       `- Unlink: task_unlink { teamName: "${teamName}", taskId: "<id>", targetId: "<targetId>", relationship: "blocked-by" }`,
       ``,
+      `Review operations — use MCP tools directly (text comments do NOT change kanban state):`,
+      `- Request review (after task_complete): review_request { teamName: "${teamName}", taskId: "<id>", from: "${leadName}", reviewer: "<reviewer-name>" }`,
+      `- Start review (reviewer signals they are beginning): review_start { teamName: "${teamName}", taskId: "<id>", from: "<reviewer-name>" }`,
+      `- Approve review: review_approve { teamName: "${teamName}", taskId: "<id>", note?: "<note>", notifyOwner: true }`,
+      `- Request changes: review_request_changes { teamName: "${teamName}", taskId: "<id>", comment: "<what to fix>" }`,
+      `CRITICAL: Writing "approved" or "LGTM" as a task comment does NOT move the task on the kanban board. You MUST call the review_approve MCP tool. Without the tool call the task stays stuck in the REVIEW column.`,
+      ``,
       `Attachment storage modes (IMPORTANT):`,
       `- Default is copy (safe, robust).`,
       `- Use mode: "link" to try a hardlink (no duplication). It may fall back to copy unless you disable fallback.`,
@@ -831,6 +838,7 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
   - If a task is blocked (uses blockedBy), it MUST be created as pending (for example with task_create + startImmediately: false). Do NOT mark blocked tasks in_progress.
      - Review guidance:
       - Prefer NOT creating a separate "review task". Our workflow reviews the work task itself: call review_start when beginning review, then review_approve/review_request_changes on the implementation task #X.
+      - CRITICAL: Text comments ("approved", "LGTM") do NOT move the task on the kanban board. You MUST call the MCP tool review_approve to move from REVIEW to APPROVED. Without the tool call, the task stays stuck in REVIEW.
        - If you MUST create a separate review reminder/assignment task, create it as pending and link it to the work task:
         - Use related to connect it to #X (non-blocking link).
         - If the review truly cannot start until #X is done, ALSO add blockedBy #X.

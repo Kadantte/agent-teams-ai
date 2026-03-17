@@ -124,6 +124,7 @@ export class TeamTaskAttachmentStore {
       mimeType,
       size: buffer.length,
       addedAt: new Date().toISOString(),
+      filePath,
     };
 
     logger.debug(`[${teamName}] Saved task attachment ${attachmentId} for task #${taskId}`);

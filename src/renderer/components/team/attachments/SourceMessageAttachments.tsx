@@ -23,6 +23,7 @@ export const SourceMessageAttachments = ({
     filename: a.filename,
     mimeType: a.mimeType,
     size: a.size,
+    ...(a.filePath ? { filePath: a.filePath } : {}),
   }));
 
   const truncatedText =

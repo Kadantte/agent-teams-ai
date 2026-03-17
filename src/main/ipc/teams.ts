@@ -1247,12 +1247,30 @@ async function handleSendMessage(
       }
 
       if (stdinSent) {
-        const attachmentMeta: AttachmentMeta[] | undefined = validatedAttachments?.map((a) => ({
-          id: a.id,
-          filename: a.filename,
-          mimeType: a.mimeType,
-          size: a.size,
-        }));
+        // Save attachment files to disk FIRST to get file paths for metadata
+        let attachmentFilePaths: Map<string, string> | undefined;
+        if (validatedAttachments?.length) {
+          try {
+            attachmentFilePaths = await attachmentStore.saveAttachments(
+              tn,
+              preGeneratedMessageId,
+              validatedAttachments
+            );
+          } catch (e) {
+            logger.warn(`Failed to save attachments: ${e}`);
+          }
+        }
+
+        const attachmentMeta: AttachmentMeta[] | undefined = validatedAttachments?.map((a) => {
+          const fp = attachmentFilePaths?.get(a.id);
+          return {
+            id: a.id,
+            filename: a.filename,
+            mimeType: a.mimeType,
+            size: a.size,
+            ...(fp ? { filePath: fp } : {}),
+          };
+        });
 
         // Persistence is best-effort — stdin already delivered the message
         let result: SendMessageResult;
@@ -1271,12 +1289,7 @@ async function handleSendMessage(
           result = { deliveredToInbox: false, messageId: preGeneratedMessageId };
         }
 
-        // Save attachment binary data to disk (best-effort)
-        if (validatedAttachments?.length && result.messageId) {
-          void attachmentStore
-            .saveAttachments(tn, result.messageId, validatedAttachments)
-            .catch((e) => logger.warn(`Failed to save attachments: ${e}`));
-        }
+        // Attachment files already saved above (before metadata construction)
 
         provisioning.pushLiveLeadProcessMessage(tn, {
           from: 'user',
