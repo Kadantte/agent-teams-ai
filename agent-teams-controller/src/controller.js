@@ -40,6 +40,7 @@ module.exports = {
   agentBlocks,
   protocols: {
     buildActionModeProtocolText: tasks.buildActionModeProtocolText,
+    MEMBER_DELEGATE_DESCRIPTION: tasks.MEMBER_DELEGATE_DESCRIPTION,
     buildProcessProtocolText: tasks.buildProcessProtocolText,
   },
   tasks,

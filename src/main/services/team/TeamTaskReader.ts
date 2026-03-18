@@ -253,6 +253,9 @@ export class TeamTaskReader {
                             mimeType: String(a.mimeType).trim(),
                             size: a.size,
                             addedAt: a.addedAt,
+                            ...('filePath' in a && typeof a.filePath === 'string'
+                              ? { filePath: a.filePath }
+                              : {}),
                           }));
                         return filtered.length > 0 ? filtered : undefined;
                       })()
@@ -288,6 +291,9 @@ export class TeamTaskReader {
                   mimeType: String(a.mimeType).trim(),
                   size: a.size,
                   addedAt: a.addedAt,
+                  ...(a.filePath != null && typeof a.filePath === 'string'
+                    ? { filePath: a.filePath }
+                    : {}),
                 }))
             : undefined,
           reviewState: getReviewStateFromTask({

@@ -368,10 +368,11 @@ function buildActionModeProtocolText(delegateDescription) {
     ].join('\n');
 }
 
+const MEMBER_DELEGATE_DESCRIPTION =
+    'Do not implement yourself. Pass the task with full context (what you know, what is needed) to your team lead or another teammate and let them handle it.';
+
 function buildMemberActionModeProtocol() {
-    return buildActionModeProtocolText(
-        'Do not implement yourself. Pass the task with full context (what you know, what is needed) to your team lead or another teammate and let them handle it.'
-    );
+    return buildActionModeProtocolText(MEMBER_DELEGATE_DESCRIPTION);
 }
 
 function buildMemberTaskProtocol(teamName) {
@@ -616,6 +617,7 @@ module.exports = {
     softDeleteTask,
     startTask,
     buildActionModeProtocolText,
+    MEMBER_DELEGATE_DESCRIPTION,
     buildProcessProtocolText,
     memberBriefing,
     taskBriefing,

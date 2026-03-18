@@ -102,6 +102,7 @@ declare module 'agent-teams-controller' {
   /** Context-free protocol text builders, shared across lead and member prompts. */
   export interface ProtocolsApi {
     buildActionModeProtocolText(delegateDescription: string): string;
+    MEMBER_DELEGATE_DESCRIPTION: string;
     buildProcessProtocolText(teamName: string): string;
   }
 

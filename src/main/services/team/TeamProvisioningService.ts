@@ -99,8 +99,6 @@ import type {
 const logger = createLogger('Service:TeamProvisioning');
 const { createController, protocols } = agentTeamsControllerModule;
 const TEAM_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
-const MEMBER_DELEGATE_DESCRIPTION =
-  'Do not implement yourself. Pass the task with full context (what you know, what is needed) to your team lead or another teammate and let them handle it.';
 const RUN_TIMEOUT_MS = 300_000;
 const VERIFY_TIMEOUT_MS = 15_000;
 const VERIFY_POLL_MS = 500;
@@ -423,7 +421,9 @@ function buildMemberSpawnPrompt(
   const workflowBlock = member.workflow?.trim()
     ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '')}`
     : '';
-  const actionModeProtocol = protocols.buildActionModeProtocolText(MEMBER_DELEGATE_DESCRIPTION);
+  const actionModeProtocol = protocols.buildActionModeProtocolText(
+    protocols.MEMBER_DELEGATE_DESCRIPTION
+  );
   return `You are ${member.name}, a ${role} on team "${displayName}" (${teamName}).${workflowBlock}
 
 ${getAgentLanguageInstruction()}
@@ -455,7 +455,7 @@ function buildReconnectMemberSpawnPrompt(
     ? `\n\nYour workflow and how you should behave:${formatWorkflowBlock(member.workflow, '     ')}`
     : '';
   const actionModeProtocol = indentMultiline(
-    protocols.buildActionModeProtocolText(MEMBER_DELEGATE_DESCRIPTION),
+    protocols.buildActionModeProtocolText(protocols.MEMBER_DELEGATE_DESCRIPTION),
     '     '
   );
   return `   For "${member.name}":
