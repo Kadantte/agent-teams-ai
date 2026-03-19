@@ -139,6 +139,9 @@ pnpm typecheck
 ### Test Failures
 Check for changes in message parsing or chunk building logic.
 
+### Packaged app: CLI / “Not logged in”
+Each successful run of **`CliInstallerService.getStatus()`** tries to append one NDJSON line to **`claude-cli-auth-diag.ndjson`** (field **`diagFile`**: full path). Typical location: Electron **`app.getPath('logs')`** — on macOS often `~/Library/Logs/<product name>/` (exact folder is OS- and build-specific). If the file exceeds **512 KiB**, it is **truncated to empty** before the next append (avoids unbounded growth). **No line is written** if the app is not under Electron, log dir cannot be resolved, or disk write fails. **IPC** (`cliInstaller:getStatus`) **dedupes** work for **5s** (`STATUS_CACHE_TTL_MS` in `src/main/ipc/cliInstaller.ts`), so rapid UI polls do **not** each trigger a new file append. Default logger hides `info`/`warn` in production; **`logger.error`** still goes to the console (e.g. if assembling the diag line throws — should be rare).
+
 ## TypeScript Conventions
 
 ### Naming

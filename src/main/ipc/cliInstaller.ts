@@ -73,6 +73,10 @@ async function handleGetStatus(
           cachedStatus = { value: status, at: Date.now() };
           return status;
         })
+        .catch((err) => {
+          cachedStatus = null;
+          throw err;
+        })
         .finally(() => {
           const ms = Date.now() - startedAt;
           if (ms >= 2000) {

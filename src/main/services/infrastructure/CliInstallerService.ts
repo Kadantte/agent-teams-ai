@@ -17,17 +17,23 @@
  * - Human-readable error messages per phase
  */
 
+import { appendCliAuthDiag } from '@main/utils/cliAuthDiagLog';
+import { buildMergedCliPath } from '@main/utils/cliPathMerge';
 import { execCli, killProcessTree, spawnCli } from '@main/utils/childProcess';
-import { getHomeDir } from '@main/utils/pathDecoder';
-import { getCachedShellEnv } from '@main/utils/shellEnv';
+import { getClaudeBasePath, getHomeDir } from '@main/utils/pathDecoder';
+import {
+  getCachedShellEnv,
+  getShellPreferredHome,
+  resolveInteractiveShellEnv,
+} from '@main/utils/shellEnv';
 import { getErrorMessage } from '@shared/utils/errorHandling';
 import { createLogger } from '@shared/utils/logger';
 import { createHash } from 'crypto';
-import { createWriteStream, existsSync, promises as fsp, realpathSync } from 'fs';
+import { createWriteStream, existsSync, promises as fsp } from 'fs';
 import http from 'http';
 import https from 'https';
 import { tmpdir } from 'os';
-import { dirname, join } from 'path';
+import { join, posix as pathPosix, win32 as pathWin32 } from 'path';
 
 import { ClaudeBinaryResolver } from '../team/ClaudeBinaryResolver';
 
@@ -78,85 +84,56 @@ const AUTH_STATUS_RETRY_DELAY_MS = 1500;
 
 /**
  * Build env for child processes with correct HOME and enriched PATH.
- *
- * On macOS, apps launched from Finder/.dmg get a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin).
- * Three layers ensure `claude auth status` and `claude --version` always work:
- *
- * 1. **Binary-derived**: add dirname(binaryPath) to PATH. If the binary is a symlink
- *    (e.g. ~/.local/bin/claude → ~/.nvm/versions/node/v22/bin/claude), also add the
- *    resolved real directory — this guarantees `node` is findable since npm installs
- *    claude next to node.
- * 2. **Shell env cache**: if the pre-warm (fired at app startup) has completed,
- *    merge the user's full interactive shell PATH — covers all custom entries.
- * 3. **Sync fallback**: platform-specific common directories for when the cache
- *    is still cold (first launch, heavy .zshrc).
- *
- * On Windows this is effectively a no-op — Explorer-launched apps inherit the full
- * user PATH, and the shell env cache returns {} (no PATH override).
+ * PATH merging lives in `cliPathMerge.ts` (shared with binary discovery).
  */
 function buildChildEnv(binaryPath?: string | null): NodeJS.ProcessEnv {
-  const home = getHomeDir();
-  const sep = process.platform === 'win32' ? ';' : ':';
-  const currentPath = process.env.PATH || '';
-  const extraDirs: string[] = [];
-
-  // Layer 1: binary's own directory + resolved symlink target.
-  // This is the most reliable source — if ClaudeBinaryResolver found the binary,
-  // its directory almost certainly contains `node` too (npm co-installs them).
-  if (binaryPath) {
-    const binDir = dirname(binaryPath);
-    extraDirs.push(binDir);
-    try {
-      const realBinDir = dirname(realpathSync(binaryPath));
-      if (realBinDir !== binDir) {
-        extraDirs.push(realBinDir);
-      }
-    } catch {
-      // symlink resolution failed (race condition / broken link) — ignore
-    }
-  }
-
-  // Layer 2: cached shell env (pre-warmed at startup, covers nvm/volta/fnm/custom PATH).
-  const cachedEnv = getCachedShellEnv();
-  if (cachedEnv?.PATH) {
-    extraDirs.push(...cachedEnv.PATH.split(sep).filter(Boolean));
-  } else {
-    // Layer 3: sync fallback — common binary directories per platform.
-    if (process.platform === 'win32') {
-      extraDirs.push(join(home, 'AppData', 'Roaming', 'npm'), join(home, 'scoop', 'shims'));
-      if (process.env.LOCALAPPDATA) {
-        extraDirs.push(join(process.env.LOCALAPPDATA, 'Programs', 'claude'));
-      }
-      if (process.env.ProgramFiles) {
-        extraDirs.push(join(process.env.ProgramFiles, 'claude'));
-      }
-    } else {
-      extraDirs.push(
-        join(home, '.local', 'bin'),
-        join(home, '.npm-global', 'bin'),
-        '/usr/local/bin',
-        '/opt/homebrew/bin'
-      );
-    }
-  }
-
-  // Deduplicate: extra dirs first (higher priority), then existing PATH entries.
-  const seen = new Set<string>();
-  const merged: string[] = [];
-  for (const dir of [...extraDirs, ...currentPath.split(sep)]) {
-    if (dir && !seen.has(dir)) {
-      seen.add(dir);
-      merged.push(dir);
-    }
-  }
-
+  const home = getShellPreferredHome();
   return {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
-    PATH: merged.join(sep),
+    PATH: buildMergedCliPath(binaryPath),
   };
 }
+
+/** `claude auth status` may prefix stderr noise or warnings; extract the JSON object. */
+function parseClaudeAuthStatusStdout(stdout: string): { loggedIn?: boolean; authMethod?: string } {
+  const trimmed = stdout.trim();
+  const parse = (s: string): { loggedIn?: boolean; authMethod?: string } => {
+    const v = JSON.parse(s) as { loggedIn?: boolean; authMethod?: string };
+    if (typeof v !== 'object' || v === null) {
+      throw new Error('auth status: not an object');
+    }
+    return v;
+  };
+  try {
+    return parse(trimmed);
+  } catch {
+    const start = trimmed.lastIndexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      return parse(trimmed.slice(start, end + 1));
+    }
+    throw new Error('auth status: no JSON object in output');
+  }
+}
+
+/** NDJSON: strip C0 controls (except \\t \\n \\r) so logs stay valid text and tiny. */
+function stripControlForDiag(s: string): string {
+  return s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '\uFFFD');
+}
+
+function clipHeadForDiag(s: string, maxLen: number): string {
+  return stripControlForDiag(s).slice(0, maxLen);
+}
+
+function clipTailForDiag(s: string, maxLen: number): string {
+  return stripControlForDiag(s).slice(-maxLen);
+}
+
+const DIAG_PATH_HEAD = 400;
+const DIAG_HOME_PREVIEW = 120;
+const DIAG_AUTH_STDOUT_TAIL = 160;
 
 // =============================================================================
 // Helpers
@@ -292,6 +269,39 @@ interface GcsManifest {
   platforms?: Record<string, GcsPlatformEntry>;
 }
 
+/** Per-`getStatus()` snapshot so parallel calls cannot clobber shared instance fields. */
+interface CliInstallerStatusRunDiag {
+  versionError: string | null;
+  authAttempts: number;
+  authLastError: string | null;
+  authStdoutLen: number;
+  authStdoutTail: string;
+  authTimedOut: boolean;
+  gatherError: string | null;
+}
+
+function createCliInstallerRunDiag(): CliInstallerStatusRunDiag {
+  return {
+    versionError: null,
+    authAttempts: 0,
+    authLastError: null,
+    authStdoutLen: 0,
+    authStdoutTail: '',
+    authTimedOut: false,
+    gatherError: null,
+  };
+}
+
+function resetGatherDiag(diag: CliInstallerStatusRunDiag): void {
+  diag.versionError = null;
+  diag.authAttempts = 0;
+  diag.authLastError = null;
+  diag.authStdoutLen = 0;
+  diag.authStdoutTail = '';
+  diag.authTimedOut = false;
+  diag.gatherError = null;
+}
+
 // =============================================================================
 // Service
 // =============================================================================
@@ -300,8 +310,81 @@ export class CliInstallerService {
   private mainWindow: BrowserWindow | null = null;
   private installing = false;
 
+  private electronMetaForDiag(): Record<string, unknown> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { app } = require('electron') as typeof import('electron');
+      return {
+        electronPackaged: Boolean(app?.isPackaged),
+        appVersion: typeof app?.getVersion === 'function' ? app.getVersion() : null,
+        exePath:
+          typeof app?.getPath === 'function'
+            ? clipHeadForDiag(app.getPath('exe'), DIAG_PATH_HEAD)
+            : null,
+      };
+    } catch {
+      return { electronPackaged: null, appVersion: null, exePath: null };
+    }
+  }
+
+  private async writeCliInstallerStatusDiag(
+    r: CliInstallationStatus,
+    diag: CliInstallerStatusRunDiag
+  ): Promise<void> {
+    const cached = getCachedShellEnv();
+    const procPath = process.env.PATH ?? '';
+    const mergedPath = buildMergedCliPath(r.binaryPath);
+    const shellHome = cached?.HOME?.trim();
+    const hasUsableShellPath = Boolean(cached?.PATH?.trim());
+    const pathSep = process.platform === 'win32' ? pathWin32.delimiter : pathPosix.delimiter;
+    await appendCliAuthDiag({
+      event: 'cli_installer_get_status',
+      ...this.electronMetaForDiag(),
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+      shellHasPath: hasUsableShellPath,
+      shellPathEntryCount: cached?.PATH ? cached.PATH.split(pathSep).filter(Boolean).length : 0,
+      shellHomeSet: Boolean(shellHome),
+      shellHomePreview: shellHome ? clipHeadForDiag(shellHome, DIAG_HOME_PREVIEW) : null,
+      electronHome: getHomeDir(),
+      preferredHome: getShellPreferredHome(),
+      claudeConfigDir: getClaudeBasePath(),
+      processPathLen: procPath.length,
+      processPathHead: clipHeadForDiag(procPath, DIAG_PATH_HEAD),
+      mergedPathLen: mergedPath.length,
+      mergedPathHead: clipHeadForDiag(mergedPath, DIAG_PATH_HEAD),
+      installed: r.installed,
+      binaryPath: r.binaryPath ? clipHeadForDiag(r.binaryPath, DIAG_PATH_HEAD) : null,
+      installedVersion: r.installedVersion,
+      authLoggedIn: r.authLoggedIn,
+      authMethod: r.authMethod,
+      latestVersion: r.latestVersion,
+      updateAvailable: r.updateAvailable,
+      versionProbeError: diag.versionError,
+      authProbeAttempts: diag.authAttempts,
+      authProbeLastError: diag.authLastError,
+      authStdoutLen: diag.authStdoutLen,
+      authStdoutTail: clipTailForDiag(diag.authStdoutTail, DIAG_AUTH_STDOUT_TAIL),
+      authProbeTimedOut: diag.authTimedOut,
+      gatherThrownError: diag.gatherError,
+    });
+  }
+
   setMainWindow(window: BrowserWindow | null): void {
     this.mainWindow = window;
+  }
+
+  /**
+   * Env for CLI subprocesses: login-shell vars + consistent HOME/PATH + same config root as the app.
+   */
+  private envForCli(binaryPath: string): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      ...(getCachedShellEnv() ?? {}),
+      ...buildChildEnv(binaryPath),
+      CLAUDE_CONFIG_DIR: getClaudeBasePath(),
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -322,10 +405,11 @@ export class CliInstallerService {
     // Run the actual status gathering with an overall timeout.
     // On timeout, return whatever partial result was collected so far.
     const ref = { current: result };
+    const runDiag = createCliInstallerRunDiag();
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
       await Promise.race([
-        this.gatherStatus(ref),
+        this.gatherStatus(ref, runDiag),
         new Promise<void>((resolve) => {
           timer = setTimeout(() => {
             logger.warn(
@@ -335,13 +419,20 @@ export class CliInstallerService {
           }, GET_STATUS_TIMEOUT_MS);
         }),
       ]);
+      return result;
+    } catch (err) {
+      runDiag.gatherError = getErrorMessage(err);
+      throw err;
     } finally {
       if (timer) {
         clearTimeout(timer);
       }
+      try {
+        await this.writeCliInstallerStatusDiag(result, runDiag);
+      } catch (diagErr) {
+        logger.error('writeCliInstallerStatusDiag failed:', getErrorMessage(diagErr));
+      }
     }
-
-    return result;
   }
 
   /**
@@ -351,7 +442,13 @@ export class CliInstallerService {
    *
    * Flow: binary resolve → --version (sequential) → Promise.all([auth, GCS]) (parallel)
    */
-  private async gatherStatus(ref: { current: CliInstallationStatus }): Promise<void> {
+  private async gatherStatus(
+    ref: { current: CliInstallationStatus },
+    diag: CliInstallerStatusRunDiag
+  ): Promise<void> {
+    resetGatherDiag(diag);
+    await resolveInteractiveShellEnv();
+
     const r = ref.current;
     const binaryPath = await ClaudeBinaryResolver.resolve();
     if (binaryPath) {
@@ -361,19 +458,20 @@ export class CliInstallerService {
       try {
         const { stdout } = await execCli(binaryPath, ['--version'], {
           timeout: VERSION_TIMEOUT_MS,
-          env: buildChildEnv(binaryPath),
+          env: this.envForCli(binaryPath),
         });
         r.installedVersion = normalizeVersion(stdout);
         logger.info(
           `Installed CLI version: "${stdout.trim()}" → normalized: "${r.installedVersion}"`
         );
       } catch (err) {
-        logger.warn('Failed to get CLI version:', getErrorMessage(err));
+        diag.versionError = getErrorMessage(err);
+        logger.warn('Failed to get CLI version:', diag.versionError);
       }
 
       // Auth and GCS version check are independent — run in parallel.
       // Both mutate `r` directly so partial results survive the outer timeout.
-      await Promise.all([this.checkAuthStatus(binaryPath, r), this.fetchLatestVersion(r)]);
+      await Promise.all([this.checkAuthStatus(binaryPath, r, diag), this.fetchLatestVersion(r)]);
     } else {
       // No binary — still check latest version for "install" prompt
       await this.fetchLatestVersion(r);
@@ -386,35 +484,42 @@ export class CliInstallerService {
    * Mutates `r` directly so results survive even if the outer Promise.all hasn't resolved.
    */
 
-  private async checkAuthStatus(binaryPath: string, result: CliInstallationStatus): Promise<void> {
+  private async checkAuthStatus(
+    binaryPath: string,
+    result: CliInstallationStatus,
+    diag: CliInstallerStatusRunDiag
+  ): Promise<void> {
     const doCheck = async (): Promise<void> => {
       for (let authAttempt = 1; authAttempt <= AUTH_STATUS_MAX_RETRIES; authAttempt++) {
+        diag.authAttempts = authAttempt;
         try {
           const { stdout: authStdout } = await execCli(binaryPath, ['auth', 'status'], {
             timeout: VERSION_TIMEOUT_MS,
-            env: buildChildEnv(binaryPath),
+            env: this.envForCli(binaryPath),
           });
-          const auth = JSON.parse(authStdout.trim()) as {
-            loggedIn?: boolean;
-            authMethod?: string;
-          };
+          diag.authStdoutLen = authStdout.length;
+          diag.authStdoutTail = authStdout.slice(-DIAG_AUTH_STDOUT_TAIL);
+          const auth = parseClaudeAuthStatusStdout(authStdout);
           result.authLoggedIn = auth.loggedIn === true;
           result.authMethod = auth.authMethod ?? null;
+          diag.authLastError = null;
           logger.info(
             `Auth status: loggedIn=${result.authLoggedIn}, method=${result.authMethod ?? 'null'}` +
               (authAttempt > 1 ? ` (attempt ${authAttempt})` : '')
           );
           return;
         } catch (err) {
+          const msg = getErrorMessage(err);
+          diag.authLastError = msg;
           if (authAttempt < AUTH_STATUS_MAX_RETRIES) {
             logger.warn(
               `Auth status check failed (attempt ${authAttempt}/${AUTH_STATUS_MAX_RETRIES}), ` +
-                `retrying in ${AUTH_STATUS_RETRY_DELAY_MS}ms: ${getErrorMessage(err)}`
+                `retrying in ${AUTH_STATUS_RETRY_DELAY_MS}ms: ${msg}`
             );
             await new Promise((resolve) => setTimeout(resolve, AUTH_STATUS_RETRY_DELAY_MS));
           } else {
             logger.warn(
-              `Auth status check failed after ${AUTH_STATUS_MAX_RETRIES} attempts: ${getErrorMessage(err)}`
+              `Auth status check failed after ${AUTH_STATUS_MAX_RETRIES} attempts: ${msg}`
             );
             result.authLoggedIn = false;
           }
@@ -424,11 +529,13 @@ export class CliInstallerService {
 
     // Own timeout so slow auth doesn't eat the overall getStatus budget
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let hitAuthTimeout = false;
     try {
       await Promise.race([
         doCheck(),
         new Promise<void>((resolve) => {
           timer = setTimeout(() => {
+            hitAuthTimeout = true;
             logger.warn(`Auth status check timed out after ${AUTH_TOTAL_TIMEOUT_MS}ms`);
             resolve();
           }, AUTH_TOTAL_TIMEOUT_MS);
@@ -438,6 +545,7 @@ export class CliInstallerService {
       if (timer) {
         clearTimeout(timer);
       }
+      diag.authTimedOut = hitAuthTimeout;
     }
   }
 
@@ -658,7 +766,7 @@ export class CliInstallerService {
   private async runInstallWithStreaming(binaryPath: string, attempt = 1): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const child = spawnCli(binaryPath, ['install'], {
-        env: { ...buildChildEnv(binaryPath), CLAUDE_SKIP_ANALYTICS: '1' },
+        env: { ...this.envForCli(binaryPath), CLAUDE_SKIP_ANALYTICS: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 

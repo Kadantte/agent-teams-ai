@@ -127,6 +127,21 @@ describe('CliInstallerService', () => {
         expect.objectContaining({ timeout: expect.any(Number) })
       );
     });
+
+    it('treats auth as logged in when JSON is embedded after stdout noise', async () => {
+      allowConsoleLogs();
+      vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/usr/local/bin/claude');
+      vi.mocked(execCli)
+        .mockResolvedValueOnce({ stdout: '2.3.4', stderr: '' })
+        .mockResolvedValueOnce({
+          stdout: 'notice: something\n{"loggedIn":true,"authMethod":"oauth_token"}\n',
+          stderr: '',
+        });
+
+      const status = await service.getStatus();
+      expect(status.authLoggedIn).toBe(true);
+      expect(status.authMethod).toBe('oauth_token');
+    });
   });
 
   describe('install mutex', () => {

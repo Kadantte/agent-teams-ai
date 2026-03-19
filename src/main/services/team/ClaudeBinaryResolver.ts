@@ -1,4 +1,5 @@
-import { getHomeDir } from '@main/utils/pathDecoder';
+import { buildMergedCliPath } from '@main/utils/cliPathMerge';
+import { getShellPreferredHome, resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -65,7 +66,7 @@ async function collectNvmCandidates(): Promise<string[]> {
     return collectNvmWindowsCandidates();
   }
 
-  const nvmNodeRoot = path.join(getHomeDir(), '.nvm', 'versions', 'node');
+  const nvmNodeRoot = path.join(getShellPreferredHome(), '.nvm', 'versions', 'node');
   let versions: string[];
   try {
     versions = await fs.promises.readdir(nvmNodeRoot);
@@ -101,8 +102,8 @@ async function collectNvmWindowsCandidates(): Promise<string[]> {
     .flatMap((version) => exts.map((ext) => path.join(nvmRoot, version, `claude${ext}`)));
 }
 
-async function resolveFromPathEnv(binaryName: string): Promise<string | null> {
-  const rawPath = process.env.PATH;
+async function resolveFromPathEnv(binaryName: string, pathEnv?: string): Promise<string | null> {
+  const rawPath = pathEnv && pathEnv.length > 0 ? pathEnv : process.env.PATH;
   if (!rawPath) {
     return null;
   }
@@ -166,6 +167,9 @@ async function resolveFromExplicitPath(inputPath: string): Promise<string | null
 
 let cachedPath: string | null | undefined;
 
+/** Coalesce concurrent first resolves so `cachedPath` is not torn by parallel scans. */
+let resolveInFlight: Promise<string | null> | null = null;
+
 export class ClaudeBinaryResolver {
   /**
    * Clear the cached binary path.
@@ -177,6 +181,17 @@ export class ClaudeBinaryResolver {
 
   static async resolve(): Promise<string | null> {
     if (cachedPath !== undefined) return cachedPath;
+    if (!resolveInFlight) {
+      resolveInFlight = ClaudeBinaryResolver.runResolve().finally(() => {
+        resolveInFlight = null;
+      });
+    }
+    return resolveInFlight;
+  }
+
+  private static async runResolve(): Promise<string | null> {
+    await resolveInteractiveShellEnv();
+    const enrichedPath = buildMergedCliPath(null);
 
     const overrideRaw = process.env.CLAUDE_CLI_PATH?.trim();
     if (overrideRaw) {
@@ -184,7 +199,7 @@ export class ClaudeBinaryResolver {
         path.isAbsolute(overrideRaw) || overrideRaw.includes('\\') || overrideRaw.includes('/');
       const resolvedOverride = looksLikePath
         ? await resolveFromExplicitPath(overrideRaw)
-        : await resolveFromPathEnv(overrideRaw);
+        : await resolveFromPathEnv(overrideRaw, enrichedPath);
 
       if (resolvedOverride) {
         cachedPath = resolvedOverride;
@@ -193,7 +208,7 @@ export class ClaudeBinaryResolver {
     }
 
     const baseBinaryName = 'claude';
-    const fromPath = await resolveFromPathEnv(baseBinaryName);
+    const fromPath = await resolveFromPathEnv(baseBinaryName, enrichedPath);
     if (fromPath) {
       cachedPath = fromPath;
       return cachedPath;
@@ -202,13 +217,14 @@ export class ClaudeBinaryResolver {
     const platformBinaryNames =
       process.platform === 'win32' ? expandWindowsBinaryNames(baseBinaryName) : [baseBinaryName];
 
+    const home = getShellPreferredHome();
     const candidateDirs: string[] =
       process.platform === 'win32'
         ? [
             // Windows: npm global install
-            path.join(getHomeDir(), 'AppData', 'Roaming', 'npm'),
+            path.join(home, 'AppData', 'Roaming', 'npm'),
             // Windows: scoop, chocolatey, and other package managers
-            path.join(getHomeDir(), 'scoop', 'shims'),
+            path.join(home, 'scoop', 'shims'),
             // Windows: Local programs
             ...(process.env.LOCALAPPDATA
               ? [path.join(process.env.LOCALAPPDATA, 'Programs', 'claude')]
@@ -218,9 +234,9 @@ export class ClaudeBinaryResolver {
           ]
         : [
             // Unix: native binary installation path (claude install)
-            path.join(getHomeDir(), '.local', 'bin'),
-            path.join(getHomeDir(), '.npm-global', 'bin'),
-            path.join(getHomeDir(), '.npm', 'bin'),
+            path.join(home, '.local', 'bin'),
+            path.join(home, '.npm-global', 'bin'),
+            path.join(home, '.npm', 'bin'),
             '/usr/local/bin',
             '/opt/homebrew/bin',
           ];

@@ -1,5 +1,70 @@
 # Release Guide
 
+## Published: v1.0.2 (2026-03-19)
+
+Patch release: reliable Claude CLI detection and login status in packaged builds (shell PATH/HOME, `CLAUDE_CONFIG_DIR`, auth output parsing), IPC cache invalidation on status errors, concurrent binary resolution guard, capped NDJSON diagnostics. Full list: [CHANGELOG.md](./CHANGELOG.md).
+
+After CI uploads artifacts, optional notes update:
+
+```bash
+gh release edit v1.0.2 --repo 777genius/claude_agent_teams_ui --notes "$(cat <<'EOF'
+## Claude Agent Teams UI v1.0.2
+
+Patch focused on CLI/auth reliability in packaged apps and related IPC hardening.
+
+### What's New
+- Setting to auto-expand AI response groups in transcripts (`general.autoExpandAIGroups`).
+
+### Improvements
+- CLI status uses interactive shell environment and merged PATH so packaged builds match terminal behavior.
+- Stricter IPC validation and clearer notification/update contracts.
+
+### Bug Fixes
+- Fix false "not logged in" when the CLI is authenticated in the shell.
+- Clear stale CLI status cache when status refresh fails.
+- Windows path edge cases in tooling and tests.
+
+### Downloads
+
+<table>
+<tr>
+<td align="center">
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.2/Claude.Agent.Teams.UI-1.0.2-arm64.dmg">
+    <img src="https://img.shields.io/badge/macOS_Apple_Silicon-.dmg-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Apple Silicon" />
+  </a>
+  <br />
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.2/Claude.Agent.Teams.UI-1.0.2.dmg">
+    <img src="https://img.shields.io/badge/macOS_Intel-.dmg-434343?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Intel" />
+  </a>
+</td>
+<td align="center">
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.2/Claude.Agent.Teams.UI.Setup.1.0.2.exe">
+    <img src="https://img.shields.io/badge/Windows-Download_.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
+  </a>
+  <br />
+  <sub>May trigger SmartScreen — click "More info" → "Run anyway"</sub>
+</td>
+<td align="center">
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.2/Claude.Agent.Teams.UI-1.0.2.AppImage">
+    <img src="https://img.shields.io/badge/Linux-Download_.AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux AppImage" />
+  </a>
+  <br />
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.2/claude-agent-teams-ui_1.0.2_amd64.deb">
+    <img src="https://img.shields.io/badge/.deb-E95420?style=flat-square&logo=ubuntu&logoColor=white" alt=".deb" />
+  </a>&nbsp;
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.2/claude-agent-teams-ui-1.0.2.x86_64.rpm">
+    <img src="https://img.shields.io/badge/.rpm-294172?style=flat-square&logo=redhat&logoColor=white" alt=".rpm" />
+  </a>&nbsp;
+  <a href="https://github.com/777genius/claude_agent_teams_ui/releases/download/v1.0.2/claude-agent-teams-ui-1.0.2.pacman">
+    <img src="https://img.shields.io/badge/.pacman-1793D1?style=flat-square&logo=archlinux&logoColor=white" alt=".pacman" />
+  </a>
+</td>
+</tr>
+</table>
+EOF
+)"
+```
+
 ## Versioning (SemVer)
 
 Format: `MAJOR.MINOR.PATCH`
@@ -166,14 +231,14 @@ electron-builder generates `latest-mac.yml`, `latest.yml`, `latest-linux.yml` al
 
 ```bash
 # Create and publish a release
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.0.2
+git push origin v1.0.2
 # Wait for CI to finish (~10 min), then update notes
 
 # Delete a release (if needed)
-gh release delete v1.1.0 --repo 777genius/claude_agent_teams_ui --yes
-git tag -d v1.1.0
-git push origin :refs/tags/v1.1.0
+gh release delete v1.0.2 --repo 777genius/claude_agent_teams_ui --yes
+git tag -d v1.0.2
+git push origin :refs/tags/v1.0.2
 
 # Check workflow status
 gh run list --repo 777genius/claude_agent_teams_ui --workflow release.yml --limit 3

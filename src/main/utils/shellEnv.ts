@@ -9,6 +9,7 @@
  * and any other service that needs the user's shell environment.
  */
 
+import { getHomeDir } from '@main/utils/pathDecoder';
 import { createLogger } from '@shared/utils/logger';
 import { spawn } from 'child_process';
 
@@ -149,4 +150,13 @@ export function clearShellEnvCache(): void {
  */
 export function getCachedShellEnv(): NodeJS.ProcessEnv | null {
   return cachedInteractiveShellEnv;
+}
+
+/**
+ * HOME from login/interactive shell when resolved, else Electron/Node home.
+ * Matches TeamProvisioningService so CLI reads the same ~/.claude as the terminal.
+ */
+export function getShellPreferredHome(): string {
+  const fromShell = getCachedShellEnv()?.HOME?.trim();
+  return fromShell || getHomeDir();
 }
