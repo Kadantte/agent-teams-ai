@@ -1,8 +1,7 @@
 import { AGENT_BLOCK_CLOSE, AGENT_BLOCK_OPEN } from '@shared/constants/agentBlocks';
+import * as agentTeamsControllerModule from 'agent-teams-controller';
 
 import type { AgentActionMode } from '@shared/types';
-
-import * as agentTeamsControllerModule from 'agent-teams-controller';
 
 const { protocols } = agentTeamsControllerModule;
 

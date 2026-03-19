@@ -1,4 +1,3 @@
-/* eslint-disable no-param-reassign -- ProvisioningRun object is intentionally mutated as a state tracker throughout the provisioning lifecycle */
 import { ConfigManager } from '@main/services/infrastructure/ConfigManager';
 import { NotificationManager } from '@main/services/infrastructure/NotificationManager';
 import { killProcessTree, spawnCli } from '@main/utils/childProcess';
@@ -7586,4 +7585,3 @@ export class TeamProvisioningService {
     });
   }
 }
-/* eslint-enable no-param-reassign -- Re-enable after TeamProvisioningService class */

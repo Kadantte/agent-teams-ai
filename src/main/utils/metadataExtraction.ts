@@ -10,6 +10,7 @@ import { LocalFileSystemProvider } from '../services/infrastructure/LocalFileSys
 import { type ChatHistoryEntry, isTextContent, type UserEntry } from '../types';
 
 import type { FileSystemProvider } from '../services/infrastructure/FileSystemProvider';
+import type { Readable } from 'stream';
 
 const logger = createLogger('Util:metadataExtraction');
 
@@ -27,6 +28,16 @@ interface MessagePreview {
 
 function byteLen(chunk: string): number {
   return Buffer.byteLength(chunk, 'utf8');
+}
+
+function createStreamCleanup(rl: readline.Interface, fileStream: Readable): () => void {
+  let cleaned = false;
+  return (): void => {
+    if (cleaned) return;
+    cleaned = true;
+    rl.close();
+    fileStream.destroy();
+  };
 }
 
 /**
@@ -58,17 +69,8 @@ export async function extractCwd(
 
   let bytes = 0;
   let timedOut = false;
-  let cleaned = false;
 
-  // Close readline FIRST so `for await` exits, then destroy the stream.
-  // Calling only stream.destroy() can leave readline hanging when it has
-  // a partial line buffered (e.g. a 400KB+ JSONL line read in 64KB chunks).
-  const cleanup = (): void => {
-    if (cleaned) return;
-    cleaned = true;
-    rl.close();
-    fileStream.destroy();
-  };
+  const cleanup = createStreamCleanup(rl, fileStream);
 
   const timer = setTimeout(() => {
     timedOut = true;
@@ -140,14 +142,8 @@ export async function extractFirstUserMessagePreview(
 
   let bytes = 0;
   let timedOut = false;
-  let cleaned = false;
 
-  const cleanup = (): void => {
-    if (cleaned) return;
-    cleaned = true;
-    rl.close();
-    fileStream.destroy();
-  };
+  const cleanup = createStreamCleanup(rl, fileStream);
 
   const timer = setTimeout(() => {
     timedOut = true;

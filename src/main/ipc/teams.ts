@@ -63,6 +63,7 @@ import {
 import { AGENT_BLOCK_CLOSE, AGENT_BLOCK_OPEN } from '@shared/constants/agentBlocks';
 import { KANBAN_COLUMN_IDS } from '@shared/constants/kanban';
 import { MAX_TEXT_LENGTH } from '@shared/constants/teamLimits';
+import { isApiErrorMessage } from '@shared/utils/apiErrorDetector';
 import {
   extractFlagsFromHelp,
   extractUserFlags,
@@ -70,7 +71,6 @@ import {
 } from '@shared/utils/cliArgsParser';
 import { createLogger } from '@shared/utils/logger';
 import { isRateLimitMessage } from '@shared/utils/rateLimitDetector';
-import { isApiErrorMessage } from '@shared/utils/apiErrorDetector';
 import crypto from 'crypto';
 import { BrowserWindow, type IpcMain, type IpcMainInvokeEvent, Notification } from 'electron';
 import * as fs from 'fs';
@@ -235,7 +235,7 @@ function checkApiErrorMessages(
     }
 
     // Extract status code for summary
-    const statusMatch = msg.text.match(/^API Error:\s*(\d{3})/);
+    const statusMatch = /^API Error:\s*(\d{3})/.exec(msg.text);
     const statusCode = statusMatch?.[1] ?? '???';
 
     void NotificationManager.getInstance()

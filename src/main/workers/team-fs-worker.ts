@@ -241,14 +241,13 @@ function nowMs(): number {
 }
 
 function bumpSkipReason(reasons: Record<string, number>, reason: string): void {
-  // eslint-disable-next-line no-param-reassign -- accumulator mutation is intentional
   reasons[reason] = (reasons[reason] || 0) + 1;
 }
 
 function pushSlowest(list: SlowEntry[], entry: SlowEntry, maxLen: number): void {
   list.push(entry);
   list.sort((a, b) => b.ms - a.ms);
-  // eslint-disable-next-line no-param-reassign -- truncate in-place is intentional
+
   if (list.length > maxLen) list.length = maxLen;
 }
 
@@ -734,10 +733,8 @@ async function readTasksDirForTeam(
 }
 
 function mergeTaskDiag(target: GetAllTasksDiag, source: TaskReadDiag): void {
-  // eslint-disable-next-line no-param-reassign -- accumulator mutation is intentional
   target.skipped += source.skipped;
   for (const [reason, count] of Object.entries(source.skipReasons)) {
-    // eslint-disable-next-line no-param-reassign -- accumulator mutation is intentional
     target.skipReasons[reason] = (target.skipReasons[reason] || 0) + count;
   }
 }

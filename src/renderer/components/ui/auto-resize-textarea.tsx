@@ -17,7 +17,6 @@ const AutoResizeTextarea = React.forwardRef<HTMLTextAreaElement, AutoResizeTexta
         if (typeof forwardedRef === 'function') {
           forwardedRef(node);
         } else if (forwardedRef) {
-          // eslint-disable-next-line no-param-reassign -- ref merging requires mutation
           forwardedRef.current = node;
         }
       },

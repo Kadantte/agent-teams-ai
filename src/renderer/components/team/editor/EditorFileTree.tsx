@@ -583,7 +583,6 @@ const RootDropZone = React.forwardRef<
     (el: HTMLDivElement | null) => {
       setNodeRef(el);
       if (typeof ref === 'function') ref(el);
-      // eslint-disable-next-line no-param-reassign -- combining forwarded ref with droppable ref
       else if (ref) ref.current = el;
     },
     [ref, setNodeRef]

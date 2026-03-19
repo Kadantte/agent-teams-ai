@@ -652,7 +652,6 @@ export class TeamDataService {
               2000
             );
             if (branch && branch !== leadBranch) {
-              // eslint-disable-next-line no-param-reassign -- intentional in-place enrichment
               member.gitBranch = branch;
             }
           } catch {

@@ -5,9 +5,8 @@
  * to convert domain-level team payloads into the unified notification format.
  */
 
-import { randomUUID } from 'crypto';
-
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
+import { randomUUID } from 'crypto';
 
 import type { DetectedError } from '../services/error/ErrorMessageBuilder';
 import type { TriggerColor } from '@shared/constants/triggerColors';

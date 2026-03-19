@@ -4,7 +4,6 @@ import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer
 import { CopyButton } from '@renderer/components/common/CopyButton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { CARD_ICON_MUTED, CARD_TEXT_LIGHT } from '@renderer/constants/cssVariables';
-import { isApiErrorMessage } from '@shared/utils/apiErrorDetector';
 import { linkifyAllMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import {
   areStringArraysEqual,
@@ -12,6 +11,7 @@ import {
   areThoughtMessagesEquivalentForRender,
 } from '@renderer/utils/messageRenderEquality';
 import { linkifyTaskIdsInMarkdown, parseTaskLinkHref } from '@renderer/utils/taskReferenceUtils';
+import { isApiErrorMessage } from '@shared/utils/apiErrorDetector';
 import { Reply } from 'lucide-react';
 
 import { formatTimeWithSec, ToolSummaryTooltipContent } from './LeadThoughtsGroup';
