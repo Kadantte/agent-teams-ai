@@ -125,7 +125,7 @@ function requestReview(context, taskId, flags = {}) {
           `FIRST call review_start to signal you are beginning the review:\n` +
             `{ teamName: "${context.teamName}", taskId: "${task.id}", from: "<your-name>" }\n\n` +
             `When approved, use MCP tool review_approve:\n` +
-            `{ teamName: "${context.teamName}", taskId: "${task.id}", notifyOwner: true }\n\n` +
+            `{ teamName: "${context.teamName}", taskId: "${task.id}", note?: "<optional note>", notifyOwner: true }\n\n` +
             `If changes are needed, use MCP tool review_request_changes:\n` +
             `{ teamName: "${context.teamName}", taskId: "${task.id}", comment: "..." }`
         ),

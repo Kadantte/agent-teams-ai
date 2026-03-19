@@ -154,8 +154,14 @@ export interface SourceMessageSnapshot {
   timestamp: string;
   /** Message source type (e.g. "user_sent", "inbox"). */
   source?: string;
-  /** Attachment metadata references (IDs only, no blobs). */
-  attachments?: { id: string; filename: string; mimeType: string; size: number }[];
+  /** Attachment metadata references (IDs only, no blobs). filePath present when file is stored on disk. */
+  attachments?: {
+    id: string;
+    filename: string;
+    mimeType: string;
+    size: number;
+    filePath?: string;
+  }[];
 }
 
 // Fields are validated in TeamTaskReader.getTasks() using `satisfies Record<keyof TeamTask, unknown>`.
@@ -229,6 +235,8 @@ export interface TaskAttachmentMeta {
   size: number;
   /** ISO timestamp when the attachment was added. */
   addedAt: string;
+  /** Absolute path to the file on disk. Null/absent for metadata-only references. */
+  filePath?: string | null;
 }
 
 /** Payload for uploading an attachment with base64 data (renderer → main). */
@@ -256,6 +264,8 @@ export interface AttachmentMeta {
   filename: string;
   mimeType: AttachmentMediaType;
   size: number;
+  /** Absolute path to the file on disk. Absent for metadata-only references. */
+  filePath?: string;
 }
 
 export interface AttachmentPayload extends AttachmentMeta {

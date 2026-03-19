@@ -371,7 +371,6 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
         if (typeof forwardedRef === 'function') {
           forwardedRef(node);
         } else if (forwardedRef) {
-          // eslint-disable-next-line no-param-reassign -- ref merging requires mutation
           forwardedRef.current = node;
         }
       },

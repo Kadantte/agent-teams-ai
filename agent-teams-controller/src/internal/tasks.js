@@ -349,7 +349,12 @@ function buildMemberLanguageInstruction(config) {
     return `IMPORTANT: Communicate in ${language}. All messages, summaries, and task descriptions MUST be in ${language}.`;
 }
 
-function buildMemberActionModeProtocol() {
+/**
+ * Raw action-mode protocol text parameterized by DELEGATE description.
+ * Shared between lead (actionModeInstructions.ts) and member (memberBriefing).
+ * Context-free — does NOT follow the (context, ...) convention.
+ */
+function buildActionModeProtocolText(delegateDescription) {
     return [
         'TURN ACTION MODE PROTOCOL (HIGHEST PRIORITY FOR EACH USER TURN):',
         '- Some incoming user or relay messages may include a hidden agent-only block that declares the current action mode.',
@@ -359,8 +364,15 @@ function buildMemberActionModeProtocol() {
         '- Modes:',
         '  - DO: Full execution mode. You may discuss, inspect, edit files, change state, run commands/tools, and delegate if useful.',
         '  - ASK: Strict read-only conversation mode. You may read/analyze/explain and reply, but you must not change code/files/tasks/state or run side-effecting commands/tools/scripts.',
-        '  - DELEGATE: Strict orchestration mode for leads. Delegate the work to teammates and coordinate it, but do not implement it yourself unless you are truly in SOLO MODE.',
+        `  - DELEGATE: ${delegateDescription}`,
     ].join('\n');
+}
+
+const MEMBER_DELEGATE_DESCRIPTION =
+    'Do not implement yourself. Pass the task with full context (what you know, what is needed) to your team lead or another teammate and let them handle it.';
+
+function buildMemberActionModeProtocol() {
+    return buildActionModeProtocolText(MEMBER_DELEGATE_DESCRIPTION);
 }
 
 function buildMemberTaskProtocol(teamName) {
@@ -393,6 +405,7 @@ function buildMemberTaskProtocol(teamName) {
    This is MANDATORY before review_approve or review_request_changes. Without this step, the kanban board may not show the task in REVIEW during your review.
 4. If you are asked to review and the task is accepted, move it to APPROVED (not DONE) with MCP tool review_approve:
    { teamName: "${teamName}", taskId: "<taskId>", note?: "<optional note>", notifyOwner: true }
+   CRITICAL: Text comments like "approved" or "LGTM" do NOT change the kanban board. You MUST call review_approve to move a task from REVIEW to APPROVED. Without the tool call the task stays stuck in the REVIEW column.
 5. If review fails and changes are needed, use MCP tool review_request_changes:
    { teamName: "${teamName}", taskId: "<taskId>", comment: "<what to fix>" }
 6. NEVER skip status updates. A task is NOT done until completed status is written.
@@ -442,8 +455,13 @@ function buildMemberTaskProtocol(teamName) {
 Failure to follow this protocol means the task board will show incorrect status.`);
 }
 
-function buildMemberProcessProtocol(teamName) {
-    return wrapAgentBlock(`BACKGROUND PROCESS REGISTRATION — when you start a background process (dev server, watcher, database, etc.):
+/**
+ * Raw process-registration protocol text (no agent-block wrapping).
+ * Shared between member briefing and lead provisioning prompt (DRY).
+ * Context-free — does NOT follow the (context, ...) convention.
+ */
+function buildProcessProtocolText(teamName) {
+    return `BACKGROUND PROCESS REGISTRATION — when you start a background process (dev server, watcher, database, etc.):
 1. Launch with & to get PID:
    pnpm dev &
 2. Register immediately with MCP tool process_register (--port and --url are optional, use when the process listens on a port):
@@ -452,7 +470,13 @@ function buildMemberProcessProtocol(teamName) {
    { teamName: "${teamName}" }
 4. When stopping a process, use MCP tool process_stop:
    { teamName: "${teamName}", pid: <PID> }
-If verification in step 3 fails or the process is missing from the list, re-register it.`);
+5. To fully remove a process record (e.g. after it has been stopped and is no longer needed), use MCP tool process_unregister:
+   { teamName: "${teamName}", pid: <PID> }
+If verification in step 3 fails or the process is missing from the list, re-register it.`;
+}
+
+function buildMemberProcessProtocol(teamName) {
+    return wrapAgentBlock(buildProcessProtocolText(teamName));
 }
 
 function buildMemberFormattingProtocol() {
@@ -592,6 +616,9 @@ module.exports = {
     setTaskStatus,
     softDeleteTask,
     startTask,
+    buildActionModeProtocolText,
+    MEMBER_DELEGATE_DESCRIPTION,
+    buildProcessProtocolText,
     memberBriefing,
     taskBriefing,
     unlinkTask,

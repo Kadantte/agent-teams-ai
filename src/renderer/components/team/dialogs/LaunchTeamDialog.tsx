@@ -157,15 +157,17 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [selectedModel, setSelectedModelRaw] = useState(() => {
-    const stored = localStorage.getItem('team:lastSelectedModel') ?? '';
+    const stored = localStorage.getItem('team:lastSelectedModel');
+    if (stored === null) return 'opus';
     return stored === '__default__' ? '' : stored;
   });
   const [skipPermissions, setSkipPermissionsRaw] = useState(
     () => localStorage.getItem('team:lastSkipPermissions') !== 'false'
   );
-  const [selectedEffort, setSelectedEffortRaw] = useState(
-    () => localStorage.getItem('team:lastSelectedEffort') ?? ''
-  );
+  const [selectedEffort, setSelectedEffortRaw] = useState(() => {
+    const stored = localStorage.getItem('team:lastSelectedEffort');
+    return stored === null ? 'medium' : stored;
+  });
 
   // ---------------------------------------------------------------------------
   // Launch-only state
@@ -323,6 +325,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       setCwdMode('project');
       setSelectedProjectPath('');
       setCustomCwd('');
+      setSelectedModelRaw('opus');
+      setSelectedEffortRaw('medium');
     }
 
     setLocalError(null);

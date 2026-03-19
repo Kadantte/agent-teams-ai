@@ -230,7 +230,27 @@ export class TeamDataService {
         needsClarification: task.needsClarification,
         deletedAt: task.deletedAt,
         reviewState,
-        // Intentionally omit description/comments/activeForm/workIntervals/links to keep payload small
+        // IMPORTANT: comments MUST be included here (at least lightweight metadata).
+        //
+        // Previously comments were omitted from GlobalTask payload to keep IPC small.
+        // This silently broke task comment notifications in the renderer: the store's
+        // detectTaskCommentNotifications() compares oldTask.comments vs newTask.comments
+        // to find new comments and fire native OS toasts. Without comments in the payload,
+        // both counts were always 0 → newCommentCount <= oldCommentCount → every comment
+        // was silently skipped → "Task comment notifications" toggle had no effect.
+        //
+        // Fix: include lightweight comment metadata (id, author, truncated text for toast
+        // preview, createdAt, type). Full text and attachments are still omitted — those
+        // are loaded on-demand by the task detail view via team:getData.
+        comments: Array.isArray(task.comments)
+          ? task.comments.map((c) => ({
+              id: c.id,
+              author: c.author,
+              text: c.text.slice(0, 120),
+              createdAt: c.createdAt,
+              type: c.type,
+            }))
+          : undefined,
         kanbanColumn,
         teamName: task.teamName,
         teamDisplayName: info.displayName,
@@ -632,7 +652,6 @@ export class TeamDataService {
               2000
             );
             if (branch && branch !== leadBranch) {
-              // eslint-disable-next-line no-param-reassign -- intentional in-place enrichment
               member.gitBranch = branch;
             }
           } catch {

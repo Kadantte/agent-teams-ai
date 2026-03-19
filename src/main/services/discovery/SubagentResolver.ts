@@ -312,7 +312,6 @@ export class SubagentResolver {
    * Intentionally mutates the subagent in place for consistency with other resolution methods.
    */
   private enrichSubagentFromTask(subagent: Process, taskCall: ToolCall): void {
-    /* eslint-disable no-param-reassign -- Mutation is intentional; subagent is enriched in place */
     subagent.parentTaskId = taskCall.id;
     subagent.description = taskCall.taskDescription;
     subagent.subagentType = taskCall.taskSubagentType;
@@ -323,7 +322,6 @@ export class SubagentResolver {
     if (teamName && memberName) {
       subagent.team = { teamName, memberName, memberColor: '' };
     }
-    /* eslint-enable no-param-reassign -- End of intentional mutation block */
   }
 
   /**

@@ -329,8 +329,8 @@ export class CliInstallerService {
             loggedIn?: boolean;
             authMethod?: string;
           };
-          result.authLoggedIn = auth.loggedIn === true; // eslint-disable-line no-param-reassign -- intentional mutation of shared result object
-          result.authMethod = auth.authMethod ?? null; // eslint-disable-line no-param-reassign -- intentional mutation of shared result object
+          result.authLoggedIn = auth.loggedIn === true;
+          result.authMethod = auth.authMethod ?? null;
           logger.info(
             `Auth status: loggedIn=${result.authLoggedIn}, method=${result.authMethod ?? 'null'}` +
               (authAttempt > 1 ? ` (attempt ${authAttempt})` : '')
@@ -347,7 +347,7 @@ export class CliInstallerService {
             logger.warn(
               `Auth status check failed after ${AUTH_STATUS_MAX_RETRIES} attempts: ${getErrorMessage(err)}`
             );
-            result.authLoggedIn = false; // eslint-disable-line no-param-reassign -- intentional mutation of shared result object
+            result.authLoggedIn = false;
           }
         }
       }
@@ -378,13 +378,13 @@ export class CliInstallerService {
   private async fetchLatestVersion(result: CliInstallationStatus): Promise<void> {
     try {
       const latestRaw = await fetchText(`${GCS_BASE}/latest`);
-      result.latestVersion = normalizeVersion(latestRaw); // eslint-disable-line no-param-reassign -- intentional mutation of shared result object
+      result.latestVersion = normalizeVersion(latestRaw);
       logger.info(
         `Latest CLI version: "${latestRaw.trim()}" → normalized: "${result.latestVersion}"`
       );
 
       if (result.installedVersion && result.latestVersion) {
-        result.updateAvailable = isVersionOlder(result.installedVersion, result.latestVersion); // eslint-disable-line no-param-reassign -- intentional mutation of shared result object
+        result.updateAvailable = isVersionOlder(result.installedVersion, result.latestVersion);
         logger.info(
           `Update available: ${result.updateAvailable} (${result.installedVersion} → ${result.latestVersion})`
         );

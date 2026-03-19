@@ -45,6 +45,9 @@ function normalizeAttachments(attachments) {
       filename: String(item.filename || '').trim(),
       mimeType: String(item.mimeType || '').trim(),
       size: Number(item.size || 0),
+      ...(typeof item.filePath === 'string' && item.filePath.trim()
+        ? { filePath: item.filePath.trim() }
+        : {}),
     }))
     .filter((item) => item.id && item.filename && item.mimeType && Number.isFinite(item.size));
 

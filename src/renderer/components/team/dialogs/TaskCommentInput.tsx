@@ -291,7 +291,7 @@ export const TaskCommentInput = ({
           className="hidden"
           onChange={(e) => {
             if (e.target.files) addFiles(e.target.files);
-            // eslint-disable-next-line no-param-reassign -- reset file input to allow re-selecting same file
+
             e.target.value = '';
           }}
         />

@@ -88,12 +88,12 @@ const TEAMMATE_COLORS: Record<string, TeamColorSet> = {
   },
   /** Reserved for the human user — never assigned to team members. */
   user: {
-    border: '#f5f5f4',
-    borderLight: '#78716c',
-    badge: 'rgba(245, 245, 244, 0.12)',
-    badgeLight: 'rgba(87, 83, 78, 0.18)',
+    border: '#a8a29e',
+    borderLight: '#57534e',
+    badge: 'rgba(168, 162, 158, 0.18)',
+    badgeLight: 'rgba(68, 64, 60, 0.14)',
     text: '#d6d3d1',
-    textLight: '#44403c',
+    textLight: '#292524',
   },
 };
 

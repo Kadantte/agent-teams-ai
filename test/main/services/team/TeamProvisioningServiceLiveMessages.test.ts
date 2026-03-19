@@ -103,6 +103,12 @@ vi.mock('agent-teams-controller', () => ({
         hoisted.sendInboxMessage(teamName, message),
     },
   }),
+  protocols: {
+    buildActionModeProtocolText: (delegate: string) =>
+      `ACTION MODE PROTOCOL (mock, delegate: ${delegate})`,
+    buildProcessProtocolText: (teamName: string) =>
+      `BACKGROUND PROCESS REGISTRATION (mock for ${teamName})`,
+  },
 }));
 
 import type { TeamChangeEvent } from '@shared/types/team';

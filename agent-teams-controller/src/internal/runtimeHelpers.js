@@ -440,6 +440,7 @@ function saveTaskAttachmentFile(paths, taskId, flags) {
     mimeType,
     size: stats.size,
     addedAt: nowIso(),
+    filePath: destPath,
   };
 
   return {

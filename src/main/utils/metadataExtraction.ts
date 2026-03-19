@@ -10,6 +10,7 @@ import { LocalFileSystemProvider } from '../services/infrastructure/LocalFileSys
 import { type ChatHistoryEntry, isTextContent, type UserEntry } from '../types';
 
 import type { FileSystemProvider } from '../services/infrastructure/FileSystemProvider';
+import type { Readable } from 'stream';
 
 const logger = createLogger('Util:metadataExtraction');
 
@@ -27,6 +28,16 @@ interface MessagePreview {
 
 function byteLen(chunk: string): number {
   return Buffer.byteLength(chunk, 'utf8');
+}
+
+function createStreamCleanup(rl: readline.Interface, fileStream: Readable): () => void {
+  let cleaned = false;
+  return (): void => {
+    if (cleaned) return;
+    cleaned = true;
+    rl.close();
+    fileStream.destroy();
+  };
 }
 
 /**
@@ -51,21 +62,26 @@ export async function extractCwd(
   }
 
   const fileStream = fsProvider.createReadStream(filePath, { encoding: 'utf8' });
-  let bytes = 0;
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    fileStream.destroy();
-  }, JSONL_HEAD_TIMEOUT_MS);
-  fileStream.on('data', (chunk: string) => {
-    bytes += byteLen(chunk);
-    if (bytes > JSONL_HEAD_MAX_BYTES) {
-      fileStream.destroy();
-    }
-  });
   const rl = readline.createInterface({
     input: fileStream,
     crlfDelay: Infinity,
+  });
+
+  let bytes = 0;
+  let timedOut = false;
+
+  const cleanup = createStreamCleanup(rl, fileStream);
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    cleanup();
+  }, JSONL_HEAD_TIMEOUT_MS);
+
+  fileStream.on('data', (chunk: string) => {
+    bytes += byteLen(chunk);
+    if (bytes > JSONL_HEAD_MAX_BYTES) {
+      cleanup();
+    }
   });
 
   try {
@@ -84,8 +100,6 @@ export async function extractCwd(
       }
       // Only conversational entries have cwd
       if ('cwd' in entry && entry.cwd) {
-        rl.close();
-        fileStream.destroy();
         return entry.cwd;
       }
     }
@@ -95,8 +109,7 @@ export async function extractCwd(
     }
   } finally {
     clearTimeout(timer);
-    rl.close();
-    fileStream.destroy();
+    cleanup();
   }
 
   return null;
@@ -122,21 +135,26 @@ export async function extractFirstUserMessagePreview(
   }
 
   const fileStream = fsProvider.createReadStream(filePath, { encoding: 'utf8' });
-  let bytes = 0;
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    fileStream.destroy();
-  }, JSONL_HEAD_TIMEOUT_MS);
-  fileStream.on('data', (chunk: string) => {
-    bytes += byteLen(chunk);
-    if (bytes > JSONL_HEAD_MAX_BYTES) {
-      fileStream.destroy();
-    }
-  });
   const rl = readline.createInterface({
     input: fileStream,
     crlfDelay: Infinity,
+  });
+
+  let bytes = 0;
+  let timedOut = false;
+
+  const cleanup = createStreamCleanup(rl, fileStream);
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    cleanup();
+  }, JSONL_HEAD_TIMEOUT_MS);
+
+  fileStream.on('data', (chunk: string) => {
+    bytes += byteLen(chunk);
+    if (bytes > JSONL_HEAD_MAX_BYTES) {
+      cleanup();
+    }
   });
 
   let commandFallback: { text: string; timestamp: string } | null = null;
@@ -182,8 +200,7 @@ export async function extractFirstUserMessagePreview(
     return commandFallback;
   } finally {
     clearTimeout(timer);
-    rl.close();
-    fileStream.destroy();
+    cleanup();
   }
 
   return commandFallback;

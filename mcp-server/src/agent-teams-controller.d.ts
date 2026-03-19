@@ -98,4 +98,13 @@ declare module 'agent-teams-controller' {
   }
 
   export const agentBlocks: AgentBlocksApi;
+
+  /** Context-free protocol text builders, shared across lead and member prompts. */
+  export interface ProtocolsApi {
+    buildActionModeProtocolText(delegateDescription: string): string;
+    MEMBER_DELEGATE_DESCRIPTION: string;
+    buildProcessProtocolText(teamName: string): string;
+  }
+
+  export const protocols: ProtocolsApi;
 }

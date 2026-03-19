@@ -9,7 +9,6 @@ import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { useStore } from '@renderer/store';
 import { filterTeamMessages } from '@renderer/utils/teamMessageFiltering';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
-import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import {
   Bell,
   CheckCheck,
@@ -321,7 +320,7 @@ export const MessagesPanel = memo(function MessagesPanel({
   );
 
   const messagesContent = (
-    <>
+    <div className="pb-14">
       <MessageComposer
         teamName={teamName}
         members={members}
@@ -381,7 +380,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         teamColorByName={teamColorByName}
         onTeamClick={openTeamTab}
       />
-    </>
+    </div>
   );
 
   // ---- Sidebar mode ----
@@ -497,7 +496,7 @@ export const MessagesPanel = memo(function MessagesPanel({
           </div>
         )}
         {/* Scrollable content */}
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden py-2 pr-3">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden pb-14 pr-3 pt-2">
           <div className="pl-3">
             <MessageComposer
               teamName={teamName}

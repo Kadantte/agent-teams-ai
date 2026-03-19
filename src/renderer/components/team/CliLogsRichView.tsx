@@ -105,10 +105,8 @@ function restoreViewport(
 ): void {
   if (viewport.mode === 'edge') {
     if (viewport.edge === 'newest') {
-      // eslint-disable-next-line no-param-reassign -- DOM scroll positioning requires direct mutation
       container.scrollTop = order === 'newest-first' ? 0 : container.scrollHeight;
     } else {
-      // eslint-disable-next-line no-param-reassign -- DOM scroll positioning requires direct mutation
       container.scrollTop = order === 'newest-first' ? container.scrollHeight : 0;
     }
     return;
@@ -121,7 +119,7 @@ function restoreViewport(
   const containerRect = container.getBoundingClientRect();
   const elRect = el.getBoundingClientRect();
   const currentOffset = elRect.top - containerRect.top;
-  // eslint-disable-next-line no-param-reassign -- DOM scroll positioning requires direct mutation
+
   container.scrollTop += currentOffset - viewport.offsetTop;
 }
 
