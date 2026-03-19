@@ -140,3 +140,13 @@ export function clearShellEnvCache(): void {
   cachedInteractiveShellEnv = null;
   shellEnvResolvePromise = null;
 }
+
+/**
+ * Return the cached shell environment synchronously, or null if not yet resolved.
+ *
+ * Use this when you need the shell env but cannot afford to wait for resolution
+ * (e.g. synchronous PATH enrichment with async pre-warming at startup).
+ */
+export function getCachedShellEnv(): NodeJS.ProcessEnv | null {
+  return cachedInteractiveShellEnv;
+}

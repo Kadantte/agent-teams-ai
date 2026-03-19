@@ -27,6 +27,7 @@ import { ReviewApplierService } from '@main/services/team/ReviewApplierService';
 import { TeamBackupService } from '@main/services/team/TeamBackupService';
 import { TeamConfigReader } from '@main/services/team/TeamConfigReader';
 import { TeamInboxWriter } from '@main/services/team/TeamInboxWriter';
+import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 import {
   CONTEXT_CHANGED,
   SCHEDULE_CHANGE,
@@ -1295,6 +1296,13 @@ function createWindow(): void {
  */
 void app.whenReady().then(() => {
   logger.info('App ready, initializing...');
+
+  // Pre-warm interactive shell env cache (non-blocking).
+  // On macOS, Finder-launched apps get a minimal PATH. This resolves the user's
+  // full shell PATH (nvm, homebrew, .local/bin, etc.) in the background so that
+  // CliInstallerService.getStatus() and other services get cached results instantly.
+  void resolveInteractiveShellEnv();
+
   try {
     // Initialize services first
     initializeServices();

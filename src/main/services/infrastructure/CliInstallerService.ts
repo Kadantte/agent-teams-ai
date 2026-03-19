@@ -19,14 +19,15 @@
 
 import { execCli, killProcessTree, spawnCli } from '@main/utils/childProcess';
 import { getHomeDir } from '@main/utils/pathDecoder';
+import { getCachedShellEnv } from '@main/utils/shellEnv';
 import { getErrorMessage } from '@shared/utils/errorHandling';
 import { createLogger } from '@shared/utils/logger';
 import { createHash } from 'crypto';
-import { createWriteStream, existsSync, promises as fsp } from 'fs';
+import { createWriteStream, existsSync, realpathSync, promises as fsp } from 'fs';
 import http from 'http';
 import https from 'https';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 import { ClaudeBinaryResolver } from '../team/ClaudeBinaryResolver';
 
@@ -76,16 +77,84 @@ const AUTH_STATUS_MAX_RETRIES = 2;
 const AUTH_STATUS_RETRY_DELAY_MS = 1500;
 
 /**
- * Build env for child processes with correct HOME.
- * On Windows with non-ASCII usernames, process.env may have a broken HOME/USERPROFILE.
- * getHomeDir() uses Electron's app.getPath('home') which handles Unicode correctly.
+ * Build env for child processes with correct HOME and enriched PATH.
+ *
+ * On macOS, apps launched from Finder/.dmg get a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin).
+ * Three layers ensure `claude auth status` and `claude --version` always work:
+ *
+ * 1. **Binary-derived**: add dirname(binaryPath) to PATH. If the binary is a symlink
+ *    (e.g. ~/.local/bin/claude → ~/.nvm/versions/node/v22/bin/claude), also add the
+ *    resolved real directory — this guarantees `node` is findable since npm installs
+ *    claude next to node.
+ * 2. **Shell env cache**: if the pre-warm (fired at app startup) has completed,
+ *    merge the user's full interactive shell PATH — covers all custom entries.
+ * 3. **Sync fallback**: platform-specific common directories for when the cache
+ *    is still cold (first launch, heavy .zshrc).
+ *
+ * On Windows this is effectively a no-op — Explorer-launched apps inherit the full
+ * user PATH, and the shell env cache returns {} (no PATH override).
  */
-function buildChildEnv(): NodeJS.ProcessEnv {
+function buildChildEnv(binaryPath?: string | null): NodeJS.ProcessEnv {
   const home = getHomeDir();
+  const sep = process.platform === 'win32' ? ';' : ':';
+  const currentPath = process.env.PATH || '';
+  const extraDirs: string[] = [];
+
+  // Layer 1: binary's own directory + resolved symlink target.
+  // This is the most reliable source — if ClaudeBinaryResolver found the binary,
+  // its directory almost certainly contains `node` too (npm co-installs them).
+  if (binaryPath) {
+    const binDir = dirname(binaryPath);
+    extraDirs.push(binDir);
+    try {
+      const realBinDir = dirname(realpathSync(binaryPath));
+      if (realBinDir !== binDir) {
+        extraDirs.push(realBinDir);
+      }
+    } catch {
+      // symlink resolution failed (race condition / broken link) — ignore
+    }
+  }
+
+  // Layer 2: cached shell env (pre-warmed at startup, covers nvm/volta/fnm/custom PATH).
+  const cachedEnv = getCachedShellEnv();
+  if (cachedEnv?.PATH) {
+    extraDirs.push(...cachedEnv.PATH.split(sep).filter(Boolean));
+  } else {
+    // Layer 3: sync fallback — common binary directories per platform.
+    if (process.platform === 'win32') {
+      extraDirs.push(join(home, 'AppData', 'Roaming', 'npm'), join(home, 'scoop', 'shims'));
+      if (process.env.LOCALAPPDATA) {
+        extraDirs.push(join(process.env.LOCALAPPDATA, 'Programs', 'claude'));
+      }
+      if (process.env.ProgramFiles) {
+        extraDirs.push(join(process.env.ProgramFiles, 'claude'));
+      }
+    } else {
+      extraDirs.push(
+        join(home, '.local', 'bin'),
+        join(home, '.npm-global', 'bin'),
+        '/usr/local/bin',
+        '/opt/homebrew/bin'
+      );
+    }
+  }
+
+  // Deduplicate: extra dirs first (higher priority), then existing PATH entries.
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const dir of [...extraDirs, ...currentPath.split(sep)]) {
+    if (dir && !seen.has(dir)) {
+      seen.add(dir);
+      merged.push(dir);
+    }
+  }
+
   return {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
+    PATH: merged.join(sep),
   };
 }
 
@@ -292,7 +361,7 @@ export class CliInstallerService {
       try {
         const { stdout } = await execCli(binaryPath, ['--version'], {
           timeout: VERSION_TIMEOUT_MS,
-          env: buildChildEnv(),
+          env: buildChildEnv(binaryPath),
         });
         r.installedVersion = normalizeVersion(stdout);
         logger.info(
@@ -323,7 +392,7 @@ export class CliInstallerService {
         try {
           const { stdout: authStdout } = await execCli(binaryPath, ['auth', 'status'], {
             timeout: VERSION_TIMEOUT_MS,
-            env: buildChildEnv(),
+            env: buildChildEnv(binaryPath),
           });
           const auth = JSON.parse(authStdout.trim()) as {
             loggedIn?: boolean;
@@ -589,7 +658,7 @@ export class CliInstallerService {
   private async runInstallWithStreaming(binaryPath: string, attempt = 1): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const child = spawnCli(binaryPath, ['install'], {
-        env: { ...buildChildEnv(), CLAUDE_SKIP_ANALYTICS: '1' },
+        env: { ...buildChildEnv(binaryPath), CLAUDE_SKIP_ANALYTICS: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
