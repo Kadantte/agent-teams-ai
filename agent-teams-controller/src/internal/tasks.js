@@ -68,8 +68,12 @@ function buildAssignmentMessage(context, task, options = {}) {
    task_start { teamName: "${context.teamName}", taskId: "${task.id}" }
 3. If you are busy on another task, blocked, or still need more context, immediately add a task comment on this task with the reason and your best ETA or what you are waiting on, keep it pending/TODO, and do not call task_start until you truly begin:
    task_add_comment { teamName: "${context.teamName}", taskId: "${task.id}", text: "<reason + ETA or blocker>", from: "<your-name>" }
-4. When the work is done, mark it completed:
-   task_complete { teamName: "${context.teamName}", taskId: "${task.id}" }`)
+4. When the work is done, FIRST post a task comment with your full results, THEN mark it completed:
+   task_add_comment { teamName: "${context.teamName}", taskId: "${task.id}", text: "<full results>", from: "<your-name>" }
+   The response contains comment.id (UUID). Take its first 8 characters as the short commentId.
+   task_complete { teamName: "${context.teamName}", taskId: "${task.id}" }
+5. After task_complete, notify your lead via SendMessage with a brief summary and a pointer to the full comment (use the short commentId from step 4).
+   Example: "#${task.displayId || task.id} done. <2-4 sentence summary>. For full details: task_get_comment { taskId: \\"${task.displayId || task.id}\\", commentId: \\"<short-commentId-from-step-4>\\" }. Moving to next task."`)
     );
 
     return lines.join('\n');
@@ -420,12 +424,13 @@ function buildMemberTaskProtocol(teamName) {
    - Do NOT start multiple tasks at once unless the team lead explicitly directs parallel work.
 3. Use MCP tool task_complete BEFORE sending your final reply:
    { teamName: "${teamName}", taskId: "<taskId>" }
-   - CRITICAL: Before calling task_complete, you MUST post a task comment with your results (findings, research report, analysis, code changes summary, or any deliverable). The task comment is the primary delivery channel — the user reads results on the task board. A SendMessage to the lead is NOT a substitute: direct messages are ephemeral and not visible on the board. If you only SendMessage without a task comment, the user will never see your work.
+   - CRITICAL: Before calling task_complete, you MUST post a task comment with your results via task_add_comment. Save the comment.id from the response — you will need it in the next step. The task comment is the primary delivery channel — the user reads results on the task board. A SendMessage to the lead is NOT a substitute: direct messages are ephemeral and not visible on the board. If you only SendMessage without a task comment, the user will never see your work.
    - If a new task comment means you must do more real work on that same task, FIRST add a short task comment saying what you are going to do, THEN run task_start again before doing the follow-up work.
    - After that follow-up work finishes, add a short task comment with the result, what changed, or what you verified.
    - After that, run task_complete again before your reply.
    - Never do comment-driven implementation/fix work while the task is still shown as pending, review, completed, or approved.
-   - After task_complete, send a notification to your team lead via SendMessage that includes: (a) which task is done (#<displayId>), (b) a brief summary of the outcome/key findings (2-4 sentences — enough to understand the gist without reading the full comment), (c) mention that the full detailed results are in the task comment (include the commentId returned by task_add_comment so the lead can reference it, e.g. "Full report in task comment <commentId>"), (d) what you will do next. Do NOT duplicate the entire results — keep it concise.
+   - After task_complete, send a notification to your team lead via SendMessage. Use the comment.id you saved earlier (first 8 characters). Your message must include: (a) which task is done, (b) a brief summary of the outcome (2-4 sentences), (c) a pointer to the full comment so the lead can fetch it, (d) what you will do next. Do NOT duplicate the entire results.
+     Example: "#abcd1234 done. Found 3 competitors: two lack kanban, one went closed-source in Jan. For full details: task_get_comment { taskId: "abcd1234", commentId: "e5f6a7b8" }. Moving to #efgh5678 next."
    - After task_complete, if the task needs review AND the team has a member whose role includes reviewing (e.g. "reviewer", "tech-lead", "qa"), IMMEDIATELY call review_request to move it to the review column and notify the reviewer:
      { teamName: "${teamName}", taskId: "<taskId>", from: "<your-name>", reviewer: "<reviewer-name>" }
      Do NOT leave a completed task without sending it to review when review is expected and a reviewer exists.
@@ -576,8 +581,8 @@ async function memberBriefing(context, memberName) {
         `Member briefing for ${requestedMemberName} on team "${context.teamName}" (${context.teamName}).`,
         `Role: ${role}.`,
         `CRITICAL: If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on that same task, FIRST leave a short task comment saying what you are about to do, THEN move it to in_progress with task_start, THEN do the work, and when finished leave a short result comment and move it to done with task_complete. Never skip this comment -> reopen -> work -> comment -> done cycle.`,
-        `CRITICAL: When you finish a task, your results (findings, research report, analysis, code changes summary, or any deliverable) MUST be posted as a task comment BEFORE calling task_complete. The task comment is the primary delivery channel — the user reads results on the task board. A SendMessage to the lead is NOT a substitute: direct messages are ephemeral and not visible on the board. If you only SendMessage without a task comment, the user will never see your work.`,
-        `After task_complete, send a notification to your team lead via SendMessage: include which task is done (#<displayId>), a brief summary of the outcome/key findings (2-4 sentences), mention that full details are in the task comment (include the commentId from the task_add_comment response), and what you will do next. Do NOT duplicate the entire results — keep it concise.`,
+        `CRITICAL: When you finish a task, your results (findings, research report, analysis, code changes summary, or any deliverable) MUST be posted as a task comment via task_add_comment BEFORE calling task_complete. Save the comment.id from the response — you will need it in the next step. The task comment is the primary delivery channel — the user reads results on the task board. A SendMessage to the lead is NOT a substitute: direct messages are ephemeral and not visible on the board. If you only SendMessage without a task comment, the user will never see your work.`,
+        `After task_complete, notify your team lead via SendMessage. Use the comment.id you saved (first 8 characters). Include: task ref, brief summary (2-4 sentences), pointer to full comment, and next step. Example: "#abcd1234 done. Found 3 competitors, two lack kanban. For full details: task_get_comment { taskId: \\"abcd1234\\", commentId: \\"e5f6a7b8\\" }. Moving to #efgh5678."`,
         `CRITICAL: A newly assigned task must NOT remain silently pending/TODO. If you are idle and the task is ready to start, start it now. If it must wait because you are already finishing another task, blocked, or still need more context, leave a short task comment on the waiting task immediately with the reason and your best ETA or what you are waiting on, keep it in pending/TODO, and only move it to in_progress with task_start when you truly begin.`,
         `Team lead: ${leadName}.`,
         buildMemberLanguageInstruction(config),
