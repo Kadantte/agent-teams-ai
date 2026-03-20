@@ -1064,10 +1064,10 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      // In development, avoid persistent Chromium storage locks (IndexedDB/Quota)
-      // when multiple dev instances are started or ports rotate (5173 -> 5174, etc).
-      // This keeps startup resilient and prevents "LOCK" contention.
-      ...(isDev ? { partition: `temp:dev-${process.pid}` } : {}),
+      // In development, use a persistent partition so that renderer-side storage
+      // (localStorage, IndexedDB — used by comment read state, etc.) survives
+      // app restarts. A fixed name is used instead of per-PID to keep data stable.
+      ...(isDev ? { partition: 'persist:dev' } : {}),
     },
     backgroundColor: '#1a1a1a',
     ...(useNativeTitleBar ? {} : { titleBarStyle: 'hidden' as const }),
