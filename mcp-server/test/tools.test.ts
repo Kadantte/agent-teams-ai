@@ -58,6 +58,7 @@ describe('agent-teams-mcp tools', () => {
     'task_create',
     'task_create_from_message',
     'task_get',
+    'task_get_comment',
     'task_link',
     'task_list',
     'task_set_clarification',

@@ -117,6 +117,17 @@ function resolveTaskRef(paths, taskRef, options = {}) {
   }
 
   const includeDeleted = options.includeDeleted === true;
+
+  // Fast path: if taskRef looks like a canonical UUID, try direct file read first
+  if (looksLikeCanonicalTaskId(normalizedRef)) {
+    const taskPath = getTaskPath(paths, normalizedRef);
+    const rawTask = readJson(taskPath, null);
+    if (rawTask && (includeDeleted || rawTask.status !== 'deleted')) {
+      return normalizedRef;
+    }
+  }
+
+  // Fallback: scan all tasks for displayId match or non-UUID refs
   const tasks = listRawTasks(paths);
   const exact = tasks.find((task) => task.id === normalizedRef);
   if (exact && (includeDeleted || exact.status !== 'deleted')) {

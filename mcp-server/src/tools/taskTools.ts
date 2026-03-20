@@ -227,6 +227,23 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
   });
 
   server.addTool({
+    name: 'task_get_comment',
+    description:
+      'Get a single task comment by id. Returns the comment object and minimal task context (id, displayId, subject, status, owner).',
+    parameters: z.object({
+      ...toolContextSchema,
+      taskId: z.string().min(1),
+      commentId: z.string().min(1),
+    }),
+    execute: async ({ teamName, claudeDir, taskId, commentId }) =>
+      await Promise.resolve(
+        jsonTextContent(
+          getController(teamName, claudeDir).tasks.getTaskComment(taskId, commentId)
+        )
+      ),
+  });
+
+  server.addTool({
     name: 'task_list',
     description: 'List tasks for a team',
     parameters: z.object({

@@ -165,6 +165,30 @@ function getTask(context, taskId) {
     return taskStore.readTask(context.paths, taskId, { includeDeleted: true });
 }
 
+function getTaskComment(context, taskId, commentId) {
+    const normalizedCommentId = String(commentId || '').trim();
+    if (!normalizedCommentId) {
+        throw new Error('Missing commentId');
+    }
+    const task = taskStore.readTask(context.paths, taskId, { includeDeleted: true });
+    const comments = Array.isArray(task.comments) ? task.comments : [];
+    const comment = comments.find((c) => c && c.id === normalizedCommentId);
+    if (!comment) {
+        throw new Error(`Comment ${normalizedCommentId} not found on task #${task.displayId || task.id}`);
+    }
+    return {
+        comment,
+        task: {
+            id: task.id,
+            displayId: task.displayId,
+            subject: task.subject,
+            status: task.status,
+            owner: task.owner,
+            commentCount: comments.length,
+        },
+    };
+}
+
 function listTasks(context) {
     return taskStore.listTasks(context.paths);
 }
@@ -609,6 +633,7 @@ module.exports = {
     completeTask,
     createTask,
     getTask,
+    getTaskComment,
     linkTask,
     listDeletedTasks,
     listTasks,

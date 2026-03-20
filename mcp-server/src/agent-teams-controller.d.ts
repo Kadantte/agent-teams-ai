@@ -7,6 +7,7 @@ declare module 'agent-teams-controller' {
   export interface ControllerTaskApi {
     createTask(flags: Record<string, unknown>): unknown;
     getTask(taskId: string): unknown;
+    getTaskComment(taskId: string, commentId: string): { comment: Record<string, unknown>; task: { id: string; displayId: string; subject: string; status: string; owner: string | null; commentCount: number } };
     listTasks(): unknown[];
     listDeletedTasks(): unknown[];
     resolveTaskId(taskRef: string): string;
