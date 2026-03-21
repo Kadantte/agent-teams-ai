@@ -22,7 +22,8 @@ import { getBaseName } from '@renderer/utils/pathUtils';
 import { highlightLines } from '@renderer/utils/syntaxHighlighter';
 import { formatTokens } from '@shared/utils/tokenFormatting';
 import { diffLines as semanticDiffLines } from 'diff';
-import { Pencil } from 'lucide-react';
+
+import { FileIcon } from '../../team/editor/FileIcon';
 
 // =============================================================================
 // Types
@@ -394,7 +395,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           borderBottom: `1px solid ${CODE_BORDER}`,
         }}
       >
-        <Pencil className="size-4 shrink-0" style={{ color: COLOR_TEXT_MUTED }} />
+        <FileIcon fileName={fileName} className="size-4 shrink-0" />
         <span className="truncate font-mono text-sm" style={{ color: CODE_FILENAME }}>
           {displayName}
         </span>
