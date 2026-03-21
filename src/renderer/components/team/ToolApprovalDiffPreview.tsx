@@ -144,6 +144,7 @@ export const ToolApprovalDiffPreview: React.FC<ToolApprovalDiffPreviewProps> = (
                 oldString={diff.oldString}
                 newString={diff.newString}
                 maxHeight="max-h-[300px]"
+                syntaxHighlight
               />
             </div>
           )}

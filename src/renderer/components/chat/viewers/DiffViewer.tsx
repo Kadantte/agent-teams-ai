@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 
 import {
   CODE_BG,
@@ -19,6 +19,7 @@ import {
   TAG_TEXT,
 } from '@renderer/constants/cssVariables';
 import { getBaseName } from '@renderer/utils/pathUtils';
+import { highlightLines } from '@renderer/utils/syntaxHighlighter';
 import { formatTokens } from '@shared/utils/tokenFormatting';
 import { diffLines as semanticDiffLines } from 'diff';
 import { Pencil } from 'lucide-react';
@@ -33,6 +34,7 @@ interface DiffViewerProps {
   newString: string; // The new text
   maxHeight?: string; // CSS max-height class (default: "max-h-96")
   tokenCount?: number; // Optional token count to display in header
+  syntaxHighlight?: boolean; // Enable syntax highlighting via highlight.js
 }
 
 interface DiffLine {
@@ -259,9 +261,10 @@ function inferLanguage(fileName: string): string {
 
 interface DiffLineRowProps {
   line: DiffLine;
+  highlightedHtml?: string;
 }
 
-const DiffLineRow: React.FC<DiffLineRowProps> = ({ line }): React.JSX.Element => {
+const DiffLineRow: React.FC<DiffLineRowProps> = ({ line, highlightedHtml }): React.JSX.Element => {
   // Theme-aware styles using CSS variables
   const getStyles = (
     type: DiffLine['type']
@@ -312,10 +315,18 @@ const DiffLineRow: React.FC<DiffLineRowProps> = ({ line }): React.JSX.Element =>
       <span className="w-6 shrink-0 select-none" style={{ color: style.text }}>
         {style.prefix}
       </span>
-      {/* Content */}
-      <span className="flex-1 whitespace-pre" style={{ color: style.text }}>
-        {line.content ?? ' '}
-      </span>
+      {/* Content — optionally syntax-highlighted via hljs (HTML-escaped, safe) */}
+      {highlightedHtml !== undefined ? (
+        <span
+          className="flex-1 whitespace-pre"
+          style={{ color: style.text }}
+          dangerouslySetInnerHTML={{ __html: highlightedHtml || ' ' }}
+        />
+      ) : (
+        <span className="flex-1 whitespace-pre" style={{ color: style.text }}>
+          {line.content ?? ' '}
+        </span>
+      )}
     </div>
   );
 };
@@ -330,12 +341,36 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   newString,
   maxHeight = 'max-h-96',
   tokenCount,
+  syntaxHighlight = false,
 }): React.JSX.Element => {
   // Compute diff
   const oldLines = oldString.split(/\r?\n/);
   const newLines = newString.split(/\r?\n/);
   const diffLines = generateDiff(oldLines, newLines);
   const stats = computeStats(diffLines);
+
+  // Syntax highlighting: build a map from content line → highlighted HTML
+  const highlightMap = useMemo(() => {
+    if (!syntaxHighlight) return null;
+    const oldHtml = highlightLines(oldString, fileName);
+    const newHtml = highlightLines(newString, fileName);
+    // Map each diff line to its highlighted HTML by tracking old/new line indices
+    const map = new Map<number, string>();
+    let oldIdx = 0;
+    let newIdx = 0;
+    for (let i = 0; i < diffLines.length; i++) {
+      const line = diffLines[i];
+      if (line.type === 'removed') {
+        map.set(i, oldHtml[oldIdx++] ?? '');
+      } else if (line.type === 'added') {
+        map.set(i, newHtml[newIdx++] ?? '');
+      } else {
+        map.set(i, oldHtml[oldIdx++] ?? '');
+        newIdx++;
+      }
+    }
+    return map;
+  }, [syntaxHighlight, oldString, newString, fileName, diffLines]);
 
   // Infer language from file extension
   const detectedLanguage = inferLanguage(fileName);
@@ -396,7 +431,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       <div className={`overflow-auto font-mono text-xs ${maxHeight}`}>
         <div className="inline-block min-w-full">
           {diffLines.map((line, index) => (
-            <DiffLineRow key={index} line={line} />
+            <DiffLineRow key={index} line={line} highlightedHtml={highlightMap?.get(index)} />
           ))}
           {diffLines.length === 0 && (
             <div className="px-3 py-2 italic" style={{ color: COLOR_TEXT_MUTED }}>

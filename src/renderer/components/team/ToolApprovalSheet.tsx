@@ -288,21 +288,21 @@ export const ToolApprovalSheet: React.FC = () => {
           <button
             type="button"
             onClick={() => void updateToolApprovalSettings({ autoAllowAll: true })}
-            className="rounded-md px-2.5 py-1.5 text-[10px] transition-colors"
+            className="rounded-md border px-3.5 py-1.5 text-xs font-medium transition-colors"
             style={{
               color: 'var(--color-text-muted)',
-              backgroundColor: 'var(--color-surface-raised)',
+              borderColor: 'var(--color-border-emphasis)',
             }}
             onMouseEnter={(e) => {
               Object.assign(e.currentTarget.style, {
                 color: 'var(--color-text-secondary)',
-                backgroundColor: 'var(--color-border-emphasis)',
+                backgroundColor: 'var(--color-surface-raised)',
               });
             }}
             onMouseLeave={(e) => {
               Object.assign(e.currentTarget.style, {
                 color: 'var(--color-text-muted)',
-                backgroundColor: 'var(--color-surface-raised)',
+                backgroundColor: 'transparent',
               });
             }}
           >
