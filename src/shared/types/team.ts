@@ -828,6 +828,8 @@ export type ToolApprovalTimeoutAction = 'allow' | 'deny' | 'wait';
 
 /** User-configurable auto-allow settings for tool approval. */
 export interface ToolApprovalSettings {
+  /** Auto-allow ALL tools (overrides individual settings below). */
+  autoAllowAll: boolean;
   /** Auto-allow file edit tools (Edit, Write, NotebookEdit). */
   autoAllowFileEdits: boolean;
   /** Auto-allow safe bash commands (git, pnpm, npm, ls, cat, echo, etc.). */
@@ -839,6 +841,7 @@ export interface ToolApprovalSettings {
 }
 
 export const DEFAULT_TOOL_APPROVAL_SETTINGS: ToolApprovalSettings = {
+  autoAllowAll: false,
   autoAllowFileEdits: false,
   autoAllowSafeBash: false,
   timeoutAction: 'wait',

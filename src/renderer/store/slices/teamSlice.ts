@@ -727,6 +727,7 @@ function loadToolApprovalSettings(): ToolApprovalSettings {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const d = DEFAULT_TOOL_APPROVAL_SETTINGS;
     return {
+      autoAllowAll: typeof parsed.autoAllowAll === 'boolean' ? parsed.autoAllowAll : d.autoAllowAll,
       autoAllowFileEdits:
         typeof parsed.autoAllowFileEdits === 'boolean'
           ? parsed.autoAllowFileEdits

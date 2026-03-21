@@ -4,7 +4,6 @@ import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors'
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
 import { highlightLines } from '@renderer/utils/syntaxHighlighter';
-import { getMemberColorByName } from '@shared/constants/memberColors';
 import { AlertTriangle, FileText, Search, Terminal } from 'lucide-react';
 
 import { ToolApprovalDiffPreview } from './ToolApprovalDiffPreview';
@@ -170,10 +169,9 @@ export const ToolApprovalSheet: React.FC = () => {
   if (!current) return null;
 
   // Prefer color from the approval itself (always available, even during provisioning),
-  // fall back to teams list, then deterministic color from team name.
+  // fall back to teams list, then getTeamColorSet hashes unknown names into TEAMMATE_COLORS.
   const teamSummary = teams.find((t) => t.teamName === current.teamName);
-  const colorName =
-    current.teamColor ?? teamSummary?.color ?? getMemberColorByName(current.teamName);
+  const colorName = current.teamColor ?? teamSummary?.color ?? current.teamName;
   const teamColor = getTeamColorSet(colorName);
   const displayName = current.teamDisplayName ?? teamSummary?.displayName ?? current.teamName;
 

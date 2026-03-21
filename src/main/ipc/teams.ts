@@ -2767,6 +2767,9 @@ async function handleToolApprovalSettings(
     return { success: false, error: 'Settings must be an object' };
   }
   const s = settings as Record<string, unknown>;
+  if (typeof s.autoAllowAll !== 'boolean') {
+    return { success: false, error: 'autoAllowAll must be a boolean' };
+  }
   if (typeof s.autoAllowFileEdits !== 'boolean') {
     return { success: false, error: 'autoAllowFileEdits must be a boolean' };
   }

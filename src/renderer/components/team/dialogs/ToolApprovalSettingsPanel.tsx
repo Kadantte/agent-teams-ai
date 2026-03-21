@@ -50,13 +50,32 @@ export const ToolApprovalSettingsPanel: React.FC = () => {
             borderColor: 'var(--color-border)',
           }}
         >
-          {/* Auto-allow file edits */}
+          {/* Auto-allow ALL */}
           <label
-            className="flex items-center gap-2 text-xs"
+            className="flex items-center gap-2 text-xs font-medium"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             <Checkbox
-              checked={settings.autoAllowFileEdits}
+              checked={settings.autoAllowAll}
+              onCheckedChange={(checked) => void updateSettings({ autoAllowAll: checked === true })}
+            />
+            Auto-allow all tools
+          </label>
+
+          {/* Separator */}
+          <div className="border-t" style={{ borderColor: 'var(--color-border)' }} />
+
+          {/* Auto-allow file edits */}
+          <label
+            className="flex items-center gap-2 text-xs"
+            style={{
+              color: 'var(--color-text-secondary)',
+              opacity: settings.autoAllowAll ? 0.5 : 1,
+            }}
+          >
+            <Checkbox
+              checked={settings.autoAllowAll || settings.autoAllowFileEdits}
+              disabled={settings.autoAllowAll}
               onCheckedChange={(checked) =>
                 void updateSettings({ autoAllowFileEdits: checked === true })
               }
@@ -67,10 +86,14 @@ export const ToolApprovalSettingsPanel: React.FC = () => {
           {/* Auto-allow safe bash */}
           <label
             className="flex items-center gap-2 text-xs"
-            style={{ color: 'var(--color-text-secondary)' }}
+            style={{
+              color: 'var(--color-text-secondary)',
+              opacity: settings.autoAllowAll ? 0.5 : 1,
+            }}
           >
             <Checkbox
-              checked={settings.autoAllowSafeBash}
+              checked={settings.autoAllowAll || settings.autoAllowSafeBash}
+              disabled={settings.autoAllowAll}
               onCheckedChange={(checked) =>
                 void updateSettings({ autoAllowSafeBash: checked === true })
               }

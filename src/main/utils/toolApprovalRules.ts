@@ -116,6 +116,11 @@ export function shouldAutoAllow(
   toolName: string,
   toolInput: Record<string, unknown>
 ): AutoAllowResult {
+  // Auto-allow ALL tools (overrides everything)
+  if (settings.autoAllowAll) {
+    return { autoAllow: true, reason: 'auto_allow_all' };
+  }
+
   // File edit auto-allow
   if (settings.autoAllowFileEdits && FILE_EDIT_TOOLS.has(toolName)) {
     return { autoAllow: true, reason: 'auto_allow_category' };
