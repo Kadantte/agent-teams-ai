@@ -1951,7 +1951,7 @@ export class TeamProvisioningService {
 
   private toolApprovalEventEmitter: ((event: ToolApprovalEvent) => void) | null = null;
   private mainWindowRef: import('electron').BrowserWindow | null = null;
-  private activeApprovalNotifications = new Set<import('electron').Notification>();
+  private activeApprovalNotifications = new Map<string, import('electron').Notification>();
 
   setToolApprovalEventEmitter(emitter: (event: ToolApprovalEvent) => void): void {
     this.toolApprovalEventEmitter = emitter;
@@ -5372,6 +5372,10 @@ export class TeamProvisioningService {
     const config = ConfigManager.getInstance().getConfig();
     if (!config.notifications.enabled || !config.notifications.notifyOnToolApproval) return;
 
+    // Respect snooze — consistent with other notification types
+    const snoozedUntil = config.notifications.snoozedUntil;
+    if (snoozedUntil && Date.now() < snoozedUntil) return;
+
     const { Notification: ElectronNotification } = require('electron') as typeof import('electron');
     if (!ElectronNotification.isSupported()) return;
 
@@ -5395,10 +5399,10 @@ export class TeamProvisioningService {
         : {}),
     });
 
-    // Prevent GC from collecting the notification (macOS issue)
-    this.activeApprovalNotifications.add(notification);
+    // Track by requestId so we can close it when approval is resolved via UI
+    this.activeApprovalNotifications.set(approval.requestId, notification);
     const cleanup = (): void => {
-      this.activeApprovalNotifications.delete(notification);
+      this.activeApprovalNotifications.delete(approval.requestId);
     };
 
     notification.on('click', () => {
@@ -5434,6 +5438,23 @@ export class TeamProvisioningService {
     }
 
     notification.show();
+  }
+
+  /** Dismiss the OS notification for a resolved/dismissed approval. */
+  dismissApprovalNotification(requestId: string): void {
+    const notification = this.activeApprovalNotifications.get(requestId);
+    if (notification) {
+      notification.close();
+      this.activeApprovalNotifications.delete(requestId);
+    }
+  }
+
+  /** Dismiss all OS notifications for a team's approvals (e.g. on team stop). */
+  private dismissAllApprovalNotifications(): void {
+    for (const [, notification] of this.activeApprovalNotifications) {
+      notification.close();
+    }
+    this.activeApprovalNotifications.clear();
   }
 
   private formatToolApprovalBody(toolName: string, toolInput: Record<string, unknown>): string {
@@ -5511,6 +5532,7 @@ export class TeamProvisioningService {
       }
       run.pendingApprovals.delete(requestId);
       this.inFlightResponses.delete(requestId);
+      this.dismissApprovalNotification(requestId);
 
       this.emitToolApprovalEvent({
         autoResolved: true,
@@ -5683,6 +5705,7 @@ export class TeamProvisioningService {
     } finally {
       run.pendingApprovals.delete(requestId);
       this.inFlightResponses.delete(requestId);
+      this.dismissApprovalNotification(requestId);
     }
   }
 
@@ -6244,6 +6267,7 @@ export class TeamProvisioningService {
       for (const requestId of run.pendingApprovals.keys()) {
         this.clearApprovalTimeout(requestId);
         this.inFlightResponses.delete(requestId);
+        this.dismissApprovalNotification(requestId);
       }
       this.emitToolApprovalEvent({ dismissed: true, teamName: run.teamName, runId: run.runId });
       run.pendingApprovals.clear();
