@@ -3231,6 +3231,19 @@ export class TeamProvisioningService {
         skipPermissions: request.skipPermissions,
       };
 
+      // Enrich with color/displayName from config.json (always available for launched teams)
+      try {
+        const cfg = JSON.parse(configRaw) as Record<string, unknown>;
+        if (typeof cfg.color === 'string' && cfg.color.trim().length > 0) {
+          syntheticRequest.color = cfg.color.trim();
+        }
+        if (typeof cfg.name === 'string' && cfg.name.trim().length > 0) {
+          syntheticRequest.displayName = cfg.name.trim();
+        }
+      } catch {
+        // config already validated above — ignore parse errors here
+      }
+
       const run: ProvisioningRun = {
         runId,
         teamName: request.teamName,
