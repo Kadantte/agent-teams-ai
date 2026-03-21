@@ -74,6 +74,7 @@ No prerequisites — Claude Code can be installed and configured directly from t
 - [FAQ](#faq)
 - [Roadmap](#roadmap)
 - [Development](#development)
+- [Tech stack](#tech-stack)
 - [Contributing](#contributing)
 
 ## What is this
@@ -130,35 +131,27 @@ A new approach to task management with AI agent teams.
 
 ## Comparison
 
-How we compare to other multi-agent orchestration tools:
-
 | Feature | Claude Agent Teams UI | Vibe Kanban | Aperant | Cursor | Claude Code CLI |
 |---|---|---|---|---|---|
+| **Cross-team communication** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Agent-to-agent messaging** | ✅ Native real-time mailbox | ❌ Agents are independent | ❌ Fixed pipeline | ❌ | ✅⚠️ Built-in (no UI) |
-| **Cross-team communication** | ✅ | ❌ | ❌ | ❌ | ✅⚠️ (no UI) |
-| **Kanban board** | ✅ 5 columns, real-time | ✅ | ✅ 6 columns (pipeline) | ❌ | ❌ |
-| **Per-task code review** | ✅ Accept / reject / comment | ⚠️ PR-level only | ⚠️ File-level only | ✅ BugBot on PRs | ❌ |
-| **Hunk-level review** | ✅ Accept / reject individual hunks | ❌ | ❌ | ✅ | ❌ |
-| **Review workflow** | ✅ Agents review each other | ❌ | ⚠️ Auto QA pipeline | ❌ | ✅⚠️ (no UI) |
+| **Full autonomy** | ✅ Agents create, assign, review tasks end-to-end | ❌ Human manages tasks | ❌ Fixed pipeline | ⚠️ Isolated tasks only | ✅⚠️ (no UI) |
+| **Task dependencies (blocked by)** | ✅ Guaranteed ordering | ❌ | ⚠️ Within plan only | ❌ | ❌ |
+| **Linked tasks** | ✅ Cross-references in messages | ⚠️ Subtasks only | ❌ | ❌ | ❌ |
 | **Session analysis** | ✅ 6-category token tracking | ❌ | ⚠️ Execution logs | ❌ | ❌ |
+| **Task attachments** | ✅ Auto-attach, agents read & attach files | ❌ | ✅ Images + files | ❌ | ❌ |
+| **Hunk-level review** | ✅ Accept / reject individual hunks | ❌ | ❌ | ✅ | ❌ |
+| **Built-in code editor** | ✅ With Git support | ❌ | ❌ | ✅ Full IDE | ❌ |
+| **Review workflow** | ✅ Agents review each other | ❌ | ⚠️ Auto QA pipeline | ❌ | ✅⚠️ (no UI) |
+| **Per-task code review** | ✅ Accept / reject / comment | ⚠️ PR-level only | ⚠️ File-level only | ✅ BugBot on PRs | ❌ |
+| **Kanban board** | ✅ 5 columns, real-time | ✅ | ✅ 6 columns (pipeline) | ❌ | ❌ |
 | **Execution log viewer** | ✅ Tool calls, reasoning, timeline | ❌ | ✅ Phase-based logs | ✅ | ❌ |
 | **Zero setup** | ✅ | ❌ Config required | ❌ Config required | ✅ | ✅ |
 | **Live processes** | ✅ View, stop, open URLs in browser | ❌ | ✅ 12 agent terminals | ✅ | ❌ |
 | **Flexible autonomy** | ✅ Granular settings, per-action approval, notifications | ❌ | ⚠️ Plan approval only | ✅ | ✅ |
-| **Full autonomy** | ✅ Agents create, assign, review tasks end-to-end | ❌ Human manages tasks | ❌ Fixed pipeline | ⚠️ Isolated tasks only | ✅⚠️ (no UI) |
-| **Task dependencies (blocked by)** | ✅ Guaranteed ordering | ❌ | ⚠️ Within plan only | ❌ | ❌ |
-| **Linked tasks** | ✅ Cross-references in messages | ⚠️ Subtasks only | ❌ | ❌ | ❌ |
-| **Task attachments** | ✅ Auto-attach, agents read & attach files | ❌ | ✅ Images + files | ❌ | ❌ |
-| **Multi-agent backend** | 🗓️ [In development](https://github.com/Alishahryar1/free-claude-code) | ✅ 6+ agents | ✅ 11 providers | ✅ Own models | — |
 | **Git worktree isolation** | ✅ Optional | ⚠️ Mandatory | ⚠️ Mandatory | ✅ | ✅ |
-| **Built-in code editor** | ✅ With Git support | ❌ | ❌ | ✅ Full IDE | ❌ |
+| **Multi-agent backend** | 🗓️ [In development](https://github.com/Alishahryar1/free-claude-code) | ✅ 6+ agents | ✅ 11 providers | ✅ Own models | — |
 | **Price** | **Free** | Free / $30 user/mo | Free | $0–$200/mo | Claude subscription |
-
----
-
-### Tech stack
-
-Electron 40, React 18, TypeScript 5, Tailwind CSS 3, Zustand 4. Data from `~/.claude/` (session logs, todos, tasks). No cloud backend — everything runs locally.
 
 ---
 
@@ -225,6 +218,10 @@ Yes. Run multiple teams in one project or across different projects, even simult
 ---
 
 ## Development
+
+## Tech stack
+
+Electron 40, React 18, TypeScript 5, Tailwind CSS 3, Zustand 4. Data from `~/.claude/` (session logs, todos, tasks). No cloud backend — everything runs locally.
 
 <details>
 <summary><strong>Build from source</strong></summary>
