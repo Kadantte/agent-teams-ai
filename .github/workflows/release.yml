@@ -37,6 +37,7 @@ jobs:
 
       - name: Build app
         env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: quant-jump-pro
@@ -112,6 +113,7 @@ jobs:
 
       - name: Build app (macOS ${{ matrix.arch }})
         env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: quant-jump-pro
@@ -184,6 +186,7 @@ jobs:
 
       - name: Build app (Windows)
         env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: quant-jump-pro
@@ -257,6 +260,7 @@ jobs:
 
       - name: Build app (Linux)
         env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: quant-jump-pro
