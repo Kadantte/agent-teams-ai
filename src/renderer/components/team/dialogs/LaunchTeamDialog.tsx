@@ -120,6 +120,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const propsTeamName = props.teamName ?? '';
   const [selectedTeamName, setSelectedTeamName] = useState('');
   const teamByName = useStore((s) => s.teamByName);
+  const openDashboard = useStore((s) => s.openDashboard);
   const teamOptions = useMemo(
     () =>
       Object.values(teamByName)
@@ -747,7 +748,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-400" />
               <div className="min-w-0 space-y-1">
                 <p className="font-medium text-red-300">
-                  CLI environment is not available — launch is blocked
+                  Claude CLI is not installed — launch is blocked
                 </p>
                 <p className="text-red-300/80">
                   {prepareMessage ?? 'Failed to prepare environment'}
@@ -765,10 +766,21 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                     ))}
                   </div>
                 ) : null}
-                <p className="text-[11px] text-[var(--color-text-muted)]">
-                  Make sure <span className="font-mono">claude</span> CLI is installed and available
-                  in PATH, then reopen this dialog.
-                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <p className="text-[11px] text-[var(--color-text-muted)]">
+                    Install Claude CLI from the Dashboard, then reopen this dialog.
+                  </p>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded bg-blue-600 px-2 py-0.5 text-[11px] font-medium text-white transition-colors hover:bg-blue-500"
+                    onClick={() => {
+                      onClose();
+                      openDashboard();
+                    }}
+                  >
+                    Go to Dashboard
+                  </button>
+                </div>
               </div>
             </div>
           </div>

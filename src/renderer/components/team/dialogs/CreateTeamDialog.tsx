@@ -25,6 +25,7 @@ import { Label } from '@renderer/components/ui/label';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
 import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
+import { useCreateTeamDraft } from '@renderer/hooks/useCreateTeamDraft';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
 import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
@@ -42,8 +43,6 @@ import { ProjectPathSelector } from './ProjectPathSelector';
 import { SkipPermissionsCheckbox } from './SkipPermissionsCheckbox';
 import { computeEffectiveTeamModel, TeamModelSelector } from './TeamModelSelector';
 import { getNextSuggestedTeamName } from './teamNameSets';
-
-import type { MemberDraft } from '@renderer/components/team/members/membersEditorTypes';
 
 const TEAM_COLOR_NAMES = [
   'blue',
@@ -227,14 +226,33 @@ export const CreateTeamDialog = ({
 }: CreateTeamDialogProps): React.JSX.Element => {
   const { isLight } = useTheme();
 
-  const [teamName, setTeamName] = useState('');
+  // ── Persisted draft state (survives tab navigation) ──────────────────
+  const {
+    teamName,
+    setTeamName,
+    members,
+    setMembers,
+    cwdMode,
+    setCwdMode,
+    selectedProjectPath,
+    setSelectedProjectPath,
+    customCwd,
+    setCustomCwd,
+    soloTeam,
+    setSoloTeam,
+    launchTeam,
+    setLaunchTeam,
+    teamColor,
+    setTeamColor,
+    isLoaded: draftLoaded,
+    clearDraft,
+  } = useCreateTeamDraft();
+
   const descriptionDraft = useDraftPersistence({ key: 'createTeam:description' });
   const promptDraft = useDraftPersistence({ key: 'createTeam:prompt' });
   const promptChipDraft = useChipDraftPersistence('createTeam:prompt:chips');
-  const [members, setMembers] = useState<MemberDraft[]>([]);
-  const [cwdMode, setCwdMode] = useState<'project' | 'custom'>('project');
-  const [selectedProjectPath, setSelectedProjectPath] = useState('');
-  const [customCwd, setCustomCwd] = useState('');
+
+  // ── Transient UI state (NOT persisted) ───────────────────────────────
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
@@ -250,9 +268,6 @@ export const CreateTeamDialog = ({
     cwd?: string;
   }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [launchTeam, setLaunchTeam] = useState(true);
-  const [soloTeam, setSoloTeam] = useState(false);
-  const [teamColor, setTeamColor] = useState('');
   const [conflictDismissed, setConflictDismissed] = useState(false);
   const [selectedModel, setSelectedModelRaw] = useState(() => {
     const stored = localStorage.getItem('team:lastSelectedModel');
@@ -334,18 +349,11 @@ export const CreateTeamDialog = ({
   };
 
   const resetFormState = (): void => {
-    setTeamName('');
+    clearDraft();
     lastAutoDescriptionRef.current = null;
     descriptionDraft.clearDraft();
     promptDraft.clearDraft();
     promptChipDraft.clearChipDraft();
-    setMembers([]);
-    setTeamColor('');
-    setCwdMode('project');
-    setSelectedProjectPath('');
-    setCustomCwd('');
-    setLaunchTeam(true);
-    setSoloTeam(false);
     resetUIState();
   };
 
@@ -473,7 +481,7 @@ export const CreateTeamDialog = ({
   }, [open, defaultProjectPath]);
 
   useEffect(() => {
-    if (!open) {
+    if (!open || !draftLoaded) {
       return;
     }
 
@@ -510,15 +518,17 @@ export const CreateTeamDialog = ({
         })
       )
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialData is checked once on open
-  }, [open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialData is checked once on open/draftLoaded
+  }, [open, draftLoaded]);
 
   useEffect(() => {
-    if (!open || initialData) {
+    if (!open || initialData || !draftLoaded) {
       return;
     }
-    setTeamName((prev) => (prev.trim().length === 0 ? suggestedTeamName : prev));
-  }, [initialData, open, suggestedTeamName]);
+    if (teamName.trim().length === 0) {
+      setTeamName(suggestedTeamName);
+    }
+  }, [initialData, open, suggestedTeamName, draftLoaded]); // eslint-disable-line react-hooks/exhaustive-deps -- teamName read once
 
   useEffect(() => {
     if (!open || initialData) {
@@ -1187,7 +1197,12 @@ export const CreateTeamDialog = ({
             </Button>
             <Button
               size="sm"
-              disabled={!canCreate || isSubmitting || (launchTeam && prepareState !== 'ready')}
+              disabled={
+                !canCreate ||
+                !draftLoaded ||
+                isSubmitting ||
+                (launchTeam && prepareState !== 'ready')
+              }
               onClick={handleSubmit}
             >
               {isSubmitting ? (

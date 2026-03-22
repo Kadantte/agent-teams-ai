@@ -10,7 +10,6 @@ import { useStore } from '@renderer/store';
 import { filterTeamMessages } from '@renderer/utils/teamMessageFiltering';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import {
-  Bell,
   CheckCheck,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -427,23 +426,6 @@ export const MessagesPanel = memo(function MessagesPanel({
               <TooltipContent side="bottom">Mark all as read</TooltipContent>
             </Tooltip>
           )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="size-6 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-                onClick={() => {
-                  void window.electronAPI.openExternal(
-                    'https://github.com/777genius/claude-notifications-go'
-                  );
-                }}
-              >
-                <Bell size={12} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Desktop notifications plugin</TooltipContent>
-          </Tooltip>
           <div className="ml-auto flex items-center gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -596,24 +578,6 @@ export const MessagesPanel = memo(function MessagesPanel({
       }
       headerExtra={
         <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="pointer-events-auto size-6 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void window.electronAPI.openExternal(
-                    'https://github.com/777genius/claude-notifications-go'
-                  );
-                }}
-              >
-                <Bell size={12} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Desktop notifications plugin</TooltipContent>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
