@@ -557,6 +557,12 @@ async function handleGetData(
   // messageIds inside the same session (e.g. lead-turn-* re-emits).
   const leadProcessTextFingerprints = new Set<string>();
 
+  // Content-based dedup for SendMessage captures: Claude Code CLI and our
+  // persistInboxMessage both write to inboxes/{member}.json, producing two entries
+  // with identical content but different messageIds. Track content fingerprints
+  // (from+to+text) with timestamps to collapse them within a 5-second window.
+  const contentSeen = new Map<string, number>(); // fingerprint → timestamp ms
+
   const merged: typeof data.messages = [];
   const seen = new Set<string>();
   for (const msg of [...data.messages, ...live]) {
@@ -572,6 +578,19 @@ async function handleGetData(
       }
       leadProcessTextFingerprints.add(fp);
     }
+
+    // Content dedup for directed messages (SendMessage captures):
+    // same from+to+text within 5 seconds = duplicate from CLI + our persist.
+    if (typeof msg.to === 'string' && msg.to.trim().length > 0) {
+      const contentFp = `${msg.from}\0${msg.to}\0${(msg.text ?? '').replace(/\s+/g, ' ').slice(0, 100)}`;
+      const msgMs = Date.parse(msg.timestamp);
+      const existingMs = contentSeen.get(contentFp);
+      if (existingMs !== undefined && Math.abs(msgMs - existingMs) <= 5000) {
+        continue; // duplicate within 5s window — skip
+      }
+      contentSeen.set(contentFp, msgMs);
+    }
+
     const key = keyFor(msg);
     if (seen.has(key)) continue;
     seen.add(key);

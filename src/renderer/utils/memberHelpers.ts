@@ -42,13 +42,15 @@ export function getMemberDotClass(
 ): string {
   if (member.status === 'terminated') return STATUS_DOT_COLORS.terminated;
   if (member.removedAt) return STATUS_DOT_COLORS.terminated;
-  if (isTeamProvisioning) return STATUS_DOT_COLORS.unknown;
-  if (isTeamAlive === false) return STATUS_DOT_COLORS.terminated;
+  // Lead activity check BEFORE provisioning fallback — when the lead process
+  // is running (CLI logs present), show green even during provisioning.
   if (leadActivity && isLeadMember(member)) {
     return leadActivity === 'active'
       ? `${STATUS_DOT_COLORS.active} animate-pulse`
       : STATUS_DOT_COLORS.active;
   }
+  if (isTeamProvisioning) return STATUS_DOT_COLORS.unknown;
+  if (isTeamAlive === false) return STATUS_DOT_COLORS.terminated;
   // When team is alive, all non-terminated members are online
   if (isTeamAlive) {
     if (member.currentTaskId) return `${STATUS_DOT_COLORS.active} animate-pulse`;
@@ -67,8 +69,7 @@ export function getPresenceLabel(
   leadContextPercent?: number
 ): string {
   if (member.status === 'terminated') return 'terminated';
-  if (isTeamProvisioning) return 'connecting';
-  if (isTeamAlive === false) return 'offline';
+  // Lead activity check before provisioning fallback (mirrors getMemberDotClass order).
   if (leadActivity && isLeadMember(member)) {
     if (leadActivity === 'active') {
       return leadContextPercent != null && leadContextPercent > 0
@@ -77,6 +78,8 @@ export function getPresenceLabel(
     }
     return 'ready';
   }
+  if (isTeamProvisioning) return 'connecting';
+  if (isTeamAlive === false) return 'offline';
   if (member.status === 'unknown') return 'idle';
   return member.currentTaskId ? 'working' : 'idle';
 }
