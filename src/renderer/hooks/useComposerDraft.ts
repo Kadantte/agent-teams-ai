@@ -17,6 +17,7 @@ import {
   type ComposerDraftSnapshot,
   composerDraftStorage,
 } from '@renderer/services/composerDraftStorage';
+import { categorizeFile } from '@shared/constants/attachments';
 import {
   fileToAttachmentPayload,
   MAX_FILES,
@@ -325,8 +326,30 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
       const fileArray = Array.from(files);
       if (fileArray.length === 0) return;
 
+      // Split: supported → attachments, unsupported → path prepended to text
+      const supported: File[] = [];
+      const unsupportedPaths: string[] = [];
+      for (const f of fileArray) {
+        if (categorizeFile(f) === 'unsupported') {
+          const p = (f as { path?: string }).path;
+          if (p) unsupportedPaths.push(p);
+          else setAttachmentError(`Unsupported file: ${f.name}`);
+        } else {
+          supported.push(f);
+        }
+      }
+
+      // Prepend unsupported file paths to text (independent of attachment validation)
+      if (unsupportedPaths.length > 0) {
+        const prefix = unsupportedPaths.join('\n') + '\n';
+        const current = textRef.current;
+        setText(current ? prefix + current : prefix);
+      }
+
+      if (supported.length === 0) return;
+
       let batchSize = 0;
-      for (const file of fileArray) {
+      for (const file of supported) {
         const validation = validateAttachment(file);
         if (!validation.valid) {
           setAttachmentError(validation.error);
@@ -336,7 +359,7 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
       }
 
       const newPayloads: AttachmentPayload[] = [];
-      for (const file of fileArray) {
+      for (const file of supported) {
         try {
           const payload = await fileToAttachmentPayload(file);
           newPayloads.push(payload);
@@ -363,7 +386,7 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
       setIsSaved(false);
       scheduleSave();
     },
-    [scheduleSave]
+    [scheduleSave, setText]
   );
 
   const removeAttachment = useCallback(
@@ -397,17 +420,19 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
       const items = event.clipboardData?.items;
       if (!items) return;
 
-      const imageFiles: File[] = [];
+      const supportedFiles: File[] = [];
       for (const item of Array.from(items)) {
-        if (item.kind === 'file' && item.type.startsWith('image/')) {
+        if (item.kind === 'file') {
           const file = item.getAsFile();
-          if (file) imageFiles.push(file);
+          if (file && categorizeFile(file) !== 'unsupported') {
+            supportedFiles.push(file);
+          }
         }
       }
 
-      if (imageFiles.length > 0) {
+      if (supportedFiles.length > 0) {
         event.preventDefault();
-        void addFiles(imageFiles);
+        void addFiles(supportedFiles);
       }
     },
     [addFiles]
@@ -418,14 +443,7 @@ export function useComposerDraft(teamName: string): UseComposerDraftResult {
       event.preventDefault();
       const files = event.dataTransfer?.files;
       if (!files?.length) return;
-
-      const allFiles = Array.from(files);
-      const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'));
-      if (imageFiles.length > 0) {
-        void addFiles(imageFiles);
-      } else if (allFiles.length > 0) {
-        setAttachmentError('Only image files are supported');
-      }
+      void addFiles(Array.from(files));
     },
     [addFiles]
   );

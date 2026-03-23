@@ -19,14 +19,14 @@ import {
   stripEncodedTaskReferenceMetadata,
 } from '@renderer/utils/taskReferenceUtils';
 import { MAX_TEXT_LENGTH } from '@shared/constants';
-import { ImagePlus, Mic, Send, Trash2, X } from 'lucide-react';
+import { categorizeFile, getEffectiveMimeType } from '@shared/constants/attachments';
+import { Mic, Paperclip, Send, Trash2, X } from 'lucide-react';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
 import type { CommentAttachmentPayload, ResolvedTeamMember } from '@shared/types';
 
 const MAX_ATTACHMENTS = 5;
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
-const ACCEPTED_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const LONG_QUOTE_THRESHOLD = 200;
 
 interface TaskCommentInputProps {
@@ -86,45 +86,55 @@ export const TaskCommentInput = ({
     trimmed.length <= MAX_TEXT_LENGTH &&
     !addingComment;
 
-  const addFiles = useCallback((files: FileList | File[]) => {
-    setAttachError(null);
-    const fileArray = Array.from(files);
-    for (const file of fileArray) {
-      if (!ACCEPTED_TYPES.has(file.type)) {
-        setAttachError(`Unsupported type: ${file.type}`);
-        continue;
-      }
-      if (file.size > MAX_FILE_SIZE) {
-        setAttachError(`File too large: ${(file.size / (1024 * 1024)).toFixed(1)} MB (max 20 MB)`);
-        continue;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        if (!base64) return;
-        const id = crypto.randomUUID();
-        setPendingAttachments((prev) => {
-          if (prev.length >= MAX_ATTACHMENTS) {
-            setAttachError(`Maximum ${MAX_ATTACHMENTS} attachments per comment`);
-            return prev;
+  const addFiles = useCallback(
+    (files: FileList | File[]) => {
+      setAttachError(null);
+      const fileArray = Array.from(files);
+      for (const file of fileArray) {
+        if (categorizeFile(file) === 'unsupported') {
+          // Insert absolute file path into comment text for unsupported types
+          const filePath = (file as { path?: string }).path;
+          if (filePath) {
+            const current = draft.value;
+            draft.setValue(current ? filePath + '\n' + current : filePath + '\n');
           }
-          return [
-            ...prev,
-            {
-              id,
-              filename: file.name,
-              mimeType: file.type,
-              base64Data: base64,
-              previewUrl: result,
-              size: file.size,
-            },
-          ];
-        });
-      };
-      reader.readAsDataURL(file);
-    }
-  }, []);
+          continue;
+        }
+        if (file.size > MAX_FILE_SIZE) {
+          setAttachError(
+            `File too large: ${(file.size / (1024 * 1024)).toFixed(1)} MB (max 20 MB)`
+          );
+          continue;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64 = result.split(',')[1];
+          if (!base64) return;
+          const id = crypto.randomUUID();
+          setPendingAttachments((prev) => {
+            if (prev.length >= MAX_ATTACHMENTS) {
+              setAttachError(`Maximum ${MAX_ATTACHMENTS} attachments per comment`);
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                id,
+                filename: file.name,
+                mimeType: getEffectiveMimeType(file),
+                base64Data: base64,
+                previewUrl: result,
+                size: file.size,
+              },
+            ];
+          });
+        };
+        reader.readAsDataURL(file);
+      }
+    },
+    [draft]
+  );
 
   const removeAttachment = useCallback((id: string) => {
     setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
@@ -179,16 +189,16 @@ export const TaskCommentInput = ({
     (e: React.ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
-      const imageFiles: File[] = [];
+      const pastedFiles: File[] = [];
       for (const item of Array.from(items)) {
-        if (item.kind === 'file' && ACCEPTED_TYPES.has(item.type)) {
+        if (item.kind === 'file') {
           const file = item.getAsFile();
-          if (file) imageFiles.push(file);
+          if (file && categorizeFile(file) !== 'unsupported') pastedFiles.push(file);
         }
       }
-      if (imageFiles.length > 0) {
+      if (pastedFiles.length > 0) {
         e.preventDefault();
-        addFiles(imageFiles);
+        addFiles(pastedFiles);
       }
     },
     [addFiles]
@@ -286,7 +296,7 @@ export const TaskCommentInput = ({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/png,image/jpeg,image/gif,image/webp"
+          accept="*/*"
           multiple
           className="hidden"
           onChange={(e) => {
@@ -323,10 +333,10 @@ export const TaskCommentInput = ({
                     disabled={addingComment || pendingAttachments.length >= MAX_ATTACHMENTS}
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    <ImagePlus size={14} />
+                    <Paperclip size={14} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="top">Attach image (or paste)</TooltipContent>
+                <TooltipContent side="top">Attach file (or paste)</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>

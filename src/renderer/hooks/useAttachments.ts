@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { draftStorage } from '@renderer/services/draftStorage';
+import { categorizeFile } from '@shared/constants/attachments';
 import {
   fileToAttachmentPayload,
   MAX_FILES,
@@ -13,6 +14,8 @@ import type { AttachmentPayload } from '@shared/types';
 interface UseAttachmentsOptions {
   /** When provided, attachments are persisted to IndexedDB under this key. */
   persistenceKey?: string;
+  /** Called with unsupported files so the consumer can handle them (e.g. insert paths into text). */
+  onUnsupportedFiles?: (files: File[]) => void;
 }
 
 interface UseAttachmentsReturn {
@@ -57,6 +60,8 @@ export function useAttachments(options?: UseAttachmentsOptions): UseAttachmentsR
   const keyRef = useRef(persistenceKey);
   // eslint-disable-next-line react-hooks/refs -- synchronous ref sync during render is intentional to avoid stale key in callbacks
   keyRef.current = persistenceKey;
+  const onUnsupportedRef = useRef(options?.onUnsupportedFiles);
+  onUnsupportedRef.current = options?.onUnsupportedFiles;
 
   // Sync ref with state
   const updateAttachments = useCallback((next: AttachmentPayload[]) => {
@@ -162,9 +167,30 @@ export function useAttachments(options?: UseAttachmentsOptions): UseAttachmentsR
       const fileArray = Array.from(files);
       if (fileArray.length === 0) return;
 
+      // Split: supported → attachments, unsupported → callback or error
+      const supported: File[] = [];
+      const unsupported: File[] = [];
+      for (const f of fileArray) {
+        if (categorizeFile(f) === 'unsupported') {
+          unsupported.push(f);
+        } else {
+          supported.push(f);
+        }
+      }
+
+      if (unsupported.length > 0) {
+        if (onUnsupportedRef.current) {
+          onUnsupportedRef.current(unsupported);
+        } else {
+          setError(`Unsupported file type: ${unsupported[0].name}`);
+        }
+      }
+
+      if (supported.length === 0) return;
+
       let batchSize = 0;
       let valid = true;
-      for (const file of fileArray) {
+      for (const file of supported) {
         const validation = validateAttachment(file);
         if (!validation.valid) {
           setError(validation.error);
@@ -176,7 +202,7 @@ export function useAttachments(options?: UseAttachmentsOptions): UseAttachmentsR
       if (!valid) return;
 
       const newPayloads: AttachmentPayload[] = [];
-      for (const file of fileArray) {
+      for (const file of supported) {
         try {
           const payload = await fileToAttachmentPayload(file);
           newPayloads.push(payload);
@@ -244,17 +270,19 @@ export function useAttachments(options?: UseAttachmentsOptions): UseAttachmentsR
       const items = event.clipboardData?.items;
       if (!items) return;
 
-      const imageFiles: File[] = [];
+      const supportedFiles: File[] = [];
       for (const item of Array.from(items)) {
-        if (item.kind === 'file' && item.type.startsWith('image/')) {
+        if (item.kind === 'file') {
           const file = item.getAsFile();
-          if (file) imageFiles.push(file);
+          if (file && categorizeFile(file) !== 'unsupported') {
+            supportedFiles.push(file);
+          }
         }
       }
 
-      if (imageFiles.length > 0) {
+      if (supportedFiles.length > 0) {
         event.preventDefault();
-        void addFiles(imageFiles);
+        void addFiles(supportedFiles);
       }
     },
     [addFiles]
@@ -265,14 +293,7 @@ export function useAttachments(options?: UseAttachmentsOptions): UseAttachmentsR
       event.preventDefault();
       const files = event.dataTransfer?.files;
       if (!files?.length) return;
-
-      const allFiles = Array.from(files);
-      const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'));
-      if (imageFiles.length > 0) {
-        void addFiles(imageFiles);
-      } else if (allFiles.length > 0) {
-        setError('Only image files are supported');
-      }
+      void addFiles(Array.from(files));
     },
     [addFiles]
   );

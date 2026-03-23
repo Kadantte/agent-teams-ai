@@ -1,3 +1,5 @@
+import { categorizeFile, getEffectiveMimeType, isImageMime } from '@shared/constants/attachments';
+
 import type { AttachmentPayload, ImageMimeType } from '@shared/types';
 
 export const ALLOWED_MIME_TYPES = new Set<ImageMimeType>([
@@ -16,8 +18,9 @@ export function isImageMimeType(type: string): type is ImageMimeType {
 }
 
 export function validateAttachment(file: File): { valid: true } | { valid: false; error: string } {
-  if (!isImageMimeType(file.type)) {
-    return { valid: false, error: `Unsupported file type: ${file.type}` };
+  const cat = categorizeFile(file);
+  if (cat === 'unsupported') {
+    return { valid: false, error: `Unsupported file type: ${file.name}` };
   }
   if (file.size > MAX_FILE_SIZE) {
     return { valid: false, error: `File "${file.name}" exceeds 10MB limit` };
@@ -30,12 +33,12 @@ export async function fileToAttachmentPayload(file: File): Promise<AttachmentPay
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      // Strip "data:image/png;base64," prefix to get raw base64
+      // Strip "data:<mime>;base64," prefix to get raw base64
       const base64 = dataUrl.split(',')[1] ?? '';
       resolve({
         id: crypto.randomUUID(),
         filename: file.name,
-        mimeType: file.type,
+        mimeType: getEffectiveMimeType(file),
         size: file.size,
         data: base64,
       });
@@ -44,6 +47,8 @@ export async function fileToAttachmentPayload(file: File): Promise<AttachmentPay
     reader.readAsDataURL(file);
   });
 }
+
+export { categorizeFile, isImageMime };
 
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

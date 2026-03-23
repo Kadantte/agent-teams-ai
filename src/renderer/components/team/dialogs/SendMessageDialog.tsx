@@ -32,7 +32,7 @@ import {
 } from '@renderer/utils/taskReferenceUtils';
 import { MAX_TEXT_LENGTH } from '@shared/constants';
 import { isLeadMember } from '@shared/utils/leadDetection';
-import { AlertCircle, ImagePlus, Send, X } from 'lucide-react';
+import { AlertCircle, Paperclip, Send, X } from 'lucide-react';
 
 import { MemberBadge } from '../MemberBadge';
 
@@ -107,8 +107,8 @@ export const SendMessageDialog = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [imageRestrictionError, setImageRestrictionError] = useState<string | null>(null);
-  const imageRestrictionTimerRef = useRef(0);
+  const [fileRestrictionError, setFileRestrictionError] = useState<string | null>(null);
+  const fileRestrictionTimerRef = useRef(0);
   const [actionMode, setActionModeState] = useState<ActionMode>(stickyActionMode);
   const actionModeRef = useRef<ActionMode>(stickyActionMode);
   const setActionMode = useCallback((mode: ActionMode) => {
@@ -279,17 +279,17 @@ export const SendMessageDialog = ({
     [addFiles]
   );
 
-  const showImageRestrictionError = useCallback(() => {
-    setImageRestrictionError('Images can only be sent to the team lead');
-    window.clearTimeout(imageRestrictionTimerRef.current);
-    imageRestrictionTimerRef.current = window.setTimeout(() => {
-      setImageRestrictionError(null);
+  const showFileRestrictionError = useCallback(() => {
+    setFileRestrictionError('Files can only be sent to the team lead');
+    window.clearTimeout(fileRestrictionTimerRef.current);
+    fileRestrictionTimerRef.current = window.setTimeout(() => {
+      setFileRestrictionError(null);
     }, 4000);
   }, []);
 
   // Cleanup restriction error timer on unmount
   useEffect(() => {
-    const ref = imageRestrictionTimerRef;
+    const ref = fileRestrictionTimerRef;
     return () => window.clearTimeout(ref.current);
   }, []);
 
@@ -320,33 +320,28 @@ export const SendMessageDialog = ({
       if (!isLeadRecipient) {
         const files = e.dataTransfer?.files;
         if (files?.length) {
-          const hasImages = Array.from(files).some((f) => f.type.startsWith('image/'));
-          if (hasImages) {
-            showImageRestrictionError();
-          }
+          showFileRestrictionError();
         }
         return;
       }
       if (canAttach) handleDrop(e);
     },
-    [isLeadRecipient, canAttach, handleDrop, showImageRestrictionError]
+    [isLeadRecipient, canAttach, handleDrop, showFileRestrictionError]
   );
 
   const handlePasteWrapper = useCallback(
     (e: React.ClipboardEvent) => {
       if (!isLeadRecipient) {
-        const hasImages = Array.from(e.clipboardData.items).some((item) =>
-          item.type.startsWith('image/')
-        );
-        if (hasImages) {
+        const hasFiles = Array.from(e.clipboardData.items).some((item) => item.kind === 'file');
+        if (hasFiles) {
           e.preventDefault();
-          showImageRestrictionError();
+          showFileRestrictionError();
         }
         return;
       }
       if (canAttach) handlePaste(e);
     },
-    [isLeadRecipient, canAttach, handlePaste, showImageRestrictionError]
+    [isLeadRecipient, canAttach, handlePaste, showFileRestrictionError]
   );
 
   return (
@@ -386,7 +381,7 @@ export const SendMessageDialog = ({
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    accept="*/*"
                     multiple
                     className="hidden"
                     onChange={handleFileInputChange}
@@ -403,15 +398,15 @@ export const SendMessageDialog = ({
                         disabled={!canAttach}
                         onClick={() => fileInputRef.current?.click()}
                       >
-                        <ImagePlus size={14} />
+                        <Paperclip size={14} />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
                       {!isTeamAlive
-                        ? 'Team must be online to attach images'
+                        ? 'Team must be online to attach files'
                         : !canAddMore
                           ? 'Maximum attachments reached'
-                          : 'Attach images (paste or drag & drop)'}
+                          : 'Attach files (paste or drag & drop)'}
                     </TooltipContent>
                   </Tooltip>
                 </>
@@ -421,9 +416,9 @@ export const SendMessageDialog = ({
             <AttachmentPreviewList
               attachments={attachments}
               onRemove={removeAttachment}
-              error={attachmentError ?? imageRestrictionError}
+              error={attachmentError ?? fileRestrictionError}
               disabled={attachmentsBlocked}
-              disabledHint="Image attachments are only supported when sending to the team lead while the team is online. Remove attachments or switch recipient."
+              disabledHint="File attachments are only supported when sending to the team lead while the team is online. Remove attachments or switch recipient."
             />
 
             <div className={quote ? 'flex flex-col' : 'contents'}>

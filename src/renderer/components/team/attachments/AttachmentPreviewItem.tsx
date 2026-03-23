@@ -1,5 +1,7 @@
-import { formatFileSize } from '@renderer/utils/attachmentUtils';
+import { formatFileSize, isImageMime } from '@renderer/utils/attachmentUtils';
 import { Ban, X } from 'lucide-react';
+
+import { FileIcon } from '@renderer/components/team/editor/FileIcon';
 
 import { AttachmentThumbnail } from './AttachmentThumbnail';
 
@@ -18,7 +20,8 @@ export const AttachmentPreviewItem = ({
   onPreview,
   disabled,
 }: AttachmentPreviewItemProps): React.JSX.Element => {
-  const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`;
+  const isImage = isImageMime(attachment.mimeType);
+  const dataUrl = isImage ? `data:${attachment.mimeType};base64,${attachment.data}` : undefined;
 
   return (
     <div className="group/att relative flex shrink-0 items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5">
@@ -27,7 +30,18 @@ export const AttachmentPreviewItem = ({
           <Ban size={18} className="text-red-400" />
         </div>
       ) : null}
-      <AttachmentThumbnail src={dataUrl} alt={attachment.filename} size="sm" onClick={onPreview} />
+      {isImage && dataUrl ? (
+        <AttachmentThumbnail
+          src={dataUrl}
+          alt={attachment.filename}
+          size="sm"
+          onClick={onPreview}
+        />
+      ) : (
+        <div className="flex size-12 items-center justify-center rounded bg-[var(--color-surface-raised)]">
+          <FileIcon fileName={attachment.filename} className="size-5" />
+        </div>
+      )}
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="max-w-[100px] truncate text-[11px] text-[var(--color-text-secondary)]">
           {attachment.filename}

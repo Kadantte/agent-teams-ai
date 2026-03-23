@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 
 import { Loader2 } from 'lucide-react';
 
+import { isImageMime } from '@renderer/utils/attachmentUtils';
+
+import { FileIcon } from '@renderer/components/team/editor/FileIcon';
+
 import { AttachmentThumbnail } from './AttachmentThumbnail';
 import { ImageLightbox } from './ImageLightbox';
 
@@ -66,30 +70,61 @@ export const AttachmentDisplay = ({
     .map((meta) => {
       const data = dataById.get(meta.id);
       if (!data) return null;
-      return { meta, dataUrl: `data:${data.mimeType};base64,${data.data}` };
+      const isImage = isImageMime(data.mimeType);
+      return {
+        meta,
+        dataUrl: isImage ? `data:${data.mimeType};base64,${data.data}` : undefined,
+        isImage,
+      };
     })
-    .filter(Boolean) as { meta: AttachmentMeta; dataUrl: string }[];
+    .filter(Boolean) as { meta: AttachmentMeta; dataUrl: string | undefined; isImage: boolean }[];
 
   if (items.length === 0) return null;
+
+  // Build lightbox slides for images only, with visual→lightbox index mapping
+  const imageSlides: { src: string; alt: string }[] = [];
+  const visualToLightbox = new Map<number, number>();
+  items.forEach((item, i) => {
+    if (item.isImage && item.dataUrl) {
+      visualToLightbox.set(i, imageSlides.length);
+      imageSlides.push({ src: item.dataUrl, alt: item.meta.filename });
+    }
+  });
 
   return (
     <>
       <div className="mt-1.5 flex flex-wrap gap-2">
-        {items.map((item, i) => (
-          <AttachmentThumbnail
-            key={item.meta.id}
-            src={item.dataUrl}
-            alt={item.meta.filename}
-            size="md"
-            onClick={() => setLightboxIndex(i)}
-          />
-        ))}
+        {items.map((item, i) =>
+          item.isImage && item.dataUrl ? (
+            <AttachmentThumbnail
+              key={item.meta.id}
+              src={item.dataUrl}
+              alt={item.meta.filename}
+              size="md"
+              onClick={
+                visualToLightbox.has(i)
+                  ? () => setLightboxIndex(visualToLightbox.get(i)!)
+                  : undefined
+              }
+            />
+          ) : (
+            <div
+              key={item.meta.id}
+              className="flex size-20 flex-col items-center justify-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)]"
+            >
+              <FileIcon fileName={item.meta.filename} className="size-5" />
+              <span className="max-w-[72px] truncate text-[9px] text-[var(--color-text-muted)]">
+                {item.meta.filename}
+              </span>
+            </div>
+          )
+        )}
       </div>
-      {lightboxIndex !== null && items[lightboxIndex] ? (
+      {lightboxIndex !== null && imageSlides[lightboxIndex] ? (
         <ImageLightbox
           open
           onClose={() => setLightboxIndex(null)}
-          slides={items.map((item) => ({ src: item.dataUrl, alt: item.meta.filename }))}
+          slides={imageSlides}
           index={lightboxIndex}
         />
       ) : null}

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AlertCircle, X } from 'lucide-react';
 
+import { isImageMime } from '@renderer/utils/attachmentUtils';
+
 import { AttachmentPreviewItem } from './AttachmentPreviewItem';
 import { ImageLightbox } from './ImageLightbox';
 
@@ -107,10 +109,18 @@ export const AttachmentPreviewList = ({
 
   if (visibleAttachments.length === 0 && exitingIds.size === 0 && !error) return null;
 
-  const lightboxSlides = visibleAttachments.map((att) => ({
-    src: `data:${att.mimeType};base64,${att.data}`,
-    alt: att.filename,
-  }));
+  // Build lightbox slides for images only, with visual→lightbox index mapping
+  const imageSlides: { src: string; alt: string }[] = [];
+  const visualToLightbox = new Map<number, number>();
+  visibleAttachments.forEach((att, i) => {
+    if (isImageMime(att.mimeType)) {
+      visualToLightbox.set(i, imageSlides.length);
+      imageSlides.push({
+        src: `data:${att.mimeType};base64,${att.data}`,
+        alt: att.filename,
+      });
+    }
+  });
 
   return (
     <div className="space-y-1.5 px-1">
@@ -135,7 +145,11 @@ export const AttachmentPreviewList = ({
                 <AttachmentPreviewItem
                   attachment={att}
                   onRemove={handleRemove}
-                  onPreview={() => setLightboxIndex(i)}
+                  onPreview={
+                    visualToLightbox.has(i)
+                      ? () => setLightboxIndex(visualToLightbox.get(i)!)
+                      : undefined
+                  }
                   disabled={disabled}
                 />
               </div>
@@ -167,11 +181,11 @@ export const AttachmentPreviewList = ({
           ) : null}
         </div>
       ) : null}
-      {lightboxIndex !== null && lightboxSlides[lightboxIndex] ? (
+      {lightboxIndex !== null && imageSlides[lightboxIndex] ? (
         <ImageLightbox
           open
           onClose={() => setLightboxIndex(null)}
-          slides={lightboxSlides}
+          slides={imageSlides}
           index={lightboxIndex}
         />
       ) : null}

@@ -1,8 +1,8 @@
-import { Ban, ImagePlus } from 'lucide-react';
+import { Ban, Paperclip } from 'lucide-react';
 
 interface DropZoneOverlayProps {
   active: boolean;
-  /** Show a "rejected" variant when images can't be sent to this recipient. */
+  /** Show a "rejected" variant when files can't be sent to this recipient. */
   rejected?: boolean;
 }
 
@@ -23,7 +23,7 @@ export const DropZoneOverlay = ({
       >
         <div className="flex flex-col items-center gap-1.5 text-red-400">
           <Ban size={24} />
-          <span className="text-xs font-medium">Images can only be sent to the team lead</span>
+          <span className="text-xs font-medium">Files can only be sent to the team lead</span>
         </div>
       </div>
     );
@@ -41,8 +41,8 @@ export const DropZoneOverlay = ({
         className="flex flex-col items-center gap-1.5"
         style={{ color: 'var(--color-accent, #6366f1)' }}
       >
-        <ImagePlus size={24} />
-        <span className="text-xs font-medium">Drop images here</span>
+        <Paperclip size={24} />
+        <span className="text-xs font-medium">Drop files here</span>
       </div>
     </div>
   );

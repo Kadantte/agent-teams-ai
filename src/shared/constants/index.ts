@@ -3,6 +3,7 @@
  */
 
 export * from './agentBlocks';
+export * from './attachments';
 export * from './cache';
 export * from './cli';
 export * from './crossTeam';

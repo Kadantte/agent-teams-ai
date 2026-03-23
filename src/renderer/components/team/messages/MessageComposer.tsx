@@ -25,7 +25,7 @@ import {
 } from '@renderer/utils/taskReferenceUtils';
 import { MAX_TEXT_LENGTH } from '@shared/constants';
 import { isLeadMember } from '@shared/utils/leadDetection';
-import { AlertCircle, Check, ChevronDown, ImagePlus, Mic, Search, Send } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, Mic, Paperclip, Search, Send } from 'lucide-react';
 
 import type { ActionMode } from '@renderer/components/team/messages/ActionModeSelector';
 import type { MentionSuggestion } from '@renderer/types/mention';
@@ -95,8 +95,8 @@ export const MessageComposer = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [imageRestrictionError, setImageRestrictionError] = useState<string | null>(null);
-  const imageRestrictionTimerRef = useRef(0);
+  const [fileRestrictionError, setFileRestrictionError] = useState<string | null>(null);
+  const fileRestrictionTimerRef = useRef(0);
   const dismissMentionsRef = useRef<(() => void) | null>(null);
 
   // Cross-team state
@@ -331,17 +331,17 @@ export const MessageComposer = ({
     [draftAddFiles]
   );
 
-  const showImageRestrictionError = useCallback(() => {
-    setImageRestrictionError('Images can only be sent to the team lead');
-    window.clearTimeout(imageRestrictionTimerRef.current);
-    imageRestrictionTimerRef.current = window.setTimeout(() => {
-      setImageRestrictionError(null);
+  const showFileRestrictionError = useCallback(() => {
+    setFileRestrictionError('Files can only be sent to the team lead');
+    window.clearTimeout(fileRestrictionTimerRef.current);
+    fileRestrictionTimerRef.current = window.setTimeout(() => {
+      setFileRestrictionError(null);
     }, 4000);
   }, []);
 
   // Cleanup restriction error timer on unmount
   useEffect(() => {
-    const ref = imageRestrictionTimerRef;
+    const ref = fileRestrictionTimerRef;
     return () => window.clearTimeout(ref.current);
   }, []);
 
@@ -373,39 +373,34 @@ export const MessageComposer = ({
       if (!isLeadRecipient) {
         const files = e.dataTransfer?.files;
         if (files?.length) {
-          const hasImages = Array.from(files).some((f) => f.type.startsWith('image/'));
-          if (hasImages) {
-            showImageRestrictionError();
-          }
+          showFileRestrictionError();
         }
         return;
       }
       if (canAttach) draftHandleDrop(e);
     },
-    [isLeadRecipient, canAttach, draftHandleDrop, showImageRestrictionError]
+    [isLeadRecipient, canAttach, draftHandleDrop, showFileRestrictionError]
   );
 
   const { handlePaste: draftHandlePaste } = draft;
   const handlePasteWrapper = useCallback(
     (e: React.ClipboardEvent) => {
       if (!isLeadRecipient) {
-        const hasImages = Array.from(e.clipboardData.items).some((item) =>
-          item.type.startsWith('image/')
-        );
-        if (hasImages) {
+        const hasFiles = Array.from(e.clipboardData.items).some((item) => item.kind === 'file');
+        if (hasFiles) {
           e.preventDefault();
-          showImageRestrictionError();
+          showFileRestrictionError();
         }
         return;
       }
       if (canAttach) draftHandlePaste(e);
     },
-    [isLeadRecipient, canAttach, draftHandlePaste, showImageRestrictionError]
+    [isLeadRecipient, canAttach, draftHandlePaste, showFileRestrictionError]
   );
 
   const remaining = MAX_TEXT_LENGTH - trimmed.length;
   const hasAttachmentPreviewContent =
-    draft.attachments.length > 0 || Boolean(draft.attachmentError ?? imageRestrictionError);
+    draft.attachments.length > 0 || Boolean(draft.attachmentError ?? fileRestrictionError);
 
   return (
     <div
@@ -426,7 +421,7 @@ export const MessageComposer = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
+                accept="*/*"
                 multiple
                 className="hidden"
                 onChange={handleFileInputChange}
@@ -444,15 +439,15 @@ export const MessageComposer = ({
                     disabled={!canAttach}
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    <ImagePlus size={14} />
+                    <Paperclip size={14} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {!isTeamAlive
-                    ? 'Team must be online to attach images'
+                    ? 'Team must be online to attach files'
                     : !draft.canAddMore
                       ? 'Maximum attachments reached'
-                      : 'Attach images (paste or drag & drop)'}
+                      : 'Attach files (paste or drag & drop)'}
                 </TooltipContent>
               </Tooltip>
             </>
@@ -839,10 +834,10 @@ export const MessageComposer = ({
           <AttachmentPreviewList
             attachments={draft.attachments}
             onRemove={draft.removeAttachment}
-            error={draft.attachmentError ?? imageRestrictionError}
+            error={draft.attachmentError ?? fileRestrictionError}
             onDismissError={draft.clearAttachmentError}
             disabled={attachmentsBlocked}
-            disabledHint="Image attachments are only supported when sending to the team lead while the team is online. Remove attachments or switch recipient."
+            disabledHint="File attachments are only supported when sending to the team lead while the team is online. Remove attachments or switch recipient."
           />
         ) : null}
       </div>

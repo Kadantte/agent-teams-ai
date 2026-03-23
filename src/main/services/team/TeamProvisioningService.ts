@@ -3601,7 +3601,7 @@ export class TeamProvisioningService {
   async sendMessageToTeam(
     teamName: string,
     message: string,
-    attachments?: { data: string; mimeType: string }[]
+    attachments?: { data: string; mimeType: string; filename?: string }[]
   ): Promise<void> {
     const runId = this.getAliveRunId(teamName);
     if (!runId) {
@@ -3615,14 +3615,38 @@ export class TeamProvisioningService {
     const contentBlocks: Record<string, unknown>[] = [{ type: 'text', text: message }];
     if (attachments?.length) {
       for (const att of attachments) {
-        contentBlocks.push({
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: att.mimeType,
-            data: att.data,
-          },
-        });
+        if (att.mimeType === 'application/pdf') {
+          // PDF → document block with base64 source
+          contentBlocks.push({
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: att.data,
+            },
+          });
+        } else if (att.mimeType === 'text/plain') {
+          // Text file → document block with text source (decode base64 → UTF-8)
+          contentBlocks.push({
+            type: 'document',
+            source: {
+              type: 'text',
+              media_type: 'text/plain',
+              data: Buffer.from(att.data, 'base64').toString('utf-8'),
+            },
+            title: att.filename,
+          });
+        } else {
+          // Image (default) → image block
+          contentBlocks.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: att.mimeType,
+              data: att.data,
+            },
+          });
+        }
       }
     }
 
