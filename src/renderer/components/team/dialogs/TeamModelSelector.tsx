@@ -101,7 +101,7 @@ export function computeEffectiveTeamModel(
   const base = selectedModel || undefined;
   if (limitContext) return base;
   if (base === 'haiku') return base;
-  return base ? `${base}[1m]` : 'sonnet[1m]';
+  return base ? `${base}[1m]` : 'opus[1m]';
 }
 
 export interface TeamModelSelectorProps {

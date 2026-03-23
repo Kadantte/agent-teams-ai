@@ -130,6 +130,7 @@ export const TeamProvisioningBanner = ({
           key={progress.runId}
           title="Launch details"
           message={progress.message}
+          messageSeverity={progress.messageSeverity}
           currentStepIndex={progressStepIndex >= 0 ? progressStepIndex : -1}
           startedAt={progress.startedAt}
           pid={progress.pid}
@@ -149,6 +150,7 @@ export const TeamProvisioningBanner = ({
           key={progress.runId}
           title="Launching team"
           message={progress.message}
+          messageSeverity={progress.messageSeverity}
           currentStepIndex={progressStepIndex >= 0 ? progressStepIndex : -1}
           loading
           startedAt={progress.startedAt}

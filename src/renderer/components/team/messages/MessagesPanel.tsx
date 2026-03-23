@@ -577,24 +577,22 @@ export const MessagesPanel = memo(function MessagesPanel({
         ) : undefined
       }
       headerExtra={
-        <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="pointer-events-auto size-6 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTogglePosition();
-                }}
-              >
-                <PanelLeft size={14} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Move to sidebar</TooltipContent>
-          </Tooltip>
-        </>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="pointer-events-auto size-6 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+              onClick={(e) => {
+                e.stopPropagation();
+                onTogglePosition();
+              }}
+            >
+              <PanelLeft size={14} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">Move to sidebar</TooltipContent>
+        </Tooltip>
       }
       defaultOpen
       action={<div className="flex items-center gap-2 px-2">{searchAndFilterBar}</div>}

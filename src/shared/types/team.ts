@@ -368,7 +368,7 @@ export type MemberStatus = 'active' | 'idle' | 'terminated' | 'unknown';
  * - online: tool_result received, agent is active
  * - error: spawn failed (tool_result with error)
  */
-export type MemberSpawnStatus = 'offline' | 'spawning' | 'online' | 'error';
+export type MemberSpawnStatus = 'offline' | 'waiting' | 'spawning' | 'online' | 'error';
 
 export type KanbanColumnId = 'todo' | 'in_progress' | 'done' | 'review' | 'approved';
 
@@ -604,6 +604,8 @@ export interface TeamProvisioningProgress {
   teamName: string;
   state: Exclude<TeamProvisioningState, 'idle'>;
   message: string;
+  /** Visual severity for the message subtitle: 'error' (red), 'warning' (amber), or default (muted). */
+  messageSeverity?: 'error' | 'warning';
   startedAt: string;
   updatedAt: string;
   pid?: number;

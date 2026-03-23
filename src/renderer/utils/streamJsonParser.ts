@@ -251,8 +251,17 @@ export function parseStreamJsonToGroups(cliLogsTail: string): StreamJsonGroup[] 
     try {
       parsed = JSON.parse(trimmed);
     } catch {
-      // Non-JSON line (truncated, marker, etc.) — flush and skip
-      flushGroup();
+      // Non-JSON line (stderr debug output, truncated data, etc.)
+      // Show as raw output so the user can see CLI stderr activity.
+      if (trimmed.length > 0) {
+        if (!currentTimestamp) currentTimestamp = new Date();
+        if (!currentGroupId) currentGroupId = `stderr-${groups.length}-${lineIndex}`;
+        currentItems.push({
+          type: 'output',
+          content: trimmed,
+          timestamp: currentTimestamp,
+        });
+      }
       continue;
     }
 

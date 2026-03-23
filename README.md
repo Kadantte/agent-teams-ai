@@ -5,7 +5,7 @@
   <a href="docs/screenshots/8.png"><img src="docs/screenshots/8.png" width="75" alt="Task Detail" /></a>&nbsp;
   <img src="resources/icons/png/1024x1024.png" alt="Claude Agent Teams UI" width="80" />&nbsp;
   <a href="docs/screenshots/9.png"><img src="docs/screenshots/9.png" width="75" alt="Execution Logs" /></a>&nbsp;
-  <a href="docs/screenshots/3.jpg"><img src="docs/screenshots/3.jpg" width="75" alt="Agent Comments" /></a>&nbsp;
+  <a href="docs/screenshots/3.jpg"><img src="docs/screenshots/3.png" width="75" alt="Agent Comments" /></a>&nbsp;
   <a href="docs/screenshots/4.png"><img src="docs/screenshots/4.png" width="75" alt="Create Team" /></a>&nbsp;
   <a href="docs/screenshots/6.png"><img src="docs/screenshots/6.png" width="65" alt="Settings" /></a>
 </p>
@@ -76,14 +76,20 @@ No prerequisites — Claude Code can be installed and configured directly from t
 
 ## Table of contents
 
+- [Installation](#installation)
+- [Table of contents](#table-of-contents)
 - [What is this](#what-is-this)
 - [Comparison](#comparison)
 - [Quick start](#quick-start)
 - [FAQ](#faq)
-- [Roadmap](#roadmap)
 - [Development](#development)
 - [Tech stack](#tech-stack)
+  - [Build for distribution](#build-for-distribution)
+  - [Scripts](#scripts)
+- [Roadmap](#roadmap)
 - [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
 
 ## What is this
 
@@ -149,7 +155,7 @@ A new approach to task management with AI agent teams.
 | **Hunk-level review** | ✅ Accept / reject individual hunks | ❌ | ❌ | ✅ | ❌ |
 | **Built-in code editor** | ✅ With Git support | ❌ | ❌ | ✅ Full IDE | ❌ |
 | **Full autonomy** | ✅ Agents create, assign, review tasks end-to-end | ❌ Human manages tasks | ❌ Fixed pipeline | ⚠️ Isolated tasks only | ✅⚠️ (no UI) |
-| **Task dependencies (blocked by)** | ✅ Guaranteed ordering | ❌ | ⚠️ Within plan only | ❌ | ✅⚠️ (no UI) |
+| **Task dependencies (blocked by)** | ✅ Guaranteed ordering | ❌ | ⚠️ Within plan only | ❌ | ✅⚠️ (no UI, no notifications) |
 | **Review workflow** | ✅ Agents review each other | ❌ | ⚠️ Auto QA pipeline | ❌ | ✅⚠️ (no UI) |
 | **Zero setup** | ✅ | ❌ Config required | ❌ Config required | ✅ | ⚠️ CLI install required |
 | **Kanban board** | ✅ 5 columns, real-time | ✅ | ✅ 6 columns (pipeline) | ❌ | ❌ |

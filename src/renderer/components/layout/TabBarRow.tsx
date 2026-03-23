@@ -35,7 +35,7 @@ export const TabBarRow = (): React.JSX.Element => {
       style={
         {
           height: `${HEADER_ROW1_HEIGHT}px`,
-          backgroundColor: 'var(--color-surface)',
+          backgroundColor: 'var(--color-surface-sidebar)',
           borderBottom: '1px solid var(--color-border)',
           WebkitAppRegion: isMacElectron ? 'drag' : undefined,
         } as React.CSSProperties

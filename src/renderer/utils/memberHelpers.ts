@@ -41,12 +41,18 @@ export function getMemberDotClass(
   leadActivity?: LeadActivityState
 ): string {
   if (member.status === 'terminated') return STATUS_DOT_COLORS.terminated;
+  if (member.removedAt) return STATUS_DOT_COLORS.terminated;
   if (isTeamProvisioning) return STATUS_DOT_COLORS.unknown;
   if (isTeamAlive === false) return STATUS_DOT_COLORS.terminated;
   if (leadActivity && isLeadMember(member)) {
     return leadActivity === 'active'
       ? `${STATUS_DOT_COLORS.active} animate-pulse`
       : STATUS_DOT_COLORS.active;
+  }
+  // When team is alive, all non-terminated members are online
+  if (isTeamAlive) {
+    if (member.currentTaskId) return `${STATUS_DOT_COLORS.active} animate-pulse`;
+    return STATUS_DOT_COLORS.active;
   }
   if (member.status === 'unknown') return STATUS_DOT_COLORS.unknown;
   if (member.currentTaskId) return STATUS_DOT_COLORS.active;
@@ -81,13 +87,15 @@ export function getPresenceLabel(
 
 export const SPAWN_DOT_COLORS: Record<MemberSpawnStatus, string> = {
   offline: 'bg-zinc-600',
-  spawning: 'bg-amber-400 animate-pulse',
-  online: 'bg-emerald-400',
+  waiting: 'bg-zinc-400 animate-pulse',
+  spawning: 'bg-amber-400',
+  online: 'bg-emerald-400 animate-[dot-online-jelly_0.45s_ease-out]',
   error: 'bg-red-400',
 };
 
 export const SPAWN_PRESENCE_LABELS: Record<MemberSpawnStatus, string> = {
   offline: 'offline',
+  waiting: 'waiting',
   spawning: 'spawning',
   online: 'online',
   error: 'spawn failed',
@@ -134,8 +142,10 @@ export function getSpawnCardClass(spawnStatus: MemberSpawnStatus | undefined): s
   switch (spawnStatus) {
     case 'offline':
       return 'opacity-40';
+    case 'waiting':
+      return 'member-waiting-shimmer';
     case 'spawning':
-      return 'opacity-70 animate-[member-spawn-pulse_2s_ease-in-out_infinite]';
+      return '';
     case 'online':
       return 'animate-[member-fade-in_0.4s_ease-out]';
     case 'error':

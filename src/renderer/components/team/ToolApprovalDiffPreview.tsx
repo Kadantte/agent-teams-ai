@@ -123,7 +123,7 @@ export const ToolApprovalDiffPreview: React.FC<ToolApprovalDiffPreviewProps> = (
         <div className="mt-2">
           {diff.loading && (
             <div
-              className="flex items-center gap-2 rounded-md border px-3 py-3 text-xs"
+              className="flex items-center gap-2 rounded-md border p-3 text-xs"
               style={{
                 backgroundColor: 'var(--color-surface)',
                 borderColor: 'var(--color-border)',

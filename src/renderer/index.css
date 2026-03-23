@@ -964,6 +964,71 @@ body {
   }
 }
 
+/* Skeleton-style shimmer for waiting members: a translucent light sweep */
+.member-waiting-shimmer {
+  position: relative;
+  overflow: hidden;
+  opacity: 0.65;
+}
+.member-waiting-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 45%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.06) 55%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: member-shimmer-sweep 2s ease-in-out infinite;
+  pointer-events: none;
+  border-radius: inherit;
+}
+:root.light .member-waiting-shimmer::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.04) 45%,
+    rgba(0, 0, 0, 0.07) 50%,
+    rgba(0, 0, 0, 0.04) 55%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: member-shimmer-sweep 2s ease-in-out infinite;
+}
+@keyframes member-shimmer-sweep {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes dot-online-jelly {
+  0% {
+    transform: scale(1);
+  }
+  25% {
+    transform: scale(1.6);
+  }
+  45% {
+    transform: scale(0.85);
+  }
+  65% {
+    transform: scale(1.15);
+  }
+  80% {
+    transform: scale(0.95);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 @keyframes member-fade-in {
   from {
     opacity: 0;

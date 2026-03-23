@@ -26,7 +26,7 @@ export function linkifyMentionsInMarkdown(
   const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const pattern = new RegExp(
     // eslint-disable-next-line no-useless-escape -- backslash-quote and backslash-hyphen needed in template literal for RegExp
-    `(^|[\\s(\\[{"\'])@(${escaped.join('|')})(?=[\\s,.:;!?)\\]}\-]|$)`,
+    `(^|[\\s(\\[{"\'])@(${escaped.join('|')})(?=[\\s,.:;!?)\\]}'\u2019-]|$)`,
     'gi'
   );
 
@@ -58,7 +58,7 @@ export function linkifyTeamMentionsInMarkdown(
   const escaped = sorted.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const pattern = new RegExp(
     // eslint-disable-next-line no-useless-escape -- backslash-quote and backslash-hyphen needed in template literal for RegExp
-    `(^|[\\s(\\[{"\'])@(${escaped.join('|')})(?=[\\s,.:;!?)\\]}\-]|$)`,
+    `(^|[\\s(\\[{"\'])@(${escaped.join('|')})(?=[\\s,.:;!?)\\]}'\u2019-]|$)`,
     'gi'
   );
 

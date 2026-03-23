@@ -23,6 +23,8 @@ export interface ProvisioningProgressBlockProps {
   title: string;
   /** Optional status message */
   message?: string | null;
+  /** Visual severity for the message subtitle */
+  messageSeverity?: 'error' | 'warning';
   /** Visual tone (e.g. highlight errors) */
   tone?: 'default' | 'error';
   /** Whether Live output is expanded by default */
@@ -118,6 +120,7 @@ function sanitizeAssistantOutput(raw?: string, isError = false): string | null {
 export const ProvisioningProgressBlock = ({
   title,
   message,
+  messageSeverity,
   tone = 'default',
   defaultLiveOutputOpen = true,
   currentStepIndex,
@@ -218,7 +221,11 @@ export const ProvisioningProgressBlock = ({
         <p
           className={cn(
             'mt-1.5 text-xs',
-            isError ? 'text-[var(--step-error-text)]' : 'text-[var(--color-text-muted)]'
+            isError || messageSeverity === 'error'
+              ? 'text-red-400'
+              : messageSeverity === 'warning'
+                ? 'text-amber-400'
+                : 'text-[var(--color-text-muted)]'
           )}
         >
           {message}

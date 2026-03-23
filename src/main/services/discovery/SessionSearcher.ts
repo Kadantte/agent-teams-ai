@@ -15,13 +15,13 @@ import { LocalFileSystemProvider } from '@main/services/infrastructure/LocalFile
 import { parseJsonlFile } from '@main/utils/jsonl';
 import { extractBaseDir, extractSessionId } from '@main/utils/pathDecoder';
 import { createLogger } from '@shared/utils/logger';
-
-import { startMainSpan } from '../../sentry';
 import {
   extractMarkdownPlainText,
   findMarkdownSearchMatches,
 } from '@shared/utils/markdownTextSearch';
 import * as path from 'path';
+
+import { startMainSpan } from '../../sentry';
 
 import { SearchTextCache } from './SearchTextCache';
 import { extractSearchableEntries } from './SearchTextExtractor';

@@ -750,77 +750,77 @@ export const TaskDetailDialog = ({
             </div>
           ) : null}
 
-          {/* Related tasks (explicit) */}
-          {relatedIds.length > 0 || relatedByIds.length > 0 ? (
+          {/* Related tasks & Dependencies — 2-column grid */}
+          {(relatedIds.length > 0 ||
+            relatedByIds.length > 0 ||
+            blockedByIds.length > 0 ||
+            blocksIds.length > 0) && (
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-text-muted)]">
-                <Link2 size={12} />
-                Related tasks
-              </div>
-
-              {relatedIds.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs text-[var(--color-text-muted)]">Links</span>
-                  {relatedIds.map((id) => {
-                    const depTask = taskMap.get(id);
-                    const label = depTask
-                      ? `${formatTaskDisplayLabel(depTask)}: ${depTask.subject}`
-                      : `#${deriveTaskDisplayId(id)}`;
-                    return (
-                      <Tooltip key={`related:${currentTask.id}:${id}`}>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            className="inline-flex items-center rounded bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-medium text-purple-300 transition-colors hover:bg-purple-500/25"
-                            onClick={() => handleDependencyClick(id)}
-                          >
-                            {depTask
-                              ? formatTaskDisplayLabel(depTask)
-                              : `#${deriveTaskDisplayId(id)}`}
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">{label}</TooltipContent>
-                      </Tooltip>
-                    );
-                  })}
+              {/* "Related tasks" header — only if links exist */}
+              {(relatedIds.length > 0 || relatedByIds.length > 0) && (
+                <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-text-muted)]">
+                  <Link2 size={12} />
+                  Related tasks
                 </div>
-              ) : null}
+              )}
 
-              {relatedByIds.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs text-[var(--color-text-muted)]">Linked from</span>
-                  {relatedByIds.map((id) => {
-                    const depTask = taskMap.get(id);
-                    const label = depTask
-                      ? `${formatTaskDisplayLabel(depTask)}: ${depTask.subject}`
-                      : `#${deriveTaskDisplayId(id)}`;
-                    return (
-                      <Tooltip key={`related-by:${currentTask.id}:${id}`}>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            className="inline-flex items-center rounded bg-fuchsia-500/15 px-1.5 py-0.5 text-[10px] font-medium text-fuchsia-300 transition-colors hover:bg-fuchsia-500/25"
-                            onClick={() => handleDependencyClick(id)}
-                          >
-                            {depTask
-                              ? formatTaskDisplayLabel(depTask)
-                              : `#${deriveTaskDisplayId(id)}`}
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">{label}</TooltipContent>
-                      </Tooltip>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                {relatedIds.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-[var(--color-text-muted)]">Links</span>
+                    {relatedIds.map((id) => {
+                      const depTask = taskMap.get(id);
+                      const label = depTask
+                        ? `${formatTaskDisplayLabel(depTask)}: ${depTask.subject}`
+                        : `#${deriveTaskDisplayId(id)}`;
+                      return (
+                        <Tooltip key={`related:${currentTask.id}:${id}`}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex items-center rounded bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-medium text-purple-300 transition-colors hover:bg-purple-500/25"
+                              onClick={() => handleDependencyClick(id)}
+                            >
+                              {depTask
+                                ? formatTaskDisplayLabel(depTask)
+                                : `#${deriveTaskDisplayId(id)}`}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{label}</TooltipContent>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                ) : null}
 
-          {/* Sections container with uniform spacing */}
-          <div className="min-w-0 space-y-1">
-            {/* Dependencies */}
-            {blockedByIds.length > 0 || blocksIds.length > 0 ? (
-              <div className="space-y-1">
+                {relatedByIds.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-[var(--color-text-muted)]">Linked from</span>
+                    {relatedByIds.map((id) => {
+                      const depTask = taskMap.get(id);
+                      const label = depTask
+                        ? `${formatTaskDisplayLabel(depTask)}: ${depTask.subject}`
+                        : `#${deriveTaskDisplayId(id)}`;
+                      return (
+                        <Tooltip key={`related-by:${currentTask.id}:${id}`}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex items-center rounded bg-fuchsia-500/15 px-1.5 py-0.5 text-[10px] font-medium text-fuchsia-300 transition-colors hover:bg-fuchsia-500/25"
+                              onClick={() => handleDependencyClick(id)}
+                            >
+                              {depTask
+                                ? formatTaskDisplayLabel(depTask)
+                                : `#${deriveTaskDisplayId(id)}`}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{label}</TooltipContent>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
                 {blockedByIds.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="inline-flex items-center gap-0.5 text-xs text-yellow-700 dark:text-yellow-300">
@@ -893,8 +893,11 @@ export const TaskDetailDialog = ({
                   </div>
                 ) : null}
               </div>
-            ) : null}
+            </div>
+          )}
 
+          {/* Sections container with uniform spacing */}
+          <div className="min-w-0 space-y-1">
             {/* Description */}
             <CollapsibleTeamSection
               title="Description"

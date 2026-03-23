@@ -17,8 +17,8 @@
  * - config:testTrigger: Test a trigger against historical session data
  */
 
-import { getAutoDetectedClaudeBasePath, getClaudeBasePath } from '@main/utils/pathDecoder';
 import { syncTelemetryFlag } from '@main/sentry';
+import { getAutoDetectedClaudeBasePath, getClaudeBasePath } from '@main/utils/pathDecoder';
 import { getErrorMessage } from '@shared/utils/errorHandling';
 import { createLogger } from '@shared/utils/logger';
 import { execFile } from 'child_process';

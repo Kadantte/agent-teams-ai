@@ -40,6 +40,7 @@ import { calculateMetrics } from '@main/utils/jsonl';
 import { createLogger } from '@shared/utils/logger';
 
 import { startMainSpan } from '../../sentry';
+
 import type { WaterfallData, WaterfallItem } from '@shared/types';
 
 const logger = createLogger('Service:ChunkBuilder');

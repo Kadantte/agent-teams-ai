@@ -27,12 +27,22 @@ import { useShallow } from 'zustand/react/shallow';
 const logger = createLogger('Component:DashboardView');
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
-import { Command, FolderGit2, FolderOpen, GitBranch, GitFork, Search, Users } from 'lucide-react';
+import {
+  Command,
+  FolderGit2,
+  FolderOpen,
+  GitBranch,
+  GitFork,
+  Search,
+  Terminal,
+  Users,
+} from 'lucide-react';
 
 import { CliStatusBanner } from './CliStatusBanner';
 import { DashboardUpdateBanner } from './DashboardUpdateBanner';
 
 import type { RepositoryGroup } from '@renderer/types/data';
+import type { TeamSummary } from '@shared/types';
 
 // =============================================================================
 // Command Search Input
@@ -134,6 +144,7 @@ interface RepositoryCardProps {
   isHighlighted?: boolean;
   taskCounts?: TaskStatusCounts;
   tasksLoading?: boolean;
+  activeTeams?: TeamSummary[];
 }
 
 const RepositoryCard = ({
@@ -142,6 +153,7 @@ const RepositoryCard = ({
   isHighlighted,
   taskCounts,
   tasksLoading,
+  activeTeams,
 }: Readonly<RepositoryCardProps>): React.JSX.Element => {
   const lastActivity = repo.mostRecentSession
     ? formatDistanceToNow(new Date(repo.mostRecentSession), { addSuffix: true })
@@ -223,6 +235,14 @@ const RepositoryCard = ({
         boxShadow: isHovered ? `inset 3px 0 12px -4px ${color.glow}` : undefined,
       }}
     >
+      {/* Online indicator — top-right corner */}
+      {activeTeams && activeTeams.length > 0 && (
+        <span className="absolute right-3 top-3 inline-flex size-2.5">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50" />
+          <span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" />
+        </span>
+      )}
+
       {/* Icon + Project name */}
       <div className="mb-1 flex items-center gap-2.5">
         <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-overlay transition-colors duration-300 group-hover:border-border-emphasis">
@@ -367,6 +387,21 @@ const RepositoryCard = ({
             </div>
           );
         })()
+      )}
+
+      {/* Active teams running in this project */}
+      {activeTeams && activeTeams.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
+          <Terminal className="size-3 shrink-0 text-emerald-400" />
+          {activeTeams.map((t) => (
+            <span
+              key={t.teamName}
+              className="inline-flex items-center rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium text-emerald-400"
+            >
+              {t.displayName}
+            </span>
+          ))}
+        </div>
       )}
     </button>
   );
@@ -518,6 +553,7 @@ const ProjectsGrid = ({
     globalTasksLoading,
     fetchAllTasks,
     openTeamsTab,
+    teams,
   } = useStore(
     useShallow((s) => ({
       repositoryGroups: s.repositoryGroups,
@@ -529,11 +565,13 @@ const ProjectsGrid = ({
       globalTasksLoading: s.globalTasksLoading,
       fetchAllTasks: s.fetchAllTasks,
       openTeamsTab: s.openTeamsTab,
+      teams: s.teams,
     }))
   );
 
   const hasFetchedTasksRef = React.useRef(false);
   const [visibleProjects, setVisibleProjects] = useState(maxProjects);
+  const [aliveTeams, setAliveTeams] = useState<string[]>([]);
 
   useEffect(() => {
     if (repositoryGroups.length === 0 && !repositoryGroupsLoading && !repositoryGroupsError) {
@@ -552,6 +590,37 @@ const ProjectsGrid = ({
       void fetchAllTasks();
     }
   }, [repositoryGroups.length, repositoryGroupsLoading, fetchAllTasks]);
+
+  // Fetch alive teams for online indicators
+  useEffect(() => {
+    let cancelled = false;
+    void api.teams
+      .aliveList()
+      .then((list) => {
+        if (!cancelled) setAliveTeams(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [teams]);
+
+  // Map: normalizedProjectPath → alive TeamSummary[]
+  const activeTeamsByProject = useMemo(() => {
+    const aliveSet = new Set(aliveTeams);
+    const map = new Map<string, TeamSummary[]>();
+    for (const team of teams) {
+      if (!aliveSet.has(team.teamName) || !team.projectPath) continue;
+      const key = normalizePath(team.projectPath);
+      const arr = map.get(key);
+      if (arr) {
+        arr.push(team);
+      } else {
+        map.set(key, [team]);
+      }
+    }
+    return map;
+  }, [teams, aliveTeams]);
 
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -699,6 +768,20 @@ const ProjectsGrid = ({
             },
             { pending: 0, inProgress: 0, completed: 0 }
           );
+          // Collect active teams for this project (deduplicated by teamName)
+          const seen = new Set<string>();
+          const repoActiveTeams: TeamSummary[] = [];
+          for (const wt of repo.worktrees) {
+            const matched = activeTeamsByProject.get(normalizePath(wt.path));
+            if (matched) {
+              for (const t of matched) {
+                if (!seen.has(t.teamName)) {
+                  seen.add(t.teamName);
+                  repoActiveTeams.push(t);
+                }
+              }
+            }
+          }
           return (
             <RepositoryCard
               key={repo.id}
@@ -710,6 +793,7 @@ const ProjectsGrid = ({
               isHighlighted={!!searchQuery.trim()}
               taskCounts={globalTasksLoading ? undefined : counts}
               tasksLoading={globalTasksLoading}
+              activeTeams={repoActiveTeams.length > 0 ? repoActiveTeams : undefined}
             />
           );
         })}

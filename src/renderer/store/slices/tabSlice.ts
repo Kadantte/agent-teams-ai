@@ -6,6 +6,7 @@
  * for backward compatibility.
  */
 
+import { addNavigationBreadcrumb } from '@renderer/sentry';
 import {
   createSearchNavigationRequest,
   findTabBySession,
@@ -13,7 +14,6 @@ import {
   truncateLabel,
 } from '@renderer/types/tabs';
 import { normalizePath } from '@renderer/utils/pathNormalize';
-import { addNavigationBreadcrumb } from '@renderer/sentry';
 
 import {
   findPane,

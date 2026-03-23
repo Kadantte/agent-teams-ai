@@ -111,24 +111,47 @@ function renderMemberChips(members: TeamSummaryMember[], isLight: boolean): Reac
   );
 }
 
-function renderTeamRecentPaths(team: TeamSummary, status: TeamStatus): React.JSX.Element | null {
+function renderTeamRecentPaths(
+  team: TeamSummary,
+  status: TeamStatus,
+  matchesCurrentProject: boolean,
+  isLight: boolean
+): React.JSX.Element | null {
   const recentPaths = getRecentProjects(team);
   if (recentPaths.length === 0) return null;
   return (
     <div className="mt-2 flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
-      <FolderOpen size={10} className="shrink-0" />
-      <span className="truncate">
-        {recentPaths.map((p, i) => (
-          <span key={p} title={p}>
-            {i === 0 && (status === 'active' || status === 'idle') ? (
-              <span className="text-emerald-400">{folderName(p)}</span>
-            ) : (
-              folderName(p)
-            )}
-            {i < recentPaths.length - 1 ? ', ' : ''}
+      {matchesCurrentProject ? (
+        <span
+          className={`inline-flex items-center gap-1 truncate rounded-full px-2 py-0.5 text-[12px] font-medium ${
+            isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-500/15 text-emerald-400'
+          }`}
+        >
+          <FolderOpen size={12} className="shrink-0" />
+          {recentPaths.map((p, i) => (
+            <span key={p} title={p}>
+              {folderName(p)}
+              {i < recentPaths.length - 1 ? ', ' : ''}
+            </span>
+          ))}
+        </span>
+      ) : (
+        <>
+          <FolderOpen size={10} className="shrink-0" />
+          <span className="truncate">
+            {recentPaths.map((p, i) => (
+              <span key={p} title={p}>
+                {i === 0 && (status === 'active' || status === 'idle') ? (
+                  <span className="text-emerald-400">{folderName(p)}</span>
+                ) : (
+                  folderName(p)
+                )}
+                {i < recentPaths.length - 1 ? ', ' : ''}
+              </span>
+            ))}
           </span>
-        ))}
-      </span>
+        </>
+      )}
     </div>
   );
 }
@@ -771,11 +794,7 @@ export const TeamListView = (): React.JSX.Element => {
                 key={team.teamName}
                 role="button"
                 tabIndex={0}
-                className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-[var(--color-surface)] p-4 hover:bg-[var(--color-surface-raised)] ${
-                  matchesCurrentProject
-                    ? 'border-emerald-500/70 ring-1 ring-emerald-500/30'
-                    : 'border-[var(--color-border)]'
-                }`}
+                className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:bg-[var(--color-surface-raised)]"
                 style={
                   teamColorSet
                     ? { borderLeftWidth: '3px', borderLeftColor: teamColorSet.border }
@@ -959,7 +978,7 @@ export const TeamListView = (): React.JSX.Element => {
                         </div>
                       );
                     })()}
-                    {renderTeamRecentPaths(team, status)}
+                    {renderTeamRecentPaths(team, status, matchesCurrentProject, isLight)}
                   </div>
                 </div>
               </div>
