@@ -16,6 +16,18 @@
  */
 
 import {
+  AUTO_CLAUDE_DIR,
+  CCSWITCH_DIR,
+  CLAUDE_CODE_DIR,
+  CLAUDE_WORKTREES_DIR,
+  CONDUCTOR_DIR,
+  CURSOR_DIR,
+  TWENTYFIRST_DIR,
+  VIBE_KANBAN_DIR,
+  WORKSPACES_DIR,
+  WORKTREES_DIR,
+} from '@main/constants/worktreePatterns';
+import {
   type PaginatedSessionsResult,
   type Project,
   type RepositoryGroup,
@@ -46,19 +58,7 @@ import {
 import { createLogger } from '@shared/utils/logger';
 import * as path from 'path';
 
-import {
-  AUTO_CLAUDE_DIR,
-  CCSWITCH_DIR,
-  CLAUDE_CODE_DIR,
-  CLAUDE_WORKTREES_DIR,
-  CONDUCTOR_DIR,
-  CURSOR_DIR,
-  TWENTYFIRST_DIR,
-  VIBE_KANBAN_DIR,
-  WORKSPACES_DIR,
-  WORKTREES_DIR,
-} from '@main/constants/worktreePatterns';
-
+import { configManager } from '../infrastructure/ConfigManager';
 import { LocalFileSystemProvider } from '../infrastructure/LocalFileSystemProvider';
 
 import { ProjectPathResolver } from './ProjectPathResolver';
@@ -310,7 +310,6 @@ export class ProjectScanner {
       });
 
       // 3. Merge custom project paths from config (persisted "Select Folder" picks)
-      const { configManager } = await import('../infrastructure/ConfigManager');
       const customPaths = configManager.getCustomProjectPaths();
       const existingPaths = new Set(groups.flatMap((g) => g.worktrees.map((w) => w.path)));
 

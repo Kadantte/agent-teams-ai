@@ -8,11 +8,10 @@
  * can find the tools they need and authenticate properly.
  */
 
-import { userInfo } from 'os';
-
 import { buildMergedCliPath } from '@main/utils/cliPathMerge';
 import { getClaudeBasePath } from '@main/utils/pathDecoder';
 import { getCachedShellEnv, getShellPreferredHome } from '@main/utils/shellEnv';
+import { userInfo } from 'os';
 
 export function buildEnrichedEnv(binaryPath?: string | null): NodeJS.ProcessEnv {
   const shellEnv = getCachedShellEnv();
