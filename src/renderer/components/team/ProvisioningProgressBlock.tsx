@@ -205,7 +205,7 @@ export const ProvisioningProgressBlock = ({
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 w-6 shrink-0 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              className="size-6 shrink-0 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               onClick={onDismiss}
             >
               <X size={12} />
@@ -217,7 +217,7 @@ export const ProvisioningProgressBlock = ({
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 w-6 shrink-0 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            className="size-6 shrink-0 p-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             onClick={onDismiss}
           >
             <X size={12} />

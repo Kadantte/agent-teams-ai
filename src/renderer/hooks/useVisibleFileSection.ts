@@ -3,7 +3,7 @@ import { type RefObject, useCallback, useEffect, useRef } from 'react';
 interface UseVisibleFileSectionOptions {
   onVisibleFileChange: (filePath: string) => void;
   scrollContainerRef: RefObject<HTMLElement | null>;
-  isProgrammaticScroll: RefObject<boolean>;
+  isProgrammaticScroll: RefObject<boolean | null>;
 }
 
 interface UseVisibleFileSectionReturn {
@@ -18,7 +18,7 @@ export function useVisibleFileSection(
   const visibleFilePaths = useRef<Set<string>>(new Set());
   const elementRefs = useRef<Map<string, HTMLElement>>(new Map());
   const observerRef = useRef<IntersectionObserver | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const updateTopmostVisible = useCallback(() => {
     if (isProgrammaticScroll.current) return;

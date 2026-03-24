@@ -401,7 +401,7 @@ export class SkillPlanService {
         if (entries.length > 0) {
           return;
         }
-        await fs.rmdir(nextDir);
+        await fs.rm(nextDir, { recursive: true });
       } catch {
         return;
       }

@@ -1,6 +1,5 @@
-import React from 'react';
+import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { act } from 'react-dom/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useVisibleAIGroup } from '../../../src/renderer/hooks/useVisibleAIGroup';
@@ -23,8 +22,9 @@ describe('useVisibleAIGroup', () => {
   });
 
   it('uses provided rootRef as IntersectionObserver root', async () => {
-    const observerSpy = vi.fn((cb: IntersectionObserverCallback, opts?: IntersectionObserverInit) =>
-      new FakeIntersectionObserver(cb, opts)
+    const observerSpy = vi.fn(
+      (cb: IntersectionObserverCallback, opts?: IntersectionObserverInit) =>
+        new FakeIntersectionObserver(cb, opts)
     );
 
     vi.stubGlobal('IntersectionObserver', observerSpy as unknown as typeof IntersectionObserver);

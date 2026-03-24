@@ -21,7 +21,7 @@ Key capabilities:
 100% free, open source. No API keys. No configuration. Runs entirely locally.
 
 ## Tech Stack
-Electron 28.x, React 18.x, TypeScript 5.x, Tailwind CSS 3.x, Zustand 4.x
+Electron 40.x, React 19.x, TypeScript 5.x, Tailwind CSS 3.x, Zustand 4.x
 
 ## Commands
 Always use pnpm (not npm/yarn) for this project.

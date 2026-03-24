@@ -363,12 +363,24 @@ export const MemberLogsTab = ({
 
   const previewOnline = useMemo((): boolean => {
     if (!previewLog) return false;
-    // Primary signal: the session file is still being written to
-    if (previewLog.isOngoing) return true;
-    // Secondary: check message freshness with generous windows
+    // Determine the most recent activity timestamp from preview messages
     const newest = previewMessages[0];
+    const newestMs = newest ? newest.timestamp.getTime() : 0;
+    // Fallback: use session start time when no preview messages exist
+    const lastActivityMs = newestMs || new Date(previewLog.startTime).getTime() || 0;
+    if (!lastActivityMs) return false;
+    const ageMs = Date.now() - lastActivityMs;
+    // isOngoing (file still being written) grants a longer freshness window,
+    // but does NOT bypass age checks — the file may be updated by system messages
+    // even while the agent is idle
+    if (previewLog.isOngoing) {
+      // Ongoing + in_progress: generous 3-minute window
+      if (taskStatus === 'in_progress') return ageMs <= 180_000;
+      // Ongoing + other status: moderate window
+      return ageMs <= 60_000;
+    }
+    // Not ongoing: check message freshness with tighter windows
     if (!newest) return false;
-    const ageMs = Date.now() - newest.timestamp.getTime();
     // Task actively in progress — agent may pause between visible outputs
     if (taskStatus === 'in_progress') return ageMs <= 60_000;
     // Completed/other tasks — shorter window

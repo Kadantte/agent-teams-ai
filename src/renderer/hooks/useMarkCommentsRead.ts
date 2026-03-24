@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useCallback, useRef } from 'react';
 
 /**
  * Provides a stable ref callback for the comments container.
@@ -19,9 +19,9 @@ export function useMarkCommentsRead(
   const nodeRef = useRef<HTMLElement | null>(null);
 
   // Stable ref callback (no dependencies — just stores the node)
-  const refCallback = useRef((node: HTMLElement | null) => {
+  const refCallback = useCallback((node: HTMLElement | null) => {
     nodeRef.current = node;
-  }).current;
+  }, []);
 
   return refCallback;
 }

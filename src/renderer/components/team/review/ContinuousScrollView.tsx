@@ -59,9 +59,9 @@ interface ContinuousScrollViewProps {
   collapsedFiles?: Set<string>;
   onToggleCollapse?: (filePath: string) => void;
   onVisibleFileChange: (filePath: string) => void;
-  scrollContainerRef: React.RefObject<HTMLDivElement>;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
   editorViewMapRef: React.MutableRefObject<Map<string, EditorView>>;
-  isProgrammaticScroll: React.RefObject<boolean>;
+  isProgrammaticScroll: React.RefObject<boolean | null>;
   teamName: string;
   memberName: string | undefined;
   fetchFileContent: (

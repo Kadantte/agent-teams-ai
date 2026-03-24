@@ -108,6 +108,13 @@ import type { TeamChangeEvent } from '@shared/types';
 const logger = createLogger('App');
 startEventLoopLagMonitor();
 
+// Windows: set AppUserModelId early so native notifications show the correct
+// application title instead of the default "electron.app.{name}" identifier.
+// Must match the appId in electron-builder config (package.json → build.appId).
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.agent-teams.app');
+}
+
 // --- Team message notification tracking ---
 const teamInboxReader = new TeamInboxReader();
 const sentMessagesStore = new TeamSentMessagesStore();

@@ -19,6 +19,7 @@
 
 import { execCli, killProcessTree, spawnCli } from '@main/utils/childProcess';
 import { appendCliAuthDiag } from '@main/utils/cliAuthDiagLog';
+import { buildEnrichedEnv } from '@main/utils/cliEnv';
 import { buildMergedCliPath } from '@main/utils/cliPathMerge';
 import { getClaudeBasePath, getHomeDir } from '@main/utils/pathDecoder';
 import {
@@ -81,20 +82,6 @@ const AUTH_STATUS_MAX_RETRIES = 2;
 
 /** Delay before retrying auth status check (ms) — gives previous process time to clean up */
 const AUTH_STATUS_RETRY_DELAY_MS = 1500;
-
-/**
- * Build env for child processes with correct HOME and enriched PATH.
- * PATH merging lives in `cliPathMerge.ts` (shared with binary discovery).
- */
-function buildChildEnv(binaryPath?: string | null): NodeJS.ProcessEnv {
-  const home = getShellPreferredHome();
-  return {
-    ...process.env,
-    HOME: home,
-    USERPROFILE: home,
-    PATH: buildMergedCliPath(binaryPath),
-  };
-}
 
 /** `claude auth status` may prefix stderr noise or warnings; extract the JSON object. */
 function parseClaudeAuthStatusStdout(stdout: string): { loggedIn?: boolean; authMethod?: string } {
@@ -379,12 +366,7 @@ export class CliInstallerService {
    * Env for CLI subprocesses: login-shell vars + consistent HOME/PATH + same config root as the app.
    */
   private envForCli(binaryPath: string): NodeJS.ProcessEnv {
-    return {
-      ...process.env,
-      ...(getCachedShellEnv() ?? {}),
-      ...buildChildEnv(binaryPath),
-      CLAUDE_CONFIG_DIR: getClaudeBasePath(),
-    };
+    return buildEnrichedEnv(binaryPath);
   }
 
   // ---------------------------------------------------------------------------

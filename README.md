@@ -243,7 +243,7 @@ Yes. Run multiple teams in one project or across different projects, even simult
 
 ## Tech stack
 
-Electron 40, React 18, TypeScript 5, Tailwind CSS 3, Zustand 4. Data from `~/.claude/` (session logs, todos, tasks). No cloud backend — everything runs locally.
+Electron 40, React 19, TypeScript 5, Tailwind CSS 3, Zustand 4. Data from `~/.claude/` (session logs, todos, tasks). No cloud backend — everything runs locally.
 
 <details>
 <summary><strong>Build from source</strong></summary>
@@ -295,14 +295,13 @@ pnpm dist            # macOS + Windows + Linux
 
 ## Roadmap
 
-- [ ] CLI runtime: Run not only on a local PC but in any headless/console environment (web UI), e.g. VPS, remote server, etc.
-- [ ] Remote agent execution via SSH: launch and manage agent teams on remote machines over SSH (stream-json protocol over SSH channel, SFTP-based file monitoring for tasks/inboxes/config)
-- [ ] 2 modes: current (agent teams), and a new mode: regular subagents (no communication between them)
-- [ ] Visual workflow editor ([@xyflow/react](https://github.com/xyflow/xyflow)) for building and orchestrating agent pipelines with drag & drop
 - [ ] Planning mode to organize agent plans before execution
-- [ ] Curate what context each agent sees (files, docs, MCP servers, skills)
+- [ ] Visual workflow editor ([@xyflow/react](https://github.com/xyflow/xyflow)) for building and orchestrating agent pipelines with drag & drop
 - [ ] Multi-model support: proxy layer to use other popular LLMs (GPT, Gemini, DeepSeek, Llama, etc.), including offline/local models
-- [ ] Attach any files to messages/comments/tasks
+- [ ] Remote agent execution via SSH: launch and manage agent teams on remote machines over SSH (stream-json protocol over SSH channel, SFTP-based file monitoring for tasks/inboxes/config)
+- [ ] CLI runtime: Run not only on a local PC but in any headless/console environment (web UI), e.g. VPS, remote server, etc.
+- [ ] 2 modes: current (agent teams), and a new mode: regular subagents (no communication between them)
+- [ ] Curate what context each agent sees (files, docs, MCP servers, skills)
 - [ ] Slash commands
 
 ---

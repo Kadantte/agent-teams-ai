@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { FileIcon } from '@renderer/components/team/editor/FileIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';

@@ -47,8 +47,8 @@ export function useLazyFileContent(options: UseLazyFileContentOptions): UseLazyF
   }, []);
 
   // Refs for loadFile/processQueue to avoid circular useCallback deps
-  const loadFileRef = useRef<(fp: string) => Promise<void>>();
-  const processQueueRef = useRef<() => void>();
+  const loadFileRef = useRef<(fp: string) => Promise<void>>(undefined);
+  const processQueueRef = useRef<() => void>(undefined);
 
   loadFileRef.current = async (filePath: string) => {
     if (!shouldLoad(filePath)) return;
