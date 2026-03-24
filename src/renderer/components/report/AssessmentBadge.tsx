@@ -20,8 +20,8 @@ export const AssessmentBadge = ({ assessment, metricKey }: AssessmentBadgeProps)
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
   const badgeRef = useRef<HTMLSpanElement>(null);
-  const enterTimer = useRef<ReturnType<typeof setTimeout>>();
-  const leaveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const enterTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const handleMouseEnter = useCallback(() => {
     if (!explanation) return;

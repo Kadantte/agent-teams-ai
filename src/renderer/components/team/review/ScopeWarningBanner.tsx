@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type JSX, useState } from 'react';
 
 import { cn } from '@renderer/lib/utils';
 import { AlertTriangle, ChevronRight, Info, ShieldCheck, X } from 'lucide-react';

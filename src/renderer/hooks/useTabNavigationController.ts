@@ -64,15 +64,15 @@ interface UseTabNavigationControllerOptions {
   /** Tab ID for consuming navigation */
   tabId: string;
   /** Refs to AI group DOM elements */
-  aiGroupRefs: React.MutableRefObject<Map<string, HTMLElement>>;
+  aiGroupRefs: React.RefObject<Map<string, HTMLElement>>;
   /** Refs to individual chat item DOM elements */
-  chatItemRefs: React.MutableRefObject<Map<string, HTMLElement>>;
+  chatItemRefs: React.RefObject<Map<string, HTMLElement>>;
   /** Refs to individual tool item DOM elements */
-  toolItemRefs: React.MutableRefObject<Map<string, HTMLElement>>;
+  toolItemRefs: React.RefObject<Map<string, HTMLElement>>;
   /** Function to expand an AI group (per-tab state) */
   expandAIGroup: (groupId: string) => void;
   /** Ref to scroll container */
-  scrollContainerRef: React.RefObject<HTMLDivElement>;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
   /** Height of sticky elements at top of scroll container */
   stickyOffset?: number;
   /** Optional helper to ensure a target group is mounted (e.g., virtualized lists) */

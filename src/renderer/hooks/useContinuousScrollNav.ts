@@ -8,7 +8,7 @@ interface UseContinuousScrollNavOptions {
 
 interface UseContinuousScrollNavReturn {
   scrollToFile: (filePath: string) => void;
-  isProgrammaticScroll: RefObject<boolean>;
+  isProgrammaticScroll: RefObject<boolean | null>;
 }
 
 export function useContinuousScrollNav(

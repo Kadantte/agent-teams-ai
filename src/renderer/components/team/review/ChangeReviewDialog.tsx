@@ -150,7 +150,7 @@ export const ChangeReviewDialog = ({
   const [selectionInfo, setSelectionInfo] = useState<EditorSelectionInfo | null>(null);
   const [containerRect, setContainerRect] = useState<DOMRect>(new DOMRect());
   const diffContentRef = useRef<HTMLDivElement>(null);
-  const selectionTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const selectionTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const activeSelectionFileRef = useRef<string | null>(null);
 
   // EditorView map for all visible file editors
