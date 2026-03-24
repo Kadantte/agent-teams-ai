@@ -61,6 +61,7 @@ export function useAttachments(options?: UseAttachmentsOptions): UseAttachmentsR
   // eslint-disable-next-line react-hooks/refs -- synchronous ref sync during render is intentional to avoid stale key in callbacks
   keyRef.current = persistenceKey;
   const onUnsupportedRef = useRef(options?.onUnsupportedFiles);
+  // eslint-disable-next-line react-hooks/refs -- synchronous ref sync during render is intentional to avoid stale callback in handlers
   onUnsupportedRef.current = options?.onUnsupportedFiles;
 
   // Sync ref with state
