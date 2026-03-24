@@ -1,4 +1,4 @@
-import { Component, type ReactNode } from 'react';
+import { Component, type JSX, type ReactNode } from 'react';
 
 import { AlertTriangle } from 'lucide-react';
 

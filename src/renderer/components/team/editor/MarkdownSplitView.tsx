@@ -113,7 +113,6 @@ export const MarkdownSplitView = React.memo(function MarkdownSplitView({
           onMouseDown={handleMouseDown}
         />
       )}
-
       {/* Preview pane */}
       <div className="flex-1 overflow-hidden bg-surface">
         <MarkdownPreviewPane

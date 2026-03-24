@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 /**
  * Empty state for ChatHistory when no conversation exists.
  */

@@ -50,7 +50,7 @@ export const SearchInFilesPanel = ({
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Monotonic request ID — prevents stale results from overwriting fresh ones
   const requestIdRef = useRef(0);
 
