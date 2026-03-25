@@ -272,11 +272,13 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
     installerRawChunks,
     completedVersion,
     fetchCliStatus,
+    invalidateCliStatus,
     installCli,
     isBusy,
   } = useCliInstaller();
 
   const [showLoginTerminal, setShowLoginTerminal] = useState(false);
+  const [isVerifyingAuth, setIsVerifyingAuth] = useState(false);
 
   useEffect(() => {
     if (!isElectron) return;
@@ -526,6 +528,22 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
 
   // Installed but not logged in — yellow warning banner
   if (cliStatus.installed && !cliStatus.authLoggedIn) {
+    if (isVerifyingAuth) {
+      return (
+        <div
+          className="mb-6 flex items-center gap-3 rounded-lg border-l-4 p-4"
+          style={{
+            borderColor: VARIANT_STYLES.info.border,
+            backgroundColor: VARIANT_STYLES.info.bg,
+          }}
+        >
+          <RefreshCw className="size-4 animate-spin" style={{ color: 'var(--color-text-muted)' }} />
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            Verifying authentication...
+          </p>
+        </div>
+      );
+    }
     return (
       <>
         <div
@@ -565,10 +583,26 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
             args={['auth', 'login']}
             onClose={() => {
               setShowLoginTerminal(false);
-              void fetchCliStatus();
+              setIsVerifyingAuth(true);
+              void (async () => {
+                try {
+                  await invalidateCliStatus();
+                  await fetchCliStatus();
+                } finally {
+                  setIsVerifyingAuth(false);
+                }
+              })();
             }}
             onExit={() => {
-              void fetchCliStatus();
+              setIsVerifyingAuth(true);
+              void (async () => {
+                try {
+                  await invalidateCliStatus();
+                  await fetchCliStatus();
+                } finally {
+                  setIsVerifyingAuth(false);
+                }
+              })();
             }}
             autoCloseOnSuccessMs={4000}
             successMessage="Login complete"

@@ -405,6 +405,9 @@ export const CLI_INSTALLER_INSTALL = 'cliInstaller:install';
 /** CLI installer progress events (main -> renderer) */
 export const CLI_INSTALLER_PROGRESS = 'cliInstaller:progress';
 
+/** Invalidate cached CLI status (forces fresh check on next getStatus) */
+export const CLI_INSTALLER_INVALIDATE_STATUS = 'cliInstaller:invalidateStatus';
+
 // =============================================================================
 // Terminal API Channels
 // =============================================================================

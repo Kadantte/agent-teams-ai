@@ -10,6 +10,7 @@ import {
   APP_RELAUNCH,
   CLI_INSTALLER_GET_STATUS,
   CLI_INSTALLER_INSTALL,
+  CLI_INSTALLER_INVALIDATE_STATUS,
   CLI_INSTALLER_PROGRESS,
   CONTEXT_CHANGED,
   CONTEXT_GET_ACTIVE,
@@ -1292,6 +1293,9 @@ const electronAPI: ElectronAPI = {
     },
     install: async (): Promise<void> => {
       return invokeIpcWithResult<void>(CLI_INSTALLER_INSTALL);
+    },
+    invalidateStatus: async (): Promise<void> => {
+      return invokeIpcWithResult<void>(CLI_INSTALLER_INVALIDATE_STATUS);
     },
     onProgress: (callback: (event: unknown, data: CliInstallerProgress) => void): (() => void) => {
       ipcRenderer.on(

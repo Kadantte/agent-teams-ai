@@ -1045,6 +1045,7 @@ export class HttpAPIClient implements ElectronAPI {
     install: async (): Promise<void> => {
       console.warn('[HttpAPIClient] CLI installer not available in browser mode');
     },
+    invalidateStatus: async (): Promise<void> => {},
     onProgress: (): (() => void) => {
       return () => {};
     },
