@@ -877,6 +877,19 @@ export class TeamDataService {
       ...(shouldStart ? { startImmediately: true } : {}),
     }) as TeamTask;
 
+    // Controller's maybeNotifyAssignedOwner skips the lead (owner === lead).
+    // For user-created tasks with startImmediately, ensure the lead also gets notified.
+    if (shouldStart) {
+      try {
+        const leadName = await this.resolveLeadName(teamName);
+        if (this.isLeadOwner(task.owner!, leadName)) {
+          await this.sendUserTaskStartNotification(teamName, task);
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+
     return task;
   }
 
@@ -945,42 +958,50 @@ export class TeamDataService {
     this.getController(teamName).tasks.startTask(taskId, 'user');
 
     if (task.owner) {
-      try {
-        const parts = [
-          `**start working on task now** ${this.getTaskLabel(task)} "${task.subject}"`,
-        ];
-        if (task.description?.trim()) {
-          parts.push(`\nDetails:\n${task.description.trim()}`);
-        }
-        if (task.prompt?.trim()) {
-          parts.push(`\nInstructions:\n${task.prompt.trim()}`);
-        }
-        parts.push(
-          '',
-          wrapAgentBlock(
-            [
-              `Begin work on this task immediately. Keep it moving until it is completed or clearly blocked. Do not leave it idle.`,
-              `To fetch the full task context (description, comments, attachments) use:`,
-              `task_get { teamName: "${teamName}", taskId: "${task.id}" }`,
-              `When done, update task status:`,
-              `task_complete { teamName: "${teamName}", taskId: "${task.id}" }`,
-            ].join('\n')
-          )
-        );
-        await this.sendMessage(teamName, {
-          member: task.owner,
-          from: 'user',
-          text: parts.join('\n'),
-          taskRefs: task.descriptionTaskRefs,
-          summary: `Start working on ${this.getTaskLabel(task)}`,
-          source: 'system_notification',
-        });
-      } catch {
-        // Best-effort notification
-      }
+      await this.sendUserTaskStartNotification(teamName, task);
     }
 
     return { notifiedOwner: !!task.owner };
+  }
+
+  /**
+   * Send a task start notification from the user to the task owner.
+   * Includes description, prompt, and task_get/task_complete instructions.
+   * Used by startTaskByUser and createTask (startImmediately).
+   */
+  private async sendUserTaskStartNotification(teamName: string, task: TeamTask): Promise<void> {
+    if (!task.owner) return;
+    try {
+      const parts = [`**start working on task now** ${this.getTaskLabel(task)} "${task.subject}"`];
+      if (task.description?.trim()) {
+        parts.push(`\nDetails:\n${task.description.trim()}`);
+      }
+      if (task.prompt?.trim()) {
+        parts.push(`\nInstructions:\n${task.prompt.trim()}`);
+      }
+      parts.push(
+        '',
+        wrapAgentBlock(
+          [
+            `Begin work on this task immediately. Keep it moving until it is completed or clearly blocked. Do not leave it idle.`,
+            `To fetch the full task context (description, comments, attachments) use:`,
+            `task_get { teamName: "${teamName}", taskId: "${task.id}" }`,
+            `When done, update task status:`,
+            `task_complete { teamName: "${teamName}", taskId: "${task.id}" }`,
+          ].join('\n')
+        )
+      );
+      await this.sendMessage(teamName, {
+        member: task.owner,
+        from: 'user',
+        text: parts.join('\n'),
+        taskRefs: task.descriptionTaskRefs,
+        summary: `Start working on ${this.getTaskLabel(task)}`,
+        source: 'system_notification',
+      });
+    } catch {
+      // Best-effort notification
+    }
   }
 
   async updateTaskStatus(
