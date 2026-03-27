@@ -7,7 +7,10 @@ import { shortenDisplayPath } from '@renderer/utils/pathDisplay';
 import { highlightLines } from '@renderer/utils/syntaxHighlighter';
 import { AlertTriangle, FileText, Search, Terminal } from 'lucide-react';
 
-import { ToolApprovalSettingsPanel } from './dialogs/ToolApprovalSettingsPanel';
+import {
+  ToolApprovalSettingsContent,
+  ToolApprovalSettingsToggle,
+} from './dialogs/ToolApprovalSettingsPanel';
 import { FileIcon } from './editor/FileIcon';
 import { ToolApprovalDiffPreview } from './ToolApprovalDiffPreview';
 
@@ -124,6 +127,7 @@ export const ToolApprovalSheet: React.FC = () => {
   const [disabled, setDisabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diffExpanded, setDiffExpanded] = useState(false);
+  const [settingsExpanded, setSettingsExpanded] = useState(false);
 
   // Clear error when current approval changes
   useEffect(() => {
@@ -333,9 +337,15 @@ export const ToolApprovalSheet: React.FC = () => {
                 {pendingApprovals.length - 1} pending
               </span>
             )}
-            <ToolApprovalSettingsPanel />
+            <ToolApprovalSettingsToggle
+              expanded={settingsExpanded}
+              onToggle={() => setSettingsExpanded((v) => !v)}
+            />
           </div>
         </div>
+
+        {/* Settings expanded content — below actions row */}
+        <ToolApprovalSettingsContent expanded={settingsExpanded} />
 
         {/* Timeout progress bar */}
         <TimeoutProgress receivedAt={current.receivedAt} />
