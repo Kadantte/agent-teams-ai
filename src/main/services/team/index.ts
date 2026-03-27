@@ -17,6 +17,7 @@ export { TeamInboxReader } from './TeamInboxReader';
 export { TeamInboxWriter } from './TeamInboxWriter';
 export { TeamKanbanManager } from './TeamKanbanManager';
 export { TeamMemberLogsFinder } from './TeamMemberLogsFinder';
+export { TeamLogSourceTracker } from './TeamLogSourceTracker';
 export { TeamMemberResolver } from './TeamMemberResolver';
 export { TeamMembersMetaStore } from './TeamMembersMetaStore';
 export { TeamProvisioningService } from './TeamProvisioningService';

@@ -173,6 +173,32 @@ export class TeamMemberLogsFinder {
     );
   }
 
+  async getLogSourceWatchContext(
+    teamName: string,
+    options?: { forceRefresh?: boolean }
+  ): Promise<{
+    projectDir: string;
+    projectPath?: string;
+    leadSessionId?: string;
+    sessionIds: string[];
+  } | null> {
+    if (options?.forceRefresh) {
+      this.discoveryCache.delete(teamName);
+    }
+
+    const discovery = await this.discoverProjectSessions(teamName);
+    if (!discovery) {
+      return null;
+    }
+
+    return {
+      projectDir: discovery.projectDir,
+      projectPath: discovery.config.projectPath,
+      leadSessionId: discovery.config.leadSessionId,
+      sessionIds: [...discovery.sessionIds],
+    };
+  }
+
   /**
    * Returns session logs that reference the given task (TaskCreate, TaskUpdate, comments, etc.).
    * When the task is in_progress and has an owner, also includes that owner's session logs so

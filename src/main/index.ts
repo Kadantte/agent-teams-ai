@@ -30,6 +30,7 @@ import { ReviewApplierService } from '@main/services/team/ReviewApplierService';
 import { TeamBackupService } from '@main/services/team/TeamBackupService';
 import { TeamConfigReader } from '@main/services/team/TeamConfigReader';
 import { TeamInboxWriter } from '@main/services/team/TeamInboxWriter';
+import { JsonTaskChangePresenceRepository } from '@main/services/team/cache/JsonTaskChangePresenceRepository';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 import {
   CONTEXT_CHANGED,
@@ -104,6 +105,7 @@ import {
   TaskBoundaryParser,
   TeamDataService,
   TeamMemberLogsFinder,
+  TeamLogSourceTracker,
   TeamProvisioningService,
   UpdaterService,
 } from './services';
@@ -780,9 +782,13 @@ function initializeServices(): void {
   teamProvisioningService.setCrossTeamSender((request) => crossTeamService.send(request));
 
   const teamMemberLogsFinder = new TeamMemberLogsFinder();
+  const taskChangePresenceRepository = new JsonTaskChangePresenceRepository();
+  const teamLogSourceTracker = new TeamLogSourceTracker(teamMemberLogsFinder);
   const memberStatsComputer = new MemberStatsComputer(teamMemberLogsFinder);
   const taskBoundaryParser = new TaskBoundaryParser();
   const changeExtractor = new ChangeExtractorService(teamMemberLogsFinder, taskBoundaryParser);
+  teamDataService.setTaskChangePresenceServices(taskChangePresenceRepository, teamLogSourceTracker);
+  changeExtractor.setTaskChangePresenceServices(taskChangePresenceRepository, teamLogSourceTracker);
   const gitDiffFallback = new GitDiffFallback();
   const fileContentResolver = new FileContentResolver(teamMemberLogsFinder, gitDiffFallback);
   const reviewApplier = new ReviewApplierService();
@@ -839,6 +845,7 @@ function initializeServices(): void {
     httpServer?.broadcast('team-change', event);
   };
   teamProvisioningService.setTeamChangeEmitter(teamChangeEmitter);
+  teamLogSourceTracker.setEmitter(teamChangeEmitter);
 
   // Allow SchedulerService to push schedule events to renderer
   schedulerService.setChangeEmitter((event) => {
@@ -1321,7 +1328,9 @@ function createWindow(): void {
     markRendererUnavailable(mainWindow);
     const activeContext = contextRegistry.getActive();
     activeContext?.stopFileWatcher();
-    scheduleRendererRecovery(mainWindow);
+    if (mainWindow) {
+      scheduleRendererRecovery(mainWindow);
+    }
   });
 
   // Set main window reference for notification manager and updater

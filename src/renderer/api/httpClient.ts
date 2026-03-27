@@ -668,6 +668,14 @@ export class HttpAPIClient implements ElectronAPI {
     getData: async (_teamName: string): Promise<TeamData> => {
       throw new Error('Teams detail is not available in browser mode');
     },
+    getTaskChangePresence: async (): Promise<
+      Record<string, 'has_changes' | 'no_changes' | 'unknown'>
+    > => {
+      return {};
+    },
+    setChangePresenceTracking: async (): Promise<void> => {
+      // Not available in browser mode — no-op.
+    },
     getClaudeLogs: async (
       _teamName: string,
       _query?: TeamClaudeLogsQuery

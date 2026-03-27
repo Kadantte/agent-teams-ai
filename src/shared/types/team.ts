@@ -218,11 +218,15 @@ export interface TeamTask {
 }
 
 /** Task enriched for UI/DTO use (overlay from kanban-state.json). */
+export type TaskChangePresenceState = 'has_changes' | 'no_changes' | 'unknown';
+
 export interface TeamTaskWithKanban extends TeamTask {
   /** Set when task is in team kanban (review or approved column). */
   kanbanColumn?: 'review' | 'approved';
   /** Reviewer assigned in kanban state, when applicable. */
   reviewer?: string | null;
+  /** Cheap persisted change-presence state for kanban rendering. */
+  changePresence?: TaskChangePresenceState;
 }
 
 /** Metadata for an attachment associated with a task or comment. */
@@ -502,6 +506,7 @@ export interface TeamChangeEvent {
   type:
     | 'config'
     | 'inbox'
+    | 'log-source-change'
     | 'task'
     | 'lead-activity'
     | 'lead-context'

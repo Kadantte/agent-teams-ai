@@ -19,6 +19,7 @@ import {
   TEAM_GET_ATTACHMENTS,
   TEAM_GET_CLAUDE_LOGS,
   TEAM_GET_DATA,
+  TEAM_GET_TASK_CHANGE_PRESENCE,
   TEAM_GET_DELETED_TASKS,
   TEAM_GET_LOGS_FOR_TASK,
   TEAM_GET_MEMBER_LOGS,
@@ -46,6 +47,7 @@ import {
   TEAM_RESTORE_TASK,
   TEAM_SAVE_TASK_ATTACHMENT,
   TEAM_SEND_MESSAGE,
+  TEAM_SET_CHANGE_PRESENCE_TRACKING,
   TEAM_SET_TASK_CLARIFICATION,
   TEAM_SHOW_MESSAGE_NOTIFICATION,
   TEAM_SOFT_DELETE_TASK,
@@ -306,6 +308,8 @@ export function initializeTeamHandlers(
 export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_LIST, handleListTeams);
   ipcMain.handle(TEAM_GET_DATA, handleGetData);
+  ipcMain.handle(TEAM_GET_TASK_CHANGE_PRESENCE, handleGetTaskChangePresence);
+  ipcMain.handle(TEAM_SET_CHANGE_PRESENCE_TRACKING, handleSetChangePresenceTracking);
   ipcMain.handle(TEAM_GET_CLAUDE_LOGS, handleGetClaudeLogs);
   ipcMain.handle(TEAM_PREPARE_PROVISIONING, handlePrepareProvisioning);
   ipcMain.handle(TEAM_CREATE, handleCreateTeam);
@@ -368,6 +372,8 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
 export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_LIST);
   ipcMain.removeHandler(TEAM_GET_DATA);
+  ipcMain.removeHandler(TEAM_GET_TASK_CHANGE_PRESENCE);
+  ipcMain.removeHandler(TEAM_SET_CHANGE_PRESENCE_TRACKING);
   ipcMain.removeHandler(TEAM_GET_CLAUDE_LOGS);
   ipcMain.removeHandler(TEAM_PREPARE_PROVISIONING);
   ipcMain.removeHandler(TEAM_CREATE);
@@ -611,6 +617,38 @@ async function handleGetData(
   checkRateLimitMessages(merged, tn, displayName, projectPath);
   checkApiErrorMessages(merged, tn, displayName, projectPath);
   return { success: true, data: { ...data, isAlive, messages: merged } };
+}
+
+async function handleGetTaskChangePresence(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown
+): Promise<IpcResult<Record<string, 'has_changes' | 'no_changes' | 'unknown'>>> {
+  const validated = validateTeamName(teamName);
+  if (!validated.valid) {
+    return { success: false, error: validated.error ?? 'Invalid teamName' };
+  }
+
+  return wrapTeamHandler('getTaskChangePresence', () =>
+    getTeamDataService().getTaskChangePresence(validated.value!)
+  );
+}
+
+async function handleSetChangePresenceTracking(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  enabled: unknown
+): Promise<IpcResult<void>> {
+  const validated = validateTeamName(teamName);
+  if (!validated.valid) {
+    return { success: false, error: validated.error ?? 'Invalid teamName' };
+  }
+  if (typeof enabled !== 'boolean') {
+    return { success: false, error: 'enabled must be a boolean' };
+  }
+
+  return wrapTeamHandler('setChangePresenceTracking', async () => {
+    getTeamDataService().setTaskChangePresenceTracking(validated.value!, enabled);
+  });
 }
 
 async function handleDeleteTeam(

@@ -90,9 +90,20 @@ import type {
   FileChangeSummary,
   KanbanTaskState,
   ResolvedTeamMember,
+  TaskChangeSetV2,
   TaskAttachmentMeta,
   TeamTaskWithKanban,
 } from '@shared/types';
+
+function resolveTaskChangePresenceFromResult(
+  data: Pick<TaskChangeSetV2, 'files' | 'confidence'>
+): 'has_changes' | 'no_changes' | null {
+  if (data.files.length > 0) {
+    return 'has_changes';
+  }
+
+  return data.confidence === 'high' || data.confidence === 'medium' ? 'no_changes' : null;
+}
 
 interface TaskDetailDialogProps {
   open: boolean;
@@ -135,6 +146,7 @@ export const TaskDetailDialog = ({
   const currentTask = task ? (taskMap.get(task.id) ?? task) : null;
   const updateTaskFields = useStore((s) => s.updateTaskFields);
   const recordTaskHasChanges = useStore((s) => s.recordTaskHasChanges);
+  const setSelectedTeamTaskChangePresence = useStore((s) => s.setSelectedTeamTaskChangePresence);
 
   const [logsRefreshing, setLogsRefreshing] = useState(false);
   const [executionPreviewOnline, setExecutionPreviewOnline] = useState(false);
@@ -324,7 +336,7 @@ export const TaskDetailDialog = ({
   const setTaskNeedsClarification = useStore((s) => s.setTaskNeedsClarification);
 
   const loadTaskChangeSummary = useCallback(
-    async (forceFresh = false): Promise<FileChangeSummary[] | null> => {
+    async (forceFresh = false): Promise<TaskChangeSetV2 | null> => {
       if (
         !currentTask ||
         !taskChangeSummaryOptions ||
@@ -338,7 +350,7 @@ export const TaskDetailDialog = ({
         ...taskChangeSummaryOptions,
         forceFresh,
       });
-      return data.files;
+      return data;
     },
     [canShowTaskChanges, currentTask, onViewChanges, taskChangeSummaryOptions, teamName, variant]
   );
@@ -356,16 +368,20 @@ export const TaskDetailDialog = ({
     }
     setTaskChangesError(null);
     void loadTaskChangeSummary()
-      .then((files) => {
+      .then((data) => {
         if (!cancelled) {
-          setTaskChangesFiles(files ?? null);
+          setTaskChangesFiles(data?.files ?? null);
           if (currentTask && taskChangeRequestOptions) {
             recordTaskHasChanges(
               teamName,
               currentTask.id,
               taskChangeRequestOptions,
-              !!files?.length
+              !!data?.files.length
             );
+          }
+          const nextPresence = data ? resolveTaskChangePresenceFromResult(data) : null;
+          if (currentTask && nextPresence) {
+            setSelectedTeamTaskChangePresence(teamName, currentTask.id, nextPresence);
           }
         }
       })
@@ -382,16 +398,20 @@ export const TaskDetailDialog = ({
       });
 
     void loadTaskChangeSummary(true)
-      .then((files) => {
-        if (!cancelled && files) {
-          setTaskChangesFiles(files);
+      .then((data) => {
+        if (!cancelled && data) {
+          setTaskChangesFiles(data.files);
           if (currentTask && taskChangeRequestOptions) {
             recordTaskHasChanges(
               teamName,
               currentTask.id,
               taskChangeRequestOptions,
-              files.length > 0
+              data.files.length > 0
             );
+          }
+          const nextPresence = resolveTaskChangePresenceFromResult(data);
+          if (currentTask && nextPresence) {
+            setSelectedTeamTaskChangePresence(teamName, currentTask.id, nextPresence);
           }
         }
       })
@@ -417,10 +437,19 @@ export const TaskDetailDialog = ({
     setTaskChangesLoading(true);
     setTaskChangesError(null);
     void loadTaskChangeSummary(true)
-      .then((files) => {
-        setTaskChangesFiles(files ?? null);
+      .then((data) => {
+        setTaskChangesFiles(data?.files ?? null);
         if (currentTask && taskChangeRequestOptions) {
-          recordTaskHasChanges(teamName, currentTask.id, taskChangeRequestOptions, !!files?.length);
+          recordTaskHasChanges(
+            teamName,
+            currentTask.id,
+            taskChangeRequestOptions,
+            !!data?.files.length
+          );
+        }
+        const nextPresence = data ? resolveTaskChangePresenceFromResult(data) : null;
+        if (currentTask && nextPresence) {
+          setSelectedTeamTaskChangePresence(teamName, currentTask.id, nextPresence);
         }
       })
       .catch((error) => {
@@ -436,6 +465,7 @@ export const TaskDetailDialog = ({
     onViewChanges,
     loadTaskChangeSummary,
     recordTaskHasChanges,
+    setSelectedTeamTaskChangePresence,
     taskChangeRequestOptions,
     teamName,
     variant,

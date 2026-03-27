@@ -144,6 +144,30 @@ describe('teamSlice actions', () => {
     );
   });
 
+  it('does not warm task-change summaries on team open', async () => {
+    const store = createSliceStore();
+    hoisted.getData.mockResolvedValue({
+      teamName: 'my-team',
+      config: { name: 'My Team' },
+      tasks: [
+        {
+          id: 'completed-1',
+          owner: 'alice',
+          status: 'completed',
+          createdAt: '2026-03-20T08:00:00.000Z',
+          updatedAt: '2026-03-20T12:00:00.000Z',
+        },
+      ],
+      members: [],
+      messages: [],
+      kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+    });
+
+    await store.getState().selectTeam('my-team');
+
+    expect(store.getState().warmTaskChangeSummaries).not.toHaveBeenCalled();
+  });
+
   describe('refreshTeamData provisioning safety', () => {
     it('does not set fatal error on TEAM_PROVISIONING', async () => {
       const store = createSliceStore();
@@ -265,7 +289,7 @@ describe('teamSlice actions', () => {
       expect(store.getState().selectedTeamError).toBe('Team not found');
     });
 
-    it('invalidates changed task summaries and warms only cacheable terminal tasks', async () => {
+    it('invalidates changed task summaries without warming task availability on refresh', async () => {
       const store = createSliceStore();
       const invalidateTaskChangePresence = vi.fn();
       const warmTaskChangeSummaries = vi.fn(async () => undefined);
@@ -367,9 +391,7 @@ describe('teamSlice actions', () => {
 
       expect(hoisted.invalidateTaskChangeSummaries).toHaveBeenCalledWith('my-team', ['task-1']);
       expect(invalidateTaskChangePresence).toHaveBeenCalledTimes(1);
-      expect(warmTaskChangeSummaries).toHaveBeenCalledWith([
-        expect.objectContaining({ teamName: 'my-team', taskId: 'task-2' }),
-      ]);
+      expect(warmTaskChangeSummaries).not.toHaveBeenCalled();
     });
   });
 

@@ -31,6 +31,7 @@ vi.mock('@renderer/api', () => ({
       })),
     },
     teams: {
+      setChangePresenceTracking: vi.fn(async () => undefined),
       onTeamChange: vi.fn(
         (cb: (event: unknown, data: { teamName: string }) => void): (() => void) => {
           hoisted.onTeamChangeCb = cb;
@@ -58,6 +59,7 @@ vi.mock('@renderer/api', () => ({
 }));
 
 import { initializeNotificationListeners, useStore } from '../../../src/renderer/store';
+import { api } from '@renderer/api';
 
 describe('team change throttling', () => {
   let cleanup: (() => void) | null = null;
@@ -66,10 +68,14 @@ describe('team change throttling', () => {
     vi.useFakeTimers();
     const fetchTeams = vi.fn(async () => undefined);
     const refreshTeamData = vi.fn(async () => undefined);
+    const refreshSelectedTeamChangePresence = vi.fn(async () => undefined);
 
     useStore.setState({
       fetchTeams,
       refreshTeamData,
+      refreshSelectedTeamChangePresence,
+      selectedTeamName: null,
+      selectedTeamData: null,
       paneLayout: {
         focusedPaneId: 'p1',
         panes: [
@@ -165,6 +171,99 @@ describe('team change throttling', () => {
     expect(fetchAllTasksSpy).not.toHaveBeenCalled();
   });
 
+  it('log-source-change refreshes only task change presence', async () => {
+    useStore.setState({
+      selectedTeamName: 'my-team',
+      selectedTeamData: {
+        teamName: 'my-team',
+        config: { name: 'My Team', members: [], projectPath: '/repo' },
+        tasks: [],
+        members: [],
+        messages: [],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        processes: [],
+      },
+    } as never);
+
+    const state = useStore.getState();
+    const fetchTeamsSpy = vi.spyOn(state, 'fetchTeams');
+    const refreshTeamDataSpy = vi.spyOn(state, 'refreshTeamData');
+    const refreshSelectedTeamChangePresenceSpy = vi.spyOn(
+      state,
+      'refreshSelectedTeamChangePresence'
+    );
+
+    hoisted.onTeamChangeCb?.({}, { type: 'log-source-change', teamName: 'my-team' });
+
+    await vi.advanceTimersByTimeAsync(399);
+    expect(refreshSelectedTeamChangePresenceSpy).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refreshSelectedTeamChangePresenceSpy).toHaveBeenCalledTimes(1);
+    expect(refreshSelectedTeamChangePresenceSpy).toHaveBeenCalledWith('my-team');
+    expect(refreshTeamDataSpy).not.toHaveBeenCalled();
+    expect(fetchTeamsSpy).not.toHaveBeenCalled();
+  });
+
+  it('polls unknown in-progress tasks in round-robin order without starving later tasks', async () => {
+    const invalidateTaskChangePresence = vi.fn();
+    const checkTaskHasChanges = vi.fn(async () => undefined);
+
+    useStore.setState({
+      selectedTeamName: 'my-team',
+      selectedTeamData: {
+        teamName: 'my-team',
+        config: { name: 'My Team', members: [], projectPath: '/repo' },
+        tasks: [
+          {
+            id: 'task-1',
+            owner: 'alice',
+            status: 'in_progress',
+            createdAt: '2026-03-01T10:00:00.000Z',
+            updatedAt: '2026-03-01T10:00:00.000Z',
+            workIntervals: [{ startedAt: '2026-03-01T10:00:00.000Z' }],
+            historyEvents: [],
+            reviewState: 'none',
+            changePresence: 'unknown',
+          },
+          {
+            id: 'task-2',
+            owner: 'alice',
+            status: 'in_progress',
+            createdAt: '2026-03-01T10:00:00.000Z',
+            updatedAt: '2026-03-01T10:00:00.000Z',
+            workIntervals: [{ startedAt: '2026-03-01T10:00:00.000Z' }],
+            historyEvents: [],
+            reviewState: 'none',
+            changePresence: 'unknown',
+          },
+        ],
+        members: [],
+        messages: [],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        processes: [],
+      },
+      invalidateTaskChangePresence,
+      checkTaskHasChanges,
+    } as never);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(checkTaskHasChanges).toHaveBeenNthCalledWith(
+      1,
+      'my-team',
+      'task-1',
+      expect.objectContaining({ status: 'in_progress', owner: 'alice' })
+    );
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(checkTaskHasChanges).toHaveBeenNthCalledWith(
+      2,
+      'my-team',
+      'task-2',
+      expect.objectContaining({ status: 'in_progress', owner: 'alice' })
+    );
+  });
+
   it('per-team throttling: busy team does not block another visible team', async () => {
     // Add a second visible team tab
     useStore.setState({
@@ -203,5 +302,49 @@ describe('team change throttling', () => {
     expect(refreshTeamDataSpy).toHaveBeenCalledTimes(2);
     expect(refreshTeamDataSpy).toHaveBeenCalledWith('my-team');
     expect(refreshTeamDataSpy).toHaveBeenCalledWith('other-team');
+  });
+
+  it('keeps auto change presence tracking disabled even after selected team data is hydrated', async () => {
+    const setChangePresenceTrackingSpy = vi.mocked(api.teams.setChangePresenceTracking);
+    setChangePresenceTrackingSpy.mockClear();
+
+    expect(setChangePresenceTrackingSpy).not.toHaveBeenCalled();
+
+    useStore.setState({
+      selectedTeamName: 'my-team',
+      selectedTeamData: {
+        teamName: 'my-team',
+        config: { name: 'My Team', members: [], projectPath: '/repo' },
+        tasks: [],
+        members: [],
+        messages: [],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        processes: [],
+      },
+    } as never);
+
+    await Promise.resolve();
+
+    expect(setChangePresenceTrackingSpy).not.toHaveBeenCalled();
+
+    useStore.setState({
+      selectedTeamName: 'other-team',
+      selectedTeamData: null,
+      paneLayout: {
+        focusedPaneId: 'p1',
+        panes: [
+          {
+            id: 'p1',
+            widthFraction: 1,
+            tabs: [{ id: 't2', type: 'team', teamName: 'other-team', label: 'other-team' }],
+            activeTabId: 't2',
+          },
+        ],
+      },
+    } as never);
+
+    await Promise.resolve();
+
+    expect(setChangePresenceTrackingSpy).not.toHaveBeenCalled();
   });
 });

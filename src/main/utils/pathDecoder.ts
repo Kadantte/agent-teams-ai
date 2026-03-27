@@ -393,6 +393,10 @@ export function getTaskChangeSummariesBasePath(): string {
   return path.join(getClaudeBasePath(), 'task-change-summaries');
 }
 
+export function getTaskChangePresenceBasePath(): string {
+  return path.join(getClaudeBasePath(), 'task-change-presence');
+}
+
 /**
  * Get the backups directory path for the app's own storage.
  */

@@ -210,6 +210,12 @@ export const TEAM_LIST = 'team:list';
 /** Get detailed team data */
 export const TEAM_GET_DATA = 'team:getData';
 
+/** Get lightweight task change presence map for the currently viewed team */
+export const TEAM_GET_TASK_CHANGE_PRESENCE = 'team:getTaskChangePresence';
+
+/** Enable or disable task change presence tracking for a visible team tab */
+export const TEAM_SET_CHANGE_PRESENCE_TRACKING = 'team:setChangePresenceTracking';
+
 /** Get buffered Claude CLI logs (paged, newest-first) */
 export const TEAM_GET_CLAUDE_LOGS = 'team:getClaudeLogs';
 

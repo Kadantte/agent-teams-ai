@@ -121,6 +121,7 @@ import {
   TEAM_GET_ATTACHMENTS,
   TEAM_GET_CLAUDE_LOGS,
   TEAM_GET_DATA,
+  TEAM_GET_TASK_CHANGE_PRESENCE,
   TEAM_GET_DELETED_TASKS,
   TEAM_GET_LOGS_FOR_TASK,
   TEAM_GET_MEMBER_LOGS,
@@ -148,6 +149,7 @@ import {
   TEAM_RESTORE_TASK,
   TEAM_SAVE_TASK_ATTACHMENT,
   TEAM_SEND_MESSAGE,
+  TEAM_SET_CHANGE_PRESENCE_TRACKING,
   TEAM_SET_TASK_CLARIFICATION,
   TEAM_SHOW_MESSAGE_NOTIFICATION,
   TEAM_SOFT_DELETE_TASK,
@@ -260,6 +262,7 @@ import type {
   SshConnectionStatus,
   SshLastConnection,
   TaskAttachmentMeta,
+  TaskChangePresenceState,
   TaskChangeSetV2,
   TaskComment,
   TeamChangeEvent,
@@ -799,6 +802,15 @@ const electronAPI: ElectronAPI = {
     },
     getData: async (teamName: string) => {
       return invokeIpcWithResult<TeamData>(TEAM_GET_DATA, teamName);
+    },
+    getTaskChangePresence: async (teamName: string) => {
+      return invokeIpcWithResult<Record<string, TaskChangePresenceState>>(
+        TEAM_GET_TASK_CHANGE_PRESENCE,
+        teamName
+      );
+    },
+    setChangePresenceTracking: async (teamName: string, enabled: boolean) => {
+      return invokeIpcWithResult<void>(TEAM_SET_CHANGE_PRESENCE_TRACKING, teamName, enabled);
     },
     getClaudeLogs: async (teamName: string, query?: TeamClaudeLogsQuery) => {
       return invokeIpcWithResult<TeamClaudeLogsResponse>(TEAM_GET_CLAUDE_LOGS, teamName, query);

@@ -43,6 +43,7 @@ import {
   TEAM_PROVISIONING_STATUS,
   TEAM_REQUEST_REVIEW,
   TEAM_SEND_MESSAGE,
+  TEAM_SET_CHANGE_PRESENCE_TRACKING,
   TEAM_GET_ALL_TASKS,
   TEAM_GET_LOGS_FOR_TASK,
   TEAM_GET_MEMBER_LOGS,
@@ -56,6 +57,7 @@ import {
   TEAM_ADD_TASK_COMMENT,
   TEAM_GET_ATTACHMENTS,
   TEAM_GET_DELETED_TASKS,
+  TEAM_GET_TASK_CHANGE_PRESENCE,
   TEAM_GET_PROJECT_BRANCH,
   TEAM_KILL_PROCESS,
   TEAM_LEAD_ACTIVITY,
@@ -105,7 +107,9 @@ describe('ipc teams handlers', () => {
       kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
       processes: [],
     })),
+    getTaskChangePresence: vi.fn(async () => ({ 'task-1': 'has_changes' })),
     reconcileTeamArtifacts: vi.fn(async () => undefined),
+    setTaskChangePresenceTracking: vi.fn(() => undefined),
     deleteTeam: vi.fn(async () => undefined),
     getLeadMemberName: vi.fn(async () => 'team-lead'),
     getTeamDisplayName: vi.fn(async () => 'My Team'),
@@ -175,6 +179,8 @@ describe('ipc teams handlers', () => {
   it('registers all expected handlers', () => {
     expect(handlers.has(TEAM_LIST)).toBe(true);
     expect(handlers.has(TEAM_GET_DATA)).toBe(true);
+    expect(handlers.has(TEAM_GET_TASK_CHANGE_PRESENCE)).toBe(true);
+    expect(handlers.has(TEAM_SET_CHANGE_PRESENCE_TRACKING)).toBe(true);
     expect(handlers.has(TEAM_DELETE_TEAM)).toBe(true);
     expect(handlers.has(TEAM_PREPARE_PROVISIONING)).toBe(true);
     expect(handlers.has(TEAM_CREATE)).toBe(true);
@@ -222,6 +228,32 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_SAVE_TASK_ATTACHMENT)).toBe(true);
     expect(handlers.has(TEAM_GET_TASK_ATTACHMENT)).toBe(true);
     expect(handlers.has(TEAM_DELETE_TASK_ATTACHMENT)).toBe(true);
+  });
+
+  it('updates change presence tracking for a team', async () => {
+    const handler = handlers.get(TEAM_SET_CHANGE_PRESENCE_TRACKING);
+    expect(handler).toBeDefined();
+
+    const result = (await handler!({} as never, 'my-team', true)) as {
+      success: boolean;
+      data?: void;
+    };
+
+    expect(result.success).toBe(true);
+    expect(service.setTaskChangePresenceTracking).toHaveBeenCalledWith('my-team', true);
+  });
+
+  it('returns lightweight task change presence for a team', async () => {
+    const handler = handlers.get(TEAM_GET_TASK_CHANGE_PRESENCE);
+    expect(handler).toBeDefined();
+
+    const result = (await handler!({} as never, 'my-team')) as {
+      success: boolean;
+      data?: Record<string, string>;
+    };
+
+    expect(result).toEqual({ success: true, data: { 'task-1': 'has_changes' } });
+    expect(service.getTaskChangePresence).toHaveBeenCalledWith('my-team');
   });
 
   it('returns success false on invalid sendMessage args', async () => {

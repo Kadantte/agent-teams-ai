@@ -3,7 +3,7 @@ import { normalizePath } from '@renderer/utils/pathNormalize';
 import {
   buildTaskChangePresenceKey,
   buildTaskChangeRequestOptions,
-  isTaskSummaryCacheableForOptions,
+  canDisplayTaskChangesForOptions,
   type TaskChangeRequestOptions,
 } from '@renderer/utils/taskChangeRequest';
 import { IpcError, unwrapIpc } from '@renderer/utils/unwrapIpc';
@@ -57,6 +57,43 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
+async function refreshTaskChangePresenceForUpdatedTask(
+  getState: () => AppState,
+  teamName: string,
+  taskId: string
+): Promise<void> {
+  const state = getState();
+  if (state.selectedTeamName !== teamName || !state.selectedTeamData) {
+    return;
+  }
+
+  const task = state.selectedTeamData.tasks.find((candidate) => candidate.id === taskId);
+  if (!task) {
+    return;
+  }
+
+  const options = buildTaskChangeRequestOptions(task);
+  if (!canDisplayTaskChangesForOptions(options)) {
+    return;
+  }
+
+  if (
+    typeof state.invalidateTaskChangePresence !== 'function' ||
+    typeof state.checkTaskHasChanges !== 'function'
+  ) {
+    return;
+  }
+
+  const cacheKey = buildTaskChangePresenceKey(teamName, taskId, options);
+  state.invalidateTaskChangePresence([cacheKey]);
+
+  try {
+    await state.checkTaskHasChanges(teamName, taskId, options);
+  } catch {
+    // Best-effort refresh after explicit task transition.
+  }
+}
+
 async function pollProvisioningStatus(
   getState: () => TeamSlice,
   runId: string,
@@ -105,6 +142,7 @@ import type {
   SendMessageRequest,
   SendMessageResult,
   TaskComment,
+  TaskChangePresenceState,
   TeamCreateRequest,
   TeamData,
   TeamLaunchRequest,
@@ -445,19 +483,6 @@ function collectTaskChangeInvalidationState(
   };
 }
 
-function buildTaskChangeWarmRequests(
-  teamName: string,
-  tasks: TeamData['tasks']
-): { teamName: string; taskId: string; options: TaskChangeRequestOptions }[] {
-  return tasks.flatMap((task) => {
-    const options = buildTaskChangeRequestOptions(task);
-    if (!isTaskSummaryCacheableForOptions(options)) {
-      return [];
-    }
-    return [{ teamName, taskId: task.id, options }];
-  });
-}
-
 function mapSendMessageError(error: unknown): string {
   const message =
     error instanceof IpcError ? error.message : error instanceof Error ? error.message : '';
@@ -556,6 +581,12 @@ export interface TeamSlice {
   openTeamsTab: () => void;
   openTeamTab: (teamName: string, projectPath?: string, taskId?: string) => void;
   clearKanbanFilter: () => void;
+  setSelectedTeamTaskChangePresence: (
+    teamName: string,
+    taskId: string,
+    presence: TaskChangePresenceState
+  ) => void;
+  refreshSelectedTeamChangePresence: (teamName: string) => Promise<void>;
   selectTeam: (
     teamName: string,
     opts?: { skipProjectAutoSelect?: boolean; allowReloadWhileProvisioning?: boolean }
@@ -1099,6 +1130,89 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     set({ kanbanFilterQuery: null });
   },
 
+  setSelectedTeamTaskChangePresence: (teamName, taskId, presence) => {
+    set((state) => {
+      let selectedChanged = false;
+      const nextSelectedTeamData =
+        state.selectedTeamName === teamName && state.selectedTeamData
+          ? {
+              ...state.selectedTeamData,
+              tasks: state.selectedTeamData.tasks.map((task) => {
+                if (task.id !== taskId || task.changePresence === presence) {
+                  return task;
+                }
+                selectedChanged = true;
+                return { ...task, changePresence: presence };
+              }),
+            }
+          : state.selectedTeamData;
+
+      let globalChanged = false;
+      const nextGlobalTasks = state.globalTasks.map((task) => {
+        if (task.teamName !== teamName || task.id !== taskId || task.changePresence === presence) {
+          return task;
+        }
+        globalChanged = true;
+        return { ...task, changePresence: presence };
+      });
+
+      if (!selectedChanged && !globalChanged) {
+        return {};
+      }
+
+      return {
+        ...(selectedChanged ? { selectedTeamData: nextSelectedTeamData } : {}),
+        ...(globalChanged ? { globalTasks: nextGlobalTasks } : {}),
+      };
+    });
+  },
+
+  refreshSelectedTeamChangePresence: async (teamName: string) => {
+    const selected = get().selectedTeamData;
+    if (get().selectedTeamName !== teamName || !selected) {
+      return;
+    }
+
+    try {
+      const presenceByTaskId = await unwrapIpc('team:getTaskChangePresence', () =>
+        api.teams.getTaskChangePresence(teamName)
+      );
+
+      if (get().selectedTeamName !== teamName || !get().selectedTeamData) {
+        return;
+      }
+
+      set((state) => {
+        if (state.selectedTeamName !== teamName || !state.selectedTeamData) {
+          return {};
+        }
+
+        let changed = false;
+        const nextTasks = state.selectedTeamData.tasks.map((task) => {
+          const nextPresence = presenceByTaskId[task.id] ?? 'unknown';
+          if (task.changePresence === nextPresence) {
+            return task;
+          }
+          changed = true;
+          return { ...task, changePresence: nextPresence };
+        });
+
+        if (!changed) {
+          return {};
+        }
+
+        return {
+          selectedTeamData: {
+            ...state.selectedTeamData,
+            tasks: nextTasks,
+          },
+        };
+      });
+    } catch {
+      // best-effort lightweight refresh; keep current UI state on failure
+    }
+  },
+
   selectTeam: async (teamName: string, opts) => {
     const allowReloadWhileProvisioning = opts?.allowReloadWhileProvisioning === true;
     // Guard: prevent duplicate in-flight fetches for the same team.
@@ -1170,11 +1284,6 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       if (invalidationState.taskIds.length > 0) {
         await api.review.invalidateTaskChangeSummaries(teamName, invalidationState.taskIds);
       }
-      const warmRequests = buildTaskChangeWarmRequests(teamName, data.tasks);
-      if (warmRequests.length > 0) {
-        void get().warmTaskChangeSummaries(warmRequests);
-      }
-
       // Sync tab label with the team's display name from config
       const displayName = data.config.name || teamName;
       const allTabs = get().getAllPaneTabs();
@@ -1294,10 +1403,6 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       }
       if (invalidationState.taskIds.length > 0) {
         await api.review.invalidateTaskChangeSummaries(teamName, invalidationState.taskIds);
-      }
-      const warmRequests = buildTaskChangeWarmRequests(teamName, data.tasks);
-      if (warmRequests.length > 0) {
-        void get().warmTaskChangeSummaries(warmRequests);
       }
     } catch (error) {
       if (get().selectedTeamName !== teamName) {
@@ -1424,6 +1529,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       set({ reviewActionError: null });
       await unwrapIpc('team:requestReview', () => api.teams.requestReview(teamName, taskId));
       await get().refreshTeamData(teamName);
+      void refreshTaskChangePresenceForUpdatedTask(get, teamName, taskId);
     } catch (error) {
       set({
         reviewActionError: mapReviewError(error),
@@ -1441,6 +1547,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   startTask: async (teamName: string, taskId: string) => {
     const result = await unwrapIpc('team:startTask', () => api.teams.startTask(teamName, taskId));
     await get().refreshTeamData(teamName);
+    void refreshTaskChangePresenceForUpdatedTask(get, teamName, taskId);
     return result;
   },
 
@@ -1449,6 +1556,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       api.teams.startTaskByUser(teamName, taskId)
     );
     await get().refreshTeamData(teamName);
+    void refreshTaskChangePresenceForUpdatedTask(get, teamName, taskId);
     return result;
   },
 
@@ -1457,6 +1565,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       api.teams.updateTaskStatus(teamName, taskId, status)
     );
     await get().refreshTeamData(teamName);
+    void refreshTaskChangePresenceForUpdatedTask(get, teamName, taskId);
   },
 
   updateTaskOwner: async (teamName: string, taskId: string, owner: string | null) => {

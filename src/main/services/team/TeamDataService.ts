@@ -40,6 +40,7 @@ import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskCommentNotificationJournal } from './TeamTaskCommentNotificationJournal';
 import { TeamTaskReader } from './TeamTaskReader';
 import { TeamTaskWriter } from './TeamTaskWriter';
+import { buildTaskChangePresenceDescriptor } from './taskChangePresenceUtils';
 
 import type {
   AddMemberRequest,
@@ -63,11 +64,15 @@ import type {
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
+  TaskChangePresenceState,
   TeamTaskWithKanban,
   ToolCallMeta,
   UpdateKanbanPatch,
 } from '@shared/types';
 import type { AgentTeamsController } from 'agent-teams-controller';
+import type { TaskChangePresenceRepository } from './cache/TaskChangePresenceRepository';
+import type { PersistedTaskChangePresenceIndex } from './cache/taskChangePresenceCacheTypes';
+import type { TeamLogSourceTracker } from './TeamLogSourceTracker';
 
 const { createController } = agentTeamsControllerModule;
 
@@ -91,6 +96,11 @@ interface EligibleTaskCommentNotification {
   summary: string;
 }
 
+interface TaskChangeLogSourceSnapshot {
+  projectFingerprint: string | null;
+  logSourceGeneration: string | null;
+}
+
 export class TeamDataService {
   private processHealthTimer: ReturnType<typeof setInterval> | null = null;
   private processHealthTeams = new Set<string>();
@@ -98,6 +108,8 @@ export class TeamDataService {
   private notifiedTaskStarts = new Set<string>();
   private taskCommentNotificationInitialization: Promise<void> | null = null;
   private taskCommentNotificationInFlight = new Set<string>();
+  private taskChangePresenceRepository: TaskChangePresenceRepository | null = null;
+  private teamLogSourceTracker: TeamLogSourceTracker | null = null;
 
   constructor(
     private readonly configReader: TeamConfigReader = new TeamConfigReader(),
@@ -166,6 +178,120 @@ export class TeamDataService {
       }
     }
     return null;
+  }
+
+  setTaskChangePresenceServices(
+    repository: TaskChangePresenceRepository,
+    tracker: TeamLogSourceTracker
+  ): void {
+    this.taskChangePresenceRepository = repository;
+    this.teamLogSourceTracker = tracker;
+  }
+
+  setTaskChangePresenceTracking(teamName: string, enabled: boolean): void {
+    if (!this.teamLogSourceTracker) {
+      return;
+    }
+
+    if (enabled) {
+      void this.teamLogSourceTracker
+        .ensureTracking(teamName)
+        .catch((error) =>
+          logger.debug(`Failed to start change-presence tracking for ${teamName}: ${String(error)}`)
+        );
+      return;
+    }
+
+    void this.teamLogSourceTracker
+      .stopTracking(teamName)
+      .catch((error) =>
+        logger.debug(`Failed to stop change-presence tracking for ${teamName}: ${String(error)}`)
+      );
+  }
+
+  private resolveTaskChangePresenceMap(
+    tasks: readonly TeamTaskWithKanban[],
+    changePresenceEnabled: boolean,
+    presenceIndex: PersistedTaskChangePresenceIndex | null,
+    logSourceSnapshot: TaskChangeLogSourceSnapshot | null
+  ): Record<string, TaskChangePresenceState> {
+    const result: Record<string, TaskChangePresenceState> = {};
+    if (
+      !changePresenceEnabled ||
+      !presenceIndex ||
+      !logSourceSnapshot?.projectFingerprint ||
+      !logSourceSnapshot.logSourceGeneration ||
+      presenceIndex.projectFingerprint !== logSourceSnapshot.projectFingerprint ||
+      presenceIndex.logSourceGeneration !== logSourceSnapshot.logSourceGeneration
+    ) {
+      for (const task of tasks) {
+        result[task.id] = 'unknown';
+      }
+      return result;
+    }
+
+    for (const task of tasks) {
+      const descriptor = buildTaskChangePresenceDescriptor({
+        owner: task.owner,
+        status: task.status,
+        intervals: task.workIntervals,
+        reviewState: task.reviewState,
+        historyEvents: task.historyEvents,
+        kanbanColumn: task.kanbanColumn,
+      });
+      const presenceEntry = presenceIndex.entries[task.id];
+      result[task.id] =
+        presenceEntry &&
+        presenceEntry.taskSignature === descriptor.taskSignature &&
+        presenceEntry.logSourceGeneration === logSourceSnapshot.logSourceGeneration
+          ? presenceEntry.presence
+          : 'unknown';
+    }
+
+    return result;
+  }
+
+  async getTaskChangePresence(teamName: string): Promise<Record<string, TaskChangePresenceState>> {
+    const config = await this.configReader.getConfig(teamName);
+    if (!config) {
+      throw new Error(`Team not found: ${teamName}`);
+    }
+
+    const changePresenceEnabled =
+      this.taskChangePresenceRepository !== null && this.teamLogSourceTracker !== null;
+    const logSourceSnapshot: TaskChangeLogSourceSnapshot | null =
+      changePresenceEnabled &&
+      typeof (this.teamLogSourceTracker as { getSnapshot?: (teamName: string) => unknown })
+        .getSnapshot === 'function'
+        ? ((
+            this.teamLogSourceTracker as {
+              getSnapshot: (teamName: string) => TaskChangeLogSourceSnapshot | null;
+            }
+          ).getSnapshot(teamName) ?? null)
+        : null;
+
+    const [tasks, kanbanState, presenceIndex] = await Promise.all([
+      this.taskReader.getTasks(teamName).catch(() => [] as TeamTask[]),
+      this.kanbanManager
+        .getState(teamName)
+        .catch(() => ({ teamName, reviewers: [], tasks: {} }) as KanbanState),
+      changePresenceEnabled &&
+      logSourceSnapshot?.projectFingerprint &&
+      logSourceSnapshot.logSourceGeneration
+        ? this.taskChangePresenceRepository!.load(teamName)
+        : Promise.resolve(null),
+    ]);
+
+    const tasksWithKanbanBase: TeamTaskWithKanban[] = tasks.map((task) =>
+      this.attachKanbanCompatibility(task, kanbanState.tasks[task.id])
+    );
+
+    return this.resolveTaskChangePresenceMap(
+      tasksWithKanbanBase,
+      changePresenceEnabled,
+      presenceIndex,
+      logSourceSnapshot
+    );
   }
 
   async listTeams(): Promise<TeamSummary[]> {
@@ -333,6 +459,24 @@ export class TeamDataService {
     mark('config');
 
     const warnings: string[] = [];
+    const changePresenceEnabled =
+      this.taskChangePresenceRepository !== null && this.teamLogSourceTracker !== null;
+    const logSourceSnapshot: TaskChangeLogSourceSnapshot | null =
+      changePresenceEnabled &&
+      typeof (this.teamLogSourceTracker as { getSnapshot?: (teamName: string) => unknown })
+        .getSnapshot === 'function'
+        ? ((
+            this.teamLogSourceTracker as {
+              getSnapshot: (teamName: string) => TaskChangeLogSourceSnapshot | null;
+            }
+          ).getSnapshot(teamName) ?? null)
+        : null;
+    const presenceIndexPromise =
+      changePresenceEnabled &&
+      logSourceSnapshot?.projectFingerprint &&
+      logSourceSnapshot.logSourceGeneration
+        ? this.taskChangePresenceRepository!.load(teamName)
+        : Promise.resolve(null);
 
     let tasks: TeamTask[] = [];
     try {
@@ -473,9 +617,24 @@ export class TeamDataService {
 
     mark('kanbanGc');
 
-    const tasksWithKanban: TeamTaskWithKanban[] = tasks.map((task) =>
+    const tasksWithKanbanBase: TeamTaskWithKanban[] = tasks.map((task) =>
       this.attachKanbanCompatibility(task, kanbanState.tasks[task.id])
     );
+
+    const presenceIndex = await presenceIndexPromise;
+
+    const taskChangePresenceById = this.resolveTaskChangePresenceMap(
+      tasksWithKanbanBase,
+      changePresenceEnabled,
+      presenceIndex,
+      logSourceSnapshot
+    );
+    const tasksWithKanban: TeamTaskWithKanban[] = changePresenceEnabled
+      ? tasksWithKanbanBase.map((task) => ({
+          ...task,
+          changePresence: taskChangePresenceById[task.id] ?? 'unknown',
+        }))
+      : tasksWithKanbanBase;
 
     const members = this.memberResolver.resolveMembers(
       config,
@@ -491,10 +650,6 @@ export class TeamDataService {
     mark('enrichBranches');
 
     mark('syncComments');
-
-    const tasksToReturn: TeamTaskWithKanban[] = tasks.map((task) =>
-      this.attachKanbanCompatibility(task, kanbanState.tasks[task.id])
-    );
 
     let processes: TeamProcess[] = [];
     try {
@@ -530,7 +685,7 @@ export class TeamDataService {
     return {
       teamName,
       config,
-      tasks: tasksToReturn,
+      tasks: tasksWithKanban,
       members,
       messages,
       kanbanState,

@@ -5,6 +5,11 @@
 import { api } from '@renderer/api';
 import { syncRendererTelemetry } from '@renderer/sentry';
 import { cleanupStale as cleanupCommentReadState } from '@renderer/services/commentReadStorage';
+import {
+  buildTaskChangePresenceKey,
+  buildTaskChangeRequestOptions,
+  canDisplayTaskChangesForOptions,
+} from '@renderer/utils/taskChangeRequest';
 import { create } from 'zustand';
 
 import { createChangeReviewSlice } from './slices/changeReviewSlice';
@@ -40,6 +45,9 @@ import type {
   ToolApprovalRequest,
   UpdaterStatus,
 } from '@shared/types';
+
+const ENABLE_AUTO_TEAM_CHANGE_PRESENCE_TRACKING = false;
+const IN_PROGRESS_CHANGE_PRESENCE_POLL_MS = 10_000;
 
 // =============================================================================
 // Store Creation
@@ -135,21 +143,94 @@ export function initializeNotificationListeners(): () => void {
   cleanupFns.push(() => {
     if (cliStatusTimer) clearTimeout(cliStatusTimer);
   });
+  const inProgressChangePresencePollTimer = setInterval(() => {
+    void pollVisibleTeamInProgressChangePresence();
+  }, IN_PROGRESS_CHANGE_PRESENCE_POLL_MS);
+  cleanupFns.push(() => {
+    clearInterval(inProgressChangePresencePollTimer);
+  });
   const pendingSessionRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingProjectRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let teamRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let teamPresenceRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let inProgressChangePresencePollInFlight = false;
+  const inProgressChangePresenceCursorByTeam = new Map<string, number>();
 
   let teamListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let globalTasksRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   const SESSION_REFRESH_DEBOUNCE_MS = 150;
   const PROJECT_REFRESH_DEBOUNCE_MS = 300;
   const TEAM_REFRESH_THROTTLE_MS = 800;
+  const TEAM_PRESENCE_REFRESH_THROTTLE_MS = 400;
   const TEAM_LIST_REFRESH_THROTTLE_MS = 2000;
   const GLOBAL_TASKS_REFRESH_THROTTLE_MS = 500;
   const getBaseProjectId = (projectId: string | null | undefined): string | null => {
     if (!projectId) return null;
     const separatorIndex = projectId.indexOf('::');
     return separatorIndex >= 0 ? projectId.slice(0, separatorIndex) : projectId;
+  };
+
+  const pollVisibleTeamInProgressChangePresence = async (): Promise<void> => {
+    if (inProgressChangePresencePollInFlight) {
+      return;
+    }
+
+    const state = useStore.getState();
+    const selectedTeamName = state.selectedTeamName;
+    const selectedTeamData = state.selectedTeamData;
+    if (
+      !selectedTeamName ||
+      !selectedTeamData ||
+      selectedTeamData.teamName !== selectedTeamName ||
+      !isTeamVisibleInAnyPane(selectedTeamName)
+    ) {
+      return;
+    }
+
+    const candidateTasks = selectedTeamData.tasks.filter((task) => {
+      if (task.status !== 'in_progress') {
+        return false;
+      }
+      return canDisplayTaskChangesForOptions(buildTaskChangeRequestOptions(task));
+    });
+    if (candidateTasks.length === 0) {
+      inProgressChangePresenceCursorByTeam.delete(selectedTeamName);
+      return;
+    }
+
+    inProgressChangePresencePollInFlight = true;
+    try {
+      const cursor = inProgressChangePresenceCursorByTeam.get(selectedTeamName) ?? 0;
+      const unknownTasks = candidateTasks.filter((task) => task.changePresence === 'unknown');
+      const sourceTasks = unknownTasks.length > 0 ? unknownTasks : candidateTasks;
+      const nextTask = sourceTasks[cursor % sourceTasks.length];
+
+      inProgressChangePresenceCursorByTeam.set(selectedTeamName, (cursor + 1) % sourceTasks.length);
+
+      const current = useStore.getState();
+      if (
+        current.selectedTeamName !== selectedTeamName ||
+        !current.selectedTeamData ||
+        current.selectedTeamData.teamName !== selectedTeamName ||
+        !isTeamVisibleInAnyPane(selectedTeamName)
+      ) {
+        return;
+      }
+
+      const currentTask = current.selectedTeamData.tasks.find((task) => task.id === nextTask.id);
+      if (!currentTask || currentTask.status !== 'in_progress') {
+        return;
+      }
+
+      const requestOptions = buildTaskChangeRequestOptions(currentTask);
+      const cacheKey = buildTaskChangePresenceKey(selectedTeamName, currentTask.id, requestOptions);
+      current.invalidateTaskChangePresence([cacheKey]);
+      await current.checkTaskHasChanges(selectedTeamName, currentTask.id, requestOptions);
+    } catch {
+      // Best-effort polling for in-progress tasks only.
+    } finally {
+      inProgressChangePresencePollInFlight = false;
+    }
   };
 
   const scheduleSessionRefresh = (projectId: string, sessionId: string): void => {
@@ -256,6 +337,61 @@ export function initializeNotificationListeners(): () => void {
       );
     });
   };
+
+  const getTrackedChangePresenceTeams = (): Set<string> => {
+    const { selectedTeamName, selectedTeamData } = useStore.getState();
+    if (
+      !selectedTeamName ||
+      !selectedTeamData ||
+      selectedTeamData.teamName !== selectedTeamName ||
+      !isTeamVisibleInAnyPane(selectedTeamName)
+    ) {
+      return new Set<string>();
+    }
+    return new Set([selectedTeamName]);
+  };
+
+  if (ENABLE_AUTO_TEAM_CHANGE_PRESENCE_TRACKING && api.teams?.setChangePresenceTracking) {
+    let trackedTeamNames = new Set<string>();
+    const syncVisibleTeamTracking = (): void => {
+      const nextTrackedTeamNames = getTrackedChangePresenceTeams();
+
+      for (const teamName of nextTrackedTeamNames) {
+        if (!trackedTeamNames.has(teamName)) {
+          void api.teams.setChangePresenceTracking(teamName, true).catch(() => undefined);
+        }
+      }
+
+      for (const teamName of trackedTeamNames) {
+        if (!nextTrackedTeamNames.has(teamName)) {
+          void api.teams.setChangePresenceTracking(teamName, false).catch(() => undefined);
+        }
+      }
+
+      trackedTeamNames = nextTrackedTeamNames;
+    };
+
+    syncVisibleTeamTracking();
+
+    const unsubscribeVisibleTeamTracking = useStore.subscribe((state, prevState) => {
+      if (
+        state.paneLayout === prevState.paneLayout &&
+        state.selectedTeamName === prevState.selectedTeamName &&
+        state.selectedTeamData === prevState.selectedTeamData
+      ) {
+        return;
+      }
+      syncVisibleTeamTracking();
+    });
+
+    cleanupFns.push(() => {
+      unsubscribeVisibleTeamTracking();
+      for (const teamName of trackedTeamNames) {
+        void api.teams.setChangePresenceTracking(teamName, false).catch(() => undefined);
+      }
+      trackedTeamNames.clear();
+    });
+  }
 
   // Listen for task-list file changes to refresh currently viewed session metadata
   if (api.onTodoChange) {
@@ -474,6 +610,22 @@ export function initializeNotificationListeners(): () => void {
         return;
       }
 
+      if (event.type === 'log-source-change') {
+        if (!event?.teamName || !isTeamVisibleInAnyPane(event.teamName)) {
+          return;
+        }
+        if (teamPresenceRefreshTimers.has(event.teamName)) {
+          return;
+        }
+        const timer = setTimeout(() => {
+          teamPresenceRefreshTimers.delete(event.teamName);
+          const current = useStore.getState();
+          void current.refreshSelectedTeamChangePresence(event.teamName);
+        }, TEAM_PRESENCE_REFRESH_THROTTLE_MS);
+        teamPresenceRefreshTimers.set(event.teamName, timer);
+        return;
+      }
+
       // Throttled refresh of summary list (keeps TeamListView current without flooding).
       if (!teamListRefreshTimer) {
         teamListRefreshTimer = setTimeout(() => {
@@ -513,6 +665,8 @@ export function initializeNotificationListeners(): () => void {
         cleanup();
         for (const t of teamRefreshTimers.values()) clearTimeout(t);
         teamRefreshTimers = new Map();
+        for (const t of teamPresenceRefreshTimers.values()) clearTimeout(t);
+        teamPresenceRefreshTimers = new Map();
         if (teamListRefreshTimer) {
           clearTimeout(teamListRefreshTimer);
           teamListRefreshTimer = null;
