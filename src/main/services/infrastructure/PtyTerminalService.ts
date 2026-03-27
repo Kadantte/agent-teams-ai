@@ -14,6 +14,8 @@ import { TERMINAL_DATA, TERMINAL_EXIT } from '@preload/constants/ipcChannels';
 import { createLogger } from '@shared/utils/logger';
 
 import type { PtySpawnOptions } from '@shared/types/terminal';
+import { safeSendToRenderer } from '@main/utils/safeWebContentsSend';
+
 import type { BrowserWindow } from 'electron';
 
 const logger = createLogger('PtyTerminalService');
@@ -110,8 +112,6 @@ export class PtyTerminalService {
   }
 
   private send(channel: string, ...args: unknown[]): void {
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send(channel, ...args);
-    }
+    safeSendToRenderer(this.mainWindow, channel, ...args);
   }
 }

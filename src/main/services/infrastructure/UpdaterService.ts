@@ -10,6 +10,7 @@
  * artifacts for the current platform.
  */
 
+import { safeSendToRenderer } from '@main/utils/safeWebContentsSend';
 import { getErrorMessage } from '@shared/utils/errorHandling';
 import { createLogger } from '@shared/utils/logger';
 import electronUpdater from 'electron-updater';
@@ -132,9 +133,7 @@ export class UpdaterService {
   }
 
   private sendStatus(status: UpdaterStatus): void {
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('updater:status', status);
-    }
+    safeSendToRenderer(this.mainWindow, 'updater:status', status);
   }
 
   /**
