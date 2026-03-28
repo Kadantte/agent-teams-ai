@@ -8,6 +8,7 @@ import { useCallback } from 'react';
 import { GraphView } from '@claude-teams/agent-graph';
 
 import { useTeamGraphAdapter } from '../adapters/useTeamGraphAdapter';
+import { GraphNodePopover } from './GraphNodePopover';
 
 import type { GraphDomainRef, GraphEventPort } from '@claude-teams/agent-graph';
 
@@ -60,6 +61,24 @@ export const TeamGraphOverlay = ({
         onRequestClose={onClose}
         onRequestPinAsTab={onPinAsTab}
         className="flex-1"
+        renderOverlay={({ node, onClose: closePopover }) => (
+          <GraphNodePopover
+            node={node}
+            onClose={closePopover}
+            onSendMessage={(name) => {
+              onSendMessage?.(name);
+              closePopover();
+            }}
+            onOpenTaskDetail={(id) => {
+              onOpenTaskDetail?.(id);
+              closePopover();
+            }}
+            onOpenMemberProfile={(name) => {
+              onOpenMemberProfile?.(name);
+              closePopover();
+            }}
+          />
+        )}
       />
     </div>
   );

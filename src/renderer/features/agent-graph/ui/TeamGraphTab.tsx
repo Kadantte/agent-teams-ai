@@ -8,8 +8,9 @@ import { useCallback, useState, lazy, Suspense } from 'react';
 import { GraphView } from '@claude-teams/agent-graph';
 
 import { useTeamGraphAdapter } from '../adapters/useTeamGraphAdapter';
+import { GraphNodePopover } from './GraphNodePopover';
 
-import type { GraphDomainRef, GraphEventPort } from '@claude-teams/agent-graph';
+import type { GraphDomainRef, GraphEventPort, GraphNode } from '@claude-teams/agent-graph';
 
 const TeamGraphOverlay = lazy(() =>
   import('./TeamGraphOverlay').then((m) => ({ default: m.TeamGraphOverlay }))
@@ -72,6 +73,27 @@ export const TeamGraphTab = ({ teamName }: TeamGraphTabProps): React.JSX.Element
         events={events}
         className="size-full"
         onRequestFullscreen={() => setFullscreen(true)}
+        renderOverlay={({ node, onClose }) => (
+          <GraphNodePopover
+            node={node}
+            onClose={onClose}
+            onSendMessage={(name) =>
+              window.dispatchEvent(
+                new CustomEvent('graph:send-message', { detail: { teamName, memberName: name } })
+              )
+            }
+            onOpenTaskDetail={(id) =>
+              window.dispatchEvent(
+                new CustomEvent('graph:open-task', { detail: { teamName, taskId: id } })
+              )
+            }
+            onOpenMemberProfile={(name) =>
+              window.dispatchEvent(
+                new CustomEvent('graph:send-message', { detail: { teamName, memberName: name } })
+              )
+            }
+          />
+        )}
       />
       {fullscreen && (
         <Suspense fallback={null}>

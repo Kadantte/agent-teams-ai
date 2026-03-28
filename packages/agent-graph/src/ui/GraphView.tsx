@@ -32,6 +32,12 @@ export interface GraphViewProps {
   onRequestClose?: () => void;
   onRequestPinAsTab?: () => void;
   onRequestFullscreen?: () => void;
+  /** Custom overlay renderer — replaces built-in GraphOverlay. Allows host app to reuse its own components. */
+  renderOverlay?: (props: {
+    node: GraphNode;
+    screenPos: { x: number; y: number };
+    onClose: () => void;
+  }) => React.ReactNode;
 }
 
 export function GraphView({
@@ -42,6 +48,7 @@ export function GraphView({
   onRequestClose,
   onRequestPinAsTab,
   onRequestFullscreen,
+  renderOverlay,
 }: GraphViewProps): React.JSX.Element {
   // ─── React state (user-facing only) ─────────────────────────────────────
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -335,12 +342,29 @@ export function GraphView({
         isAlive={data.isAlive}
       />
 
-      <GraphOverlay
-        selectedNode={selectedNode}
-        worldToScreen={camera.worldToScreen}
-        events={events}
-        onDeselect={() => setSelectedNodeId(null)}
-      />
+      {selectedNode && renderOverlay ? (
+        <div
+          className="absolute z-20 pointer-events-auto"
+          style={{
+            left: `${camera.worldToScreen(selectedNode.x ?? 0, selectedNode.y ?? 0).x + 20}px`,
+            top: `${camera.worldToScreen(selectedNode.x ?? 0, selectedNode.y ?? 0).y - 20}px`,
+            transform: 'translateY(-50%)',
+          }}
+        >
+          {renderOverlay({
+            node: selectedNode,
+            screenPos: camera.worldToScreen(selectedNode.x ?? 0, selectedNode.y ?? 0),
+            onClose: () => setSelectedNodeId(null),
+          })}
+        </div>
+      ) : (
+        <GraphOverlay
+          selectedNode={selectedNode}
+          worldToScreen={camera.worldToScreen}
+          events={events}
+          onDeselect={() => setSelectedNodeId(null)}
+        />
+      )}
     </div>
   );
 }
