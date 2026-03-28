@@ -53,6 +53,8 @@ export interface GraphNode {
   currentTaskId?: string | null;
   /** Current task subject (for display in popover) */
   currentTaskSubject?: string;
+  /** Agent is awaiting tool approval from the user */
+  pendingApproval?: boolean;
 
   // ─── Task-specific ─────────────────────────────────────────────────────
   /** Short display ID (e.g., "#3") */

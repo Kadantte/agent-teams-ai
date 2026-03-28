@@ -50,6 +50,27 @@ export function drawAgents(
     // Breathing animation + spawn/waiting effects
     drawBreathing(ctx, x, y, r, node.state, time, node.spawnStatus);
 
+    // Pending approval indicator: pulsing amber ring
+    if (node.pendingApproval) {
+      const pulseAlpha = 0.3 + 0.35 * Math.sin(time * 3);
+      const ringR = r + 5;
+      ctx.beginPath();
+      ctx.arc(x, y, ringR, 0, Math.PI * 2);
+      ctx.strokeStyle = hexWithAlpha('#f59e0b', pulseAlpha);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Subtle amber glow
+      const glowR = r + 12;
+      const grad = ctx.createRadialGradient(x, y, r, x, y, glowR);
+      grad.addColorStop(0, hexWithAlpha('#f59e0b', pulseAlpha * 0.25));
+      grad.addColorStop(1, 'transparent');
+      ctx.beginPath();
+      ctx.arc(x, y, glowR, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+
     // Working indicator: subtle spinning arc when member has active task
     if (node.currentTaskId && (node.state === 'active' || node.state === 'thinking' || node.state === 'tool_calling')) {
       const ringR = r + 4;

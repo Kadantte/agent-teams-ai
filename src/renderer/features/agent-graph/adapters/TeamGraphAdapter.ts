@@ -50,7 +50,8 @@ export class TeamGraphAdapter {
     teamData: TeamData | null,
     teamName: string,
     spawnStatuses?: Record<string, MemberSpawnStatusEntry>,
-    leadContext?: LeadContextUsage
+    leadContext?: LeadContextUsage,
+    pendingApprovalAgents?: Set<string>
   ): GraphDataPort {
     if (teamData?.teamName !== teamName) {
       return TeamGraphAdapter.#emptyResult(teamName);
@@ -58,7 +59,10 @@ export class TeamGraphAdapter {
 
     // Simple hash for change detection (avoids full deep equality)
     const totalComments = teamData.tasks.reduce((sum, t) => sum + (t.comments?.length ?? 0), 0);
-    const hash = `${teamData.teamName}:${teamData.members.length}:${teamData.tasks.length}:${teamData.messages.length}:${teamData.isAlive}:${leadContext?.percent}:${totalComments}`;
+    const approvalKey = pendingApprovalAgents?.size
+      ? Array.from(pendingApprovalAgents).sort().join(',')
+      : '';
+    const hash = `${teamData.teamName}:${teamData.members.length}:${teamData.tasks.length}:${teamData.messages.length}:${teamData.isAlive}:${leadContext?.percent}:${totalComments}:${approvalKey}`;
     if (hash === this.#lastDataHash && teamName === this.#lastTeamName) {
       return this.#cachedResult;
     }
@@ -82,7 +86,15 @@ export class TeamGraphAdapter {
     const leadId = `lead:${teamName}`;
 
     this.#buildLeadNode(nodes, leadId, teamData, teamName, leadContext);
-    this.#buildMemberNodes(nodes, edges, leadId, teamData, teamName, spawnStatuses);
+    this.#buildMemberNodes(
+      nodes,
+      edges,
+      leadId,
+      teamData,
+      teamName,
+      spawnStatuses,
+      pendingApprovalAgents
+    );
     this.#buildTaskNodes(nodes, edges, teamData, teamName);
     this.#buildProcessNodes(nodes, edges, teamData, teamName);
     this.#buildMessageParticles(particles, teamData.messages, teamName, leadId, edges);
@@ -140,7 +152,8 @@ export class TeamGraphAdapter {
     leadId: string,
     data: TeamData,
     teamName: string,
-    spawnStatuses?: Record<string, MemberSpawnStatusEntry>
+    spawnStatuses?: Record<string, MemberSpawnStatusEntry>,
+    pendingApprovalAgents?: Set<string>
   ): void {
     for (const member of data.members) {
       if (member.removedAt) continue;
@@ -162,6 +175,7 @@ export class TeamGraphAdapter {
         currentTaskSubject: member.currentTaskId
           ? data.tasks.find((t) => t.id === member.currentTaskId)?.subject
           : undefined,
+        pendingApproval: pendingApprovalAgents?.has(member.name) ?? false,
         domainRef: { kind: 'member', teamName, memberName: member.name },
       });
 

@@ -15,16 +15,32 @@ import type { GraphDataPort } from '@claude-teams/agent-graph';
 export function useTeamGraphAdapter(teamName: string): GraphDataPort {
   const adapterRef = useRef<TeamGraphAdapter>(TeamGraphAdapter.create());
 
-  const { teamData, spawnStatuses, leadContext } = useStore(
+  const { teamData, spawnStatuses, leadContext, pendingApprovals } = useStore(
     useShallow((s) => ({
       teamData: s.selectedTeamData,
       spawnStatuses: teamName ? s.memberSpawnStatusesByTeam[teamName] : undefined,
       leadContext: teamName ? s.leadContextByTeam[teamName] : undefined,
+      pendingApprovals: s.pendingApprovals,
     }))
   );
 
+  const pendingApprovalAgents = useMemo(() => {
+    const agents = new Set<string>();
+    for (const a of pendingApprovals) {
+      if (a.source !== 'lead') agents.add(a.source);
+    }
+    return agents;
+  }, [pendingApprovals]);
+
   return useMemo(
-    () => adapterRef.current.adapt(teamData, teamName, spawnStatuses, leadContext),
-    [teamData, teamName, spawnStatuses, leadContext]
+    () =>
+      adapterRef.current.adapt(
+        teamData,
+        teamName,
+        spawnStatuses,
+        leadContext,
+        pendingApprovalAgents
+      ),
+    [teamData, teamName, spawnStatuses, leadContext, pendingApprovalAgents]
   );
 }
