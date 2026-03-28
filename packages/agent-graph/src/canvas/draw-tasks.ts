@@ -139,22 +139,24 @@ function drawTaskPill(
   );
   ctx.fill();
 
-  // Display ID
-  const displayId = node.displayId ?? node.label;
-  ctx.font = `bold ${TASK_PILL.idFontSize}px monospace`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = isFinished ? COLORS.textDim : COLORS.textPrimary;
-  ctx.fillText(displayId, -halfW + TASK_PILL.textOffsetX, -4);
-
-  // Subject text
+  // Subject (main title — large)
   if (node.sublabel) {
-    ctx.font = `${TASK_PILL.subjectFontSize}px sans-serif`;
-    ctx.fillStyle = isFinished ? COLORS.textMuted : COLORS.textDim;
+    ctx.font = `bold ${TASK_PILL.idFontSize}px sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = isFinished ? COLORS.textDim : COLORS.textPrimary;
     const maxW = w - TASK_PILL.textOffsetX - 8;
     const subject = truncateText(ctx, node.sublabel, maxW, ctx.font);
-    ctx.fillText(subject, -halfW + TASK_PILL.textOffsetX, 8);
+    ctx.fillText(subject, -halfW + TASK_PILL.textOffsetX, -4);
   }
+
+  // Display ID (secondary — small)
+  const displayId = node.displayId ?? node.label;
+  ctx.font = `${TASK_PILL.subjectFontSize}px monospace`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = isFinished ? COLORS.textMuted : COLORS.textDim;
+  ctx.fillText(displayId, -halfW + TASK_PILL.textOffsetX, 8);
 
   // Approved badge: checkmark at right side
   if (node.reviewState === 'approved') {
