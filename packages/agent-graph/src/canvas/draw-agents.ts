@@ -44,8 +44,8 @@ export function drawAgents(
     // Hexagonal body with interior fill
     drawHexBody(ctx, x, y, r, color, node.state, time, isSelected, isHovered);
 
-    // Breathing animation
-    drawBreathing(ctx, x, y, r, node.state, time);
+    // Breathing animation + spawn/waiting effects
+    drawBreathing(ctx, x, y, r, node.state, time, node.spawnStatus);
 
     // Name label
     drawLabel(ctx, x, y, r, node.label, color);
@@ -150,7 +150,34 @@ function drawBreathing(
   r: number,
   state: string,
   time: number,
+  spawnStatus?: GraphNode['spawnStatus'],
 ): void {
+  // Spawning: rotating dashed ring (loading spinner)
+  if (spawnStatus === 'spawning') {
+    const ringR = r + AGENT_DRAW.orbitParticleOffset;
+    const rotation = time * ANIM.orbitSpeed * 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, ringR, rotation, rotation + Math.PI * 1.4);
+    ctx.strokeStyle = COLORS.holoBase + alphaHex(0.5);
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    return;
+  }
+
+  // Waiting: pulsing hex outline (breathing border)
+  if (spawnStatus === 'waiting') {
+    const pulse = 0.12 + 0.12 * Math.sin(time * AGENT_DRAW.waitingBreatheSpeed);
+    drawHexagon(ctx, x, y, r + AGENT_DRAW.outerRingOffset);
+    ctx.strokeStyle = COLORS.holoBase + alphaHex(pulse);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    return;
+  }
+
   const isActive = state === 'active' || state === 'thinking' || state === 'tool_calling';
   const speed = isActive ? ANIM.breathe.activeSpeed : ANIM.breathe.idleSpeed;
   const amp = isActive ? ANIM.breathe.activeAmp : ANIM.breathe.idleAmp;

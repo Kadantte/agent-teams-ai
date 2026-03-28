@@ -87,8 +87,11 @@ export class KanbanLayoutEngine {
           task.fy = task.y;
           continue;
         }
-        task.x = baseX + colIdx * columnWidth;
-        task.y = baseY + rowIdx * rowHeight;
+        const targetX = baseX + colIdx * columnWidth;
+        const targetY = baseY + rowIdx * rowHeight;
+        // Smooth slide: LERP toward target; instant on first appearance
+        task.x = task.x != null ? task.x + (targetX - task.x) * 0.15 : targetX;
+        task.y = task.y != null ? task.y + (targetY - task.y) * 0.15 : targetY;
         task.fx = task.x;
         task.fy = task.y;
         task.vx = 0;
@@ -120,8 +123,10 @@ export class KanbanLayoutEngine {
   static #layoutUnassigned(tasks: GraphNode[]): void {
     const { columnWidth, rowHeight } = KANBAN_ZONE;
     for (const [idx, task] of tasks.entries()) {
-      task.x = -400 + (idx % 3) * columnWidth;
-      task.y = 400 + Math.floor(idx / 3) * rowHeight;
+      const targetX = -400 + (idx % 3) * columnWidth;
+      const targetY = 400 + Math.floor(idx / 3) * rowHeight;
+      task.x = task.x != null ? task.x + (targetX - task.x) * 0.15 : targetX;
+      task.y = task.y != null ? task.y + (targetY - task.y) * 0.15 : targetY;
       task.fx = task.x;
       task.fy = task.y;
       task.vx = 0;

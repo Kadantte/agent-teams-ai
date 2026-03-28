@@ -83,7 +83,10 @@ export function drawEdges(
 
     const style = EDGE_STYLES[edge.type] ?? EDGE_STYLES['parent-child'];
     const isActive = hasActiveParticles.has(edge.id);
-    const alpha = isActive ? BEAM.activeAlpha : BEAM.idleAlpha;
+    // Pulse alpha when particles are travelling: base 0.3 + 0.2 * sin wave
+    const alpha = isActive
+      ? BEAM.activeAlpha + 0.2 * Math.sin(_time * 6)
+      : BEAM.idleAlpha;
 
     if (alpha < MIN_VISIBLE_OPACITY) continue;
 
@@ -91,6 +94,12 @@ export function drawEdges(
 
     ctx.save();
     ctx.globalAlpha = alpha;
+
+    // Subtle glow pass when edge has active particles
+    if (isActive) {
+      ctx.shadowColor = edge.color ?? style.color;
+      ctx.shadowBlur = 12;
+    }
 
     // Draw tapered bezier
     drawTaperedBezier(
