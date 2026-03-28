@@ -55,6 +55,8 @@ export const COLORS = {
 
   // Particle kind colors
   particleMessage: '#66ccff',
+  particleInboxMessage: '#66ccff',
+  particleTaskComment: '#ff9ad5',
   particleTaskAssign: '#ffbb44',
   particleReviewRequest: '#f59e0b',
   particleReviewResponse: '#22c55e',

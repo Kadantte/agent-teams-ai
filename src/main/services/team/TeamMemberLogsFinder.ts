@@ -688,8 +688,18 @@ export class TeamMemberLogsFinder {
     const discovery = await this.discoverProjectSessions(teamName);
     if (!discovery) return [];
 
-    const { projectDir, sessionIds, knownMembers } = discovery;
-    const candidates = await this.collectSubagentCandidates(projectDir, sessionIds);
+    const { projectDir, sessionIds, knownMembers, config } = discovery;
+    const currentLeadSessionId =
+      typeof config.leadSessionId === 'string' && config.leadSessionId.trim().length > 0
+        ? config.leadSessionId.trim()
+        : null;
+    // Live teammate tool tracking should follow the current team run, not historical
+    // lead sessions kept in sessionHistory or lingering on disk.
+    const candidateSessionIds =
+      currentLeadSessionId && sessionIds.includes(currentLeadSessionId)
+        ? [currentLeadSessionId]
+        : sessionIds;
+    const candidates = await this.collectSubagentCandidates(projectDir, candidateSessionIds);
     const results: Array<{
       memberName: string;
       sessionId: string;

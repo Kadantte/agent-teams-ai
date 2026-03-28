@@ -22,7 +22,8 @@ export type GraphNodeState =
 export type GraphEdgeType = 'parent-child' | 'ownership' | 'blocking' | 'related' | 'message';
 
 export type GraphParticleKind =
-  | 'message'
+  | 'inbox_message'
+  | 'task_comment'
   | 'task_assign'
   | 'review_request'
   | 'review_response'

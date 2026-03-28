@@ -674,6 +674,7 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
     () => (teamProjectPath ? [teamProjectPath] : []),
     [teamProjectPath]
   );
+  // Live branch sync now uses main-side background tracking instead of renderer polling.
   useBranchSync(branchSyncPaths, { live: true });
   const leadBranch = useStore((s) =>
     teamProjectPath ? (s.branchByPath[normalizePath(teamProjectPath)] ?? null) : null

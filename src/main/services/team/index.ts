@@ -1,4 +1,5 @@
 export { CascadeGuard } from './CascadeGuard';
+export { BranchStatusService } from './BranchStatusService';
 export { ChangeExtractorService } from './ChangeExtractorService';
 export { ClaudeBinaryResolver } from './ClaudeBinaryResolver';
 export { CrossTeamOutbox } from './CrossTeamOutbox';

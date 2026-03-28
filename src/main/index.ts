@@ -38,6 +38,7 @@ import {
   SKILLS_CHANGED,
   SSH_STATUS,
   TEAM_CHANGE,
+  TEAM_PROJECT_BRANCH_CHANGE,
   TEAM_TOOL_APPROVAL_EVENT,
   WINDOW_FULLSCREEN_CHANGED,
   // eslint-disable-next-line boundaries/element-types -- IPC channel constants shared between main and preload
@@ -97,6 +98,7 @@ import {
   configManager,
   LocalFileSystemProvider,
   MemberStatsComputer,
+  BranchStatusService,
   NotificationManager,
   PtyTerminalService,
   ServiceContext,
@@ -391,6 +393,7 @@ let httpServer: HttpServer;
 let schedulerService: SchedulerService;
 let skillsWatcherService: SkillsWatcherService | null = null;
 let teamBackupService: TeamBackupService | null = null;
+let branchStatusService: BranchStatusService | null = null;
 let rendererRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 let rendererRecoveryAttempts = 0;
 
@@ -786,6 +789,9 @@ function initializeServices(): void {
   const taskChangePresenceRepository = new JsonTaskChangePresenceRepository();
   const teamLogSourceTracker = new TeamLogSourceTracker(teamMemberLogsFinder);
   let teammateToolTracker: TeammateToolTracker | null = null;
+  branchStatusService = new BranchStatusService((event) => {
+    safeSendToRenderer(mainWindow, TEAM_PROJECT_BRANCH_CHANGE, event);
+  });
   const memberStatsComputer = new MemberStatsComputer(teamMemberLogsFinder);
   const taskBoundaryParser = new TaskBoundaryParser();
   const changeExtractor = new ChangeExtractorService(teamMemberLogsFinder, taskBoundaryParser);
@@ -891,6 +897,7 @@ function initializeServices(): void {
     teamMemberLogsFinder,
     memberStatsComputer,
     teammateToolTracker ?? undefined,
+    branchStatusService ?? undefined,
     {
       rewire: rewireContextEvents,
       full: onContextSwitched,
@@ -1043,6 +1050,8 @@ function shutdownServices(): void {
   if (teamDataService) {
     teamDataService.stopProcessHealthPolling();
   }
+  branchStatusService?.dispose();
+  branchStatusService = null;
 
   // Stop scheduled task execution and croner jobs
   if (schedulerService) {
@@ -1198,6 +1207,7 @@ function createWindow(): void {
 
   mainWindow.webContents.on('did-start-loading', () => {
     markRendererUnavailable(mainWindow);
+    branchStatusService?.resetAllTracking();
   });
 
   // Set traffic light position + notify renderer on first load, and auto-check for updates
@@ -1343,6 +1353,7 @@ function createWindow(): void {
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     logger.error('Renderer process gone:', details.reason, details.exitCode);
     markRendererUnavailable(mainWindow);
+    branchStatusService?.resetAllTracking();
     const activeContext = contextRegistry.getActive();
     activeContext?.stopFileWatcher();
     if (mainWindow) {

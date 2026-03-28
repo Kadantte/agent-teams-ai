@@ -126,6 +126,7 @@ import {
   TEAM_GET_MEMBER_LOGS,
   TEAM_GET_MEMBER_STATS,
   TEAM_GET_PROJECT_BRANCH,
+  TEAM_PROJECT_BRANCH_CHANGE,
   TEAM_GET_SAVED_REQUEST,
   TEAM_GET_TASK_ATTACHMENT,
   TEAM_GET_TASK_CHANGE_PRESENCE,
@@ -150,6 +151,7 @@ import {
   TEAM_SAVE_TASK_ATTACHMENT,
   TEAM_SEND_MESSAGE,
   TEAM_SET_CHANGE_PRESENCE_TRACKING,
+  TEAM_SET_PROJECT_BRANCH_TRACKING,
   TEAM_SET_TOOL_ACTIVITY_TRACKING,
   TEAM_SET_TASK_CLARIFICATION,
   TEAM_SHOW_MESSAGE_NOTIFICATION,
@@ -266,6 +268,7 @@ import type {
   TaskChangePresenceState,
   TaskChangeSetV2,
   TaskComment,
+  ProjectBranchChangeEvent,
   TeamChangeEvent,
   TeamClaudeLogsQuery,
   TeamClaudeLogsResponse,
@@ -958,6 +961,9 @@ const electronAPI: ElectronAPI = {
     getProjectBranch: async (projectPath: string) => {
       return invokeIpcWithResult<string | null>(TEAM_GET_PROJECT_BRANCH, projectPath);
     },
+    setProjectBranchTracking: async (projectPath: string, enabled: boolean) => {
+      return invokeIpcWithResult<void>(TEAM_SET_PROJECT_BRANCH_TRACKING, projectPath, enabled);
+    },
     getAttachments: async (teamName: string, messageId: string) => {
       return invokeIpcWithResult<AttachmentFileData[]>(TEAM_GET_ATTACHMENTS, teamName, messageId);
     },
@@ -1065,6 +1071,20 @@ const electronAPI: ElectronAPI = {
         attachmentId,
         mimeType
       );
+    },
+    onProjectBranchChange: (
+      callback: (event: unknown, data: ProjectBranchChangeEvent) => void
+    ): (() => void) => {
+      ipcRenderer.on(
+        TEAM_PROJECT_BRANCH_CHANGE,
+        callback as (event: Electron.IpcRendererEvent, ...args: unknown[]) => void
+      );
+      return (): void => {
+        ipcRenderer.removeListener(
+          TEAM_PROJECT_BRANCH_CHANGE,
+          callback as (event: Electron.IpcRendererEvent, ...args: unknown[]) => void
+        );
+      };
     },
     onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void): (() => void) => {
       ipcRenderer.on(

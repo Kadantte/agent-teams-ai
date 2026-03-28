@@ -42,6 +42,7 @@ export function drawParticles(
     const baseSize = (p.size ?? 1) * 3;
     // Differentiate visual by particle kind
     const size = p.kind === 'spawn' ? baseSize * 1.5
+      : p.kind === 'task_comment' ? baseSize * 1.15
       : p.kind === 'review_request' || p.kind === 'review_response' ? baseSize * 1.2
       : baseSize;
 
@@ -49,8 +50,8 @@ export function drawParticles(
     const phaseOffset = p.id.charCodeAt(Math.min(5, p.id.length - 1)) * 0.1;
     const wobbleAmp = BEAM.wobble.amp;
 
-    drawParticleTrail(ctx, source, target, cp, p.progress, color, size, wobbleAmp, phaseOffset, time);
-    drawParticleCore(ctx, source, target, cp, p.progress, color, size, wobbleAmp, phaseOffset, time);
+    drawParticleTrail(ctx, source, target, cp, p.progress, color, size, wobbleAmp, phaseOffset, time, p.kind);
+    drawParticleCore(ctx, source, target, cp, p.progress, color, size, wobbleAmp, phaseOffset, time, p.kind);
 
     // Label
     if (p.label && p.progress > PARTICLE_DRAW.labelMinT && p.progress < PARTICLE_DRAW.labelMaxT) {
@@ -104,8 +105,9 @@ function drawParticleTrail(
   wobbleAmp: number,
   phaseOffset: number,
   time: number,
+  kind: GraphParticle['kind'],
 ): void {
-  const trailSegments = 6;
+  const trailSegments = kind === 'task_comment' ? 4 : 6;
   const trailStep = BEAM.wobble.trailOffset / trailSegments;
 
   for (let i = trailSegments; i >= 1; i--) {
@@ -114,10 +116,18 @@ function drawParticleTrail(
     const alpha = (1 - i / trailSegments) * 0.3;
     const trailSize = size * (1 - i / trailSegments) * 0.5;
 
-    ctx.fillStyle = hexWithAlpha(color, alpha);
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, trailSize, 0, Math.PI * 2);
-    ctx.fill();
+    if (kind === 'task_comment') {
+      ctx.strokeStyle = hexWithAlpha(color, alpha);
+      ctx.lineWidth = Math.max(0.8, trailSize * 0.45);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, trailSize * 1.15, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = hexWithAlpha(color, alpha);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, trailSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
@@ -132,13 +142,28 @@ function drawParticleCore(
   wobbleAmp: number,
   phaseOffset: number,
   time: number,
+  kind: GraphParticle['kind'],
 ): void {
   const pos = getWobbledPosition(source, target, cp, progress, wobbleAmp, phaseOffset, time);
 
   // Glow sprite
   const glowR = PARTICLE_DRAW.glowRadius;
-  const sprite = getGlowSprite(color, glowR, 0.4, 0);
+  const sprite = getGlowSprite(color, glowR, kind === 'task_comment' ? 0.28 : 0.4, 0);
   ctx.drawImage(sprite, pos.x - glowR, pos.y - glowR);
+
+  if (kind === 'task_comment') {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, size * 1.1, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, size * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
 
   // Core dot
   ctx.fillStyle = color;

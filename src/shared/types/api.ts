@@ -51,6 +51,7 @@ import type {
   MemberFullStats,
   MemberLogSummary,
   MemberSpawnStatusesSnapshot,
+  ProjectBranchChangeEvent,
   ReplaceMembersRequest,
   SendMessageRequest,
   SendMessageResult,
@@ -489,6 +490,7 @@ export interface TeamsAPI {
     value: 'lead' | 'user' | null
   ) => Promise<void>;
   getProjectBranch: (projectPath: string) => Promise<string | null>;
+  setProjectBranchTracking: (projectPath: string, enabled: boolean) => Promise<void>;
   getAttachments: (teamName: string, messageId: string) => Promise<AttachmentFileData[]>;
   killProcess: (teamName: string, pid: number) => Promise<void>;
   getLeadActivity: (teamName: string) => Promise<LeadActivitySnapshot>;
@@ -530,6 +532,9 @@ export interface TeamsAPI {
     attachmentId: string,
     mimeType: string
   ) => Promise<void>;
+  onProjectBranchChange: (
+    callback: (event: unknown, data: ProjectBranchChangeEvent) => void
+  ) => () => void;
   onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void) => () => void;
   onProvisioningProgress: (
     callback: (event: unknown, data: TeamProvisioningProgress) => void

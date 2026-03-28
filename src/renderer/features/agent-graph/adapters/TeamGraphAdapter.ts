@@ -67,6 +67,42 @@ export class TeamGraphAdapter {
 
     // Simple hash for change detection (avoids full deep equality)
     const totalComments = teamData.tasks.reduce((sum, t) => sum + (t.comments?.length ?? 0), 0);
+    const memberKey = teamData.members
+      .map(
+        (member) =>
+          `${member.name}:${member.status}:${member.currentTaskId ?? ''}:${member.role ?? ''}:${member.color ?? ''}:${member.agentType ?? ''}:${member.removedAt ?? ''}`
+      )
+      .sort()
+      .join('|');
+    const taskKey = teamData.tasks
+      .map(
+        (task) =>
+          `${task.id}:${task.status}:${task.owner ?? ''}:${task.reviewState ?? ''}:${task.displayId ?? ''}:${task.subject}:${task.updatedAt ?? ''}`
+      )
+      .sort()
+      .join('|');
+    const processKey = teamData.processes
+      .map(
+        (proc) =>
+          `${proc.id}:${proc.label}:${proc.registeredBy ?? ''}:${proc.url ?? ''}:${proc.stoppedAt ?? ''}`
+      )
+      .sort()
+      .join('|');
+    const messageKey = teamData.messages
+      .slice(0, 25)
+      .map((msg) => TeamGraphAdapter.#getMessageParticleKey(msg))
+      .join('|');
+    const commentKey = teamData.tasks
+      .map((task) => {
+        const comments = task.comments ?? [];
+        const tail = comments
+          .slice(Math.max(0, comments.length - 5))
+          .map((comment) => `${comment.id}:${comment.author}:${comment.createdAt}`)
+          .join(',');
+        return `${task.id}:${comments.length}:${tail}`;
+      })
+      .sort()
+      .join('|');
     const approvalKey = pendingApprovalAgents?.size
       ? Array.from(pendingApprovalAgents).sort().join(',')
       : '';
@@ -107,7 +143,7 @@ export class TeamGraphAdapter {
           .sort()
           .join('|')
       : '';
-    const hash = `${teamData.teamName}:${teamData.members.length}:${teamData.tasks.length}:${teamData.messages.length}:${teamData.isAlive}:${leadContext?.percent}:${totalComments}:${approvalKey}:${activeToolKey}:${finishedVisibleKey}:${historyKey}`;
+    const hash = `${teamData.teamName}:${teamData.config.name ?? ''}:${teamData.config.color ?? ''}:${teamData.members.length}:${teamData.tasks.length}:${teamData.messages.length}:${teamData.processes.length}:${teamData.isAlive}:${leadContext?.percent}:${totalComments}:${memberKey}:${taskKey}:${processKey}:${messageKey}:${commentKey}:${approvalKey}:${activeToolKey}:${finishedVisibleKey}:${historyKey}`;
     if (hash === this.#lastDataHash && teamName === this.#lastTeamName) {
       return this.#cachedResult;
     }
@@ -156,8 +192,8 @@ export class TeamGraphAdapter {
     );
     this.#buildTaskNodes(nodes, edges, teamData, teamName);
     this.#buildProcessNodes(nodes, edges, teamData, teamName);
-    this.#buildMessageParticles(particles, teamData.messages, teamName, leadId, edges);
-    this.#buildCommentParticles(particles, teamData, teamName, edges);
+    this.#buildMessageParticles(particles, teamData.messages, teamName, leadId, leadName, edges);
+    this.#buildCommentParticles(particles, teamData, teamName, leadId, leadName, edges);
 
     this.#cachedResult = {
       nodes,
@@ -436,38 +472,38 @@ export class TeamGraphAdapter {
     messages: readonly InboxMessage[],
     teamName: string,
     leadId: string,
+    leadName: string,
     edges: GraphEdge[]
   ): void {
-    const recent = messages.slice(-20);
+    const ordered = [...messages].reverse();
 
     // First call: record all existing message IDs without creating particles.
     // This prevents old messages from spawning particles when the graph opens.
     if (!this.#initialMessagesSeen) {
       this.#initialMessagesSeen = true;
-      for (const msg of recent) {
-        const msgKey = msg.messageId ?? msg.timestamp;
+      for (const msg of ordered) {
+        const msgKey = TeamGraphAdapter.#getMessageParticleKey(msg);
         this.#seenMessageIds.add(msgKey);
       }
       return;
     }
 
     // Subsequent calls: only create particles for messages not yet seen.
-    for (const msg of recent) {
-      const msgKey = msg.messageId ?? msg.timestamp;
+    for (const msg of ordered) {
+      const msgKey = TeamGraphAdapter.#getMessageParticleKey(msg);
       if (this.#seenMessageIds.has(msgKey)) continue;
       this.#seenMessageIds.add(msgKey);
 
-      const edgeId = TeamGraphAdapter.#resolveMessageEdge(msg, teamName, leadId, edges);
+      const edgeId = TeamGraphAdapter.#resolveMessageEdge(msg, teamName, leadId, leadName, edges);
       if (!edgeId) continue;
 
-      const ts = typeof msg.timestamp === 'string' ? new Date(msg.timestamp).getTime() : 0;
       particles.push({
-        id: `particle:msg:${msgKey}`,
+        id: `particle:msg:${teamName}:${msgKey}`,
         edgeId,
-        progress: (ts % 800) / 1000,
-        kind: 'message',
+        progress: 0,
+        kind: 'inbox_message',
         color: msg.color ?? '#66ccff',
-        label: msg.summary ?? undefined,
+        label: TeamGraphAdapter.#buildParticleLabel(msg.summary ?? msg.text, 'inbox'),
       });
     }
   }
@@ -476,6 +512,8 @@ export class TeamGraphAdapter {
     particles: GraphParticle[],
     data: TeamData,
     teamName: string,
+    leadId: string,
+    leadName: string,
     edges: GraphEdge[]
   ): void {
     // First call: record current comment counts without creating particles.
@@ -500,22 +538,46 @@ export class TeamGraphAdapter {
       const prevCount = this.#seenCommentCounts.get(task.id) ?? 0;
       const currentCount = task.comments?.length ?? 0;
 
-      if (currentCount > prevCount && prevCount > 0) {
-        // New comment(s) detected — create a particle from the author to the task
-        const newComment = task.comments![currentCount - 1];
-        const authorNodeId = `member:${teamName}:${newComment.author}`;
-        const taskNodeId = `task:${teamName}:${task.id}`;
-        const authorEdge = edges.find((e) => e.source === authorNodeId && e.target === taskNodeId);
+      if (currentCount > prevCount) {
+        for (let index = prevCount; index < currentCount; index += 1) {
+          const newComment = task.comments?.[index];
+          if (!newComment) continue;
+          const authorNodeId = TeamGraphAdapter.#resolveParticipantId(
+            newComment.author,
+            teamName,
+            leadId,
+            leadName
+          );
+          const taskNodeId = `task:${teamName}:${task.id}`;
+          const authorEdge =
+            edges.find((e) => e.source === authorNodeId && e.target === taskNodeId) ??
+            edges.find((e) => e.source === taskNodeId && e.target === authorNodeId);
 
-        if (authorEdge) {
-          particles.push({
-            id: `particle:comment:${task.id}:${currentCount}`,
-            edgeId: authorEdge.id,
-            progress: 0,
-            kind: 'message',
-            color: memberColors.get(newComment.author) ?? '#cc88ff',
-            label: '\u{1F4AC}',
-          });
+          const edgeId =
+            authorEdge?.id ??
+            (() => {
+              const syntheticEdgeId = `edge:msg:${authorNodeId}:${taskNodeId}`;
+              if (!edges.some((edge) => edge.id === syntheticEdgeId)) {
+                edges.push({
+                  id: syntheticEdgeId,
+                  source: authorNodeId,
+                  target: taskNodeId,
+                  type: 'message',
+                });
+              }
+              return syntheticEdgeId;
+            })();
+
+          if (authorNodeId) {
+            particles.push({
+              id: `particle:comment:${teamName}:${task.id}:${index + 1}`,
+              edgeId,
+              progress: 0,
+              kind: 'task_comment',
+              color: memberColors.get(newComment.author) ?? '#cc88ff',
+              label: TeamGraphAdapter.#buildParticleLabel(newComment.text, 'comment'),
+            });
+          }
         }
       }
 
@@ -588,13 +650,14 @@ export class TeamGraphAdapter {
     msg: InboxMessage,
     teamName: string,
     leadId: string,
+    leadName: string,
     edges: GraphEdge[]
   ): string | null {
     const { from, to } = msg;
 
     if (from && to) {
-      const fromId = TeamGraphAdapter.#resolveParticipantId(from, teamName, leadId);
-      const toId = TeamGraphAdapter.#resolveParticipantId(to, teamName, leadId);
+      const fromId = TeamGraphAdapter.#resolveParticipantId(from, teamName, leadId, leadName);
+      const toId = TeamGraphAdapter.#resolveParticipantId(to, teamName, leadId, leadName);
       return (
         edges.find((e) => e.source === fromId && e.target === toId)?.id ??
         edges.find((e) => e.source === toId && e.target === fromId)?.id ??
@@ -603,7 +666,7 @@ export class TeamGraphAdapter {
     }
 
     if (from && !to) {
-      const fromId = TeamGraphAdapter.#resolveParticipantId(from, teamName, leadId);
+      const fromId = TeamGraphAdapter.#resolveParticipantId(from, teamName, leadId, leadName);
       return (
         edges.find(
           (e) =>
@@ -616,8 +679,39 @@ export class TeamGraphAdapter {
     return null;
   }
 
-  static #resolveParticipantId(name: string, teamName: string, leadId: string): string {
-    if (name === 'user' || name === 'team-lead') return leadId;
+  static #resolveParticipantId(
+    name: string,
+    teamName: string,
+    leadId: string,
+    leadName?: string
+  ): string {
+    const normalized = name.trim().toLowerCase();
+    if (normalized === 'user' || normalized === 'team-lead') return leadId;
+    if (leadName && normalized === leadName.trim().toLowerCase()) return leadId;
     return `member:${teamName}:${name}`;
+  }
+
+  static #buildParticleLabel(
+    text: string | undefined,
+    kind: 'inbox' | 'comment',
+    max = 26
+  ): string | undefined {
+    const normalized = text?.replace(/\s+/g, ' ').trim();
+    const prefix = kind === 'comment' ? '\u{1F4AC}' : '\u{2709}';
+    if (!normalized) return prefix;
+    const clipped =
+      normalized.length > max
+        ? `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}\u2026`
+        : normalized;
+    return `${prefix} ${clipped}`;
+  }
+
+  static #getMessageParticleKey(msg: InboxMessage): string {
+    if (msg.messageId && msg.messageId.trim().length > 0) {
+      return msg.messageId;
+    }
+    return [msg.timestamp, msg.from ?? '', msg.to ?? '', msg.summary ?? '', msg.text ?? ''].join(
+      '\u0000'
+    );
   }
 }

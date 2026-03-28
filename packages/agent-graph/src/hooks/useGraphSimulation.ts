@@ -217,7 +217,7 @@ export function useGraphSimulation(): UseGraphSimulationResult {
 
     state.nodes = nodes;
     state.edges = edges;
-    state.particles = particles;
+    state.particles = mergeParticles(state.particles, particles);
 
     syncSimulation(nodes, edges);
   }, [syncSimulation]);
@@ -235,6 +235,23 @@ export function useGraphSimulation(): UseGraphSimulationResult {
   }, []);
 
   return { stateRef, updateData, tick };
+}
+
+function mergeParticles(
+  existing: GraphParticle[],
+  incoming: GraphParticle[],
+): GraphParticle[] {
+  if (existing.length === 0) return incoming;
+  if (incoming.length === 0) return existing;
+
+  const merged = existing.slice();
+  const seen = new Set(existing.map((particle) => particle.id));
+  for (const particle of incoming) {
+    if (seen.has(particle.id)) continue;
+    merged.push(particle);
+    seen.add(particle.id);
+  }
+  return merged;
 }
 
 // ─── Frame Tick (pure function) ─────────────────────────────────────────────

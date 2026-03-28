@@ -319,6 +319,12 @@ export const TEAM_ADD_TASK_COMMENT = 'team:addTaskComment';
 /** Get current git branch for a project path (live read from .git/HEAD) */
 export const TEAM_GET_PROJECT_BRANCH = 'team:getProjectBranch';
 
+/** Enable or disable background tracking for a project path's git branch */
+export const TEAM_SET_PROJECT_BRANCH_TRACKING = 'team:setProjectBranchTracking';
+
+/** Push event: tracked project branch changed (main → renderer) */
+export const TEAM_PROJECT_BRANCH_CHANGE = 'team:projectBranchChange';
+
 /** Add a new member to an existing team */
 export const TEAM_ADD_MEMBER = 'team:addMember';
 

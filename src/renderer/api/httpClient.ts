@@ -839,6 +839,9 @@ export class HttpAPIClient implements ElectronAPI {
     getProjectBranch: async (_projectPath: string): Promise<string | null> => {
       return null;
     },
+    setProjectBranchTracking: async (): Promise<void> => {
+      // Not available in browser mode — no-op.
+    },
     getAttachments: async (
       _teamName: string,
       _messageId: string
@@ -917,6 +920,9 @@ export class HttpAPIClient implements ElectronAPI {
       _mimeType: string
     ): Promise<void> => {
       throw new Error('Task attachments are not available in browser mode');
+    },
+    onProjectBranchChange: (): (() => void) => {
+      return () => {};
     },
     onTeamChange: (callback: (event: unknown, data: TeamChangeEvent) => void): (() => void) => {
       return this.addEventListener('team-change', (data: unknown) =>

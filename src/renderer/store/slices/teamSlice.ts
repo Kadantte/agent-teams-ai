@@ -930,17 +930,31 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   setMessagesPanelWidth: (width: number) => set({ messagesPanelWidth: width }),
 
   fetchBranches: async (paths: string[]) => {
-    const results: Record<string, string | null> = {};
-    for (const p of paths) {
-      try {
-        const branch = await api.teams.getProjectBranch(p);
-        results[normalizePath(p)] = branch;
-      } catch {
-        results[normalizePath(p)] = null;
-      }
-    }
+    const entries = await Promise.all(
+      paths.map(async (p) => {
+        try {
+          const branch = await api.teams.getProjectBranch(p);
+          return [normalizePath(p), branch] as const;
+        } catch {
+          return [normalizePath(p), null] as const;
+        }
+      })
+    );
+    const results: Record<string, string | null> = Object.fromEntries(entries);
     if (Object.keys(results).length > 0) {
-      set((state) => ({ branchByPath: { ...state.branchByPath, ...results } }));
+      set((state) => {
+        let changed = false;
+        for (const [key, value] of Object.entries(results)) {
+          if (state.branchByPath[key] !== value) {
+            changed = true;
+            break;
+          }
+        }
+        if (!changed) {
+          return {};
+        }
+        return { branchByPath: { ...state.branchByPath, ...results } };
+      });
     }
   },
 

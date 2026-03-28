@@ -29,6 +29,7 @@ export interface GraphViewProps {
   events?: GraphEventPort;
   config?: Partial<GraphConfigPort>;
   className?: string;
+  suspendAnimation?: boolean;
   onRequestClose?: () => void;
   onRequestPinAsTab?: () => void;
   onRequestFullscreen?: () => void;
@@ -45,6 +46,7 @@ export function GraphView({
   events,
   config,
   className,
+  suspendAnimation = false,
   onRequestClose,
   onRequestPinAsTab,
   onRequestFullscreen,
@@ -58,6 +60,7 @@ export function GraphView({
     showEdges: true,
     paused: !(config?.animationEnabled ?? true),
   });
+  const effectivePaused = filters.paused || suspendAnimation;
 
   // Ref mirror of selectedNodeId — read by RAF loop to avoid recreating animate on selection change
   const selectedNodeIdRef = useRef<string | null>(null);
@@ -155,7 +158,7 @@ export function GraphView({
 
   // Start/stop RAF
   useEffect(() => {
-    if (!filters.paused) {
+    if (!effectivePaused) {
       runningRef.current = true;
       lastTimeRef.current = 0;
       rafRef.current = requestAnimationFrame(animate);
@@ -167,7 +170,7 @@ export function GraphView({
       runningRef.current = false;
       cancelAnimationFrame(rafRef.current);
     };
-  }, [filters.paused, animate]);
+  }, [effectivePaused, animate]);
 
   // ─── Auto-fit: center graph immediately when data arrives ──────────────
   const hasAutoFit = useRef(false);

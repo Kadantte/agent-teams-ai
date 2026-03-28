@@ -341,6 +341,35 @@ describe('tabSlice', () => {
       // Sidebar state should be preserved (not cleared) when switching to dashboard
       expect(store.getState().selectedProjectId).toBe('project-2');
     });
+
+    it('should re-select the team when switching to a graph tab for another team', () => {
+      const selectTeamSpy = vi.fn(async () => undefined);
+      store.setState({
+        selectedTeamName: 'team-a',
+        selectedTeamData: {
+          teamName: 'team-a',
+          config: { name: 'Team A', projectPath: '/repo/a' },
+          members: [],
+          tasks: [],
+          messages: [],
+          kanbanState: { teamName: 'team-a', reviewers: [], tasks: {} },
+          processes: [],
+          isAlive: true,
+        },
+        selectTeam: selectTeamSpy,
+      } as never);
+
+      store.getState().openTab({
+        type: 'graph',
+        teamName: 'team-b',
+        label: 'Team B Graph',
+      });
+      const graphTabId = store.getState().activeTabId!;
+
+      store.getState().setActiveTab(graphTabId);
+
+      expect(selectTeamSpy).toHaveBeenCalledWith('team-b');
+    });
   });
 
   describe('saveTabScrollPosition', () => {

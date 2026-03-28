@@ -89,6 +89,7 @@ import { registerWindowHandlers, removeWindowHandlers } from './window';
 
 import type {
   ChangeExtractorService,
+  BranchStatusService,
   CliInstallerService,
   FileContentResolver,
   GitDiffFallback,
@@ -129,6 +130,7 @@ export function initializeIpcHandlers(
   teamMemberLogsFinder: TeamMemberLogsFinder,
   memberStatsComputer: MemberStatsComputer,
   teammateToolTracker: TeammateToolTracker | undefined,
+  branchStatusService: BranchStatusService | undefined,
   contextCallbacks: {
     rewire: (context: ServiceContext) => void;
     full: (context: ServiceContext) => void;
@@ -170,7 +172,8 @@ export function initializeIpcHandlers(
     teamMemberLogsFinder,
     memberStatsComputer,
     teamBackupService,
-    teammateToolTracker
+    teammateToolTracker,
+    branchStatusService
   );
   initializeConfigHandlers({
     onClaudeRootPathUpdated: contextCallbacks.onClaudeRootPathUpdated,

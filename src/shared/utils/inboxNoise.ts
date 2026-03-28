@@ -109,13 +109,22 @@ export function isOnlyTeammateMessageBlocks(text: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
+ * Detects `<teammate-message>` opening tags (even without closing tag).
+ * Claude's lead model sometimes echoes raw teammate message XML in assistant
+ * text output — these are always protocol artifacts, never real user content.
+ */
+const TEAMMATE_MESSAGE_OPEN_RE = /^\s*<teammate-message\s/;
+
+/**
  * Returns true if a lead thought text is entirely protocol noise and should
  * be hidden from the user.  Covers:
  * 1. Structured JSON noise (idle_notification, shutdown_*, etc.)
- * 2. Text that consists solely of `<teammate-message>` XML blocks
+ * 2. Text that consists solely of `<teammate-message>` XML blocks (closed tags)
+ * 3. Text starting with an unclosed `<teammate-message>` tag
  */
 export function isThoughtProtocolNoise(text: string): boolean {
   if (isInboxNoiseMessage(text)) return true;
   if (isOnlyTeammateMessageBlocks(text)) return true;
+  if (TEAMMATE_MESSAGE_OPEN_RE.test(text)) return true;
   return false;
 }

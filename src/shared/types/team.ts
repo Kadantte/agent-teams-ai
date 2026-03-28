@@ -579,6 +579,11 @@ export interface TeamChangeEvent {
   detail?: string;
 }
 
+export interface ProjectBranchChangeEvent {
+  projectPath: string;
+  branch: string | null;
+}
+
 /** Per-member spawn status entry, exposed to renderer via IPC. */
 export interface MemberSpawnStatusEntry {
   status: MemberSpawnStatus;

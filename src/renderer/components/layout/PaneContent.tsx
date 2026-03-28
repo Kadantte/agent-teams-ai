@@ -68,7 +68,7 @@ export const PaneContent = ({ pane }: PaneContentProps): React.JSX.Element => {
             {tab.type === 'schedules' && <SchedulesView />}
             {tab.type === 'graph' && (
               <TabUIProvider tabId={tab.id}>
-                <TeamGraphTab teamName={tab.teamName ?? ''} />
+                <TeamGraphTab teamName={tab.teamName ?? ''} isActive={isActive} />
               </TabUIProvider>
             )}
           </div>

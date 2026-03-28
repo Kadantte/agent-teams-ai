@@ -18,9 +18,13 @@ const TeamGraphOverlay = lazy(() =>
 
 export interface TeamGraphTabProps {
   teamName: string;
+  isActive?: boolean;
 }
 
-export const TeamGraphTab = ({ teamName }: TeamGraphTabProps): React.JSX.Element => {
+export const TeamGraphTab = ({
+  teamName,
+  isActive = true,
+}: TeamGraphTabProps): React.JSX.Element => {
   const graphData = useTeamGraphAdapter(teamName);
   const [fullscreen, setFullscreen] = useState(false);
 
@@ -69,6 +73,7 @@ export const TeamGraphTab = ({ teamName }: TeamGraphTabProps): React.JSX.Element
         data={graphData}
         events={events}
         className="size-full"
+        suspendAnimation={!isActive}
         onRequestFullscreen={() => setFullscreen(true)}
         renderOverlay={({ node, onClose }) => (
           <GraphNodePopover

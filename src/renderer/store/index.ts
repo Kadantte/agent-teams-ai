@@ -5,6 +5,7 @@
 import { api } from '@renderer/api';
 import { syncRendererTelemetry } from '@renderer/sentry';
 import { cleanupStale as cleanupCommentReadState } from '@renderer/services/commentReadStorage';
+import { normalizePath } from '@renderer/utils/pathNormalize';
 import {
   buildTaskChangePresenceKey,
   buildTaskChangeRequestOptions,
@@ -1000,6 +1001,29 @@ export function initializeNotificationListeners(): () => void {
           globalTasksRefreshTimer = null;
         }
       });
+    }
+  }
+
+  if (api.teams?.onProjectBranchChange) {
+    const cleanup = api.teams.onProjectBranchChange((_event: unknown, event) => {
+      if (!event?.projectPath) return;
+      const normalizedPath = normalizePath(event.projectPath);
+      if (!normalizedPath) return;
+      useStore.setState((prev) => {
+        const current = prev.branchByPath[normalizedPath];
+        if (current === event.branch) {
+          return {};
+        }
+        return {
+          branchByPath: {
+            ...prev.branchByPath,
+            [normalizedPath]: event.branch,
+          },
+        };
+      });
+    });
+    if (typeof cleanup === 'function') {
+      cleanupFns.push(cleanup);
     }
   }
 
