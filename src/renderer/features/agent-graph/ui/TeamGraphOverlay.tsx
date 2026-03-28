@@ -15,32 +15,41 @@ export interface TeamGraphOverlayProps {
   teamName: string;
   onClose: () => void;
   onPinAsTab?: () => void;
+  onSendMessage?: (memberName: string) => void;
+  onOpenTaskDetail?: (taskId: string) => void;
+  onOpenMemberProfile?: (memberName: string) => void;
 }
 
 export const TeamGraphOverlay = ({
   teamName,
   onClose,
   onPinAsTab,
+  onSendMessage,
+  onOpenTaskDetail,
+  onOpenMemberProfile,
 }: TeamGraphOverlayProps): React.JSX.Element => {
   const graphData = useTeamGraphAdapter(teamName);
 
   const events: GraphEventPort = {
-    onNodeClick: useCallback((_ref: GraphDomainRef) => {
-      // Popover shown by GraphView internally
-    }, []),
-    onNodeDoubleClick: useCallback((ref: GraphDomainRef) => {
-      // TODO: open TaskDetailDialog or MemberDetailDialog based on ref.kind
-      console.log('Double-click:', ref);
-    }, []),
-    onSendMessage: useCallback((_memberName: string, _teamName: string) => {
-      // TODO: open SendMessageDialog
-    }, []),
-    onOpenTaskDetail: useCallback((_taskId: string, _teamName: string) => {
-      // TODO: open TaskDetailDialog
-    }, []),
-    onBackgroundClick: useCallback(() => {
-      // Deselect handled by GraphView
-    }, []),
+    onNodeDoubleClick: useCallback(
+      (ref: GraphDomainRef) => {
+        if (ref.kind === 'task') onOpenTaskDetail?.(ref.taskId);
+        else if (ref.kind === 'member') onOpenMemberProfile?.(ref.memberName);
+      },
+      [onOpenTaskDetail, onOpenMemberProfile]
+    ),
+    onSendMessage: useCallback(
+      (memberName: string) => onSendMessage?.(memberName),
+      [onSendMessage]
+    ),
+    onOpenTaskDetail: useCallback(
+      (taskId: string) => onOpenTaskDetail?.(taskId),
+      [onOpenTaskDetail]
+    ),
+    onOpenMemberProfile: useCallback(
+      (memberName: string) => onOpenMemberProfile?.(memberName),
+      [onOpenMemberProfile]
+    ),
   };
 
   return (

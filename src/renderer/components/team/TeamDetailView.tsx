@@ -2088,6 +2088,22 @@ export const TeamDetailView = ({ teamName }: TeamDetailViewProps): React.JSX.Ele
                 .getState()
                 .openTab({ type: 'graph', label: `${data.config.name} Graph`, teamName });
             }}
+            onSendMessage={(memberName) => {
+              setSendDialogRecipient(memberName);
+              setSendDialogDefaultText(undefined);
+              setSendDialogDefaultChip(undefined);
+              setSendDialogOpen(true);
+            }}
+            onOpenTaskDetail={(taskId) => {
+              const task = data.tasks.find((t) => t.id === taskId);
+              if (task) setSelectedTask(task);
+            }}
+            onOpenMemberProfile={(memberName) => {
+              setSendDialogRecipient(memberName);
+              setSendDialogDefaultText(undefined);
+              setSendDialogDefaultChip(undefined);
+              setSendDialogOpen(true);
+            }}
           />
         </Suspense>
       )}
