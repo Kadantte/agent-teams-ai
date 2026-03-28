@@ -9,6 +9,7 @@
 
 import type { GraphNode } from '../ports/types';
 import { KANBAN_ZONE } from '../constants/canvas-constants';
+import { COLORS } from '../constants/colors';
 
 /** Column header info for rendering */
 export interface KanbanColumnHeader {
@@ -26,13 +27,13 @@ export interface KanbanZoneInfo {
   headers: KanbanColumnHeader[];
 }
 
-// Column display config
+// Column display config — colors from single source of truth (COLORS)
 const COLUMN_LABELS: Record<string, { label: string; color: string }> = {
-  todo: { label: 'Todo', color: '#6b7280' },
-  wip: { label: 'In Progress', color: '#3b82f6' },
-  done: { label: 'Done', color: '#22c55e' },
-  review: { label: 'Review', color: '#f59e0b' },
-  approved: { label: 'Approved', color: '#22c55e' },
+  todo: { label: 'Todo', color: COLORS.taskPending },
+  wip: { label: 'In Progress', color: COLORS.taskInProgress },
+  done: { label: 'Done', color: COLORS.taskCompleted },
+  review: { label: 'Review', color: COLORS.reviewPending },
+  approved: { label: 'Approved', color: COLORS.reviewApproved },
 };
 
 export class KanbanLayoutEngine {

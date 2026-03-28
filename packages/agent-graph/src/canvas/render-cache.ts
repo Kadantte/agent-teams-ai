@@ -44,15 +44,14 @@ function hexWithAlpha(color: string, alpha: number): string {
   const key = `${color}|${a}`;
   let result = _hexAlphaCache.get(key);
   if (result) return result;
-  result = ensureHex(color) + ALPHA_LUT[a];
+  result = ensureHex(color) + alphaHex(a / 255);
   _hexAlphaCache.set(key, result);
   if (_hexAlphaCache.size > 500) _hexAlphaCache.clear(); // prevent unbounded growth
   return result;
 }
 
-// Import-time LUT for alpha hex
-const ALPHA_LUT: string[] = [];
-for (let i = 0; i < 256; i++) ALPHA_LUT.push(i.toString(16).padStart(2, '0'));
+// Reuse alpha hex LUT from colors.ts (DRY — single source)
+import { alphaHex } from '../constants/colors';
 
 // ─── Glow Sprite Cache ──────────────────────────────────────────────────────
 

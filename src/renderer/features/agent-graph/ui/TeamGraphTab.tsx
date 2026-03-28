@@ -24,46 +24,31 @@ export const TeamGraphTab = ({ teamName }: TeamGraphTabProps): React.JSX.Element
   const graphData = useTeamGraphAdapter(teamName);
   const [fullscreen, setFullscreen] = useState(false);
 
+  // Typed event dispatchers (DRY — used in both events + renderOverlay)
+  const dispatchOpenTask = useCallback(
+    (taskId: string) =>
+      window.dispatchEvent(new CustomEvent('graph:open-task', { detail: { teamName, taskId } })),
+    [teamName]
+  );
+  const dispatchSendMessage = useCallback(
+    (memberName: string) =>
+      window.dispatchEvent(
+        new CustomEvent('graph:send-message', { detail: { teamName, memberName } })
+      ),
+    [teamName]
+  );
+
   const events: GraphEventPort = {
     onNodeDoubleClick: useCallback(
       (ref: GraphDomainRef) => {
-        // Dispatch to TeamDetailView's dialog system via CustomEvent
-        if (ref.kind === 'task') {
-          window.dispatchEvent(
-            new CustomEvent('graph:open-task', { detail: { teamName, taskId: ref.taskId } })
-          );
-        } else if (ref.kind === 'member') {
-          window.dispatchEvent(
-            new CustomEvent('graph:send-message', {
-              detail: { teamName, memberName: ref.memberName },
-            })
-          );
-        }
+        if (ref.kind === 'task') dispatchOpenTask(ref.taskId);
+        else if (ref.kind === 'member') dispatchSendMessage(ref.memberName);
       },
-      [teamName]
+      [dispatchOpenTask, dispatchSendMessage]
     ),
-    onSendMessage: useCallback(
-      (memberName: string) => {
-        window.dispatchEvent(
-          new CustomEvent('graph:send-message', { detail: { teamName, memberName } })
-        );
-      },
-      [teamName]
-    ),
-    onOpenTaskDetail: useCallback(
-      (taskId: string) => {
-        window.dispatchEvent(new CustomEvent('graph:open-task', { detail: { teamName, taskId } }));
-      },
-      [teamName]
-    ),
-    onOpenMemberProfile: useCallback(
-      (memberName: string) => {
-        window.dispatchEvent(
-          new CustomEvent('graph:send-message', { detail: { teamName, memberName } })
-        );
-      },
-      [teamName]
-    ),
+    onSendMessage: dispatchSendMessage,
+    onOpenTaskDetail: dispatchOpenTask,
+    onOpenMemberProfile: dispatchSendMessage,
   };
 
   return (
@@ -77,21 +62,9 @@ export const TeamGraphTab = ({ teamName }: TeamGraphTabProps): React.JSX.Element
           <GraphNodePopover
             node={node}
             onClose={onClose}
-            onSendMessage={(name) =>
-              window.dispatchEvent(
-                new CustomEvent('graph:send-message', { detail: { teamName, memberName: name } })
-              )
-            }
-            onOpenTaskDetail={(id) =>
-              window.dispatchEvent(
-                new CustomEvent('graph:open-task', { detail: { teamName, taskId: id } })
-              )
-            }
-            onOpenMemberProfile={(name) =>
-              window.dispatchEvent(
-                new CustomEvent('graph:send-message', { detail: { teamName, memberName: name } })
-              )
-            }
+            onSendMessage={dispatchSendMessage}
+            onOpenTaskDetail={dispatchOpenTask}
+            onOpenMemberProfile={dispatchSendMessage}
           />
         )}
       />
