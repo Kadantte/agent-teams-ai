@@ -1,8 +1,8 @@
 /**
  * KanbanLayoutEngine — positions task nodes in kanban columns relative to their owner.
  *
- * Each member/lead gets a zone below them with 4 columns: todo → wip → review → done.
- * Tasks are pinned (fx/fy) — no d3-force drift. Deterministic layout.
+ * Each member/lead gets a zone below them with columns for non-empty statuses only.
+ * Empty columns are skipped — no wasted space. Each column has a header label.
  *
  * Class with ES #private methods, single source of truth from KANBAN_ZONE constants.
  */
@@ -10,12 +10,40 @@
 import type { GraphNode } from '../ports/types';
 import { KANBAN_ZONE } from '../constants/canvas-constants';
 
+/** Column header info for rendering */
+export interface KanbanColumnHeader {
+  label: string;
+  x: number;
+  y: number;
+  color: string;
+}
+
+/** Zone info per owner for rendering headers */
+export interface KanbanZoneInfo {
+  ownerId: string;
+  ownerX: number;
+  ownerY: number;
+  headers: KanbanColumnHeader[];
+}
+
+// Column display config
+const COLUMN_LABELS: Record<string, { label: string; color: string }> = {
+  todo: { label: 'Todo', color: '#6b7280' },
+  wip: { label: 'In Progress', color: '#3b82f6' },
+  done: { label: 'Done', color: '#22c55e' },
+  review: { label: 'Review', color: '#f59e0b' },
+  approved: { label: 'Approved', color: '#22c55e' },
+};
+
 export class KanbanLayoutEngine {
   // Reusable collections (cleared each call, never GC'd)
   static readonly #nodeMap = new Map<string, GraphNode>();
   static readonly #tasksByOwner = new Map<string, GraphNode[]>();
   static readonly #unassigned: GraphNode[] = [];
   static readonly #colTasks = new Map<string, GraphNode[]>();
+
+  /** Zone info for rendering column headers — updated each layout() call */
+  static zones: KanbanZoneInfo[] = [];
 
   /**
    * Position all task nodes in kanban columns relative to their owner.
@@ -26,7 +54,6 @@ export class KanbanLayoutEngine {
     nodeMap.clear();
     for (const n of nodes) nodeMap.set(n.id, n);
 
-    // Group tasks by owner — reuse maps
     const tasksByOwner = this.#tasksByOwner;
     tasksByOwner.clear();
     const unassigned = this.#unassigned;
@@ -46,26 +73,27 @@ export class KanbanLayoutEngine {
       }
     }
 
-    // Layout each owner's tasks in kanban columns
+    // Reset zones
+    this.zones = [];
+
     for (const [ownerId, tasks] of tasksByOwner) {
       const owner = nodeMap.get(ownerId);
       if (!owner || owner.x == null || owner.y == null) continue;
-      KanbanLayoutEngine.#layoutZone(tasks, owner.x, owner.y);
+      const zoneInfo = KanbanLayoutEngine.#layoutZone(tasks, owner.x, owner.y, ownerId);
+      if (zoneInfo) this.zones.push(zoneInfo);
     }
 
-    // Unassigned tasks: separate zone
     KanbanLayoutEngine.#layoutUnassigned(unassigned);
   }
 
   // ─── Private ──────────────────────────────────────────────────────────────
 
-  static #layoutZone(tasks: GraphNode[], ownerX: number, ownerY: number): void {
+  static #layoutZone(tasks: GraphNode[], ownerX: number, ownerY: number, ownerId: string): KanbanZoneInfo | null {
     const { columnWidth, rowHeight, offsetY, columns, maxVisibleRows } = KANBAN_ZONE;
-    const totalWidth = columns.length * columnWidth;
-    const baseX = ownerX - totalWidth / 2;
+    const headerHeight = 20; // space for column header label
     const baseY = ownerY + offsetY;
 
-    // Classify each task into a column — reuse shared Map
+    // Classify tasks into columns
     const colTasks = KanbanLayoutEngine.#colTasks;
     colTasks.clear();
     for (const col of columns) colTasks.set(col, []);
@@ -75,21 +103,47 @@ export class KanbanLayoutEngine {
       colTasks.get(col)?.push(task);
     }
 
-    // Position each task in its column + row
-    for (const [colIdx, colName] of columns.entries()) {
-      const colNodes = colTasks.get(colName) ?? [];
-      for (const [rowIdx, task] of colNodes.entries()) {
+    // Collect only NON-EMPTY columns (skip empty — no wasted space)
+    const activeColumns: { name: string; tasks: GraphNode[] }[] = [];
+    for (const colName of columns) {
+      const nodes = colTasks.get(colName) ?? [];
+      if (nodes.length > 0) {
+        activeColumns.push({ name: colName, tasks: nodes });
+      }
+    }
+
+    if (activeColumns.length === 0) return null;
+
+    // Center active columns under owner
+    const totalWidth = activeColumns.length * columnWidth;
+    const baseX = ownerX - totalWidth / 2;
+
+    // Build headers + position tasks
+    const headers: KanbanColumnHeader[] = [];
+
+    for (const [colIdx, col] of activeColumns.entries()) {
+      const colX = baseX + colIdx * columnWidth;
+      const config = COLUMN_LABELS[col.name] ?? { label: col.name, color: '#888' };
+
+      // Column header
+      headers.push({
+        label: config.label,
+        x: colX + columnWidth / 2, // centered in column
+        y: baseY,
+        color: config.color,
+      });
+
+      // Position tasks below header
+      for (const [rowIdx, task] of col.tasks.entries()) {
         if (rowIdx >= maxVisibleRows) {
-          // Hide overflow tasks off-screen
           task.x = -99999;
           task.y = -99999;
           task.fx = task.x;
           task.fy = task.y;
           continue;
         }
-        const targetX = baseX + colIdx * columnWidth;
-        const targetY = baseY + rowIdx * rowHeight;
-        // Smooth slide: LERP toward target; instant on first appearance
+        const targetX = colX;
+        const targetY = baseY + headerHeight + rowIdx * rowHeight;
         task.x = task.x != null ? task.x + (targetX - task.x) * 0.15 : targetX;
         task.y = task.y != null ? task.y + (targetY - task.y) * 0.15 : targetY;
         task.fx = task.x;
@@ -98,17 +152,12 @@ export class KanbanLayoutEngine {
         task.vy = 0;
       }
     }
+
+    return { ownerId, ownerX, ownerY, headers };
   }
 
-  /**
-   * Determine which kanban column a task belongs to.
-   * Columns: todo → wip → done → review → approved
-   * approved is separate from review — approved goes after review.
-   */
   static #resolveColumn(task: GraphNode): string {
-    // Approved = separate column (after review)
     if (task.reviewState === 'approved') return 'approved';
-    // Active review/needsFix = review column (next to done)
     if (task.reviewState === 'review' || task.reviewState === 'needsFix') return 'review';
     switch (task.taskStatus) {
       case 'in_progress':

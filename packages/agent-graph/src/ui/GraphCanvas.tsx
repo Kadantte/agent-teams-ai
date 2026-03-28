@@ -12,10 +12,11 @@ import { drawBackground, createDepthParticles, updateDepthParticles, type DepthP
 import { drawEdges } from '../canvas/draw-edges';
 import { drawParticles } from '../canvas/draw-particles';
 import { drawAgents } from '../canvas/draw-agents';
-import { drawTasks } from '../canvas/draw-tasks';
+import { drawTasks, drawColumnHeaders } from '../canvas/draw-tasks';
 import { drawProcesses } from '../canvas/draw-processes';
 import { drawEffects, type VisualEffect } from '../canvas/draw-effects';
 import { BloomRenderer } from '../canvas/bloom-renderer';
+import { KanbanLayoutEngine } from '../layout/kanbanLayout';
 import type { CameraTransform } from '../hooks/useGraphCamera';
 
 // ─── Draw State (passed by ref, not by props — no React re-renders) ─────────
@@ -208,6 +209,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
 
       // 2c. Visible nodes only (back to front: process → task → member/lead)
       drawProcesses(ctx, visibleNodes, state.time, state.selectedNodeId, state.hoveredNodeId);
+      drawColumnHeaders(ctx, KanbanLayoutEngine.zones);
       drawTasks(ctx, visibleNodes, state.time, state.selectedNodeId, state.hoveredNodeId);
       drawAgents(ctx, visibleNodes, state.time, state.selectedNodeId, state.hoveredNodeId);
 

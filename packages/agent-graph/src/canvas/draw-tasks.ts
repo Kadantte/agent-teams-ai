@@ -8,6 +8,7 @@ import { COLORS, getTaskStatusColor, getReviewStateColor } from '../constants/co
 import { TASK_PILL, MIN_VISIBLE_OPACITY, ANIM } from '../constants/canvas-constants';
 import { truncateText } from './draw-misc';
 import { hexWithAlpha } from './render-cache';
+import type { KanbanZoneInfo } from '../layout/kanbanLayout';
 
 /**
  * Draw all task nodes as pill-shaped cards.
@@ -175,4 +176,31 @@ function drawTaskPill(
   }
 
   ctx.restore();
+}
+
+/**
+ * Draw kanban column headers above task columns.
+ */
+export function drawColumnHeaders(
+  ctx: CanvasRenderingContext2D,
+  zones: KanbanZoneInfo[],
+): void {
+  for (const zone of zones) {
+    for (const header of zone.headers) {
+      ctx.font = 'bold 8px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillStyle = hexWithAlpha(header.color, 0.6);
+      ctx.fillText(header.label, header.x, header.y - 2);
+
+      // Subtle underline
+      const labelWidth = ctx.measureText(header.label).width;
+      ctx.beginPath();
+      ctx.moveTo(header.x - labelWidth / 2, header.y);
+      ctx.lineTo(header.x + labelWidth / 2, header.y);
+      ctx.strokeStyle = hexWithAlpha(header.color, 0.2);
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+  }
 }
