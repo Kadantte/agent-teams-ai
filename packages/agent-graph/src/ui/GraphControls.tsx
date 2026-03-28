@@ -63,7 +63,7 @@ export function GraphControls({
   const nameColor = teamColor ?? '#aaeeff';
 
   return (
-    <div className="absolute top-2 left-20 right-3 flex items-center justify-between pointer-events-none z-10">
+    <div className="absolute top-2 left-20 right-3 flex items-center justify-between pointer-events-none z-10 gap-3">
       {/* Left: team name + status indicator */}
       <div className="flex items-center pointer-events-auto">
         <div
@@ -191,10 +191,10 @@ function ToolbarToggle({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-mono transition-all cursor-pointer border
+      className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-mono transition-all cursor-pointer
         ${active
-          ? 'text-[#aaeeffcc] bg-[rgba(100,200,255,0.08)] border-[rgba(100,200,255,0.12)]'
-          : 'text-[#66ccff40] bg-transparent border-transparent hover:text-[#66ccff70] hover:border-[rgba(100,200,255,0.08)]'
+          ? 'text-[#aaeeffc0] bg-[rgba(100,200,255,0.1)]'
+          : 'text-[#66ccff40] bg-transparent hover:text-[#66ccff70] hover:bg-[rgba(100,200,255,0.05)]'
         }`}
     >
       {icon}
