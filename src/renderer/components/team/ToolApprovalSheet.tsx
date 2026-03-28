@@ -170,10 +170,26 @@ export const ToolApprovalSheet: React.FC = () => {
       setDisabled(true);
       setError(null);
 
-      // For AskUserQuestion, build answers from selected options
+      // For AskUserQuestion, build per-question answers from selected options
+      // Key format in selectedOptions: "qi:label" — parse question index to map correctly
       const answersMessage =
         allow && current.toolName === 'AskUserQuestion' && selectedOptions.size > 0
-          ? Array.from(selectedOptions).join(', ')
+          ? (() => {
+              const questions = Array.isArray(current.toolInput.questions)
+                ? (current.toolInput.questions as { question?: string }[])
+                : [];
+              const answersByQuestion: Record<string, string> = {};
+              for (const key of selectedOptions) {
+                const colonIdx = key.indexOf(':');
+                if (colonIdx < 0) continue;
+                const qi = parseInt(key.slice(0, colonIdx), 10);
+                const label = key.slice(colonIdx + 1);
+                const questionText = questions[qi]?.question ?? `Question ${qi + 1}`;
+                const existing = answersByQuestion[questionText];
+                answersByQuestion[questionText] = existing ? `${existing}, ${label}` : label;
+              }
+              return JSON.stringify(answersByQuestion);
+            })()
           : undefined;
 
       // Safety timeout — if IPC hangs (e.g. stdin.write callback never fires),
@@ -210,7 +226,12 @@ export const ToolApprovalSheet: React.FC = () => {
 
   const handleOptionSelect = useCallback((label: string, multiSelect: boolean) => {
     setSelectedOptions((prev) => {
-      const next = multiSelect ? new Set(prev) : new Set<string>();
+      // For single-select: clear all options from the SAME question (same prefix)
+      // Key format: "qi:label" where qi is the question index
+      const prefix = label.split(':')[0] + ':';
+      const next = multiSelect
+        ? new Set(prev)
+        : new Set(Array.from(prev).filter((k) => !k.startsWith(prefix)));
       if (next.has(label)) {
         next.delete(label);
       } else {
@@ -495,7 +516,7 @@ const ToolInputPreview = ({
             {Array.isArray(q.options) && (
               <div className="space-y-1.5">
                 {q.options.map((opt, oi) => {
-                  const optKey = opt.label ?? `opt-${oi}`;
+                  const optKey = `${qi}:${opt.label ?? `opt-${oi}`}`;
                   const isSelected = selectedOptions?.has(optKey) ?? false;
                   return (
                     <button
@@ -525,7 +546,7 @@ const ToolInputPreview = ({
                           className="text-xs font-medium"
                           style={{ color: isSelected ? 'rgb(52, 211, 153)' : 'var(--color-text)' }}
                         >
-                          {opt.label}
+                          {opt.label ?? `Option ${oi + 1}`}
                         </span>
                         {opt.description && (
                           <p
