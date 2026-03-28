@@ -85,6 +85,12 @@ export function GraphControls({
           >
             {teamName}
           </span>
+          <span
+            className="rounded px-1 py-0.5 text-[9px] font-mono"
+            style={{ background: 'rgba(100, 200, 255, 0.1)', color: '#66ccff90' }}
+          >
+            beta
+          </span>
         </div>
       </div>
 
@@ -193,7 +199,7 @@ function ToolbarToggle({
       onClick={onClick}
       className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-mono transition-all cursor-pointer border
         ${active
-          ? 'text-[#ffffff] bg-[rgba(100,200,255,0.2)] border-[rgba(100,200,255,0.4)]'
+          ? 'text-[#aaeeff] bg-[rgba(100,200,255,0.15)] border-[rgba(100,200,255,0.25)]'
           : 'text-[#66ccff50] bg-transparent border-transparent hover:text-[#66ccff90] hover:bg-[rgba(100,200,255,0.06)]'
         }`}
     >
