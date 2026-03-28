@@ -150,6 +150,7 @@ import {
   TEAM_SAVE_TASK_ATTACHMENT,
   TEAM_SEND_MESSAGE,
   TEAM_SET_CHANGE_PRESENCE_TRACKING,
+  TEAM_SET_TOOL_ACTIVITY_TRACKING,
   TEAM_SET_TASK_CLARIFICATION,
   TEAM_SHOW_MESSAGE_NOTIFICATION,
   TEAM_SOFT_DELETE_TASK,
@@ -811,6 +812,9 @@ const electronAPI: ElectronAPI = {
     },
     setChangePresenceTracking: async (teamName: string, enabled: boolean) => {
       return invokeIpcWithResult<void>(TEAM_SET_CHANGE_PRESENCE_TRACKING, teamName, enabled);
+    },
+    setToolActivityTracking: async (teamName: string, enabled: boolean) => {
+      return invokeIpcWithResult<void>(TEAM_SET_TOOL_ACTIVITY_TRACKING, teamName, enabled);
     },
     getClaudeLogs: async (teamName: string, query?: TeamClaudeLogsQuery) => {
       return invokeIpcWithResult<TeamClaudeLogsResponse>(TEAM_GET_CLAUDE_LOGS, teamName, query);

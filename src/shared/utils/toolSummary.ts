@@ -93,6 +93,7 @@ export function extractToolPreview(
     case 'Glob':
       return typeof input.pattern === 'string' ? truncateStr(input.pattern, 40) : undefined;
     case 'Agent':
+    case 'Task':
     case 'TaskCreate':
       return typeof input.prompt === 'string'
         ? input.prompt
@@ -115,4 +116,35 @@ export function extractToolPreview(
       return typeof v === 'string' ? truncateStr(v, 50) : undefined;
     }
   }
+}
+
+function flattenToolResultContent(content: unknown): string[] {
+  if (typeof content === 'string') {
+    return [content];
+  }
+
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  const parts: string[] = [];
+  for (const item of content) {
+    if (!item || typeof item !== 'object') continue;
+    const block = item as Record<string, unknown>;
+    if (typeof block.text === 'string') {
+      parts.push(block.text);
+      continue;
+    }
+    if (typeof block.content === 'string') {
+      parts.push(block.content);
+    }
+  }
+  return parts;
+}
+
+/** Extract a short human-readable preview from tool_result content. */
+export function extractToolResultPreview(content: unknown, max = 80): string | undefined {
+  const joined = flattenToolResultContent(content).join(' ').replace(/\s+/g, ' ').trim();
+  if (!joined) return undefined;
+  return truncateStr(joined, max);
 }

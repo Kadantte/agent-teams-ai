@@ -63,7 +63,7 @@ export interface GraphNode {
     startedAt: string;
     finishedAt?: string;
     resultPreview?: string;
-    source: 'runtime' | 'inbox';
+    source: 'runtime' | 'member_log' | 'inbox';
   };
   /** Recent completed tool activity for popovers and secondary UI */
   recentTools?: Array<{
@@ -73,7 +73,7 @@ export interface GraphNode {
     startedAt: string;
     finishedAt: string;
     resultPreview?: string;
-    source: 'runtime' | 'inbox';
+    source: 'runtime' | 'member_log' | 'inbox';
   }>;
 
   // ─── Task-specific ─────────────────────────────────────────────────────

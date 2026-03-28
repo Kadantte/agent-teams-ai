@@ -20,6 +20,8 @@ interface TeamLogSourceSnapshot {
   logSourceGeneration: string | null;
 }
 
+export type TeamLogSourceTrackingConsumer = 'change_presence' | 'tool_activity';
+
 interface TrackingState {
   watcher: FSWatcher | null;
   projectDir: string | null;
@@ -29,13 +31,14 @@ interface TrackingState {
   recomputePromise: Promise<TeamLogSourceSnapshot> | null;
   recomputeVersion: number | null;
   snapshot: TeamLogSourceSnapshot;
-  desiredTracking: boolean;
+  consumers: Set<TeamLogSourceTrackingConsumer>;
   lifecycleVersion: number;
 }
 
 export class TeamLogSourceTracker {
   private readonly stateByTeam = new Map<string, TrackingState>();
   private emitter: ((event: TeamChangeEvent) => void) | null = null;
+  private readonly changeListeners = new Set<(teamName: string) => void>();
 
   constructor(private readonly logsFinder: TeamMemberLogsFinder) {}
 
@@ -43,22 +46,46 @@ export class TeamLogSourceTracker {
     this.emitter = emitter;
   }
 
+  onLogSourceChange(listener: (teamName: string) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
   getSnapshot(teamName: string): TeamLogSourceSnapshot | null {
     const state = this.stateByTeam.get(teamName);
     return state ? { ...state.snapshot } : null;
   }
 
+  async setTracking(
+    teamName: string,
+    consumer: TeamLogSourceTrackingConsumer,
+    enabled: boolean
+  ): Promise<TeamLogSourceSnapshot> {
+    return enabled
+      ? this.enableTracking(teamName, consumer)
+      : this.disableTracking(teamName, consumer);
+  }
+
   async ensureTracking(teamName: string): Promise<TeamLogSourceSnapshot> {
+    return this.enableTracking(teamName, 'change_presence');
+  }
+
+  private async enableTracking(
+    teamName: string,
+    consumer: TeamLogSourceTrackingConsumer
+  ): Promise<TeamLogSourceSnapshot> {
     const state = this.getOrCreateState(teamName);
-    if (!state.desiredTracking) {
-      state.desiredTracking = true;
+    if (!state.consumers.has(consumer)) {
+      state.consumers.add(consumer);
       state.lifecycleVersion += 1;
     }
 
     if (
       state.initializePromise &&
       state.initializeVersion === state.lifecycleVersion &&
-      state.desiredTracking
+      state.consumers.size > 0
     ) {
       return state.initializePromise;
     }
@@ -101,7 +128,7 @@ export class TeamLogSourceTracker {
       recomputePromise: null,
       recomputeVersion: null,
       snapshot: { projectFingerprint: null, logSourceGeneration: null },
-      desiredTracking: false,
+      consumers: new Set(),
       lifecycleVersion: 0,
     };
     this.stateByTeam.set(teamName, created);
@@ -109,14 +136,25 @@ export class TeamLogSourceTracker {
   }
 
   async stopTracking(teamName: string): Promise<void> {
+    await this.disableTracking(teamName, 'change_presence');
+  }
+
+  private async disableTracking(
+    teamName: string,
+    consumer: TeamLogSourceTrackingConsumer
+  ): Promise<TeamLogSourceSnapshot> {
     const state = this.stateByTeam.get(teamName);
     if (!state) {
-      return;
+      return { projectFingerprint: null, logSourceGeneration: null };
     }
 
-    if (state.desiredTracking) {
-      state.desiredTracking = false;
+    if (state.consumers.has(consumer)) {
+      state.consumers.delete(consumer);
       state.lifecycleVersion += 1;
+    }
+
+    if (state.consumers.size > 0) {
+      return { ...state.snapshot };
     }
 
     if (state.refreshTimer) {
@@ -131,11 +169,12 @@ export class TeamLogSourceTracker {
 
     state.projectDir = null;
     state.snapshot = { projectFingerprint: null, logSourceGeneration: null };
+    return { ...state.snapshot };
   }
 
   private isTrackingCurrent(teamName: string, expectedVersion: number): boolean {
     const state = this.stateByTeam.get(teamName);
-    return !!state && state.desiredTracking && state.lifecycleVersion === expectedVersion;
+    return !!state && state.consumers.size > 0 && state.lifecycleVersion === expectedVersion;
   }
 
   private async initializeTeam(
@@ -167,10 +206,7 @@ export class TeamLogSourceTracker {
       state.snapshot.logSourceGeneration &&
       previousGeneration !== state.snapshot.logSourceGeneration
     ) {
-      this.emitter?.({
-        type: 'log-source-change',
-        teamName,
-      });
+      this.emitLogSourceChange(teamName);
     }
     return snapshot;
   }
@@ -181,7 +217,7 @@ export class TeamLogSourceTracker {
     expectedVersion: number
   ): Promise<void> {
     const state = this.stateByTeam.get(teamName);
-    if (!state || !state.desiredTracking || state.lifecycleVersion !== expectedVersion) {
+    if (!state || state.consumers.size === 0 || state.lifecycleVersion !== expectedVersion) {
       return;
     }
     if (state.projectDir === projectDir && state.watcher) {
@@ -216,7 +252,7 @@ export class TeamLogSourceTracker {
 
     const scheduleRecompute = (): void => {
       const current = this.stateByTeam.get(teamName);
-      if (!current?.desiredTracking) {
+      if (!current || current.consumers.size === 0) {
         return;
       }
       if (current.refreshTimer) {
@@ -240,13 +276,13 @@ export class TeamLogSourceTracker {
 
   private async recompute(teamName: string): Promise<TeamLogSourceSnapshot> {
     const state = this.getOrCreateState(teamName);
-    if (!state.desiredTracking) {
+    if (state.consumers.size === 0) {
       return state.snapshot;
     }
     if (
       state.recomputePromise &&
       state.recomputeVersion === state.lifecycleVersion &&
-      state.desiredTracking
+      state.consumers.size > 0
     ) {
       return state.recomputePromise;
     }
@@ -278,10 +314,7 @@ export class TeamLogSourceTracker {
         state.snapshot.logSourceGeneration &&
         previousGeneration !== state.snapshot.logSourceGeneration
       ) {
-        this.emitter?.({
-          type: 'log-source-change',
-          teamName,
-        });
+        this.emitLogSourceChange(teamName);
       }
 
       return state.snapshot;
@@ -296,6 +329,20 @@ export class TeamLogSourceTracker {
     state.recomputePromise = recomputePromise;
     state.recomputeVersion = recomputeVersion;
     return recomputePromise;
+  }
+
+  private emitLogSourceChange(teamName: string): void {
+    this.emitter?.({
+      type: 'log-source-change',
+      teamName,
+    });
+    for (const listener of this.changeListeners) {
+      try {
+        listener(teamName);
+      } catch (error) {
+        logger.warn(`Log-source listener failed for ${teamName}: ${String(error)}`);
+      }
+    }
   }
 
   private async computeSnapshot(context: {

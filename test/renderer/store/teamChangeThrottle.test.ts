@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hoisted = vi.hoisted(() => ({
   onTeamChangeCb: null as
-    | ((event: unknown, data: { type?: string; teamName: string }) => void)
+    | ((event: unknown, data: { type?: string; teamName: string; detail?: string }) => void)
     | null,
   onProvisioningProgressCb: null as
     | ((event: unknown, data: { runId: string; teamName: string }) => void)
@@ -32,8 +32,11 @@ vi.mock('@renderer/api', () => ({
     },
     teams: {
       setChangePresenceTracking: vi.fn(async () => undefined),
+      setToolActivityTracking: vi.fn(async () => undefined),
       onTeamChange: vi.fn(
-        (cb: (event: unknown, data: { teamName: string }) => void): (() => void) => {
+        (
+          cb: (event: unknown, data: { teamName: string; type?: string; detail?: string }) => void
+        ): (() => void) => {
           hoisted.onTeamChangeCb = cb;
           return () => {
             hoisted.onTeamChangeCb = null;
@@ -346,5 +349,67 @@ describe('team change throttling', () => {
     await Promise.resolve();
 
     expect(setChangePresenceTrackingSpy).not.toHaveBeenCalled();
+  });
+
+  it('tracks visible team tabs for tool activity and disables tracking when tab disappears', async () => {
+    const setToolActivityTrackingSpy = vi.mocked(api.teams.setToolActivityTracking);
+    setToolActivityTrackingSpy.mockClear();
+
+    cleanup?.();
+    cleanup = initializeNotificationListeners();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(setToolActivityTrackingSpy).toHaveBeenCalledWith('my-team', true);
+
+    useStore.setState({
+      paneLayout: {
+        focusedPaneId: 'p1',
+        panes: [{ id: 'p1', widthFraction: 1, tabs: [], activeTabId: null }],
+      },
+    } as never);
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(setToolActivityTrackingSpy).toHaveBeenCalledWith('my-team', false);
+  });
+
+  it('applies targeted tool resets without clearing sibling tools', async () => {
+    useStore.setState({
+      activeToolsByTeam: {
+        'my-team': {
+          alice: {
+            'tool-a': {
+              memberName: 'alice',
+              toolUseId: 'tool-a',
+              toolName: 'Read',
+              startedAt: '2026-03-28T10:00:00.000Z',
+              state: 'running',
+              source: 'runtime',
+            },
+            'tool-b': {
+              memberName: 'alice',
+              toolUseId: 'tool-b',
+              toolName: 'Bash',
+              startedAt: '2026-03-28T10:00:01.000Z',
+              state: 'running',
+              source: 'runtime',
+            },
+          },
+        },
+      },
+    } as never);
+
+    hoisted.onTeamChangeCb?.({}, {
+      type: 'tool-activity',
+      teamName: 'my-team',
+      detail: JSON.stringify({
+        action: 'reset',
+        memberName: 'alice',
+        toolUseIds: ['tool-a'],
+      }),
+    });
+
+    expect(useStore.getState().activeToolsByTeam['my-team']?.alice?.['tool-a']).toBeUndefined();
+    expect(useStore.getState().activeToolsByTeam['my-team']?.alice?.['tool-b']).toBeDefined();
   });
 });

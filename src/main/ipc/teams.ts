@@ -48,6 +48,7 @@ import {
   TEAM_SAVE_TASK_ATTACHMENT,
   TEAM_SEND_MESSAGE,
   TEAM_SET_CHANGE_PRESENCE_TRACKING,
+  TEAM_SET_TOOL_ACTIVITY_TRACKING,
   TEAM_SET_TASK_CLARIFICATION,
   TEAM_SHOW_MESSAGE_NOTIFICATION,
   TEAM_SOFT_DELETE_TASK,
@@ -110,6 +111,7 @@ import {
 
 import type {
   MemberStatsComputer,
+  TeammateToolTracker,
   TeamDataService,
   TeamMemberLogsFinder,
   TeamProvisioningService,
@@ -272,6 +274,7 @@ let teamProvisioningService: TeamProvisioningService | null = null;
 let teamMemberLogsFinder: TeamMemberLogsFinder | null = null;
 let memberStatsComputer: MemberStatsComputer | null = null;
 let teamBackupService: TeamBackupService | null = null;
+let teammateToolTracker: TeammateToolTracker | null = null;
 
 const attachmentStore = new TeamAttachmentStore();
 const taskAttachmentStore = new TeamTaskAttachmentStore();
@@ -300,13 +303,15 @@ export function initializeTeamHandlers(
   provisioningService: TeamProvisioningService,
   logsFinder?: TeamMemberLogsFinder,
   statsComputer?: MemberStatsComputer,
-  backupService?: TeamBackupService
+  backupService?: TeamBackupService,
+  toolTracker?: TeammateToolTracker
 ): void {
   teamDataService = service;
   teamProvisioningService = provisioningService;
   teamMemberLogsFinder = logsFinder ?? null;
   memberStatsComputer = statsComputer ?? null;
   teamBackupService = backupService ?? null;
+  teammateToolTracker = toolTracker ?? null;
 }
 
 export function registerTeamHandlers(ipcMain: IpcMain): void {
@@ -314,6 +319,7 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_GET_DATA, handleGetData);
   ipcMain.handle(TEAM_GET_TASK_CHANGE_PRESENCE, handleGetTaskChangePresence);
   ipcMain.handle(TEAM_SET_CHANGE_PRESENCE_TRACKING, handleSetChangePresenceTracking);
+  ipcMain.handle(TEAM_SET_TOOL_ACTIVITY_TRACKING, handleSetToolActivityTracking);
   ipcMain.handle(TEAM_GET_CLAUDE_LOGS, handleGetClaudeLogs);
   ipcMain.handle(TEAM_PREPARE_PROVISIONING, handlePrepareProvisioning);
   ipcMain.handle(TEAM_CREATE, handleCreateTeam);
@@ -378,6 +384,7 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_GET_DATA);
   ipcMain.removeHandler(TEAM_GET_TASK_CHANGE_PRESENCE);
   ipcMain.removeHandler(TEAM_SET_CHANGE_PRESENCE_TRACKING);
+  ipcMain.removeHandler(TEAM_SET_TOOL_ACTIVITY_TRACKING);
   ipcMain.removeHandler(TEAM_GET_CLAUDE_LOGS);
   ipcMain.removeHandler(TEAM_PREPARE_PROVISIONING);
   ipcMain.removeHandler(TEAM_CREATE);
@@ -448,6 +455,13 @@ function getTeamProvisioningService(): TeamProvisioningService {
     throw new Error('Team provisioning handlers are not initialized');
   }
   return teamProvisioningService;
+}
+
+function getTeammateToolTracker(): TeammateToolTracker {
+  if (!teammateToolTracker) {
+    throw new Error('Teammate tool tracker is not initialized');
+  }
+  return teammateToolTracker;
 }
 
 async function wrapTeamHandler<T>(
@@ -652,6 +666,24 @@ async function handleSetChangePresenceTracking(
 
   return wrapTeamHandler('setChangePresenceTracking', async () => {
     getTeamDataService().setTaskChangePresenceTracking(validated.value!, enabled);
+  });
+}
+
+async function handleSetToolActivityTracking(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  enabled: unknown
+): Promise<IpcResult<void>> {
+  const validated = validateTeamName(teamName);
+  if (!validated.valid) {
+    return { success: false, error: validated.error ?? 'Invalid teamName' };
+  }
+  if (typeof enabled !== 'boolean') {
+    return { success: false, error: 'enabled must be a boolean' };
+  }
+
+  return wrapTeamHandler('setToolActivityTracking', async () => {
+    await getTeammateToolTracker().setTracking(validated.value!, enabled);
   });
 }
 

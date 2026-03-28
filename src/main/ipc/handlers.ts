@@ -100,6 +100,7 @@ import type {
   SshConnectionManager,
   TeamDataService,
   TeamMemberLogsFinder,
+  TeammateToolTracker,
   TeamProvisioningService,
   UpdaterService,
 } from '../services';
@@ -127,6 +128,7 @@ export function initializeIpcHandlers(
   teamProvisioningService: TeamProvisioningService,
   teamMemberLogsFinder: TeamMemberLogsFinder,
   memberStatsComputer: MemberStatsComputer,
+  teammateToolTracker: TeammateToolTracker | undefined,
   contextCallbacks: {
     rewire: (context: ServiceContext) => void;
     full: (context: ServiceContext) => void;
@@ -167,7 +169,8 @@ export function initializeIpcHandlers(
     teamProvisioningService,
     teamMemberLogsFinder,
     memberStatsComputer,
-    teamBackupService
+    teamBackupService,
+    teammateToolTracker
   );
   initializeConfigHandlers({
     onClaudeRootPathUpdated: contextCallbacks.onClaudeRootPathUpdated,

@@ -4046,11 +4046,7 @@ export class TeamProvisioningService {
             if (typeof msg.text !== 'string') continue;
             const perm = parsePermissionRequest(msg.text);
             if (!perm) continue;
-            if (run.processedPermissionRequestIds.has(perm.requestId)) continue;
-            run.processedPermissionRequestIds.add(perm.requestId);
-            logger.warn(
-              `[${run.teamName}] [PERM-TRACE] Intercepted permission_request from inbox scan (read=${String(msg.read)}): agent=${perm.agentId} tool=${perm.toolName} requestId=${perm.requestId}`
-            );
+            // Dedup is handled inside handleTeammatePermissionRequest via processedPermissionRequestIds
             this.handleTeammatePermissionRequest(run, perm, msg.timestamp);
           }
         } catch {
@@ -4193,32 +4189,19 @@ export class TeamProvisioningService {
       );
       const deferredIds = new Set(deferredByAge.map((m) => m.messageId));
 
-      // Category 4: teammate permission requests — intercept and convert to tool approvals.
-      // Don't relay these to the lead agent (it can't handle them).
-      // NOTE: We intentionally do NOT exclude nativeMatchedMessageIds here — even if
-      // Claude Code runtime natively delivered the message to the lead, we still need
-      // to intercept permission_request and show the ToolApprovalSheet for the user.
-      const permissionRequestMsgs = unread.filter(
-        (m) =>
-          !permanentlyIgnoredIds.has(m.messageId) &&
-          !deferredIds.has(m.messageId) &&
-          parsePermissionRequest(m.text) !== null
+      // Category 4: teammate permission requests — filter from actionable so they're
+      // NOT relayed to the lead. The actual interception + ToolApprovalRequest emission
+      // is handled by the early scan above (which checks processedPermissionRequestIds).
+      const permissionRequestIds = new Set(
+        unread
+          .filter(
+            (m) =>
+              !permanentlyIgnoredIds.has(m.messageId) &&
+              !deferredIds.has(m.messageId) &&
+              parsePermissionRequest(m.text) !== null
+          )
+          .map((m) => m.messageId)
       );
-      const permissionRequestIds = new Set(permissionRequestMsgs.map((m) => m.messageId));
-      if (permissionRequestMsgs.length > 0) {
-        logger.warn(
-          `[${run.teamName}] [PERM-TRACE] relay intercepted ${permissionRequestMsgs.length} permission_request(s) from inbox`
-        );
-        for (const msg of permissionRequestMsgs) {
-          const perm = parsePermissionRequest(msg.text)!;
-          this.handleTeammatePermissionRequest(run, perm, msg.timestamp);
-        }
-        try {
-          await this.markInboxMessagesRead(teamName, leadName, permissionRequestMsgs);
-        } catch {
-          // best-effort
-        }
-      }
 
       // Actionable: everything not in any category.
       const actionableUnread = unread.filter(
@@ -5777,13 +5760,11 @@ export class TeamProvisioningService {
     perm: ParsedPermissionRequest,
     messageTimestamp: string
   ): void {
-    // Skip if already tracked (idempotency — relay can be called multiple times)
-    if (run.pendingApprovals.has(perm.requestId)) {
-      logger.warn(
-        `[${run.teamName}] [PERM-TRACE] Duplicate permission_request skipped: ${perm.requestId}`
-      );
-      return;
-    }
+    // Skip if already tracked (idempotency — multiple paths can trigger this:
+    // early inbox scan, stdout parsing, native message blocks, relay Category 4)
+    if (run.processedPermissionRequestIds.has(perm.requestId)) return;
+    if (run.pendingApprovals.has(perm.requestId)) return;
+    run.processedPermissionRequestIds.add(perm.requestId);
 
     logger.warn(
       `[${run.teamName}] [PERM-TRACE] handleTeammatePermissionRequest: agent=${perm.agentId} tool=${perm.toolName} requestId=${perm.requestId}`

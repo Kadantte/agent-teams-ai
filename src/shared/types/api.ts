@@ -419,6 +419,7 @@ export interface TeamsAPI {
   getData: (teamName: string) => Promise<TeamData>;
   getTaskChangePresence: (teamName: string) => Promise<Record<string, TaskChangePresenceState>>;
   setChangePresenceTracking: (teamName: string, enabled: boolean) => Promise<void>;
+  setToolActivityTracking: (teamName: string, enabled: boolean) => Promise<void>;
   getClaudeLogs: (teamName: string, query?: TeamClaudeLogsQuery) => Promise<TeamClaudeLogsResponse>;
   deleteTeam: (teamName: string) => Promise<void>;
   restoreTeam: (teamName: string) => Promise<void>;

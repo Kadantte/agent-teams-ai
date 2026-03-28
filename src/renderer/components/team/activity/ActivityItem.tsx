@@ -54,6 +54,7 @@ import {
   Command,
   ListPlus,
   Maximize2,
+  MoveRight,
   RefreshCw,
   Reply,
   X,
@@ -835,9 +836,7 @@ export const ActivityItem = memo(
           {/* Recipient — arrow + avatar + badge */}
           {message.to && message.to !== message.from ? (
             <>
-              <span style={{ color: CARD_ICON_MUTED }} className="text-[10px]">
-                &rarr;
-              </span>
+              <MoveRight size={10} style={{ color: CARD_ICON_MUTED }} className="shrink-0" />
               {crossTeamTarget ? (
                 <CrossTeamTeamBadge teamName={crossTeamTarget} onClick={onTeamClick} />
               ) : null}

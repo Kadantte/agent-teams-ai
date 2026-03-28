@@ -25,6 +25,7 @@ const ATTRIBUTION_SCAN_LINES = 50;
 /** Grace before task creation — logs cannot reference a task before it exists. */
 const TASK_SINCE_GRACE_MS = 2 * 60 * 1000;
 const FILE_MENTIONS_CACHE_MAX = 10_000;
+const ATTRIBUTION_CACHE_MAX = 5_000;
 
 /** Max concurrent file reads during parallel scan phases. */
 const SCAN_CONCURRENCY = 15;
@@ -87,6 +88,7 @@ function trimTrailingSlashes(value: string): string {
 
 export class TeamMemberLogsFinder {
   private readonly fileMentionsCache = new Map<string, boolean>();
+  private readonly attributionCache = new Map<string, SubagentAttribution | null>();
   private readonly discoveryCache = new Map<
     string,
     {
@@ -660,7 +662,17 @@ export class TeamMemberLogsFinder {
 
         const filePath = path.join(subagentsDir, file);
         // Quick attribution check — only Phase 1 (no full-file streaming)
-        const attribution = await this.attributeSubagent(filePath, knownMembers);
+        let mtimeMs = 0;
+        try {
+          mtimeMs = (await fs.stat(filePath)).mtimeMs;
+        } catch {
+          continue;
+        }
+        const attribution = await this.getCachedSubagentAttribution(
+          filePath,
+          knownMembers,
+          mtimeMs
+        );
         if (attribution?.detectedMember.toLowerCase() === memberName.trim().toLowerCase()) {
           paths.push(filePath);
         }
@@ -668,6 +680,50 @@ export class TeamMemberLogsFinder {
     }
 
     return paths;
+  }
+
+  async listAttributedSubagentFiles(
+    teamName: string
+  ): Promise<Array<{ memberName: string; sessionId: string; filePath: string; mtimeMs: number }>> {
+    const discovery = await this.discoverProjectSessions(teamName);
+    if (!discovery) return [];
+
+    const { projectDir, sessionIds, knownMembers } = discovery;
+    const candidates = await this.collectSubagentCandidates(projectDir, sessionIds);
+    const results: Array<{
+      memberName: string;
+      sessionId: string;
+      filePath: string;
+      mtimeMs: number;
+    }> = [];
+
+    const settled = await Promise.all(
+      candidates.map(async (candidate) => {
+        try {
+          const stat = await fs.stat(candidate.filePath);
+          const attribution = await this.getCachedSubagentAttribution(
+            candidate.filePath,
+            knownMembers,
+            stat.mtimeMs
+          );
+          if (!attribution) return null;
+          return {
+            memberName: attribution.detectedMember,
+            sessionId: candidate.sessionId,
+            filePath: candidate.filePath,
+            mtimeMs: stat.mtimeMs,
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    for (const item of settled) {
+      if (item) results.push(item);
+    }
+
+    return results;
   }
 
   /**
@@ -1148,6 +1204,24 @@ export class TeamMemberLogsFinder {
       logger.debug(`Cannot read project dir: ${projectDir}`);
       return [];
     }
+  }
+
+  private async getCachedSubagentAttribution(
+    filePath: string,
+    knownMembers: Set<string>,
+    mtimeMs: number
+  ): Promise<SubagentAttribution | null> {
+    const cacheKey = `${filePath}:${mtimeMs}`;
+    if (this.attributionCache.has(cacheKey)) {
+      return this.attributionCache.get(cacheKey) ?? null;
+    }
+    const attribution = await this.attributeSubagent(filePath, knownMembers);
+    this.attributionCache.set(cacheKey, attribution);
+    if (this.attributionCache.size > ATTRIBUTION_CACHE_MAX) {
+      const oldestKey = this.attributionCache.keys().next().value;
+      if (oldestKey) this.attributionCache.delete(oldestKey);
+    }
+    return attribution;
   }
 
   private async parseSubagentSummary(

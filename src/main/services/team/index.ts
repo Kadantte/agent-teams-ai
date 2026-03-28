@@ -20,6 +20,7 @@ export { TeamLogSourceTracker } from './TeamLogSourceTracker';
 export { TeamMemberLogsFinder } from './TeamMemberLogsFinder';
 export { TeamMemberResolver } from './TeamMemberResolver';
 export { TeamMembersMetaStore } from './TeamMembersMetaStore';
+export { TeammateToolTracker } from './TeammateToolTracker';
 export { TeamProvisioningService } from './TeamProvisioningService';
 export { TeamSentMessagesStore } from './TeamSentMessagesStore';
 export { TeamTaskReader } from './TeamTaskReader';

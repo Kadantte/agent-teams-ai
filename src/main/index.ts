@@ -106,6 +106,7 @@ import {
   TeamDataService,
   TeamLogSourceTracker,
   TeamMemberLogsFinder,
+  TeammateToolTracker,
   TeamProvisioningService,
   UpdaterService,
 } from './services';
@@ -784,6 +785,7 @@ function initializeServices(): void {
   const teamMemberLogsFinder = new TeamMemberLogsFinder();
   const taskChangePresenceRepository = new JsonTaskChangePresenceRepository();
   const teamLogSourceTracker = new TeamLogSourceTracker(teamMemberLogsFinder);
+  let teammateToolTracker: TeammateToolTracker | null = null;
   const memberStatsComputer = new MemberStatsComputer(teamMemberLogsFinder);
   const taskBoundaryParser = new TaskBoundaryParser();
   const changeExtractor = new ChangeExtractorService(teamMemberLogsFinder, taskBoundaryParser);
@@ -839,13 +841,27 @@ function initializeServices(): void {
     return getTeamControlApiBaseUrl();
   });
 
-  // Allow TeamProvisioningService to trigger team refresh events (e.g. live lead replies).
-  const teamChangeEmitter = (event: TeamChangeEvent): void => {
+  const forwardTeamChange = (event: TeamChangeEvent): void => {
     safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
     httpServer?.broadcast('team-change', event);
   };
+  teammateToolTracker = new TeammateToolTracker(
+    teamMemberLogsFinder,
+    teamLogSourceTracker,
+    forwardTeamChange
+  );
+  // Allow TeamProvisioningService to trigger team refresh events (e.g. live lead replies).
+  const teamChangeEmitter = (event: TeamChangeEvent): void => {
+    forwardTeamChange(event);
+    if (event.type === 'lead-activity' && event.detail === 'offline') {
+      teammateToolTracker?.handleTeamOffline(event.teamName);
+    }
+  };
   teamProvisioningService.setTeamChangeEmitter(teamChangeEmitter);
   teamLogSourceTracker.setEmitter(teamChangeEmitter);
+  teamLogSourceTracker.onLogSourceChange((teamName) => {
+    teammateToolTracker?.handleLogSourceChange(teamName);
+  });
 
   // Allow SchedulerService to push schedule events to renderer
   schedulerService.setChangeEmitter((event) => {
@@ -874,6 +890,7 @@ function initializeServices(): void {
     teamProvisioningService,
     teamMemberLogsFinder,
     memberStatsComputer,
+    teammateToolTracker ?? undefined,
     {
       rewire: rewireContextEvents,
       full: onContextSwitched,

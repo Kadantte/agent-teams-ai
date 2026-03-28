@@ -308,7 +308,7 @@ export interface ToolCallMeta {
   toolUseId?: string;
 }
 
-export type ToolActivitySource = 'runtime' | 'inbox';
+export type ToolActivitySource = 'runtime' | 'member_log' | 'inbox';
 export type ToolActivityState = 'running' | 'complete' | 'error';
 
 /** Live or recently finished tool activity for one team member. */
@@ -337,6 +337,7 @@ export interface ToolActivityEventPayload {
   };
   memberName?: string;
   toolUseId?: string;
+  toolUseIds?: string[];
   finishedAt?: string;
   resultPreview?: string;
   isError?: boolean;

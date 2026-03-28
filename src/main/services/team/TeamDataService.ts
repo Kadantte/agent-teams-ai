@@ -197,7 +197,7 @@ export class TeamDataService {
 
     if (enabled) {
       void this.teamLogSourceTracker
-        .ensureTracking(teamName)
+        .setTracking(teamName, 'change_presence', true)
         .catch((error) =>
           logger.debug(`Failed to start change-presence tracking for ${teamName}: ${String(error)}`)
         );
@@ -205,7 +205,7 @@ export class TeamDataService {
     }
 
     void this.teamLogSourceTracker
-      .stopTracking(teamName)
+      .setTracking(teamName, 'change_presence', false)
       .catch((error) =>
         logger.debug(`Failed to stop change-presence tracking for ${teamName}: ${String(error)}`)
       );

@@ -277,6 +277,21 @@ export function initializeNotificationListeners(): () => void {
     delete nextTeamState[memberName];
     return nextTeamState;
   };
+  const removeMemberToolEntries = (
+    teamState: Record<string, Record<string, ActiveToolCall>> | undefined,
+    memberName: string,
+    toolUseIds: readonly string[]
+  ): Record<string, Record<string, ActiveToolCall>> => {
+    if (!teamState?.[memberName] || toolUseIds.length === 0) return teamState ?? {};
+    let nextTeamState = teamState ?? {};
+    let changed = false;
+    for (const toolUseId of toolUseIds) {
+      if (!nextTeamState[memberName]?.[toolUseId]) continue;
+      nextTeamState = removeMemberToolEntry(nextTeamState, memberName, toolUseId);
+      changed = true;
+    }
+    return changed ? nextTeamState : (teamState ?? {});
+  };
   const getBaseProjectId = (projectId: string | null | undefined): string | null => {
     if (!projectId) return null;
     const separatorIndex = projectId.indexOf('::');
@@ -461,6 +476,19 @@ export function initializeNotificationListeners(): () => void {
     return new Set([selectedTeamName]);
   };
 
+  const getTrackedToolActivityTeams = (): Set<string> => {
+    const { paneLayout } = useStore.getState();
+    const tracked = new Set<string>();
+    for (const pane of paneLayout.panes) {
+      if (!pane.activeTabId) continue;
+      const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId);
+      if (activeTab?.type === 'team' && activeTab.teamName) {
+        tracked.add(activeTab.teamName);
+      }
+    }
+    return tracked;
+  };
+
   if (ENABLE_AUTO_TEAM_CHANGE_PRESENCE_TRACKING && api.teams?.setChangePresenceTracking) {
     let trackedTeamNames = new Set<string>();
     const syncVisibleTeamTracking = (): void => {
@@ -498,6 +526,44 @@ export function initializeNotificationListeners(): () => void {
       unsubscribeVisibleTeamTracking();
       for (const teamName of trackedTeamNames) {
         void api.teams.setChangePresenceTracking(teamName, false).catch(() => undefined);
+      }
+      trackedTeamNames.clear();
+    });
+  }
+
+  if (api.teams?.setToolActivityTracking) {
+    let trackedTeamNames = new Set<string>();
+    const syncVisibleTeamTracking = (): void => {
+      const nextTrackedTeamNames = getTrackedToolActivityTeams();
+
+      for (const teamName of nextTrackedTeamNames) {
+        if (!trackedTeamNames.has(teamName)) {
+          void api.teams.setToolActivityTracking(teamName, true).catch(() => undefined);
+        }
+      }
+
+      for (const teamName of trackedTeamNames) {
+        if (!nextTrackedTeamNames.has(teamName)) {
+          void api.teams.setToolActivityTracking(teamName, false).catch(() => undefined);
+        }
+      }
+
+      trackedTeamNames = nextTrackedTeamNames;
+    };
+
+    syncVisibleTeamTracking();
+
+    const unsubscribeVisibleTeamTracking = useStore.subscribe((state, prevState) => {
+      if (state.paneLayout === prevState.paneLayout) {
+        return;
+      }
+      syncVisibleTeamTracking();
+    });
+
+    cleanupFns.push(() => {
+      unsubscribeVisibleTeamTracking();
+      for (const teamName of trackedTeamNames) {
+        void api.teams.setToolActivityTracking(teamName, false).catch(() => undefined);
       }
       trackedTeamNames.clear();
     });
@@ -801,6 +867,10 @@ export function initializeNotificationListeners(): () => void {
           } else if (payload.action === 'reset') {
             if (payload.memberName) {
               const memberName = payload.memberName;
+              const toolUseIds =
+                Array.isArray(payload.toolUseIds) && payload.toolUseIds.length > 0
+                  ? payload.toolUseIds
+                  : null;
               useStore.setState((prev) => {
                 if (!prev.activeToolsByTeam[event.teamName]?.[memberName]) {
                   return {};
@@ -808,10 +878,13 @@ export function initializeNotificationListeners(): () => void {
                 return {
                   activeToolsByTeam: {
                     ...prev.activeToolsByTeam,
-                    [event.teamName]: removeMemberToolGroup(
-                      prev.activeToolsByTeam[event.teamName],
-                      memberName
-                    ),
+                    [event.teamName]: toolUseIds
+                      ? removeMemberToolEntries(
+                          prev.activeToolsByTeam[event.teamName],
+                          memberName,
+                          toolUseIds
+                        )
+                      : removeMemberToolGroup(prev.activeToolsByTeam[event.teamName], memberName),
                   },
                 };
               });
