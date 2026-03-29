@@ -58,21 +58,11 @@ export class TeamLogSourceTracker {
     return state ? { ...state.snapshot } : null;
   }
 
-  async setTracking(
-    teamName: string,
-    consumer: TeamLogSourceTrackingConsumer,
-    enabled: boolean
-  ): Promise<TeamLogSourceSnapshot> {
-    return enabled
-      ? this.enableTracking(teamName, consumer)
-      : this.disableTracking(teamName, consumer);
-  }
-
   async ensureTracking(teamName: string): Promise<TeamLogSourceSnapshot> {
     return this.enableTracking(teamName, 'change_presence');
   }
 
-  private async enableTracking(
+  async enableTracking(
     teamName: string,
     consumer: TeamLogSourceTrackingConsumer
   ): Promise<TeamLogSourceSnapshot> {
@@ -139,7 +129,7 @@ export class TeamLogSourceTracker {
     await this.disableTracking(teamName, 'change_presence');
   }
 
-  private async disableTracking(
+  async disableTracking(
     teamName: string,
     consumer: TeamLogSourceTrackingConsumer
   ): Promise<TeamLogSourceSnapshot> {

@@ -102,14 +102,14 @@ export class TeammateToolTracker {
     state.epoch += 1;
     state.filesByPath.clear();
     state.refreshQueued = false;
-    await this.logSourceTracker.setTracking(teamName, 'tool_activity', true);
+    await this.logSourceTracker.enableTracking(teamName, 'tool_activity');
     await this.refreshTeam(teamName);
   }
 
   private async disableTracking(teamName: string): Promise<void> {
     const state = this.stateByTeam.get(teamName);
     if (!state) {
-      await this.logSourceTracker.setTracking(teamName, 'tool_activity', false);
+      await this.logSourceTracker.disableTracking(teamName, 'tool_activity');
       return;
     }
     state.enabled = false;
@@ -117,7 +117,7 @@ export class TeammateToolTracker {
     this.resetAllTrackedTools(teamName, state.filesByPath);
     state.filesByPath.clear();
     state.refreshQueued = false;
-    await this.logSourceTracker.setTracking(teamName, 'tool_activity', false);
+    await this.logSourceTracker.disableTracking(teamName, 'tool_activity');
   }
 
   private async refreshTeam(teamName: string): Promise<void> {

@@ -79,7 +79,11 @@ describe('TeammateToolTracker', () => {
         mtimeMs: Date.now(),
       },
     ]);
-    const setTracking = vi.fn(async () => ({
+    const enableTracking = vi.fn(async () => ({
+      projectFingerprint: null,
+      logSourceGeneration: null,
+    }));
+    const disableTracking = vi.fn(async () => ({
       projectFingerprint: null,
       logSourceGeneration: null,
     }));
@@ -87,13 +91,13 @@ describe('TeammateToolTracker', () => {
 
     const tracker = new TeammateToolTracker(
       { listAttributedSubagentFiles } as never,
-      { setTracking } as never,
+      { enableTracking, disableTracking } as never,
       (event) => events.push(event)
     );
 
     await tracker.setTracking('my-team', true);
 
-    expect(setTracking).toHaveBeenCalledWith('my-team', 'tool_activity', true);
+    expect(enableTracking).toHaveBeenCalledWith('my-team', 'tool_activity');
     expect(events).toHaveLength(1);
     const payload = JSON.parse(events[0].detail ?? '');
     expect(payload).toMatchObject({
@@ -133,7 +137,7 @@ describe('TeammateToolTracker', () => {
     const events: TeamChangeEvent[] = [];
     const tracker = new TeammateToolTracker(
       { listAttributedSubagentFiles } as never,
-      { setTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
+      { enableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })), disableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
       (event) => events.push(event)
     );
 
@@ -190,7 +194,7 @@ describe('TeammateToolTracker', () => {
     const events: TeamChangeEvent[] = [];
     const tracker = new TeammateToolTracker(
       { listAttributedSubagentFiles } as never,
-      { setTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
+      { enableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })), disableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
       (event) => events.push(event)
     );
 
@@ -239,7 +243,7 @@ describe('TeammateToolTracker', () => {
     const events: TeamChangeEvent[] = [];
     const tracker = new TeammateToolTracker(
       { listAttributedSubagentFiles } as never,
-      { setTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
+      { enableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })), disableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
       (event) => events.push(event)
     );
 
@@ -296,7 +300,7 @@ describe('TeammateToolTracker', () => {
     const events: TeamChangeEvent[] = [];
     const tracker = new TeammateToolTracker(
       { listAttributedSubagentFiles } as never,
-      { setTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
+      { enableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })), disableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
       (event) => events.push(event)
     );
 
@@ -345,11 +349,12 @@ describe('TeammateToolTracker', () => {
       Array<{ memberName: string; sessionId: string; filePath: string; mtimeMs: number }>
     >();
     const listAttributedSubagentFiles = vi.fn(() => deferred.promise);
-    const setTracking = vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null }));
+    const enableTracking = vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null }));
+    const disableTracking = vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null }));
     const events: TeamChangeEvent[] = [];
     const tracker = new TeammateToolTracker(
       { listAttributedSubagentFiles } as never,
-      { setTracking } as never,
+      { enableTracking, disableTracking } as never,
       (event) => events.push(event)
     );
 
@@ -369,7 +374,7 @@ describe('TeammateToolTracker', () => {
     await Promise.all([enablePromise, disablePromise]);
 
     expect(events).toHaveLength(0);
-    expect(setTracking).toHaveBeenNthCalledWith(1, 'my-team', 'tool_activity', true);
-    expect(setTracking).toHaveBeenNthCalledWith(2, 'my-team', 'tool_activity', false);
+    expect(enableTracking).toHaveBeenNthCalledWith(1, 'my-team', 'tool_activity');
+    expect(disableTracking).toHaveBeenNthCalledWith(1, 'my-team', 'tool_activity');
   });
 });
