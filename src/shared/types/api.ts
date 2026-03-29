@@ -548,7 +548,7 @@ export interface TeamsAPI {
   ) => Promise<void>;
   validateCliArgs: (rawArgs: string) => Promise<CliArgsValidationResult>;
   onToolApprovalEvent: (callback: (event: unknown, data: ToolApprovalEvent) => void) => () => void;
-  updateToolApprovalSettings: (settings: ToolApprovalSettings) => Promise<void>;
+  updateToolApprovalSettings: (teamName: string, settings: ToolApprovalSettings) => Promise<void>;
   readFileForToolApproval: (filePath: string) => Promise<ToolApprovalFileContent>;
 }
 

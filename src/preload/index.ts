@@ -1145,8 +1145,8 @@ const electronAPI: ElectronAPI = {
         );
       };
     },
-    updateToolApprovalSettings: async (settings: ToolApprovalSettings) => {
-      return invokeIpcWithResult<void>(TEAM_TOOL_APPROVAL_SETTINGS, settings);
+    updateToolApprovalSettings: async (teamName: string, settings: ToolApprovalSettings) => {
+      return invokeIpcWithResult<void>(TEAM_TOOL_APPROVAL_SETTINGS, teamName, settings);
     },
     readFileForToolApproval: async (filePath: string) => {
       return invokeIpcWithResult<ToolApprovalFileContent>(TEAM_TOOL_APPROVAL_READ_FILE, filePath);

@@ -1064,7 +1064,8 @@ export function initializeNotificationListeners(): () => void {
 
     // Sync saved tool approval settings to main process on startup
     const savedSettings = useStore.getState().toolApprovalSettings;
-    api.teams.updateToolApprovalSettings?.(savedSettings).catch(() => {
+    const activeTeam = useStore.getState().selectedTeamName ?? '__global__';
+    api.teams.updateToolApprovalSettings?.(activeTeam, savedSettings).catch(() => {
       // Silently ignore — settings will use defaults until next update
     });
   }

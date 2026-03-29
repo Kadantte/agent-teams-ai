@@ -2945,8 +2945,12 @@ async function handleToolApprovalRespond(
 
 async function handleToolApprovalSettings(
   _event: IpcMainInvokeEvent,
+  teamName: unknown,
   settings: unknown
 ): Promise<IpcResult<void>> {
+  if (typeof teamName !== 'string' || teamName.trim().length === 0) {
+    return { success: false, error: 'teamName must be a non-empty string' };
+  }
   if (typeof settings !== 'object' || settings === null) {
     return { success: false, error: 'Settings must be an object' };
   }
@@ -2973,7 +2977,10 @@ async function handleToolApprovalSettings(
   }
 
   try {
-    getTeamProvisioningService().updateToolApprovalSettings(s as unknown as ToolApprovalSettings);
+    getTeamProvisioningService().updateToolApprovalSettings(
+      teamName as string,
+      s as unknown as ToolApprovalSettings
+    );
   } catch (err) {
     return {
       success: false,

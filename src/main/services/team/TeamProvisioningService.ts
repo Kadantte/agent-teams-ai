@@ -1276,7 +1276,7 @@ export class TeamProvisioningService {
   private helpOutputCache: string | null = null;
   private helpOutputCacheTime = 0;
   private static readonly HELP_CACHE_TTL_MS = 5 * 60 * 1000;
-  private toolApprovalSettings: ToolApprovalSettings = DEFAULT_TOOL_APPROVAL_SETTINGS;
+  private toolApprovalSettingsByTeam = new Map<string, ToolApprovalSettings>();
   private pendingTimeouts = new Map<string, NodeJS.Timeout>();
   private inFlightResponses = new Set<string>();
   private controlApiBaseUrlResolver: (() => Promise<string | null>) | null = null;
@@ -2022,8 +2022,12 @@ export class TeamProvisioningService {
     this.mainWindowRef = win;
   }
 
-  updateToolApprovalSettings(settings: ToolApprovalSettings): void {
-    this.toolApprovalSettings = settings;
+  private getToolApprovalSettings(teamName: string): ToolApprovalSettings {
+    return this.toolApprovalSettingsByTeam.get(teamName) ?? DEFAULT_TOOL_APPROVAL_SETTINGS;
+  }
+
+  updateToolApprovalSettings(teamName: string, settings: ToolApprovalSettings): void {
+    this.toolApprovalSettingsByTeam.set(teamName, settings);
     this.reEvaluatePendingApprovals();
   }
 
@@ -5779,7 +5783,11 @@ export class TeamProvisioningService {
     };
 
     // Check auto-allow rules before prompting user
-    const autoResult = shouldAutoAllow(this.toolApprovalSettings, toolName, toolInput);
+    const autoResult = shouldAutoAllow(
+      this.getToolApprovalSettings(run.teamName),
+      toolName,
+      toolInput
+    );
     if (autoResult.autoAllow) {
       logger.info(`[${run.teamName}] Auto-allowing ${toolName} (${autoResult.reason})`);
       this.autoAllowControlRequest(run, requestId);
@@ -5832,7 +5840,11 @@ export class TeamProvisioningService {
       teamDisplayName: run.request.displayName,
     };
 
-    const autoResult = shouldAutoAllow(this.toolApprovalSettings, perm.toolName, perm.input);
+    const autoResult = shouldAutoAllow(
+      this.getToolApprovalSettings(run.teamName),
+      perm.toolName,
+      perm.input
+    );
     if (autoResult.autoAllow) {
       logger.info(
         `[${run.teamName}] Auto-allowing teammate ${perm.agentId} ${perm.toolName} (${autoResult.reason})`
@@ -6003,7 +6015,7 @@ export class TeamProvisioningService {
   }
 
   private startApprovalTimeout(run: ProvisioningRun, requestId: string): void {
-    const { timeoutAction, timeoutSeconds } = this.toolApprovalSettings;
+    const { timeoutAction, timeoutSeconds } = this.getToolApprovalSettings(run.teamName);
     if (timeoutAction === 'wait') return;
 
     const timeoutMs = timeoutSeconds * 1000;
@@ -6013,7 +6025,7 @@ export class TeamProvisioningService {
       if (!this.tryClaimResponse(requestId)) return;
 
       // Read CURRENT settings (not captured closure) in case user changed action
-      const currentAction = this.toolApprovalSettings.timeoutAction;
+      const currentAction = this.getToolApprovalSettings(run.teamName).timeoutAction;
       if (currentAction === 'wait') {
         // Settings changed to 'wait' but timer fired before reEvaluatePendingApprovals cleared it
         this.inFlightResponses.delete(requestId);
@@ -6102,13 +6114,10 @@ export class TeamProvisioningService {
 
   private reEvaluatePendingApprovals(): void {
     for (const [, run] of this.runs) {
+      const settings = this.getToolApprovalSettings(run.teamName);
       const toRemove: string[] = [];
       for (const [requestId, approval] of run.pendingApprovals) {
-        const result = shouldAutoAllow(
-          this.toolApprovalSettings,
-          approval.toolName,
-          approval.toolInput
-        );
+        const result = shouldAutoAllow(settings, approval.toolName, approval.toolInput);
         if (result.autoAllow) {
           this.clearApprovalTimeout(requestId);
           if (!this.tryClaimResponse(requestId)) continue;
@@ -6126,16 +6135,10 @@ export class TeamProvisioningService {
             teamName: run.teamName,
             reason: 'auto_allow_category',
           } as ToolApprovalAutoResolved);
-        } else if (
-          this.toolApprovalSettings.timeoutAction !== 'wait' &&
-          !this.pendingTimeouts.has(requestId)
-        ) {
+        } else if (settings.timeoutAction !== 'wait' && !this.pendingTimeouts.has(requestId)) {
           // Settings changed from 'wait' to allow/deny — start timer for already pending items
           this.startApprovalTimeout(run, requestId);
-        } else if (
-          this.toolApprovalSettings.timeoutAction === 'wait' &&
-          this.pendingTimeouts.has(requestId)
-        ) {
+        } else if (settings.timeoutAction === 'wait' && this.pendingTimeouts.has(requestId)) {
           // Settings changed TO 'wait' — clear existing timers
           this.clearApprovalTimeout(requestId);
         }
