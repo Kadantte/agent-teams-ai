@@ -6541,11 +6541,16 @@ export class TeamProvisioningService {
   ): Promise<void> {
     const settingsPath = path.join(projectCwd, '.claude', 'settings.local.json');
     try {
-      const added = await this.addPermissionRulesToSettings(
-        settingsPath,
-        [...AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES],
-        'allow'
-      );
+      // FACT: Teammates need both MCP tools AND standard file tools (Write/Edit).
+      // FACT: Standard tools use "setMode: acceptEdits" permission_suggestions, but
+      // we can't change subprocess session mode — so we pre-add them as allow rules.
+      const allTools = [
+        ...AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
+        'Edit',
+        'Write',
+        'NotebookEdit',
+      ];
+      const added = await this.addPermissionRulesToSettings(settingsPath, allTools, 'allow');
       logger.info(
         `[${teamName}] Seeded teammate operational MCP rules in ${settingsPath} (${added} added)`
       );

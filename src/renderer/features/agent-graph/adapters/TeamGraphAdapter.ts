@@ -8,6 +8,7 @@
  */
 
 import { agentAvatarUrl } from '@renderer/utils/memberHelpers';
+import { getInboxJsonType, isInboxNoiseMessage } from '@shared/utils/inboxNoise';
 import { isLeadMember } from '@shared/utils/leadDetection';
 
 import type {
@@ -524,6 +525,15 @@ export class TeamGraphAdapter {
       // Skip comment notifications — #buildCommentParticles handles them with real text
       if (msg.summary?.startsWith('Comment on ')) continue;
 
+      // Handle noise messages: idle shows as "idle", others (shutdown, terminated) skip entirely
+      const msgText = msg.text ?? '';
+      const noiseType = getInboxJsonType(msgText);
+      if (noiseType === 'idle_notification') {
+        // Show idle as a simple label, don't skip
+      } else if (isInboxNoiseMessage(msgText)) {
+        continue; // skip shutdown_approved, teammate_terminated, shutdown_request
+      }
+
       const edgeId = TeamGraphAdapter.#resolveMessageEdge(msg, teamName, leadId, leadName, edges);
       if (!edgeId) continue;
 
@@ -537,13 +547,19 @@ export class TeamGraphAdapter {
       );
       const isFromTeammate = fromId !== leadId;
 
+      // For idle notifications, show a clean "idle" label instead of raw JSON
+      const particleLabel =
+        noiseType === 'idle_notification'
+          ? 'idle'
+          : TeamGraphAdapter.#buildParticleLabel(msg.summary ?? msg.text, 'inbox');
+
       particles.push({
         id: `particle:msg:${teamName}:${msgKey}`,
         edgeId,
         progress: 0,
         kind: 'inbox_message',
         color: msg.color ?? '#66ccff',
-        label: TeamGraphAdapter.#buildParticleLabel(msg.summary ?? msg.text, 'inbox'),
+        label: particleLabel,
         reverse: isFromTeammate,
       });
     }
@@ -735,7 +751,7 @@ export class TeamGraphAdapter {
   static #buildParticleLabel(
     text: string | undefined,
     kind: 'inbox' | 'comment',
-    max = 26
+    max = 52
   ): string | undefined {
     const normalized = text?.replace(/\s+/g, ' ').trim();
     const prefix = kind === 'comment' ? '\u{1F4AC}' : '\u{2709}';
