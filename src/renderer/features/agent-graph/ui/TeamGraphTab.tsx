@@ -99,7 +99,13 @@ export const TeamGraphTab = ({
       </div>
       {fullscreen && (
         <Suspense fallback={null}>
-          <TeamGraphOverlay teamName={teamName} onClose={() => setFullscreen(false)} />
+          <TeamGraphOverlay
+            teamName={teamName}
+            onClose={() => setFullscreen(false)}
+            onSendMessage={dispatchSendMessage}
+            onOpenTaskDetail={dispatchOpenTask}
+            onOpenMemberProfile={dispatchOpenProfile}
+          />
         </Suspense>
       )}
     </div>
