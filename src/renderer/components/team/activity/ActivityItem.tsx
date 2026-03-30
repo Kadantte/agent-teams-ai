@@ -252,9 +252,7 @@ function getNoiseLabel(parsed: StructuredMessage): string | null {
 
   if (type === 'permission_request') {
     const toolName = getStringField(parsed, 'tool_name');
-    const description = getStringField(parsed, 'description');
-    const label = toolName ? `Permission: ${toolName}` : 'Permission request';
-    return description ? `${label} — ${description}` : label;
+    return toolName ? `Permission: ${toolName}` : 'Permission request';
   }
 
   if (type === 'permission_response') {
