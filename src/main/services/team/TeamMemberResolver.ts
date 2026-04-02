@@ -8,6 +8,7 @@ import type {
   MemberStatus,
   ResolvedTeamMember,
   TeamConfig,
+  TeamMember,
   TeamTaskWithKanban,
 } from '@shared/types';
 
@@ -134,15 +135,26 @@ export class TeamMemberResolver {
     if (Array.isArray(config.members)) {
       for (const m of config.members) {
         if (typeof m?.name === 'string' && m.name.trim() !== '') {
+          const configMember = m as TeamMember & { provider?: 'anthropic' | 'codex' | 'gemini' };
+          const providerId =
+            configMember.providerId === 'anthropic' ||
+            configMember.providerId === 'codex' ||
+            configMember.providerId === 'gemini'
+              ? configMember.providerId
+              : configMember.provider === 'anthropic' ||
+                  configMember.provider === 'codex' ||
+                  configMember.provider === 'gemini'
+                ? configMember.provider
+                : undefined;
           configMemberMap.set(m.name.trim(), {
-            agentType: m.agentType,
-            role: m.role,
-            workflow: m.workflow,
-            providerId: m.providerId,
-            model: m.model,
-            effort: m.effort,
-            color: m.color,
-            cwd: m.cwd,
+            agentType: configMember.agentType,
+            role: configMember.role,
+            workflow: configMember.workflow,
+            providerId,
+            model: configMember.model,
+            effort: configMember.effort,
+            color: configMember.color,
+            cwd: configMember.cwd,
           });
         }
       }

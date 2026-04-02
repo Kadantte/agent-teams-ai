@@ -36,6 +36,7 @@ export function createMemberDraft(initial?: Partial<MemberDraft>): MemberDraft {
     providerId: initial?.providerId,
     model: initial?.model ?? '',
     effort: initial?.effort,
+    removedAt: initial?.removedAt,
   };
 }
 
@@ -67,6 +68,7 @@ export function createMemberDraftsFromInputs(
             : 'anthropic',
         model: member.model ?? '',
         effort: normalizeDraftEffort(member.effort),
+        removedAt: member.removedAt,
       });
     });
 }
@@ -78,6 +80,33 @@ export function clearMemberModelOverrides(member: MemberDraft): MemberDraft {
     model: '',
     effort: undefined,
   };
+}
+
+export function normalizeProviderForMode(
+  providerId: TeamProviderId | undefined,
+  multimodelEnabled: boolean
+): TeamProviderId {
+  if (multimodelEnabled && (providerId === 'codex' || providerId === 'gemini')) {
+    return providerId;
+  }
+  return 'anthropic';
+}
+
+export function normalizeMemberDraftForProviderMode(
+  member: MemberDraft,
+  multimodelEnabled: boolean
+): MemberDraft {
+  if (multimodelEnabled) {
+    return member;
+  }
+  if (member.providerId === 'codex' || member.providerId === 'gemini') {
+    return {
+      ...member,
+      providerId: 'anthropic',
+      model: '',
+    };
+  }
+  return member;
 }
 
 function normalizeDraftEffort(value: string | undefined): EffortLevel | undefined {
@@ -155,6 +184,9 @@ export function getWorkflowForExport(member: MemberDraft): string | undefined {
 export function buildMembersFromDrafts(members: MemberDraft[]): TeamProvisioningMemberInput[] {
   return members
     .map((member) => {
+      if (member.removedAt) {
+        return null;
+      }
       const name = member.name.trim();
       if (!name) {
         return null;

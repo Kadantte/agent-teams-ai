@@ -125,8 +125,10 @@ const SLOW_CHECK_DELAY_MS = 5_000;
 
 const CliCheckingSpinner = ({
   styles,
+  label,
 }: {
   styles: { border: string; bg: string };
+  label: string;
 }): React.JSX.Element => {
   const [showHint, setShowHint] = useState(false);
 
@@ -146,7 +148,7 @@ const CliCheckingSpinner = ({
       />
       <div>
         <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-          Checking AI Providers...
+          {label}
         </span>
         {showHint && (
           <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>
@@ -309,11 +311,27 @@ function formatRuntimeAuthSummary(
     return `Providers: ${connected}/${denominator} connected`;
   }
 
+  if (cliStatus.authStatusChecking) {
+    return 'Checking authentication...';
+  }
+
   if (cliStatus.authLoggedIn) {
     return 'Authenticated';
   }
 
   return null;
+}
+
+function isCheckingMultimodelStatus(
+  cliStatus: NonNullable<ReturnType<typeof useCliInstaller>['cliStatus']>
+): boolean {
+  return (
+    cliStatus.flavor === 'free-code' &&
+    cliStatus.providers.length > 0 &&
+    cliStatus.providers.every(
+      (provider) => provider.statusMessage === 'Checking...' && !provider.authenticated
+    )
+  );
 }
 
 function createLoadingMultimodelStatus(): CliInstallationStatus {
@@ -349,6 +367,7 @@ function createLoadingMultimodelStatus(): CliInstallationStatus {
     latestVersion: null,
     updateAvailable: false,
     authLoggedIn: false,
+    authStatusChecking: true,
     authMethod: null,
     providers,
   };
@@ -643,6 +662,11 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
     async (enabled: boolean) => {
       setIsSwitchingFlavor(true);
       try {
+        useStore.setState({
+          cliStatus: enabled ? createLoadingMultimodelStatus() : null,
+          cliStatusLoading: true,
+          cliStatusError: null,
+        });
         await updateConfig('general', { multimodelEnabled: enabled });
         await invalidateCliStatus();
         await fetchCliStatus();
@@ -695,6 +719,8 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
     if (installerState === 'completed') return 'success';
     if (installerState !== 'idle') return 'info';
     if (!cliStatus) return 'loading';
+    if (isCheckingMultimodelStatus(cliStatus)) return 'info';
+    if (cliStatus.authStatusChecking) return 'info';
     if (!cliStatus.installed) return 'error';
     if (cliStatus.installed && !cliStatus.authLoggedIn) return 'warning';
     if (cliStatus.updateAvailable) return 'info';
@@ -785,7 +811,12 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
     }
 
     // Claude-only mode: keep the generic loading spinner.
-    return <CliCheckingSpinner styles={styles} />;
+    return (
+      <CliCheckingSpinner
+        styles={styles}
+        label={multimodelEnabled ? 'Checking AI Providers...' : 'Checking Claude CLI...'}
+      />
+    );
   }
 
   // ── Downloading ────────────────────────────────────────────────────────
@@ -937,8 +968,12 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
   }
 
   // Installed but not logged in — yellow warning banner
-  if (cliStatus.installed && cliStatus.flavor !== 'free-code' && !cliStatus.authLoggedIn) {
-    if (isVerifyingAuth) {
+  if (
+    cliStatus.installed &&
+    cliStatus.flavor !== 'free-code' &&
+    (cliStatus.authStatusChecking || isVerifyingAuth)
+  ) {
+    if (cliStatus.authStatusChecking || isVerifyingAuth) {
       return (
         <div
           className="mb-6 flex items-center gap-3 rounded-lg border-l-4 p-4"
@@ -954,6 +989,14 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
         </div>
       );
     }
+  }
+
+  if (
+    cliStatus.installed &&
+    cliStatus.flavor !== 'free-code' &&
+    !cliStatus.authStatusChecking &&
+    !cliStatus.authLoggedIn
+  ) {
     return (
       <>
         <div

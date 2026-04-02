@@ -11,6 +11,7 @@ export interface MemberDraft {
   providerId?: TeamProviderId;
   model?: string;
   effort?: EffortLevel;
+  removedAt?: number | string | null;
 }
 
 export interface MembersEditorValue {

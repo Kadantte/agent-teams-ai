@@ -94,6 +94,7 @@ describe('cliInstallerSlice', () => {
         latestVersion: '2.1.59',
         updateAvailable: false,
         authLoggedIn: false,
+        authStatusChecking: false,
         authMethod: null,
         providers: [],
       };
@@ -126,6 +127,7 @@ describe('cliInstallerSlice', () => {
         latestVersion: '2.1.59',
         updateAvailable: true,
         authLoggedIn: true,
+        authStatusChecking: false,
         authMethod: 'oauth_token',
         providers: [],
       };

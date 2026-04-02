@@ -9,13 +9,14 @@ import { RoleSelect } from '@renderer/components/team/RoleSelect';
 import { Button } from '@renderer/components/ui/button';
 import { Input } from '@renderer/components/ui/input';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { reconcileChips, removeChipTokenFromText } from '@renderer/utils/chipUtils';
 import { getMemberColorByName } from '@shared/constants/memberColors';
-import { ChevronDown, ChevronRight, Info, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info, RotateCcw, Trash2 } from 'lucide-react';
 
 import type { MemberDraft } from './membersEditorTypes';
 import type { InlineChip } from '@renderer/types/inlineChip';
@@ -48,6 +49,8 @@ interface MemberDraftRowProps {
   lockProviderModel?: boolean;
   forceInheritedModelSettings?: boolean;
   modelLockReason?: string;
+  isRemoved?: boolean;
+  onRestore?: (id: string) => void;
 }
 
 export const MemberDraftRow = ({
@@ -76,6 +79,8 @@ export const MemberDraftRow = ({
   lockProviderModel = false,
   forceInheritedModelSettings = false,
   modelLockReason,
+  isRemoved = false,
+  onRestore,
 }: MemberDraftRowProps): React.JSX.Element => {
   const { isLight } = useTheme();
   const memberColorSet = getTeamColorSet(
@@ -154,13 +159,19 @@ export const MemberDraftRow = ({
   const effectiveEffort = forceInheritedModelSettings
     ? inheritedEffort
     : (member.effort ?? inheritedEffort);
-  const modelButtonLabel = effectiveModel?.trim()
+  const modelButtonLabelBase = effectiveModel?.trim()
     ? getTeamModelLabel(effectiveModel.trim())
     : 'Default';
+  const modelButtonLabel = forceInheritedModelSettings
+    ? `${modelButtonLabelBase} (lead)`
+    : modelButtonLabelBase;
+  const modelTooltipText = forceInheritedModelSettings
+    ? 'Provider, model, and effort are inherited from the lead while sync is enabled.'
+    : modelLockReason;
 
   return (
     <div
-      className="relative grid grid-cols-1 gap-2 rounded-md p-2 shadow-sm md:grid-cols-[1fr_180px_auto]"
+      className={`relative grid grid-cols-1 gap-2 rounded-md p-2 shadow-sm md:grid-cols-[1fr_180px_auto] ${isRemoved ? 'opacity-55' : ''}`}
       style={{
         backgroundColor: isLight
           ? 'color-mix(in srgb, var(--color-surface-raised) 22%, white 78%)'
@@ -178,6 +189,7 @@ export const MemberDraftRow = ({
           className="h-8 text-xs"
           value={member.name}
           aria-label={`Member ${index + 1} name`}
+          disabled={isRemoved}
           onChange={(event) => onNameChange(member.id, event.target.value)}
           placeholder="member-name"
           style={
@@ -193,6 +205,7 @@ export const MemberDraftRow = ({
       <div>
         <RoleSelect
           value={member.roleSelection || '__none__'}
+          disabled={isRemoved}
           onValueChange={(roleSelection) => onRoleChange(member.id, roleSelection)}
           customRole={member.customRole}
           onCustomRoleChange={(customRole) => onCustomRoleChange(member.id, customRole)}
@@ -207,6 +220,7 @@ export const MemberDraftRow = ({
               variant="outline"
               size="sm"
               className="relative h-8 shrink-0 gap-1"
+              disabled={isRemoved}
               onClick={() => setWorkflowExpanded((prev) => !prev)}
             >
               {workflowExpanded ? (
@@ -221,36 +235,62 @@ export const MemberDraftRow = ({
             </Button>
           ) : null}
           <div className="min-w-0 space-y-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex max-w-[190px]">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 max-w-[190px] shrink-0 justify-start gap-1 overflow-hidden text-left"
+                    disabled={lockProviderModel || isRemoved}
+                    onClick={() => setModelExpanded((prev) => !prev)}
+                  >
+                    {modelExpanded ? (
+                      <ChevronDown className="size-3.5" />
+                    ) : (
+                      <ChevronRight className="size-3.5" />
+                    )}
+                    <span className="truncate">Model: {modelButtonLabel}</span>
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {modelTooltipText ? (
+                <TooltipContent side="top" className="max-w-64 text-xs leading-relaxed">
+                  {modelTooltipText}
+                </TooltipContent>
+              ) : null}
+            </Tooltip>
+          </div>
+          {isRemoved ? (
             <Button
               variant="outline"
               size="sm"
-              className="h-8 max-w-[190px] shrink-0 justify-start gap-1 overflow-hidden text-left"
-              disabled={lockProviderModel}
-              title={lockProviderModel ? modelLockReason : undefined}
-              onClick={() => setModelExpanded((prev) => !prev)}
+              className="size-8 shrink-0 px-0"
+              aria-label={`Restore ${member.name || `member ${index + 1}`}`}
+              title="Restore member"
+              onClick={() => onRestore?.(member.id)}
             >
-              {modelExpanded ? (
-                <ChevronDown className="size-3.5" />
-              ) : (
-                <ChevronRight className="size-3.5" />
-              )}
-              <span className="truncate">Model: {modelButtonLabel}</span>
+              <RotateCcw className="size-3.5" />
             </Button>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="size-8 shrink-0 border-red-500/40 px-0 text-red-300 hover:bg-red-500/10 hover:text-red-200"
-            aria-label={`Remove ${member.name || `member ${index + 1}`}`}
-            title="Remove member"
-            onClick={() => onRemove(member.id)}
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="size-8 shrink-0 border-red-500/40 px-0 text-red-300 hover:bg-red-500/10 hover:text-red-200"
+              aria-label={`Remove ${member.name || `member ${index + 1}`}`}
+              title="Remove member"
+              onClick={() => onRemove(member.id)}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          )}
         </div>
+        {isRemoved ? (
+          <div className="pl-1 text-[11px] text-[var(--color-text-muted)]">Removed</div>
+        ) : null}
       </div>
       {showWorkflow && onWorkflowChange && workflowExpanded ? (
-        <div className="space-y-0.5 md:col-span-3">
+        <div className="space-y-0.5 pl-3 md:col-span-3">
           <label
             htmlFor={`member-${member.id}-workflow`}
             className="block text-[10px] font-medium text-[var(--color-text-muted)]"
@@ -281,7 +321,7 @@ export const MemberDraftRow = ({
         </div>
       ) : null}
       {modelExpanded && (
-        <div className="space-y-2 md:col-span-3">
+        <div className="space-y-2 pl-3 md:col-span-3">
           <TeamModelSelector
             providerId={effectiveProviderId}
             onProviderChange={(providerId) => {

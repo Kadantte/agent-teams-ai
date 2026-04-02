@@ -160,7 +160,8 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
   id,
 }) => {
   const cliStatus = useStore((s) => s.cliStatus);
-  const multimodelAvailable = cliStatus?.flavor === 'free-code';
+  const multimodelEnabled = useStore((s) => s.appConfig?.general?.multimodelEnabled ?? true);
+  const multimodelAvailable = multimodelEnabled || cliStatus?.flavor === 'free-code';
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -180,6 +181,12 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
 
   const activeProvider = PROVIDERS.find((provider) => provider.id === providerId) ?? PROVIDERS[0];
   const ProviderIcon = activeProvider.icon;
+  const defaultModelTooltip = useMemo(() => {
+    if (providerId === 'anthropic') {
+      return 'Default model from Claude CLI (/model).\nUses the runtime default for the selected provider.';
+    }
+    return 'Uses the runtime default for the selected provider.';
+  }, [providerId]);
   const isProviderSelectable = (candidateProviderId: string): boolean =>
     multimodelAvailable || candidateProviderId === 'anthropic';
   const activeProviderSelectable = isProviderSelectable(providerId);
@@ -192,7 +199,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
         : providerId === 'gemini'
           ? GEMINI_MODEL_OPTIONS
           : ANTHROPIC_MODEL_OPTIONS;
-    if (runtimeModels.length === 0) {
+    if (providerId === 'anthropic' || runtimeModels.length === 0) {
       return [...fallback];
     }
     const dynamicOptions = runtimeModels.map((model) => ({
@@ -310,7 +317,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
         )}
 
         <div
-          className="grid gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5"
+          className="grid gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5"
           style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}
         >
           {modelOptions.map((opt) => (
@@ -342,9 +349,12 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
                       <Info className="size-3 shrink-0 opacity-40 transition-opacity hover:opacity-70" />
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-[240px] text-xs">
-                      Default model from Claude CLI (/model).
-                      <br />
-                      Uses the runtime default for the selected provider.
+                      {defaultModelTooltip.split('\n').map((line, index) => (
+                        <React.Fragment key={line}>
+                          {index > 0 ? <br /> : null}
+                          {line}
+                        </React.Fragment>
+                      ))}
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>

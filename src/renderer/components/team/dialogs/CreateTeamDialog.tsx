@@ -7,6 +7,8 @@ import {
   buildMembersFromDrafts,
   clearMemberModelOverrides,
   createMemberDraft,
+  normalizeMemberDraftForProviderMode,
+  normalizeProviderForMode,
   validateMemberNameInline,
 } from '@renderer/components/team/members/MembersEditorSection';
 import { TeamRosterEditorSection } from '@renderer/components/team/members/TeamRosterEditorSection';
@@ -33,6 +35,7 @@ import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
+import { useStore } from '@renderer/store';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 
@@ -266,6 +269,7 @@ export const CreateTeamDialog = ({
   onOpenTeam,
 }: CreateTeamDialogProps): React.JSX.Element => {
   const { isLight } = useTheme();
+  const multimodelEnabled = useStore((s) => s.appConfig?.general?.multimodelEnabled ?? true);
 
   // ── Persisted draft state (survives tab navigation) ──────────────────
   const {
@@ -362,13 +366,14 @@ export const CreateTeamDialog = ({
   };
 
   const setSelectedProviderId = (value: TeamProviderId): void => {
-    setSelectedProviderIdRaw(value);
-    localStorage.setItem('team:lastSelectedProvider', value);
-    if (value !== 'anthropic') {
+    const normalizedValue = normalizeProviderForMode(value, multimodelEnabled);
+    setSelectedProviderIdRaw(normalizedValue);
+    localStorage.setItem('team:lastSelectedProvider', normalizedValue);
+    if (normalizedValue !== 'anthropic') {
       setLimitContextRaw(false);
       localStorage.setItem('team:lastLimitContext', 'false');
     }
-    setSelectedModelRaw(getStoredTeamModel(value));
+    setSelectedModelRaw(getStoredTeamModel(normalizedValue));
   };
 
   const setLimitContext = (value: boolean): void => {
@@ -444,7 +449,10 @@ export const CreateTeamDialog = ({
     [members, syncModelsWithLead]
   );
 
-  const selectedMemberProviders = useMemo(() => {
+  const selectedMemberProviders = useMemo<TeamProviderId[]>(() => {
+    if (!multimodelEnabled) {
+      return ['anthropic'];
+    }
     if (soloTeam || syncModelsWithLead) {
       return [selectedProviderId];
     }
@@ -456,7 +464,22 @@ export const CreateTeamDialog = ({
         ),
       ])
     );
-  }, [members, selectedProviderId, soloTeam, syncModelsWithLead]);
+  }, [members, multimodelEnabled, selectedProviderId, soloTeam, syncModelsWithLead]);
+
+  useEffect(() => {
+    if (multimodelEnabled) {
+      return;
+    }
+    if (selectedProviderId !== 'anthropic') {
+      setSelectedProviderIdRaw('anthropic');
+      setSelectedModelRaw(getStoredTeamModel('anthropic'));
+    }
+    const nextMembers = members.map((member) => normalizeMemberDraftForProviderMode(member, false));
+    const changed = nextMembers.some((member, index) => member !== members[index]);
+    if (changed) {
+      setMembers(nextMembers);
+    }
+  }, [members, multimodelEnabled, selectedProviderId, setMembers]);
 
   useEffect(() => {
     if (!open || !canCreate || !launchTeam) {
@@ -631,15 +654,22 @@ export const CreateTeamDialog = ({
           const presetRoles: readonly string[] = PRESET_ROLES;
           const isPreset = m.role != null && presetRoles.includes(m.role);
           const isCustom = m.role != null && m.role.length > 0 && !isPreset;
-          return createMemberDraft({
-            name: m.name,
-            roleSelection: isCustom ? CUSTOM_ROLE : (m.role ?? ''),
-            customRole: isCustom ? m.role : '',
-            workflow: m.workflow,
-            providerId: m.providerId,
-            model: m.model ?? '',
-            effort: m.effort,
-          });
+          return normalizeMemberDraftForProviderMode(
+            createMemberDraft({
+              name: m.name,
+              roleSelection: isCustom ? CUSTOM_ROLE : (m.role ?? ''),
+              customRole: isCustom ? m.role : '',
+              workflow: m.workflow,
+              providerId: normalizeProviderForMode(m.providerId, multimodelEnabled),
+              model:
+                normalizeProviderForMode(m.providerId, multimodelEnabled) ===
+                normalizeProviderForMode(m.providerId, true)
+                  ? (m.model ?? '')
+                  : '',
+              effort: m.effort,
+            }),
+            multimodelEnabled
+          );
         })
       );
       setSyncModelsWithLead(

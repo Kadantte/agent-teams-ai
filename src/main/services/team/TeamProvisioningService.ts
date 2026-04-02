@@ -295,6 +295,7 @@ interface ProvisioningRun {
   onProgress: (progress: TeamProvisioningProgress) => void;
   expectedMembers: string[];
   request: TeamCreateRequest;
+  effectiveMembers: TeamCreateRequest['members'];
   lastLogProgressAt: number;
   /** Monotonic ms timestamp of last stdout/stderr data. For stall detection. */
   lastDataReceivedAt: number;
@@ -489,6 +490,45 @@ function formatWorkflowBlock(workflow: string, indent: string): string {
   if (trimmed.length === 0) return '';
   const body = indentMultiline(trimmed, indent);
   return `\n${indent}---BEGIN WORKFLOW---\n${body}\n${indent}---END WORKFLOW---`;
+}
+
+type TeamMemberInput = TeamCreateRequest['members'][number];
+
+function normalizeTeamMemberProviderId(providerId: unknown): TeamProviderId | undefined {
+  return providerId === 'codex' || providerId === 'gemini' || providerId === 'anthropic'
+    ? providerId
+    : undefined;
+}
+
+function buildEffectiveTeamMemberSpec(
+  member: TeamMemberInput,
+  defaults: {
+    providerId?: TeamProviderId;
+    model?: string;
+    effort?: TeamCreateRequest['effort'];
+  }
+): TeamMemberInput {
+  const memberProviderId = normalizeTeamMemberProviderId(member.providerId);
+  const defaultProviderId = normalizeTeamMemberProviderId(defaults.providerId);
+  const model = member.model?.trim() || defaults.model?.trim() || undefined;
+
+  return {
+    ...member,
+    providerId: memberProviderId ?? defaultProviderId ?? 'anthropic',
+    model,
+    effort: member.effort ?? defaults.effort,
+  };
+}
+
+function buildEffectiveTeamMemberSpecs(
+  members: TeamCreateRequest['members'],
+  defaults: {
+    providerId?: TeamProviderId;
+    model?: string;
+    effort?: TeamCreateRequest['effort'];
+  }
+): TeamCreateRequest['members'] {
+  return members.map((member) => buildEffectiveTeamMemberSpec(member, defaults));
 }
 
 function buildMembersPrompt(members: TeamCreateRequest['members']): string {
@@ -983,17 +1023,20 @@ function buildTaskBoardSnapshot(tasks: TeamTask[]): string {
   return `\nCurrent task board (in_progress/pending):\n${lines.join('\n')}\n`;
 }
 
-function buildProvisioningPrompt(request: TeamCreateRequest): string {
+function buildProvisioningPrompt(
+  request: TeamCreateRequest,
+  effectiveMembers: TeamCreateRequest['members']
+): string {
   const displayName = request.displayName?.trim() || request.teamName;
   const userPromptBlock = request.prompt?.trim()
     ? `\nAdditional instructions from the user:\n${request.prompt.trim()}\n`
     : '';
 
   const leadName =
-    request.members.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
+    effectiveMembers.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
   const projectName = path.basename(request.cwd);
 
-  const isSolo = request.members.length === 0;
+  const isSolo = effectiveMembers.length === 0;
 
   const step3Block = isSolo
     ? `3) If user instructions describe work to be done — create tasks on the team board and assign each task to yourself (“${leadName}”) as owner.\n` +
@@ -1036,14 +1079,15 @@ function buildProvisioningPrompt(request: TeamCreateRequest): string {
      With member_briefing bootstrap enabled, the teammate will fetch durable rules after spawn.
 
    Per-member spawn instructions:
-${request.members
+${effectiveMembers
   .map((m) => {
     const providerLine =
       m.providerId && m.providerId !== 'anthropic' ? `   - provider: “${m.providerId}”\n` : '';
     const modelLine = m.model?.trim() ? `   - model: “${m.model.trim()}”\n` : '';
+    const effortLine = m.effort ? `   - effort: “${m.effort}”\n` : '';
     return `   For “${m.name}”:
    - name: “${m.name}”
-${providerLine}${modelLine}   - prompt:
+${providerLine}${modelLine}${effortLine}   - prompt:
 ${buildMemberSpawnPrompt(m, displayName, request.teamName, leadName)
   .split('\n')
   .map((line) => `     ${line}`)
@@ -1055,7 +1099,7 @@ ${buildMemberSpawnPrompt(m, displayName, request.teamName, leadName)
     teamName: request.teamName,
     leadName,
     isSolo,
-    members: request.members,
+    members: effectiveMembers,
   });
 
   return `agent_teams_ui [Agent Team: “${request.teamName}” | Project: “${projectName}” | Lead: “${leadName}”] — team does NOT exist yet. You must create it.
@@ -3051,6 +3095,14 @@ export class TeamProvisioningService {
     // Respawn with saved context — CLI handles its own auth refresh.
     let child: ReturnType<typeof spawn>;
     try {
+      if (mcpFlagIdx !== -1 && mcpFlagIdx + 1 < ctx.args.length) {
+        await this.validateAgentTeamsMcpRuntime(
+          ctx.claudePath,
+          ctx.cwd,
+          ctx.env,
+          ctx.args[mcpFlagIdx + 1]!
+        );
+      }
       child = spawnCli(ctx.claudePath, ctx.args, {
         cwd: ctx.cwd,
         env: { ...ctx.env },
@@ -3292,6 +3344,11 @@ export class TeamProvisioningService {
         throw new Error('Claude CLI not found; install it or provide a valid path');
       }
 
+      const effectiveMemberSpecs = buildEffectiveTeamMemberSpecs(request.members, {
+        providerId: request.providerId,
+        model: request.model,
+        effort: request.effort,
+      });
       const runId = randomUUID();
       const startedAt = nowIso();
       const run: ProvisioningRun = {
@@ -3318,6 +3375,7 @@ export class TeamProvisioningService {
         onProgress,
         expectedMembers: request.members.map((member) => member.name),
         request,
+        effectiveMembers: effectiveMemberSpecs,
         lastLogProgressAt: 0,
         lastDataReceivedAt: 0, // intentionally 0 — real reset happens after spawn (see startStallWatchdog call sites)
         lastStdoutReceivedAt: 0,
@@ -3372,13 +3430,14 @@ export class TeamProvisioningService {
       this.provisioningRunByTeam.set(request.teamName, runId);
       run.onProgress(run.progress);
 
-      const prompt = buildProvisioningPrompt(request);
+      const prompt = buildProvisioningPrompt(request, effectiveMemberSpecs);
       let child: ReturnType<typeof spawn>;
       const { env: shellEnv } = await this.buildProvisioningEnv(request.providerId);
       let mcpConfigPath: string;
       try {
         mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
         run.mcpConfigPath = mcpConfigPath;
+        await this.validateAgentTeamsMcpRuntime(claudePath, request.cwd, shellEnv, mcpConfigPath);
       } catch (error) {
         this.runs.delete(runId);
         this.provisioningRunByTeam.delete(request.teamName);
@@ -3718,12 +3777,20 @@ export class TeamProvisioningService {
       const runId = randomUUID();
       const startedAt = nowIso();
 
+      const effectiveMemberSpecs = buildEffectiveTeamMemberSpecs(expectedMemberSpecs, {
+        providerId: request.providerId,
+        model: request.model,
+        effort: request.effort,
+      });
+
       // Build a synthetic TeamCreateRequest for reuse by shared infrastructure
       const syntheticRequest: TeamCreateRequest = {
         teamName: request.teamName,
         members: expectedMemberSpecs,
         cwd: request.cwd,
         providerId: request.providerId,
+        model: request.model,
+        effort: request.effort,
         skipPermissions: request.skipPermissions,
       };
 
@@ -3764,6 +3831,7 @@ export class TeamProvisioningService {
         onProgress,
         expectedMembers,
         request: syntheticRequest,
+        effectiveMembers: effectiveMemberSpecs,
         lastLogProgressAt: 0,
         lastDataReceivedAt: 0, // intentionally 0 — real reset happens after spawn (see startStallWatchdog call sites)
         lastStdoutReceivedAt: 0,
@@ -3837,7 +3905,7 @@ export class TeamProvisioningService {
 
       const prompt = buildLaunchPrompt(
         request,
-        expectedMemberSpecs,
+        effectiveMemberSpecs,
         existingTasks,
         Boolean(previousSessionId)
       );
@@ -3847,6 +3915,7 @@ export class TeamProvisioningService {
       try {
         mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
         run.mcpConfigPath = mcpConfigPath;
+        await this.validateAgentTeamsMcpRuntime(claudePath, request.cwd, shellEnv, mcpConfigPath);
       } catch (error) {
         this.runs.delete(runId);
         this.provisioningRunByTeam.delete(request.teamName);
@@ -6862,7 +6931,13 @@ export class TeamProvisioningService {
         run.teamName,
         run.request.cwd,
         run.detectedSessionId,
-        run.request.color
+        run.request.color,
+        {
+          providerId: run.request.providerId,
+          model: run.request.model,
+          effort: run.request.effort,
+          members: run.effectiveMembers,
+        }
       );
       await this.cleanupPrelaunchBackup(run.teamName);
 
@@ -6996,7 +7071,13 @@ export class TeamProvisioningService {
       run.teamName,
       run.request.cwd,
       run.detectedSessionId,
-      run.request.color
+      run.request.color,
+      {
+        providerId: run.request.providerId,
+        model: run.request.model,
+        effort: run.request.effort,
+        members: run.effectiveMembers,
+      }
     );
 
     // Clean up team.meta.json — provisioning succeeded, config.json is now authoritative.
@@ -7789,7 +7870,13 @@ export class TeamProvisioningService {
       run.teamName,
       run.request.cwd,
       run.detectedSessionId,
-      run.request.color
+      run.request.color,
+      {
+        providerId: run.request.providerId,
+        model: run.request.model,
+        effort: run.request.effort,
+        members: run.effectiveMembers,
+      }
     );
     // Process was killed by timeout — mark as disconnected, not ready
     const progress = updateProgress(run, 'disconnected', 'Team provisioned but process timed out', {
@@ -7963,6 +8050,96 @@ export class TeamProvisioningService {
     }
   }
 
+  private applyEffectiveLaunchStateToConfig(
+    config: Record<string, unknown>,
+    launchState?: {
+      providerId?: TeamProviderId;
+      model?: string;
+      effort?: TeamCreateRequest['effort'];
+      members?: TeamCreateRequest['members'];
+    }
+  ): void {
+    if (!launchState || !Array.isArray(config.members)) {
+      return;
+    }
+
+    const effectiveLeadProviderId =
+      normalizeTeamMemberProviderId(launchState.providerId) ?? 'anthropic';
+    const effectiveLeadModel = launchState.model?.trim() || undefined;
+    const effectiveLeadEffort =
+      launchState.effort === 'low' ||
+      launchState.effort === 'medium' ||
+      launchState.effort === 'high'
+        ? launchState.effort
+        : undefined;
+
+    const membersByName = new Map(
+      (launchState.members ?? []).map((member) => [member.name.toLowerCase(), member] as const)
+    );
+
+    config.members = (config.members as Record<string, unknown>[]).map((member) => {
+      if (!member || typeof member !== 'object') {
+        return member;
+      }
+
+      const rawName = typeof member.name === 'string' ? member.name.trim() : '';
+      const nextMember = { ...member };
+
+      const assignRuntimeState = (state: {
+        providerId?: TeamProviderId;
+        model?: string;
+        effort?: TeamCreateRequest['effort'];
+      }): void => {
+        const providerId = normalizeTeamMemberProviderId(state.providerId);
+        if (providerId) {
+          nextMember.provider = providerId;
+          nextMember.providerId = providerId;
+        } else {
+          delete nextMember.provider;
+          delete nextMember.providerId;
+        }
+
+        const model = state.model?.trim() || undefined;
+        if (model) {
+          nextMember.model = model;
+        } else {
+          delete nextMember.model;
+        }
+
+        const effort =
+          state.effort === 'low' || state.effort === 'medium' || state.effort === 'high'
+            ? state.effort
+            : undefined;
+        if (effort) {
+          nextMember.effort = effort;
+        } else {
+          delete nextMember.effort;
+        }
+      };
+
+      if (isLeadMember(nextMember) || rawName.toLowerCase() === 'team-lead') {
+        assignRuntimeState({
+          providerId: effectiveLeadProviderId,
+          model: effectiveLeadModel,
+          effort: effectiveLeadEffort,
+        });
+        return nextMember;
+      }
+
+      const effectiveMember = membersByName.get(rawName.toLowerCase());
+      if (!effectiveMember) {
+        return nextMember;
+      }
+
+      assignRuntimeState({
+        providerId: effectiveMember.providerId,
+        model: effectiveMember.model,
+        effort: effectiveMember.effort,
+      });
+      return nextMember;
+    });
+  }
+
   /**
    * Single atomic read-mutate-write for post-launch config updates.
    * Combines session history append and projectPath update to avoid
@@ -7972,7 +8149,13 @@ export class TeamProvisioningService {
     teamName: string,
     projectPath: string,
     detectedSessionId: string | null,
-    color?: string
+    color?: string,
+    launchState?: {
+      providerId?: TeamProviderId;
+      model?: string;
+      effort?: TeamCreateRequest['effort'];
+      members?: TeamCreateRequest['members'];
+    }
   ): Promise<void> {
     const MAX_SESSION_HISTORY = 5000;
     const MAX_PROJECT_PATH_HISTORY = 500;
@@ -8048,6 +8231,8 @@ export class TeamProvisioningService {
             ? pathHistory.slice(-MAX_PROJECT_PATH_HISTORY)
             : pathHistory;
       }
+
+      this.applyEffectiveLaunchStateToConfig(config, launchState);
 
       await atomicWriteAsync(configPath, JSON.stringify(config, null, 2));
     } catch (error) {
@@ -8751,6 +8936,7 @@ export class TeamProvisioningService {
           role?: string;
           workflow?: string;
           agentType?: string;
+          providerId?: string;
           provider?: string;
           model?: string;
           effort?: string;
@@ -8771,10 +8957,7 @@ export class TeamProvisioningService {
           role: typeof member.role === 'string' ? member.role.trim() || undefined : undefined,
           workflow:
             typeof member.workflow === 'string' ? member.workflow.trim() || undefined : undefined,
-          providerId:
-            member.provider === 'codex' || member.provider === 'gemini'
-              ? member.provider
-              : undefined,
+          providerId: normalizeTeamMemberProviderId(member.providerId ?? member.provider),
           model: typeof member.model === 'string' ? member.model.trim() || undefined : undefined,
           effort:
             member.effort === 'low' || member.effort === 'medium' || member.effort === 'high'
@@ -8983,6 +9166,56 @@ export class TeamProvisioningService {
     this.helpOutputCache = output;
     this.helpOutputCacheTime = Date.now();
     return output;
+  }
+
+  private buildAgentTeamsMcpValidationError(output: string): string {
+    const detail = this.normalizeApiRetryErrorMessage(output) || output.trim();
+    if (!detail) {
+      return (
+        'agent-teams MCP loaded config but did not expose member_briefing. ' +
+        'The leader would start without required team MCP tools.'
+      );
+    }
+    return (
+      'agent-teams MCP loaded config but did not expose member_briefing. ' + `Details: ${detail}`
+    );
+  }
+
+  private async validateAgentTeamsMcpRuntime(
+    claudePath: string,
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+    mcpConfigPath: string
+  ): Promise<void> {
+    const result = await this.spawnProbe(
+      claudePath,
+      [
+        '--setting-sources',
+        'user,project,local',
+        '--mcp-config',
+        mcpConfigPath,
+        '--',
+        'mcp',
+        'get',
+        'agent-teams',
+      ],
+      cwd,
+      env,
+      VERIFY_TIMEOUT_MS
+    );
+
+    const combinedOutput = buildCombinedLogs(result.stdout, result.stderr).trim();
+    if (result.exitCode !== 0) {
+      throw new Error(this.buildAgentTeamsMcpValidationError(combinedOutput));
+    }
+
+    const normalizedOutput = combinedOutput.toLowerCase();
+    if (
+      !normalizedOutput.includes('status: ✓ connected') &&
+      !normalizedOutput.includes('status: connected')
+    ) {
+      throw new Error(this.buildAgentTeamsMcpValidationError(combinedOutput));
+    }
   }
 
   private async spawnProbe(

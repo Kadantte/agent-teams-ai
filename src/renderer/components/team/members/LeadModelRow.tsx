@@ -49,7 +49,7 @@ export const LeadModelRow = ({
 
   return (
     <div
-      className="relative grid grid-cols-1 gap-2 rounded-md p-2 shadow-sm md:grid-cols-[1fr_180px_auto]"
+      className="relative grid grid-cols-1 gap-2 rounded-md p-2 shadow-sm md:grid-cols-[auto_1fr_auto]"
       style={{
         backgroundColor: isLight
           ? 'color-mix(in srgb, var(--color-surface-raised) 22%, white 78%)'
@@ -62,34 +62,15 @@ export const LeadModelRow = ({
         style={{ backgroundColor: leadColorSet.border }}
         aria-hidden="true"
       />
-      <div className="space-y-0.5">
-        <div className="flex h-8 items-center px-2 text-sm font-medium text-[var(--color-text)]">
-          lead
+      <div className="min-w-0">
+        <div className="flex h-8 items-center gap-3 px-2">
+          <span className="text-sm font-medium text-[var(--color-text)]">lead</span>
+          <span className="shrink-0 text-xs text-[var(--color-text-secondary)]">Team Lead</span>
         </div>
       </div>
-      <div>
-        <div className="flex h-8 items-center px-2 text-xs text-[var(--color-text-secondary)]">
-          Team Lead
-        </div>
-      </div>
-      <div className="space-y-1">
-        <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-          <div className="min-w-0 space-y-1">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 max-w-[190px] shrink-0 justify-start gap-1 overflow-hidden text-left"
-              onClick={() => setModelExpanded((prev) => !prev)}
-            >
-              {modelExpanded ? (
-                <ChevronDown className="size-3.5" />
-              ) : (
-                <ChevronRight className="size-3.5" />
-              )}
-              <span className="truncate">Model: {modelButtonLabel}</span>
-            </Button>
-          </div>
-          <div className="flex items-center gap-2 pl-1 xl:pl-0">
+      <div className="min-w-0">
+        <div className="flex h-8 items-center justify-end px-2 text-xs text-[var(--color-text-secondary)]">
+          <div className="flex min-w-0 items-center gap-2">
             <Checkbox
               id="sync-models-with-lead"
               checked={syncModelsWithTeammates}
@@ -97,11 +78,28 @@ export const LeadModelRow = ({
             />
             <Label
               htmlFor="sync-models-with-lead"
-              className="cursor-pointer text-xs font-normal text-text-secondary"
+              className="cursor-pointer truncate text-xs font-normal text-text-secondary"
             >
-              Синхронизировать модель с тимейтами
+              Sync model with teammates
             </Label>
           </div>
+        </div>
+      </div>
+      <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 max-w-[220px] shrink-0 justify-start gap-1 overflow-hidden text-left"
+            onClick={() => setModelExpanded((prev) => !prev)}
+          >
+            {modelExpanded ? (
+              <ChevronDown className="size-3.5" />
+            ) : (
+              <ChevronRight className="size-3.5" />
+            )}
+            <span className="truncate">Model: {modelButtonLabel}</span>
+          </Button>
         </div>
       </div>
       {modelExpanded ? (
@@ -118,12 +116,14 @@ export const LeadModelRow = ({
             onValueChange={onEffortChange}
             id="lead-effort"
           />
-          <LimitContextCheckbox
-            id="lead-limit-context"
-            checked={limitContext}
-            onCheckedChange={onLimitContextChange}
-            disabled={providerId !== 'anthropic' || model === 'haiku'}
-          />
+          {providerId === 'anthropic' ? (
+            <LimitContextCheckbox
+              id="lead-limit-context"
+              checked={limitContext}
+              onCheckedChange={onLimitContextChange}
+              disabled={model === 'haiku'}
+            />
+          ) : null}
           <div className="flex items-start gap-2 rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2">
             <Info className="mt-0.5 size-3.5 shrink-0 text-sky-400" />
             <p className="text-[11px] leading-relaxed text-sky-300">

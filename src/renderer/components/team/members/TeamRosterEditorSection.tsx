@@ -40,6 +40,7 @@ interface TeamRosterEditorSectionProps {
   onSyncModelsWithTeammatesChange: (value: boolean) => void;
   headerTop?: React.ReactNode;
   headerBottom?: React.ReactNode;
+  softDeleteMembers?: boolean;
 }
 
 export const TeamRosterEditorSection = ({
@@ -75,6 +76,7 @@ export const TeamRosterEditorSection = ({
   onSyncModelsWithTeammatesChange,
   headerTop,
   headerBottom,
+  softDeleteMembers = false,
 }: TeamRosterEditorSectionProps): React.JSX.Element => {
   return (
     <MembersEditorSection
@@ -98,6 +100,7 @@ export const TeamRosterEditorSection = ({
       lockProviderModel={lockProviderModel}
       forceInheritedModelSettings={forceInheritedModelSettings}
       modelLockReason={modelLockReason}
+      softDeleteMembers={softDeleteMembers}
       headerExtra={
         <div className="space-y-3">
           {headerTop}

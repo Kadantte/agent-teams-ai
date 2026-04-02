@@ -1136,30 +1136,35 @@ export const TeamDetailView = ({
     const teamSummary = teams.find((t) => t.teamName === teamName);
     return (
       <>
-        <div className="flex size-full items-center justify-center p-6">
-          <div className="max-w-md text-center">
-            <p className="text-sm font-medium text-text">Team not launched yet</p>
-            <p className="mt-2 text-xs text-text-secondary">
-              This is a draft team — <strong>{teamSummary?.displayName || teamName}</strong> has
-              been configured with {teamSummary?.memberCount ?? 0} member
-              {teamSummary?.memberCount === 1 ? '' : 's'} but hasn&apos;t been provisioned by CLI
-              yet. Click Launch to select a model and start the team.
-            </p>
-            <div className="mt-4 flex justify-center gap-2">
-              <button
-                className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500"
-                onClick={() => setLaunchDialogOpen(true)}
-              >
-                Launch
-              </button>
-              <button
-                className="rounded-md bg-surface-raised px-4 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:text-text"
-                onClick={() => {
-                  void api.teams.deleteDraft(teamName).catch(() => {});
-                }}
-              >
-                Delete
-              </button>
+        <div className="size-full overflow-auto p-6">
+          <div ref={provisioningBannerRef}>
+            <TeamProvisioningBanner teamName={teamName} />
+          </div>
+          <div className="flex min-h-[calc(100vh-12rem)] items-center justify-center">
+            <div className="max-w-md text-center">
+              <p className="text-sm font-medium text-text">Team not launched yet</p>
+              <p className="mt-2 text-xs text-text-secondary">
+                This is a draft team — <strong>{teamSummary?.displayName || teamName}</strong> has
+                been configured with {teamSummary?.memberCount ?? 0} member
+                {teamSummary?.memberCount === 1 ? '' : 's'} but hasn&apos;t been provisioned by CLI
+                yet. Click Launch to select a model and start the team.
+              </p>
+              <div className="mt-4 flex justify-center gap-2">
+                <button
+                  className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500"
+                  onClick={() => setLaunchDialogOpen(true)}
+                >
+                  Launch
+                </button>
+                <button
+                  className="rounded-md bg-surface-raised px-4 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:text-text"
+                  onClick={() => {
+                    void api.teams.deleteDraft(teamName).catch(() => {});
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         </div>

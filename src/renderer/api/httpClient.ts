@@ -1072,6 +1072,7 @@ export class HttpAPIClient implements ElectronAPI {
       latestVersion: null,
       updateAvailable: false,
       authLoggedIn: false,
+      authStatusChecking: false,
       authMethod: null,
       providers: [],
     }),

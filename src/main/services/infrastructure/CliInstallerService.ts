@@ -433,6 +433,7 @@ export class CliInstallerService {
       latestVersion: null,
       updateAvailable: false,
       authLoggedIn: false,
+      authStatusChecking: true,
       authMethod: null,
       providers,
     };
@@ -497,6 +498,7 @@ export class CliInstallerService {
     if (binaryPath) {
       r.installed = true;
       r.binaryPath = binaryPath;
+      r.authStatusChecking = true;
       this.sendProgress({ type: 'status', status: cloneCliInstallationStatus(r) });
 
       try {
@@ -522,6 +524,7 @@ export class CliInstallerService {
       ]);
     } else {
       // No binary — still check latest version for "install" prompt
+      r.authStatusChecking = false;
       if (r.supportsSelfUpdate) {
         await this.fetchLatestVersion(r);
       }
@@ -541,6 +544,7 @@ export class CliInstallerService {
     diag: CliInstallerStatusRunDiag
   ): Promise<void> {
     if (result.flavor === 'free-code') {
+      result.authStatusChecking = true;
       try {
         const providers = await this.multimodelBridgeService.getProviderStatuses(
           binaryPath,
@@ -556,10 +560,12 @@ export class CliInstallerService {
         result.authLoggedIn = providers.some((provider) => provider.authenticated);
         result.authMethod =
           providers.find((provider) => provider.authenticated)?.authMethod ?? null;
+        result.authStatusChecking = false;
         this.sendProgress({ type: 'status', status: cloneCliInstallationStatus(result) });
       } catch (error) {
         const msg = getErrorMessage(error);
         diag.authLastError = msg;
+        result.authStatusChecking = false;
         logger.warn(`Provider status check failed for claude-multimodel: ${msg}`);
       }
       return;
@@ -578,6 +584,7 @@ export class CliInstallerService {
           const auth = parseClaudeAuthStatusStdout(authStdout);
           result.authLoggedIn = auth.loggedIn === true;
           result.authMethod = auth.authMethod ?? null;
+          result.authStatusChecking = false;
           diag.authLastError = null;
           logger.info(
             `Auth status: loggedIn=${result.authLoggedIn}, method=${result.authMethod ?? 'null'}` +
@@ -598,6 +605,7 @@ export class CliInstallerService {
               `Auth status check failed after ${AUTH_STATUS_MAX_RETRIES} attempts: ${msg}`
             );
             result.authLoggedIn = false;
+            result.authStatusChecking = false;
           }
         }
       }
@@ -621,6 +629,7 @@ export class CliInstallerService {
       if (timer) {
         clearTimeout(timer);
       }
+      result.authStatusChecking = false;
       diag.authTimedOut = hitAuthTimeout;
     }
   }

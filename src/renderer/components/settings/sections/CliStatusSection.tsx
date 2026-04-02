@@ -131,6 +131,7 @@ function createLoadingMultimodelStatus(): CliInstallationStatus {
     latestVersion: null,
     updateAvailable: false,
     authLoggedIn: false,
+    authStatusChecking: true,
     authMethod: null,
     providers: providers.map((provider) => ({
       ...provider,
@@ -223,6 +224,11 @@ export const CliStatusSection = (): React.JSX.Element | null => {
     async (enabled: boolean) => {
       setIsSwitchingFlavor(true);
       try {
+        useStore.setState({
+          cliStatus: enabled ? createLoadingMultimodelStatus() : null,
+          cliStatusLoading: true,
+          cliStatusError: null,
+        });
         await updateConfig('general', { multimodelEnabled: enabled });
         await invalidateCliStatus();
         await fetchCliStatus();
@@ -261,7 +267,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
             style={{ color: 'var(--color-text-muted)' }}
           >
             <Loader2 className="size-4 animate-spin" />
-            Checking AI Providers...
+            {multimodelEnabled ? 'Checking AI Providers...' : 'Checking Claude CLI...'}
           </div>
         )}
 

@@ -7,9 +7,12 @@ import {
   buildMembersFromDrafts,
   clearMemberModelOverrides,
   createMemberDraftsFromInputs,
+  normalizeMemberDraftForProviderMode,
+  normalizeProviderForMode,
   validateMemberNameInline,
 } from '@renderer/components/team/members/MembersEditorSection';
 import { TeamRosterEditorSection } from '@renderer/components/team/members/TeamRosterEditorSection';
+import { TeamProvisioningBanner } from '@renderer/components/team/TeamProvisioningBanner';
 import { SkipPermissionsCheckbox } from '@renderer/components/team/dialogs/SkipPermissionsCheckbox';
 import { Button } from '@renderer/components/ui/button';
 import { Checkbox } from '@renderer/components/ui/checkbox';
@@ -33,6 +36,10 @@ import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
+import {
+  getCurrentProvisioningProgressForTeam,
+  isTeamProvisioningActive,
+} from '@renderer/store/slices/teamSlice';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import {
@@ -155,6 +162,7 @@ function getProviderLabel(providerId: TeamProviderId): string {
 export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Element => {
   const { open, onClose } = props;
   const { isLight } = useTheme();
+  const multimodelEnabled = useStore((s) => s.appConfig?.general?.multimodelEnabled ?? true);
   const isLaunch = props.mode === 'launch';
   const isSchedule = props.mode === 'schedule';
   const schedule = isSchedule ? (props.schedule ?? null) : null;
@@ -261,20 +269,41 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     () => (syncModelsWithLead ? membersDrafts.map(clearMemberModelOverrides) : membersDrafts),
     [membersDrafts, syncModelsWithLead]
   );
-  const selectedMemberProviders = useMemo(
+  const selectedMemberProviders = useMemo<TeamProviderId[]>(
     () =>
-      Array.from(
-        new Set([
-          selectedProviderId,
-          ...effectiveMemberDrafts.flatMap((member) =>
-            member.providerId === 'codex' || member.providerId === 'gemini'
-              ? [member.providerId]
-              : []
+      !multimodelEnabled
+        ? ['anthropic']
+        : Array.from(
+            new Set([
+              selectedProviderId,
+              ...effectiveMemberDrafts.flatMap((member) =>
+                member.providerId === 'codex' || member.providerId === 'gemini'
+                  ? [member.providerId]
+                  : []
+              ),
+            ])
           ),
-        ])
-      ),
-    [effectiveMemberDrafts, selectedProviderId]
+    [effectiveMemberDrafts, multimodelEnabled, selectedProviderId]
   );
+
+  useEffect(() => {
+    if (multimodelEnabled) {
+      return;
+    }
+    if (selectedProviderId !== 'anthropic') {
+      setSelectedProviderIdRaw('anthropic');
+      setSelectedModelRaw(getStoredTeamModel('anthropic'));
+    }
+    setMembersDrafts((prev) => {
+      let changed = false;
+      const next = prev.map((member) => {
+        const normalized = normalizeMemberDraftForProviderMode(member, false);
+        if (normalized !== member) changed = true;
+        return normalized;
+      });
+      return changed ? next : prev;
+    });
+  }, [multimodelEnabled, selectedProviderId]);
 
   // Schedule store actions
   const createSchedule = useStore((s) => s.createSchedule);
@@ -302,13 +331,14 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   };
 
   const setSelectedProviderId = (value: TeamProviderId): void => {
-    setSelectedProviderIdRaw(value);
-    localStorage.setItem('team:lastSelectedProvider', value);
-    if (value !== 'anthropic') {
+    const normalizedValue = normalizeProviderForMode(value, multimodelEnabled);
+    setSelectedProviderIdRaw(normalizedValue);
+    localStorage.setItem('team:lastSelectedProvider', normalizedValue);
+    if (normalizedValue !== 'anthropic') {
       setLimitContextRaw(false);
       localStorage.setItem('team:lastLimitContext', 'false');
     }
-    setSelectedModelRaw(getStoredTeamModel(value));
+    setSelectedModelRaw(getStoredTeamModel(normalizedValue));
   };
 
   const setSelectedModel = (value: string): void => {
@@ -401,8 +431,16 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       promptDraft.setValue(schedule.launchConfig.prompt);
       setCustomCwd(schedule.launchConfig.cwd);
       setCwdMode('custom');
-      setSelectedProviderIdRaw(schedule.launchConfig.providerId ?? 'anthropic');
-      setSelectedModelRaw(schedule.launchConfig.model ?? '');
+      const scheduleProviderId = normalizeProviderForMode(
+        schedule.launchConfig.providerId,
+        multimodelEnabled
+      );
+      setSelectedProviderIdRaw(scheduleProviderId);
+      setSelectedModelRaw(
+        scheduleProviderId === normalizeProviderForMode(schedule.launchConfig.providerId, true)
+          ? (schedule.launchConfig.model ?? '')
+          : getStoredTeamModel('anthropic')
+      );
       setSkipPermissionsRaw(schedule.launchConfig.skipPermissions !== false);
       setSelectedEffortRaw(schedule.launchConfig.effort ?? '');
     } else {
@@ -417,8 +455,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       setCwdMode('project');
       setSelectedProjectPath('');
       setCustomCwd('');
-      setSelectedProviderIdRaw(getStoredTeamProvider());
-      setSelectedModelRaw(getStoredTeamModel(getStoredTeamProvider()));
+      const storedProviderId = normalizeProviderForMode(getStoredTeamProvider(), multimodelEnabled);
+      setSelectedProviderIdRaw(storedProviderId);
+      setSelectedModelRaw(getStoredTeamModel(storedProviderId));
       setSelectedEffortRaw('medium');
     }
 
@@ -442,10 +481,11 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       }
       if (cancelled) return;
 
-      const nextProviderId =
+      const rawNextProviderId =
         savedRequest?.providerId === 'codex' || savedRequest?.providerId === 'gemini'
           ? savedRequest.providerId
           : 'anthropic';
+      const nextProviderId = normalizeProviderForMode(rawNextProviderId, multimodelEnabled);
       const providerFromSaved = Boolean(savedRequest?.providerId);
       const nextMembersSource =
         members.length > 0
@@ -455,15 +495,28 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             : [];
       const storedEffort = localStorage.getItem('team:lastSelectedEffort');
 
-      setMembersDrafts(createMemberDraftsFromInputs(nextMembersSource));
+      setMembersDrafts(
+        createMemberDraftsFromInputs(nextMembersSource).map((member) =>
+          normalizeMemberDraftForProviderMode(member, multimodelEnabled)
+        )
+      );
       setSyncModelsWithLead(
         !nextMembersSource.some((member) => member.providerId || member.model || member.effort)
       );
-      setSelectedProviderIdRaw(providerFromSaved ? nextProviderId : getStoredTeamProvider());
+      setSelectedProviderIdRaw(
+        providerFromSaved
+          ? nextProviderId
+          : normalizeProviderForMode(getStoredTeamProvider(), multimodelEnabled)
+      );
       setSelectedModelRaw(
-        typeof savedRequest?.model === 'string'
+        typeof savedRequest?.model === 'string' &&
+          nextProviderId === normalizeProviderForMode(rawNextProviderId, true)
           ? savedRequest.model
-          : getStoredTeamModel(providerFromSaved ? nextProviderId : getStoredTeamProvider())
+          : getStoredTeamModel(
+              providerFromSaved
+                ? nextProviderId
+                : normalizeProviderForMode(getStoredTeamProvider(), multimodelEnabled)
+            )
       );
       setSelectedEffortRaw(
         savedRequest?.effort ?? (storedEffort === null ? 'medium' : storedEffort)
@@ -481,7 +534,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     return () => {
       cancelled = true;
     };
-  }, [open, isLaunch, effectiveTeamName, members]);
+  }, [open, isLaunch, effectiveTeamName, members, multimodelEnabled]);
 
   // ---------------------------------------------------------------------------
   // Launch-only effects
@@ -773,6 +826,14 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
 
   const provisioningError = isLaunch ? props.provisioningError : null;
   const activeError = localError ?? provisioningError;
+  const currentProvisioning = useStore((s) =>
+    isLaunch && effectiveTeamName
+      ? getCurrentProvisioningProgressForTeam(s, effectiveTeamName)
+      : null
+  );
+  const launchInFlight = useStore((s) =>
+    isLaunch && effectiveTeamName ? isTeamProvisioningActive(s, effectiveTeamName) : false
+  );
 
   // ---------------------------------------------------------------------------
   // Submit
@@ -827,8 +888,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             worktree: worktreeEnabled && worktreeName.trim() ? worktreeName.trim() : undefined,
             extraCliArgs: customArgs.trim() || undefined,
           });
-          resetFormState();
-          onClose();
         } else {
           // Schedule mode: create or update
           const parsedBudget = maxBudgetUsd ? parseFloat(maxBudgetUsd) : undefined;
@@ -883,7 +942,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   // ---------------------------------------------------------------------------
 
   const isDisabled = isLaunch
-    ? isSubmitting || prepareState !== 'ready'
+    ? isSubmitting || launchInFlight
     : isSubmitting || validationErrors.length > 0;
 
   // ---------------------------------------------------------------------------
@@ -905,7 +964,13 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     'Schedule automatic Claude task execution'
   );
 
-  const submitLabel = isLaunch ? 'Launch' : isEditing ? 'Save Changes' : 'Create Schedule';
+  const submitLabel = isLaunch
+    ? prepareState === 'idle' || prepareState === 'loading'
+      ? 'Skip and Launch'
+      : 'Launch'
+    : isEditing
+      ? 'Save Changes'
+      : 'Create Schedule';
 
   const submittingLabel = isLaunch ? 'Launching...' : isEditing ? 'Saving...' : 'Creating...';
 
@@ -1160,38 +1225,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             projectsError={projectsError}
           />
 
-          {isLaunch ? (
-            <TeamRosterEditorSection
-              members={membersDrafts}
-              onMembersChange={setMembersDrafts}
-              validateMemberName={validateMemberNameInline}
-              showWorkflow
-              showJsonEditor
-              draftKeyPrefix={`launchTeam:${effectiveTeamName}`}
-              projectPath={effectiveCwd || null}
-              taskSuggestions={taskSuggestions}
-              teamSuggestions={teamMentionSuggestions}
-              existingMembers={members}
-              defaultProviderId={selectedProviderId}
-              inheritedProviderId={selectedProviderId}
-              inheritedModel={selectedModel}
-              inheritedEffort={(selectedEffort as EffortLevel) || undefined}
-              inheritModelSettingsByDefault
-              forceInheritedModelSettings={syncModelsWithLead}
-              modelLockReason="This teammate is synced with the lead model. Turn off sync to set a custom provider, model, or effort."
-              providerId={selectedProviderId}
-              model={selectedModel}
-              effort={(selectedEffort as EffortLevel) || undefined}
-              limitContext={limitContext}
-              onProviderChange={setSelectedProviderId}
-              onModelChange={setSelectedModel}
-              onEffortChange={setSelectedEffort}
-              onLimitContextChange={setLimitContext}
-              syncModelsWithTeammates={syncModelsWithLead}
-              onSyncModelsWithTeammatesChange={setSyncModelsWithLead}
-            />
-          ) : null}
-
           {/* ═══════════════════════════════════════════════════════════════════
               Launch: optional settings
               Schedule: prompt + execution defaults
@@ -1203,6 +1236,38 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               summary={launchOptionalSummary}
             >
               <div className="space-y-4">
+                <TeamRosterEditorSection
+                  members={membersDrafts}
+                  onMembersChange={setMembersDrafts}
+                  validateMemberName={validateMemberNameInline}
+                  showWorkflow
+                  showJsonEditor
+                  draftKeyPrefix={`launchTeam:${effectiveTeamName}`}
+                  projectPath={effectiveCwd || null}
+                  taskSuggestions={taskSuggestions}
+                  teamSuggestions={teamMentionSuggestions}
+                  existingMembers={members}
+                  defaultProviderId={selectedProviderId}
+                  inheritedProviderId={selectedProviderId}
+                  inheritedModel={selectedModel}
+                  inheritedEffort={(selectedEffort as EffortLevel) || undefined}
+                  inheritModelSettingsByDefault
+                  lockProviderModel={syncModelsWithLead}
+                  forceInheritedModelSettings={syncModelsWithLead}
+                  modelLockReason="This teammate is synced with the lead model. Turn off sync to set a custom provider, model, or effort."
+                  providerId={selectedProviderId}
+                  model={selectedModel}
+                  effort={(selectedEffort as EffortLevel) || undefined}
+                  limitContext={limitContext}
+                  onProviderChange={setSelectedProviderId}
+                  onModelChange={setSelectedModel}
+                  onEffortChange={setSelectedEffort}
+                  onLimitContextChange={setLimitContext}
+                  syncModelsWithTeammates={syncModelsWithLead}
+                  onSyncModelsWithTeammatesChange={setSyncModelsWithLead}
+                  softDeleteMembers
+                />
+
                 <div className="space-y-1.5">
                   <Label htmlFor="dialog-prompt" className="label-optional">
                     Prompt for team lead (optional)
@@ -1388,6 +1453,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
           </div>
         ) : null}
 
+        {isLaunch && effectiveTeamName && (currentProvisioning || provisioningError) ? (
+          <div className="pt-1">
+            <TeamProvisioningBanner teamName={effectiveTeamName} />
+          </div>
+        ) : null}
+
         <DialogFooter className={isLaunch ? 'pt-4 sm:justify-between' : 'pt-4'}>
           {/* Launch-only: CLI warm-up status */}
           {isLaunch ? (
@@ -1405,13 +1476,6 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                       </span>
                       <p className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)] opacity-70">
                         <span>Pre-flight check to catch errors before launch</span>
-                        <button
-                          type="button"
-                          onClick={() => setPrepareState('ready')}
-                          className="rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text-secondary)]"
-                        >
-                          Skip
-                        </button>
                       </p>
                     </div>
                   </div>
@@ -1462,7 +1526,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               disabled={isDisabled}
               onClick={handleSubmit}
             >
-              {isSubmitting ? (
+              {isSubmitting || launchInFlight ? (
                 <>
                   <Loader2 className="mr-1.5 size-3.5 animate-spin" />
                   {submittingLabel}

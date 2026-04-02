@@ -592,14 +592,14 @@ export const TeamListView = (): React.JSX.Element => {
       setLaunchingTeamName(request.teamName);
       try {
         await launchTeam(request);
-        openTeamTab(request.teamName, request.cwd);
       } catch (err) {
         console.error('Failed to launch team:', err);
+        throw err;
       } finally {
         setLaunchingTeamName(null);
       }
     },
-    [launchTeam, openTeamTab]
+    [launchTeam]
   );
 
   useEffect(() => {

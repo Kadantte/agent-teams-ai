@@ -85,6 +85,8 @@ export interface CliInstallationStatus {
   updateAvailable: boolean;
   /** Whether user is logged in (claude auth status) */
   authLoggedIn: boolean;
+  /** Whether runtime authentication status is still being checked */
+  authStatusChecking: boolean;
   /** Auth method if logged in (e.g. "oauth_token", "api_key"), null otherwise */
   authMethod: string | null;
   /** Provider-level runtime status when supported by the configured runtime */

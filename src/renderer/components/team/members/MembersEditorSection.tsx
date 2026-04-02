@@ -98,6 +98,7 @@ export interface MembersEditorSectionProps {
   inheritModelSettingsByDefault?: boolean;
   forceInheritedModelSettings?: boolean;
   modelLockReason?: string;
+  softDeleteMembers?: boolean;
 }
 
 export const MembersEditorSection = ({
@@ -122,6 +123,7 @@ export const MembersEditorSection = ({
   inheritModelSettingsByDefault = false,
   forceInheritedModelSettings = false,
   modelLockReason,
+  softDeleteMembers = false,
 }: MembersEditorSectionProps): React.JSX.Element => {
   const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
   const [jsonText, setJsonText] = useState('');
@@ -215,7 +217,21 @@ export const MembersEditorSection = ({
   };
 
   const removeMember = (memberId: string): void => {
-    onChange(members.filter((c) => c.id !== memberId));
+    if (!softDeleteMembers) {
+      onChange(members.filter((c) => c.id !== memberId));
+      return;
+    }
+    onChange(
+      members.map((member) =>
+        member.id === memberId ? { ...member, removedAt: member.removedAt ?? Date.now() } : member
+      )
+    );
+  };
+
+  const restoreMember = (memberId: string): void => {
+    onChange(
+      members.map((member) => (member.id === memberId ? { ...member, removedAt: null } : member))
+    );
   };
 
   const addMember = (): void => {
@@ -230,7 +246,9 @@ export const MembersEditorSection = ({
     ]);
   };
 
-  const names = members.map((m) => m.name.trim().toLowerCase()).filter(Boolean);
+  const activeMembers = members.filter((member) => !member.removedAt);
+  const removedMembers = members.filter((member) => member.removedAt);
+  const names = activeMembers.map((m) => m.name.trim().toLowerCase()).filter(Boolean);
   const hasDuplicates = new Set(names).size !== names.length;
   const memberColorMap = useMemo(
     () => buildMemberDraftColorMap(members, existingMembers),
@@ -264,7 +282,7 @@ export const MembersEditorSection = ({
       {!hideContent && (
         <>
           <div className="space-y-2">
-            {members.map((member, index) => (
+            {activeMembers.map((member, index) => (
               <MemberDraftRow
                 key={member.id}
                 member={member}
@@ -294,6 +312,47 @@ export const MembersEditorSection = ({
                 modelLockReason={modelLockReason}
               />
             ))}
+            {softDeleteMembers && removedMembers.length > 0 ? (
+              <div className="pt-2">
+                <div className="mb-2 text-[10px] text-[var(--color-text-muted)]">
+                  Removed ({removedMembers.length})
+                </div>
+                <div className="space-y-2">
+                  {removedMembers.map((member, index) => (
+                    <MemberDraftRow
+                      key={member.id}
+                      member={member}
+                      index={activeMembers.length + index}
+                      resolvedColor={memberColorMap.get(member.name.trim())}
+                      nameError={null}
+                      onNameChange={updateMemberName}
+                      onRoleChange={updateMemberRole}
+                      onCustomRoleChange={updateMemberCustomRole}
+                      onRemove={removeMember}
+                      onRestore={restoreMember}
+                      showWorkflow={showWorkflow}
+                      onWorkflowChange={showWorkflow ? updateMemberWorkflow : undefined}
+                      onWorkflowChipsChange={showWorkflow ? updateMemberWorkflowChips : undefined}
+                      onProviderChange={updateMemberProvider}
+                      onModelChange={updateMemberModel}
+                      onEffortChange={updateMemberEffort}
+                      inheritedProviderId={inheritedProviderId}
+                      inheritedModel={inheritedModel}
+                      inheritedEffort={inheritedEffort}
+                      forceInheritedModelSettings={forceInheritedModelSettings}
+                      draftKeyPrefix={draftKeyPrefix}
+                      projectPath={projectPath}
+                      mentionSuggestions={mentionSuggestions}
+                      taskSuggestions={taskSuggestions}
+                      teamSuggestions={teamSuggestions}
+                      lockProviderModel
+                      modelLockReason="Removed members are kept for soft delete history. Restore them to edit settings."
+                      isRemoved
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {jsonEditorOpen && showJsonEditor ? (
               <MembersJsonEditor
                 value={jsonText}
@@ -327,5 +386,7 @@ export {
   createMemberDraft,
   createMemberDraftsFromInputs,
   getMemberDraftRole,
+  normalizeMemberDraftForProviderMode,
+  normalizeProviderForMode,
   validateMemberNameInline,
 } from './membersEditorUtils';
