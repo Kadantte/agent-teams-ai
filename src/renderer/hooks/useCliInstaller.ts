@@ -7,11 +7,12 @@
 
 import { useStore } from '@renderer/store';
 
-import type { CliInstallationStatus } from '@shared/types';
+import type { CliInstallationStatus, CliProviderId } from '@shared/types';
 
 export function useCliInstaller(): {
   cliStatus: CliInstallationStatus | null;
   cliStatusLoading: boolean;
+  cliProviderStatusLoading: Partial<Record<CliProviderId, boolean>>;
   cliStatusError: string | null;
   installerState:
     | 'idle'
@@ -28,13 +29,19 @@ export function useCliInstaller(): {
   installerDetail: string | null;
   installerRawChunks: string[];
   completedVersion: string | null;
+  bootstrapCliStatus: (options?: { multimodelEnabled?: boolean }) => Promise<void>;
   fetchCliStatus: () => Promise<void>;
+  fetchCliProviderStatus: (
+    providerId: CliProviderId,
+    options?: { silent?: boolean; epoch?: number }
+  ) => Promise<void>;
   invalidateCliStatus: () => Promise<void>;
   installCli: () => void;
   isBusy: boolean;
 } {
   const cliStatus = useStore((s) => s.cliStatus);
   const cliStatusLoading = useStore((s) => s.cliStatusLoading);
+  const cliProviderStatusLoading = useStore((s) => s.cliProviderStatusLoading);
   const cliStatusError = useStore((s) => s.cliStatusError);
   const installerState = useStore((s) => s.cliInstallerState);
   const downloadProgress = useStore((s) => s.cliDownloadProgress);
@@ -44,7 +51,9 @@ export function useCliInstaller(): {
   const installerDetail = useStore((s) => s.cliInstallerDetail);
   const installerRawChunks = useStore((s) => s.cliInstallerRawChunks);
   const completedVersion = useStore((s) => s.cliCompletedVersion);
+  const bootstrapCliStatus = useStore((s) => s.bootstrapCliStatus);
   const fetchCliStatus = useStore((s) => s.fetchCliStatus);
+  const fetchCliProviderStatus = useStore((s) => s.fetchCliProviderStatus);
   const invalidateCliStatus = useStore((s) => s.invalidateCliStatus);
   const installCli = useStore((s) => s.installCli);
 
@@ -53,6 +62,7 @@ export function useCliInstaller(): {
   return {
     cliStatus,
     cliStatusLoading,
+    cliProviderStatusLoading,
     cliStatusError,
     installerState,
     downloadProgress,
@@ -62,7 +72,9 @@ export function useCliInstaller(): {
     installerDetail,
     installerRawChunks,
     completedVersion,
+    bootstrapCliStatus,
     fetchCliStatus,
+    fetchCliProviderStatus,
     invalidateCliStatus,
     installCli,
     isBusy,

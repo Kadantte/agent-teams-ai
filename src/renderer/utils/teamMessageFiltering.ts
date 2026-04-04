@@ -1,3 +1,7 @@
+import {
+  getSanitizedInboxMessageSummary,
+  getSanitizedInboxMessageText,
+} from '@renderer/utils/bootstrapPromptSanitizer';
 import { isInboxNoiseMessage } from '@shared/utils/inboxNoise';
 
 import type { InboxMessage } from '@shared/types';
@@ -48,8 +52,8 @@ export function filterTeamMessages(
   const q = searchQuery.trim().toLowerCase();
   if (q) {
     list = list.filter((m) => {
-      const text = (m.text ?? '').toLowerCase();
-      const summary = (m.summary ?? '').toLowerCase();
+      const text = getSanitizedInboxMessageText(m).toLowerCase();
+      const summary = getSanitizedInboxMessageSummary(m).toLowerCase();
       const from = (m.from ?? '').toLowerCase();
       const to = (m.to ?? '').toLowerCase();
       return text.includes(q) || summary.includes(q) || from.includes(q) || to.includes(q);

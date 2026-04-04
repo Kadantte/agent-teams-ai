@@ -12,6 +12,10 @@ const toolContextSchema = {
   claudeDir: z.string().min(1).optional(),
 };
 
+const ALWAYS_LOAD_META = {
+  'anthropic/alwaysLoad': true,
+} as const;
+
 const relationshipTypeSchema = z.enum(['blocked-by', 'blocks', 'related']);
 
 /** Allowed message source types for task_create_from_message provenance. Fail closed — only explicit user-originated sources. */
@@ -468,6 +472,7 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
   server.addTool({
     name: 'member_briefing',
     description: 'Get bootstrap briefing for a team member',
+    _meta: ALWAYS_LOAD_META,
     parameters: z.object({
       ...toolContextSchema,
       memberName: z.string().min(1),

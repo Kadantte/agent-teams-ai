@@ -41,6 +41,8 @@ interface TeamRosterEditorSectionProps {
   headerTop?: React.ReactNode;
   headerBottom?: React.ReactNode;
   softDeleteMembers?: boolean;
+  leadWarningText?: string | null;
+  memberWarningById?: Record<string, string | null | undefined>;
 }
 
 export const TeamRosterEditorSection = ({
@@ -77,6 +79,8 @@ export const TeamRosterEditorSection = ({
   headerTop,
   headerBottom,
   softDeleteMembers = false,
+  leadWarningText,
+  memberWarningById,
 }: TeamRosterEditorSectionProps): React.JSX.Element => {
   return (
     <MembersEditorSection
@@ -115,10 +119,12 @@ export const TeamRosterEditorSection = ({
             onLimitContextChange={onLimitContextChange}
             syncModelsWithTeammates={syncModelsWithTeammates}
             onSyncModelsWithTeammatesChange={onSyncModelsWithTeammatesChange}
+            warningText={leadWarningText}
           />
           {headerBottom}
         </div>
       }
+      memberWarningById={memberWarningById}
     />
   );
 };

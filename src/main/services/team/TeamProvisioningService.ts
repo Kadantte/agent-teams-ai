@@ -3,6 +3,7 @@ import { NotificationManager } from '@main/services/infrastructure/NotificationM
 import { getAppIconPath } from '@main/utils/appIcon';
 import { killProcessTree, spawnCli } from '@main/utils/childProcess';
 import { FileReadTimeoutError, readFileUtf8WithTimeout } from '@main/utils/fsRead';
+import { killProcessByPid } from '@main/utils/processKill';
 import {
   encodePath,
   extractBaseDir,
@@ -45,13 +46,14 @@ import {
   type ParsedTeammateContent,
 } from '@shared/utils/teammateMessageParser';
 import { createCliAutoSuffixNameGuard, parseNumericSuffixName } from '@shared/utils/teamMemberName';
+import { normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 import {
   extractToolPreview,
   extractToolResultPreview,
   formatToolSummaryFromCalls,
 } from '@shared/utils/toolSummary';
 import * as agentTeamsControllerModule from 'agent-teams-controller';
-import { type ChildProcess, type spawn } from 'child_process';
+import { execFileSync, type ChildProcess, type spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -69,8 +71,15 @@ import { TeamMembersMetaStore } from './TeamMembersMetaStore';
 import { TeamMetaStore } from './TeamMetaStore';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskReader } from './TeamTaskReader';
-import { applyProviderRuntimeEnv, resolveTeamProviderId } from '../runtime/providerRuntimeEnv';
-import { resolveGeminiRuntimeAuth } from '../runtime/geminiRuntimeAuth';
+import {
+  applyConfiguredRuntimeBackendsEnv,
+  applyProviderRuntimeEnv,
+  resolveTeamProviderId,
+} from '../runtime/providerRuntimeEnv';
+import {
+  resolveGeminiRuntimeAuth,
+  type GeminiRuntimeAuthState,
+} from '../runtime/geminiRuntimeAuth';
 
 /**
  * Kill a team CLI process using SIGKILL (uncatchable).
@@ -85,12 +94,20 @@ function killTeamProcess(child: ChildProcess | null | undefined): void {
   killProcessTree(child, 'SIGKILL');
 }
 
+interface PersistedRuntimeMemberLike {
+  name?: string;
+  agentId?: string;
+  tmuxPaneId?: string;
+  backendType?: string;
+}
+
 import type {
   ActiveToolCall,
   CrossTeamSendResult,
   InboxMessage,
   LeadContextUsage,
   MemberSpawnStatus,
+  MemberSpawnLivenessSource,
   MemberSpawnStatusEntry,
   TeamChangeEvent,
   TeamCreateRequest,
@@ -124,7 +141,7 @@ const LOG_PROGRESS_THROTTLE_MS = 300;
 const UI_LOGS_TAIL_LIMIT = 128 * 1024;
 const PROBE_CACHE_TTL_MS = 36 * 60 * 60 * 1000;
 const PREFLIGHT_TIMEOUT_MS = 60000;
-const PREFLIGHT_CODEX_TIMEOUT_MS = 20000;
+const PREFLIGHT_CODEX_TIMEOUT_MS = 45000;
 const PREFLIGHT_GEMINI_TIMEOUT_MS = 15000;
 const PREFLIGHT_BINARY_TIMEOUT_MS = 8000;
 const PREFLIGHT_AUTH_RETRY_DELAY_MS = 2000;
@@ -136,6 +153,7 @@ const STALL_WARNING_THRESHOLD_MS = 20_000;
 const TEAM_JSON_READ_TIMEOUT_MS = 5_000;
 const TEAM_CONFIG_MAX_BYTES = 10 * 1024 * 1024;
 const TEAM_INBOX_MAX_BYTES = 2 * 1024 * 1024;
+const TEAM_LAUNCH_STATE_FILE = 'launch-state.json';
 const CROSS_TEAM_TOOL_RECIPIENT_NAMES = new Set([
   'cross_team_send',
   'cross_team_list_targets',
@@ -213,11 +231,166 @@ function getTeamProviderLabel(providerId: TeamProviderId): string {
   }
 }
 
+type CanonicalSendMessageExample = {
+  to: string;
+  summary: string;
+  message: string;
+};
+
+// TODO(refactor): If more prompt-bound tool contracts appear here, move these
+// canonical examples/rules into a small dedicated module (for example
+// `teamPromptContracts.ts`) and cover them with schema-backed tests. Keep this
+// layer narrow and explicit; do not grow it into a generic schema-to-prompt
+// generator.
+const SEND_MESSAGE_CANONICAL_FIELDS = ['to', 'summary', 'message'] as const;
+const SEND_MESSAGE_FORBIDDEN_ALIAS_FIELDS = ['recipient', 'content'] as const;
+
+function buildCanonicalSendMessageExample(example: CanonicalSendMessageExample): string {
+  return `{ ${SEND_MESSAGE_CANONICAL_FIELDS.map((field) => `${field}: "${example[field]}"`).join(', ')} }`;
+}
+
+function getCanonicalSendMessageFieldRule(): string {
+  return `CRITICAL: The SendMessage tool input must use the actual tool field names \`${SEND_MESSAGE_CANONICAL_FIELDS.join('`, `')}\`. Never invent alternate keys like \`${SEND_MESSAGE_FORBIDDEN_ALIAS_FIELDS.join('` or `')}\`.`;
+}
+
+function getCanonicalSendMessageToolRule(to: string): string {
+  return `Use the SendMessage tool with to="${to}".`;
+}
+
+function getConfiguredRuntimeBackend(providerId: TeamProviderId): string | null {
+  const runtimeConfig = ConfigManager.getInstance().getConfig().runtime.providerBackends;
+  switch (providerId) {
+    case 'gemini':
+      return runtimeConfig.gemini;
+    case 'codex':
+      return runtimeConfig.codex;
+    case 'anthropic':
+    default:
+      return null;
+  }
+}
+
+function mergeProvisioningWarnings(
+  existing: string[] | undefined,
+  nextWarning: string | null
+): string[] | undefined {
+  if (!nextWarning) return existing;
+  const merged = (existing ?? []).filter((warning) => warning !== nextWarning);
+  merged.push(nextWarning);
+  return merged.length > 0 ? merged : undefined;
+}
+
+function buildRuntimeLaunchWarning(
+  request: Pick<TeamCreateRequest, 'providerId' | 'model' | 'effort'>,
+  env: NodeJS.ProcessEnv,
+  options?: {
+    geminiRuntimeAuth?: GeminiRuntimeAuthState | null;
+    promptSize?: PromptSizeSummary | null;
+    expectedMembersCount?: number;
+  }
+): string {
+  const providerId = resolveTeamProviderId(request.providerId);
+  const providerLabel = getTeamProviderLabel(providerId);
+  const modelLabel = request.model?.trim() || 'default';
+  const effortLabel = request.effort ?? 'default';
+  const backend = getConfiguredRuntimeBackend(providerId);
+  const flags: string[] = [];
+  if (env.CLAUDE_CODE_USE_GEMINI === '1') flags.push('USE_GEMINI');
+  if (env.CLAUDE_CODE_USE_OPENAI === '1') flags.push('USE_OPENAI');
+  if (env.CLAUDE_CODE_ENTRY_PROVIDER) {
+    flags.push(`ENTRY_PROVIDER=${env.CLAUDE_CODE_ENTRY_PROVIDER}`);
+  }
+  if (env.CLAUDE_CODE_GEMINI_BACKEND) {
+    flags.push(`GEMINI_BACKEND=${env.CLAUDE_CODE_GEMINI_BACKEND}`);
+  }
+  if (env.CLAUDE_CODE_CODEX_BACKEND) {
+    flags.push(`CODEX_BACKEND=${env.CLAUDE_CODE_CODEX_BACKEND}`);
+  }
+  const backendPart = backend ? `, backend ${backend}` : '';
+  const flagsPart = flags.length > 0 ? `, env ${flags.join(', ')}` : '';
+  const geminiAuth = options?.geminiRuntimeAuth;
+  const authPart =
+    providerId === 'gemini' && geminiAuth
+      ? `, auth ${geminiAuth.authMethod ?? 'none'}/${geminiAuth.resolvedBackend}`
+      : '';
+  const promptSize = options?.promptSize;
+  const promptPart = promptSize
+    ? `, prompt ${promptSize.chars.toLocaleString('en-US')} chars/${promptSize.lines} lines`
+    : '';
+  const membersPart =
+    typeof options?.expectedMembersCount === 'number'
+      ? `, members ${options.expectedMembersCount}`
+      : '';
+  return `Launch runtime: ${providerLabel} · ${modelLabel} · ${effortLabel}${backendPart}${authPart}${promptPart}${membersPart}${flagsPart}`;
+}
+
+function logRuntimeLaunchSnapshot(
+  teamName: string,
+  claudePath: string,
+  args: string[],
+  request: Pick<TeamCreateRequest, 'providerId' | 'model' | 'effort'>,
+  env: NodeJS.ProcessEnv,
+  options?: {
+    geminiRuntimeAuth?: GeminiRuntimeAuthState | null;
+    promptSize?: PromptSizeSummary | null;
+    expectedMembersCount?: number;
+  }
+): void {
+  const providerId = resolveTeamProviderId(request.providerId);
+  const snapshot = {
+    providerId,
+    model: request.model ?? null,
+    effort: request.effort ?? null,
+    configuredBackend: getConfiguredRuntimeBackend(providerId),
+    promptSize: options?.promptSize ?? null,
+    expectedMembersCount: options?.expectedMembersCount ?? null,
+    geminiRuntimeAuth:
+      providerId === 'gemini'
+        ? {
+            authenticated: options?.geminiRuntimeAuth?.authenticated ?? null,
+            authMethod: options?.geminiRuntimeAuth?.authMethod ?? null,
+            resolvedBackend: options?.geminiRuntimeAuth?.resolvedBackend ?? null,
+            projectId: options?.geminiRuntimeAuth?.projectId ?? null,
+            statusMessage: options?.geminiRuntimeAuth?.statusMessage ?? null,
+          }
+        : null,
+    env: {
+      CLAUDE_CODE_USE_GEMINI: env.CLAUDE_CODE_USE_GEMINI ?? null,
+      CLAUDE_CODE_USE_OPENAI: env.CLAUDE_CODE_USE_OPENAI ?? null,
+      CLAUDE_CODE_ENTRY_PROVIDER: env.CLAUDE_CODE_ENTRY_PROVIDER ?? null,
+      CLAUDE_CODE_GEMINI_BACKEND: env.CLAUDE_CODE_GEMINI_BACKEND ?? null,
+      CLAUDE_CODE_CODEX_BACKEND: env.CLAUDE_CODE_CODEX_BACKEND ?? null,
+      CLAUDE_CONFIG_DIR: env.CLAUDE_CONFIG_DIR ?? null,
+      CLAUDE_TEAM_CONTROL_URL: env.CLAUDE_TEAM_CONTROL_URL ?? null,
+    },
+    args,
+    claudePath,
+  };
+  logger.info(`[${teamName}] Launch runtime snapshot ${JSON.stringify(snapshot)}`);
+}
+
+function getPromptSizeSummary(prompt: string): PromptSizeSummary {
+  return {
+    chars: prompt.length,
+    lines: prompt.length === 0 ? 0 : prompt.split(/\r?\n/g).length,
+  };
+}
+
 type TeamsBaseLocation = 'configured' | 'default';
 
 type ValidConfigProbeResult =
   | { ok: true; location: TeamsBaseLocation; configPath: string }
   | { ok: false };
+
+interface PartialLaunchStateFile {
+  version: 1;
+  state: 'partial_launch_failure';
+  updatedAt: string;
+  leadSessionId?: string;
+  expectedMembers: string[];
+  confirmedMembers: string[];
+  missingMembers: string[];
+}
 
 function getTeamsBasePathsToProbe(): { location: TeamsBaseLocation; basePath: string }[] {
   const configured = getTeamsBasePath();
@@ -260,6 +433,10 @@ function looksLikeClaudeStdoutJsonFragment(text: string): boolean {
     /"subtype"\s*:/.test(trimmed) ||
     /"session_id"\s*:/.test(trimmed)
   );
+}
+
+function getTeamLaunchStatePath(teamName: string): string {
+  return path.join(getTeamsBasePath(), teamName, TEAM_LAUNCH_STATE_FILE);
 }
 
 interface ProvisioningRun {
@@ -365,6 +542,8 @@ interface ProvisioningRun {
   pendingInboxRelayCandidates: PendingInboxRelayCandidate[];
   /** Accumulates assistant text during provisioning phase for live UI preview. */
   provisioningOutputParts: string[];
+  /** Stable assistant message ids -> provisioningOutputParts index for in-place updates. */
+  provisioningOutputIndexByMessageId: Map<string, number>;
   /** Session ID detected from stream-json output (result.session_id or message.session_id). */
   detectedSessionId: string | null;
   /** Lead process activity: 'active' during turn processing, 'idle' waiting for input, 'offline' after exit. */
@@ -405,8 +584,15 @@ interface ProvisioningRun {
   /** Per-member spawn lifecycle statuses tracked from stream-json output. */
   memberSpawnStatuses: Map<
     string,
-    { status: MemberSpawnStatus; error?: string; updatedAt: string }
+    {
+      status: MemberSpawnStatus;
+      error?: string;
+      livenessSource?: MemberSpawnLivenessSource;
+      updatedAt: string;
+    }
   >;
+  /** Agent tool_use_id -> teammate name for persistent teammate spawns. */
+  memberSpawnToolUseIds: Map<string, string>;
 }
 
 type LeadActivityState = 'active' | 'idle' | 'offline';
@@ -421,6 +607,12 @@ type ProvisioningAuthSource =
 interface ProvisioningEnvResolution {
   env: NodeJS.ProcessEnv;
   authSource: ProvisioningAuthSource;
+  geminiRuntimeAuth: GeminiRuntimeAuthState | null;
+}
+
+interface PromptSizeSummary {
+  chars: number;
+  lines: number;
 }
 
 function nowIso(): string {
@@ -531,6 +723,56 @@ function buildEffectiveTeamMemberSpecs(
   return members.map((member) => buildEffectiveTeamMemberSpec(member, defaults));
 }
 
+function shouldSkipResumeForProviderRuntimeChange(
+  request: Pick<TeamLaunchRequest, 'providerId' | 'model'>,
+  config: Record<string, unknown>
+): { skip: boolean; reason?: string } {
+  const providerId = normalizeTeamMemberProviderId(request.providerId);
+  if (providerId !== 'gemini' && providerId !== 'codex') {
+    return { skip: false };
+  }
+
+  const members = Array.isArray(config.members)
+    ? (config.members as Record<string, unknown>[])
+    : [];
+  const lead =
+    members.find((member) => isLeadMember(member)) ??
+    members.find((member) => {
+      const name = typeof member?.name === 'string' ? member.name.trim().toLowerCase() : '';
+      return name === 'team-lead';
+    });
+  if (!lead) {
+    return { skip: false };
+  }
+
+  const currentLeadProviderId =
+    normalizeTeamMemberProviderId(
+      typeof lead.providerId === 'string'
+        ? lead.providerId
+        : typeof lead.provider === 'string'
+          ? lead.provider
+          : providerId
+    ) ?? providerId;
+  const requestedModel = request.model?.trim() || '';
+  const currentLeadModel = typeof lead.model === 'string' ? lead.model.trim() : '';
+
+  if (currentLeadProviderId !== providerId) {
+    return {
+      skip: true,
+      reason: `provider changed (${currentLeadProviderId} -> ${providerId})`,
+    };
+  }
+
+  if (requestedModel && currentLeadModel && requestedModel !== currentLeadModel) {
+    return {
+      skip: true,
+      reason: `model changed (${currentLeadModel} -> ${requestedModel})`,
+    };
+  }
+
+  return { skip: false };
+}
+
 function buildMembersPrompt(members: TeamCreateRequest['members']): string {
   return members
     .map((member) => {
@@ -571,6 +813,38 @@ function buildTeammateAgentBlockReminder(): string {
   ].join('\n');
 }
 
+function extractBootstrapFailureReason(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const lower = trimmed.toLowerCase();
+  const looksLikeBootstrapFailure =
+    lower.includes('bootstrap failed') ||
+    lower.includes('bootstrap failure') ||
+    lower.includes('bootstrap error') ||
+    lower.includes('bootstrap не удался') ||
+    lower.includes('сбой bootstrap') ||
+    ((lower.includes('member') || lower.includes('член')) && lower.includes('not found')) ||
+    (lower.includes('не найден') &&
+      (lower.includes('член') || lower.includes('member') || lower.includes('inbox'))) ||
+    lower.includes('member_briefing tool is not available') ||
+    lower.includes('member_briefing tool not found') ||
+    lower.includes('no such tool available: mcp__agent_teams__member_briefing') ||
+    lower.includes('agent calls that include team_name must also include name') ||
+    (lower.includes('member_briefing') &&
+      (lower.includes('not available') ||
+        lower.includes('not found') ||
+        lower.includes('lookup failure') ||
+        lower.includes('validation error') ||
+        lower.includes('api error'))) ||
+    lower.includes('please check the provided tool list');
+  if (!looksLikeBootstrapFailure) return null;
+  return trimmed.slice(0, 280);
+}
+
+function normalizeMemberDiagnosticText(memberName: string, text: string): string {
+  return `${memberName}: ${text.trim()}`;
+}
+
 function buildMemberSpawnPrompt(
   member: TeamCreateRequest['members'][number],
   displayName: string,
@@ -597,12 +871,19 @@ function buildMemberSpawnPrompt(
 ${getAgentLanguageInstruction()}
 Your FIRST action: call MCP tool member_briefing with:
 { teamName: "${teamName}", memberName: "${member.name}" }
+Call member_briefing directly as your own MCP tool call. Do NOT use the Agent tool, any subagent, or any delegated helper for this step.
+member_briefing is expected to be available in your initial MCP tool list. If it is missing or unavailable, treat that as a real bootstrap error and report the exact error text to your team lead.
 Do NOT start work, claim tasks, or improvise workflow/task/process rules before member_briefing succeeds.
-If member_briefing fails, send a short message to your team lead "${leadName}" explaining that bootstrap failed, then wait.
+If member_briefing fails, send one short natural-language message to your team lead "${leadName}" that includes the exact failure reason (for example the API error, validation error, or lookup failure), then wait. Do NOT send only "bootstrap failed".
 IMPORTANT: When sending messages to the team lead, always use the exact name "${leadName}" in the \`to\` field of SendMessage. Never abbreviate or shorten it (e.g. do NOT use "lead" instead of "team-lead").
+${getCanonicalSendMessageFieldRule()}
+Correct example:
+${buildCanonicalSendMessageExample({ to: leadName, summary: 'short update', message: 'your message' })}
 After member_briefing succeeds:
-- Introduce yourself briefly (name and role) and confirm you are ready.
-- Then wait for task assignments.
+- Do NOT send a "ready", "online", "status accepted", or other acknowledgement-only message just to confirm you started successfully.
+- If bootstrap succeeded and you have no task yet, stay silent and wait for task assignments.
+- Only SendMessage the lead after bootstrap when there is a real blocker, a failed bootstrap, an explicit question, an urgent coordination need, or a completed task result to report.
+- Never send raw tool output, JSON, dict/object dumps, Python-style structs, or internal state payloads to the lead or the user. If you need to report bootstrap/task/tool status, rewrite it as one short natural-language sentence.
 - When you later receive work or reconnect after a restart, use task_briefing as your compact queue view. Use task_get when you need the full task context before starting a pending/needsFix task or when the in_progress briefing details are not enough.
 - If a newly assigned task cannot be started immediately because you are still busy on another task, leave a short task comment on that waiting task right away with the reason and your best ETA, keep it in pending/TODO, and only move it to in_progress with task_start when you truly begin.
 - CRITICAL: If someone comments on your task, you MUST reply on that same task via task_add_comment. Never leave a user/lead/teammate task comment unanswered, even if the reply is only a short acknowledgement or status update. Do NOT treat status changes or direct messages as a substitute for an on-task reply.
@@ -658,13 +939,18 @@ ${providerArgLine}${modelArgLine}${effortArgLine}   - prompt:
      }
      Your FIRST action: call MCP tool member_briefing with:
      { teamName: "${teamName}", memberName: "${member.name}" }
+     Call member_briefing directly as your own MCP tool call. Do NOT use the Agent tool, any subagent, or any delegated helper for this step.
+     member_briefing is expected to be available in your initial MCP tool list. If it is missing or unavailable, treat that as a real bootstrap error and report the exact error text to your team lead.
      Do NOT start work, claim tasks, or improvise workflow/task/process rules before member_briefing succeeds.
-     If member_briefing fails, send a short message to your team lead "${leadName}" explaining that bootstrap failed, then wait.
+     If member_briefing fails, send one short natural-language message to your team lead "${leadName}" that includes the exact failure reason (for example the API error, validation error, or lookup failure), then wait. Do NOT send only "bootstrap failed".
      IMPORTANT: When sending messages to the team lead, always use the exact name "${leadName}" in the \`to\` field of SendMessage. Never abbreviate or shorten it (e.g. do NOT use "lead" instead of "team-lead").
      ${buildTeammateAgentBlockReminder()}
 ${actionModeProtocol}
 
      After member_briefing succeeds:
+     - Do NOT send a "ready", "online", "status accepted", or other acknowledgement-only message just to confirm you reconnected successfully.
+     - If reconnect bootstrap succeeded and you have no immediate blocker or question, stay silent and continue with your queue.
+     - Never send raw tool output, JSON, dict/object dumps, Python-style structs, or internal state payloads to the lead or the user. If you need to report bootstrap/task/tool status, rewrite it as one short natural-language sentence.
      - Use task_briefing as your compact queue view.
      - If task_briefing shows any in_progress task, resume/finish those first. Call task_get only if you need more context than task_briefing already gave you.
      - After that, prioritize tasks marked Needs fixes after review, then normal pending tasks.
@@ -780,7 +1066,7 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
       `- Request changes: review_request_changes { teamName: "${teamName}", taskId: "<id>", comment: "<what to fix>" }`,
       `CRITICAL: Writing "approved" or "LGTM" as a task comment does NOT move the task on the kanban board. You MUST call the review_approve MCP tool. Without the tool call the task stays stuck in the REVIEW column.`,
       ``,
-      `Process operations — use MCP tools directly:`,
+      `Background service operations — use MCP tools directly (dev servers, watchers, databases, etc.; NOT teammate-agent liveness):`,
       protocols.buildProcessProtocolText(teamName),
       ``,
       `Attachment storage modes (IMPORTANT):`,
@@ -880,7 +1166,7 @@ Constraints:
 - Do NOT spawn or create a member named "user". "user" is a reserved system name for the human operator — it is NOT a teammate.
 - Keep assistant text minimal. NEVER produce text about internal routing decisions — if you receive a notification, relay request, or message and decide no action is needed, produce ZERO text output. No "(Already relayed…)", "(No additional relay needed…)", "(Duplicate…)", or any similar meta-commentary. If there is nothing to do, say nothing.
 - NEVER send duplicate messages to the same member. One SendMessage per member per topic is enough.
-- NEVER use SendMessage with recipient "*" (broadcast). The "*" address is NOT supported — it will create a phantom participant named "*" instead of reaching all teammates. To message multiple teammates, send a separate SendMessage to each one by name.
+- NEVER use SendMessage with to="*" (broadcast). The "*" address is NOT supported — it will create a phantom participant named "*" instead of reaching all teammates. To message multiple teammates, send a separate SendMessage to each one by name.
 - Keep the task board high-signal: avoid creating tasks for trivial micro-items.
 - Use the team task board for assigned/substantial work.
 - DELEGATION-FIRST (behavior rule for ALL future turns): When "user" gives you work, your top priority is to (a) decompose into tasks, (b) create tasks on the team board, (c) assign them to teammates, and (d) SendMessage "user" a short confirmation (task IDs + owners). Do NOT start implementing yourself unless the team is truly in SOLO MODE (no teammates).
@@ -895,9 +1181,10 @@ ${teamCtlOps}
 ${actionModeProtocol}
 
 Communication protocol (CRITICAL — you are running headless, no one sees your text output):
-- When you receive a <teammate-message> from a teammate, ALWAYS reply using the SendMessage tool with the sender's name as recipient.
+- When you receive a <teammate-message> from a teammate, reply using the SendMessage tool ONLY when a reply changes what happens next: decision, clarification, unblock, assignment, review, correction, or explicit acknowledgement the teammate asked for.
 - Your plain text output is invisible to teammates — they are separate processes and can only read their inbox.
-- Example: if you receive <teammate-message teammate_id="alice">...</teammate-message>, respond with SendMessage(type: "message", recipient: "alice", content: "your reply").
+- Example: if you receive <teammate-message teammate_id="alice">...</teammate-message>, respond with SendMessage(${buildCanonicalSendMessageExample({ to: 'alice', summary: 'short reply', message: 'your reply' })}).
+- Do NOT reply to low-value acknowledgements or presence pings such as "ready", "online", "status accepted", "awaiting task", or "received" unless you need to give the teammate a concrete next action.
 - Cross-team communication: when work needs expertise, coordination, review, or a decision from ANOTHER team, CALL the MCP tool named "cross_team_send" with teamName: "${teamName}" and a focused actionable message.
 - Before sending cross-team, use MCP tool "cross_team_list_targets" with teamName: "${teamName}" to discover valid target teams.
 - To review messages your team already sent to other teams, use MCP tool "cross_team_get_outbox" with teamName: "${teamName}".
@@ -1123,6 +1410,9 @@ ${step2Block}
 ${step3Block}
 
 ${isSolo ? '3' : '4'}) After all steps, output a short summary.
+CRITICAL: If any Agent teammate spawn returns an error, that teammate is NOT online. Do NOT claim they were spawned successfully. In your final summary, explicitly list which teammate names failed to start.
+CRITICAL: Do NOT call a teammate "online", "ready", "confirmed alive", or "without launch errors" solely because Agent returned "Spawned successfully". Use that wording only after the teammate has actually completed bootstrap or sent a real post-bootstrap confirmation message. If a teammate runtime is alive but bootstrap is still pending, say exactly that.
+CRITICAL: If a teammate reports that member_briefing is unavailable, do NOT tell them to skip bootstrap and do NOT improvise a workaround. Treat that as a real bootstrap error, ask them to send the exact error text, and keep that teammate in bootstrap-pending or failed state until the error is resolved.
 `;
 }
 
@@ -1225,6 +1515,7 @@ ${step2And3Block}
 4) If something about team state looks unclear or inconsistent, you MAY inspect ~/.claude/teams/${request.teamName}/config.json after teammates are restored (or immediately in solo mode). Treat it as a diagnostic cross-check, not as the first reconnect action.
 
 5) After all steps, output a short summary of reconnected members and what happens next.
+CRITICAL: If any Agent teammate spawn returns an error, that teammate is NOT online. Do NOT claim they were restored/spawned successfully. In your final summary, explicitly list which teammate names failed to start.
 `;
 }
 
@@ -1244,7 +1535,7 @@ function updateProgress(
   message: string,
   extras?: Pick<
     TeamProvisioningProgress,
-    'pid' | 'error' | 'warnings' | 'cliLogsTail' | 'configReady'
+    'pid' | 'error' | 'warnings' | 'cliLogsTail' | 'configReady' | 'messageSeverity'
   >
 ): TeamProvisioningProgress {
   const assistantOutput =
@@ -1262,6 +1553,7 @@ function updateProgress(
     cliLogsTail: extras?.cliLogsTail ?? run.progress.cliLogsTail,
     assistantOutput,
     configReady: extras?.configReady ?? run.progress.configReady,
+    messageSeverity: extras?.messageSeverity,
   };
   return run.progress;
 }
@@ -2022,8 +2314,18 @@ export class TeamProvisioningService {
       })();
     }
 
-    // Same-team reconciliation: record fingerprints for native delivery dedup
+    // Same-team teammate messages are the canonical heartbeat signal: they prove the
+    // runtime produced a real post-spawn message, unlike writes to inboxes/<member>.json
+    // which may simply be user/lead messages addressed TO the teammate.
     const sameTeamBlocks = blocks.filter((block) => !parseCrossTeamPrefix(block.content));
+    for (const block of sameTeamBlocks) {
+      this.setMemberSpawnStatus(run, block.teammateId, 'online', undefined, 'heartbeat');
+    }
+    for (const block of sameTeamBlocks) {
+      const bootstrapFailureReason = extractBootstrapFailureReason(block.content);
+      if (!bootstrapFailureReason) continue;
+      this.setMemberSpawnStatus(run, block.teammateId, 'error', bootstrapFailureReason);
+    }
     if (sameTeamBlocks.length > 0) {
       this.rememberSameTeamNativeFingerprints(run.teamName, sameTeamBlocks);
       const leadName = this.getRunLeadName(run);
@@ -2372,6 +2674,60 @@ export class TeamProvisioningService {
       resultPreview: extractToolResultPreview(resultContent),
       isError,
     });
+
+    const spawnedMemberName = run.memberSpawnToolUseIds.get(toolUseId);
+    if (spawnedMemberName) {
+      run.memberSpawnToolUseIds.delete(toolUseId);
+      if (isError) {
+        const resultPreview = extractToolResultPreview(resultContent);
+        this.handleMemberSpawnFailure(run, spawnedMemberName, resultPreview);
+      } else {
+        // Agent tool_result only confirms that the runtime accepted the spawn.
+        // The teammate becomes truly "online" only after the first inbox heartbeat.
+        this.setMemberSpawnStatus(run, spawnedMemberName, 'waiting');
+      }
+    }
+  }
+
+  private handleMemberSpawnFailure(
+    run: ProvisioningRun,
+    memberName: string,
+    resultPreview?: string
+  ): void {
+    const reason =
+      (typeof resultPreview === 'string' && resultPreview.trim().length > 0
+        ? resultPreview.trim()
+        : 'Teammate spawn failed immediately after launch.') || 'Teammate spawn failed.';
+    const message = `Teammate "${memberName}" failed to start: ${reason}`;
+
+    this.setMemberSpawnStatus(run, memberName, 'error', message);
+
+    const lastIndex = run.provisioningOutputParts.length - 1;
+    if (lastIndex < 0 || run.provisioningOutputParts[lastIndex]?.trim() !== message) {
+      run.provisioningOutputParts.push(message);
+    }
+
+    if (
+      !run.provisioningComplete &&
+      (run.progress.state === 'assembling' || run.progress.state === 'configuring')
+    ) {
+      const progress = updateProgress(run, 'assembling', `Failed to start member ${memberName}`);
+      run.onProgress(progress);
+    }
+  }
+
+  private appendMemberBootstrapDiagnostic(
+    run: ProvisioningRun,
+    memberName: string,
+    text: string
+  ): void {
+    const line = normalizeMemberDiagnosticText(memberName, text);
+    const lastIndex = run.provisioningOutputParts.length - 1;
+    if (lastIndex >= 0 && run.provisioningOutputParts[lastIndex]?.trim() === line) {
+      return;
+    }
+    run.provisioningOutputParts.push(line);
+    logger.info(`[${run.teamName}] [bootstrap] ${line}`);
   }
 
   private resetRuntimeToolActivity(run: ProvisioningRun, memberName?: string): void {
@@ -2402,15 +2758,50 @@ export class TeamProvisioningService {
     run: ProvisioningRun,
     memberName: string,
     status: MemberSpawnStatus,
-    error?: string
+    error?: string,
+    livenessSource?: MemberSpawnLivenessSource
   ): void {
     const prev = run.memberSpawnStatuses.get(memberName);
-    if (prev?.status === status) return;
+    if (
+      prev?.status === status &&
+      prev?.error === error &&
+      prev?.livenessSource === livenessSource
+    ) {
+      return;
+    }
     run.memberSpawnStatuses.set(memberName, {
       status,
       error,
+      livenessSource,
       updatedAt: nowIso(),
     });
+    if (status === 'spawning') {
+      this.appendMemberBootstrapDiagnostic(run, memberName, 'Agent tool invoked');
+    } else if (status === 'waiting') {
+      this.appendMemberBootstrapDiagnostic(
+        run,
+        memberName,
+        'spawn accepted, waiting for bootstrap'
+      );
+    } else if (status === 'online' && livenessSource === 'heartbeat') {
+      this.appendMemberBootstrapDiagnostic(
+        run,
+        memberName,
+        'bootstrap confirmed via first heartbeat'
+      );
+    } else if (status === 'online' && livenessSource === 'process') {
+      this.appendMemberBootstrapDiagnostic(
+        run,
+        memberName,
+        'runtime process is alive, bootstrap not yet confirmed'
+      );
+    } else if (status === 'error') {
+      this.appendMemberBootstrapDiagnostic(
+        run,
+        memberName,
+        error?.trim().length ? error.trim() : 'bootstrap failed'
+      );
+    }
     if (!this.isCurrentTrackedRun(run)) return;
     this.teamChangeEmitter?.({
       type: 'member-spawn',
@@ -2434,7 +2825,12 @@ export class TeamProvisioningService {
     if (!run) return { statuses: {}, runId: null };
     const result: Record<string, MemberSpawnStatusEntry> = {};
     for (const [name, entry] of run.memberSpawnStatuses) {
-      result[name] = { status: entry.status, error: entry.error, updatedAt: entry.updatedAt };
+      result[name] = {
+        status: entry.status,
+        error: entry.error,
+        livenessSource: entry.livenessSource,
+        updatedAt: entry.updatedAt,
+      };
     }
     return { statuses: result, runId };
   }
@@ -3245,7 +3641,9 @@ export class TeamProvisioningService {
           if (msgType === 'assistant' || msgType === 'result') {
             run.lastStdoutReceivedAt = Date.now();
             if (run.stallWarningIndex != null) {
-              run.provisioningOutputParts.splice(run.stallWarningIndex, 1);
+              const removedIndex = run.stallWarningIndex;
+              run.provisioningOutputParts.splice(removedIndex, 1);
+              this.shiftProvisioningOutputIndexesAfterRemoval(run, removedIndex);
               run.stallWarningIndex = null;
               if (run.preStallMessage != null) {
                 run.progress.message = run.preStallMessage;
@@ -3401,6 +3799,7 @@ export class TeamProvisioningService {
         silentUserDmForwardClearHandle: null,
         pendingInboxRelayCandidates: [],
         provisioningOutputParts: [],
+        provisioningOutputIndexByMessageId: new Map(),
         detectedSessionId: null,
         leadActivityState: 'active',
         leadContextUsage: null,
@@ -3413,8 +3812,9 @@ export class TeamProvisioningService {
         postCompactReminderInFlight: false,
         suppressPostCompactReminderOutput: false,
         memberSpawnStatuses: new Map(
-          request.members.map((m) => [m.name, { status: 'waiting' as const, updatedAt: nowIso() }])
+          request.members.map((m) => [m.name, { status: 'offline' as const, updatedAt: nowIso() }])
         ),
+        memberSpawnToolUseIds: new Map(),
         progress: {
           runId,
           teamName: request.teamName,
@@ -3429,10 +3829,14 @@ export class TeamProvisioningService {
       this.runs.set(runId, run);
       this.provisioningRunByTeam.set(request.teamName, runId);
       run.onProgress(run.progress);
+      await this.clearPartialLaunchState(request.teamName);
 
       const prompt = buildProvisioningPrompt(request, effectiveMemberSpecs);
+      const promptSize = getPromptSizeSummary(prompt);
       let child: ReturnType<typeof spawn>;
-      const { env: shellEnv } = await this.buildProvisioningEnv(request.providerId);
+      const { env: shellEnv, geminiRuntimeAuth } = await this.buildProvisioningEnv(
+        request.providerId
+      );
       let mcpConfigPath: string;
       try {
         mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
@@ -3465,6 +3869,16 @@ export class TeamProvisioningService {
         ...(request.worktree ? ['--worktree', request.worktree] : []),
         ...parseCliArgs(request.extraCliArgs),
       ];
+      const runtimeWarning = buildRuntimeLaunchWarning(request, shellEnv, {
+        geminiRuntimeAuth,
+        promptSize,
+        expectedMembersCount: effectiveMemberSpecs.length,
+      });
+      logRuntimeLaunchSnapshot(request.teamName, claudePath, spawnArgs, request, shellEnv, {
+        geminiRuntimeAuth,
+        promptSize,
+        expectedMembersCount: effectiveMemberSpecs.length,
+      });
       try {
         // Pre-save our meta files before spawn — CLI doesn't touch these.
         // If provisioning fails before TeamCreate, user can retry without re-entering config.
@@ -3525,6 +3939,7 @@ export class TeamProvisioningService {
 
       updateProgress(run, 'spawning', 'Starting Claude CLI process', {
         pid: child.pid ?? undefined,
+        warnings: mergeProvisioningWarnings(run.progress.warnings, runtimeWarning),
       });
       run.onProgress(run.progress);
       run.child = child;
@@ -3697,7 +4112,12 @@ export class TeamProvisioningService {
       } else {
         try {
           const configParsed = JSON.parse(configRaw) as Record<string, unknown>;
-          if (
+          const resumeGuard = shouldSkipResumeForProviderRuntimeChange(request, configParsed);
+          if (resumeGuard.skip) {
+            logger.info(
+              `[${request.teamName}] Skipping session resume — ${resumeGuard.reason ?? 'runtime changed'}`
+            );
+          } else if (
             typeof configParsed.leadSessionId === 'string' &&
             configParsed.leadSessionId.trim().length > 0
           ) {
@@ -3857,6 +4277,7 @@ export class TeamProvisioningService {
         silentUserDmForwardClearHandle: null,
         pendingInboxRelayCandidates: [],
         provisioningOutputParts: [],
+        provisioningOutputIndexByMessageId: new Map(),
         detectedSessionId: null,
         leadActivityState: 'active',
         leadContextUsage: null,
@@ -3869,8 +4290,9 @@ export class TeamProvisioningService {
         postCompactReminderInFlight: false,
         suppressPostCompactReminderOutput: false,
         memberSpawnStatuses: new Map(
-          expectedMembers.map((name) => [name, { status: 'waiting' as const, updatedAt: nowIso() }])
+          expectedMembers.map((name) => [name, { status: 'offline' as const, updatedAt: nowIso() }])
         ),
+        memberSpawnToolUseIds: new Map(),
         progress: {
           runId,
           teamName: request.teamName,
@@ -3909,8 +4331,11 @@ export class TeamProvisioningService {
         existingTasks,
         Boolean(previousSessionId)
       );
+      const promptSize = getPromptSizeSummary(prompt);
       let child: ReturnType<typeof spawn>;
-      const { env: shellEnv } = await this.buildProvisioningEnv(request.providerId);
+      const { env: shellEnv, geminiRuntimeAuth } = await this.buildProvisioningEnv(
+        request.providerId
+      );
       let mcpConfigPath: string;
       try {
         mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
@@ -3956,6 +4381,16 @@ export class TeamProvisioningService {
         launchArgs.push('--worktree', request.worktree);
       }
       launchArgs.push(...parseCliArgs(request.extraCliArgs));
+      const runtimeWarning = buildRuntimeLaunchWarning(request, shellEnv, {
+        geminiRuntimeAuth,
+        promptSize,
+        expectedMembersCount: effectiveMemberSpecs.length,
+      });
+      logRuntimeLaunchSnapshot(request.teamName, claudePath, launchArgs, request, shellEnv, {
+        geminiRuntimeAuth,
+        promptSize,
+        expectedMembersCount: effectiveMemberSpecs.length,
+      });
       // --resume is added above when a valid previous session JSONL exists.
       // Without it, CLI creates a fresh session ID automatically.
 
@@ -3982,6 +4417,7 @@ export class TeamProvisioningService {
       const resumeHint = previousSessionId ? ' (resuming previous session)' : '';
       updateProgress(run, 'spawning', `Starting Claude CLI process for team launch${resumeHint}`, {
         pid: child.pid ?? undefined,
+        warnings: mergeProvisioningWarnings(run.progress.warnings, runtimeWarning),
       });
       run.onProgress(run.progress);
       run.child = child;
@@ -4217,9 +4653,10 @@ export class TeamProvisioningService {
     const internal = wrapInAgentBlock(
       [
         `UI relay request — forward a direct message to teammate "${teammateName}".`,
-        `MUST: use the SendMessage tool with recipient="${teammateName}".`,
-        `MUST: ask the teammate to reply back to recipient "user" (short answer).`,
-        `CRITICAL: Do NOT send any message to recipient "user" for this turn.`,
+        `MUST: ${getCanonicalSendMessageToolRule(teammateName)}`,
+        `MUST: if they reply to the human, the destination must be to="user" (short answer).`,
+        `CRITICAL: Do NOT send any message to="user" for this turn.`,
+        getCanonicalSendMessageFieldRule(),
       ].join('\n')
     );
     const message = [
@@ -4296,8 +4733,9 @@ export class TeamProvisioningService {
         `Inbox relay (internal) — forward to "${memberName}".`,
         wrapInAgentBlock(
           [
-            `CRITICAL: Do NOT send any message to recipient "user" for this relay turn. The ONLY valid recipient is "${memberName}".`,
-            `Use the SendMessage tool with recipient="${memberName}" to forward each inbox item below.`,
+            `CRITICAL: Do NOT send any message to="user" for this relay turn. The ONLY valid destination is to="${memberName}".`,
+            getCanonicalSendMessageToolRule(memberName),
+            getCanonicalSendMessageFieldRule(),
             `Preserve task IDs and critical instructions. Do NOT add extra narration outside the SendMessage calls.`,
             `If an inbox item is marked Source: system_notification, forward that notification exactly once without paraphrasing.`,
           ].join('\n')
@@ -4982,6 +5420,10 @@ export class TeamProvisioningService {
       // Only track spawns for this team
       if (teamName !== run.teamName) continue;
       this.setMemberSpawnStatus(run, memberName, 'spawning');
+      const toolUseId = typeof part.id === 'string' ? part.id.trim() : '';
+      if (toolUseId) {
+        run.memberSpawnToolUseIds.set(toolUseId, memberName);
+      }
 
       // Advance stepper to "Members joining" when first member spawn is detected
       if (
@@ -4991,22 +5433,6 @@ export class TeamProvisioningService {
         const progress = updateProgress(run, 'assembling', `Spawning member ${memberName}...`);
         run.onProgress(progress);
       }
-    }
-  }
-
-  /**
-   * Mark a member as online when their first inbox message arrives.
-   * Called from the inbox change handler.
-   */
-  markMemberOnlineFromInbox(teamName: string, memberName: string): void {
-    const runId = this.getTrackedRunId(teamName);
-    if (!runId) return;
-    const run = this.runs.get(runId);
-    if (!run) return;
-    const entry = run.memberSpawnStatuses.get(memberName);
-    // Only transition spawning → online (not offline → online, to avoid false positives)
-    if (entry?.status === 'spawning') {
-      this.setMemberSpawnStatus(run, memberName, 'online');
     }
   }
 
@@ -5049,17 +5475,29 @@ export class TeamProvisioningService {
 
     // Flag any expected member not found in config.json (excluding the lead)
     for (const expected of run.expectedMembers) {
-      // Check exact name or CLI-suffixed variant (e.g., "alice-2" for "alice")
-      if (registeredNames.has(expected)) continue;
-      const hasSuffixed = [...registeredNames].some((name) => {
+      const current = run.memberSpawnStatuses.get(expected);
+      if (current?.status === 'error' || current?.status === 'online') continue;
+
+      const matchedRuntimeNames = [...registeredNames].filter((name) => {
+        if (name === expected) return true;
         const parsed = parseNumericSuffixName(name);
         return parsed !== null && parsed.suffix >= 2 && parsed.base === expected;
       });
-      if (hasSuffixed) continue;
 
-      // Skip if already in a terminal or positive status
-      const current = run.memberSpawnStatuses.get(expected);
-      if (current?.status === 'error' || current?.status === 'online') continue;
+      // A teammate may intentionally stay silent after bootstrap. If Claude Code
+      // registered the runtime and the OS process is still alive, treat it as
+      // process-confirmed running. Keep this distinct from heartbeat-confirmed online.
+      if (
+        matchedRuntimeNames.length > 0 &&
+        matchedRuntimeNames.some((runtimeName) =>
+          this.hasLiveTeamAgentProcess(run.teamName, runtimeName)
+        )
+      ) {
+        this.setMemberSpawnStatus(run, expected, 'online', undefined, 'process');
+        continue;
+      }
+
+      if (matchedRuntimeNames.length > 0) continue;
 
       logger.warn(
         `[${run.teamName}] Member "${expected}" not found in config.json members after provisioning`
@@ -5069,6 +5507,138 @@ export class TeamProvisioningService {
         expected,
         'error',
         'Teammate not registered after provisioning — spawned incorrectly. Restart the team to fix.'
+      );
+    }
+  }
+
+  private hasLiveTeamAgentProcess(teamName: string, memberName: string): boolean {
+    if (process.platform === 'win32') {
+      return false;
+    }
+
+    let output = '';
+    try {
+      output = execFileSync('ps', ['-ax', '-o', 'command='], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      return false;
+    }
+
+    const teamMarker = `--team-name ${teamName}`;
+    const memberMarker = `--agent-id ${memberName}@${teamName}`;
+
+    return output.split('\n').some((line) => {
+      const trimmed = line.trim();
+      return trimmed.includes(teamMarker) && trimmed.includes(memberMarker);
+    });
+  }
+
+  private async clearPartialLaunchState(teamName: string): Promise<void> {
+    try {
+      await fs.promises.rm(getTeamLaunchStatePath(teamName), { force: true });
+    } catch {
+      // best-effort
+    }
+  }
+
+  private getFailedSpawnMembers(
+    run: ProvisioningRun
+  ): { name: string; error?: string; updatedAt: string }[] {
+    return [...run.memberSpawnStatuses.entries()]
+      .filter(([, entry]) => entry.status === 'error')
+      .map(([name, entry]) => ({ name, error: entry.error, updatedAt: entry.updatedAt }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private async persistPartialLaunchState(run: ProvisioningRun): Promise<void> {
+    if (!run.isLaunch || !run.expectedMembers || run.expectedMembers.length === 0) {
+      if (run.isLaunch) {
+        await this.clearPartialLaunchState(run.teamName);
+      }
+      return;
+    }
+
+    const expectedMembers = Array.from(
+      new Set(
+        run.expectedMembers
+          .map((name) => name.trim())
+          .filter((name) => name.length > 0 && name !== 'user' && !isLeadMember({ name }))
+      )
+    );
+    if (expectedMembers.length === 0) {
+      await this.clearPartialLaunchState(run.teamName);
+      return;
+    }
+
+    const configPath = path.join(getTeamsBasePath(), run.teamName, 'config.json');
+    let registeredMembers = new Set<string>();
+    let leadSessionId: string | undefined;
+    try {
+      const raw = await tryReadRegularFileUtf8(configPath, {
+        timeoutMs: TEAM_JSON_READ_TIMEOUT_MS,
+        maxBytes: TEAM_CONFIG_MAX_BYTES,
+      });
+      if (!raw) {
+        await this.clearPartialLaunchState(run.teamName);
+        return;
+      }
+      const config = JSON.parse(raw) as {
+        leadSessionId?: unknown;
+        members?: { name?: unknown }[];
+      };
+      leadSessionId =
+        typeof config.leadSessionId === 'string' && config.leadSessionId.trim().length > 0
+          ? config.leadSessionId.trim()
+          : undefined;
+      registeredMembers = new Set(
+        (config.members ?? [])
+          .map((member) => (typeof member?.name === 'string' ? member.name.trim() : ''))
+          .filter((name) => name.length > 0 && !isLeadMember({ name }))
+      );
+    } catch {
+      await this.clearPartialLaunchState(run.teamName);
+      return;
+    }
+
+    const inboxNames = await this.inboxReader
+      .listInboxNames(run.teamName)
+      .catch(() => [] as string[]);
+    const confirmedMembers = Array.from(
+      new Set(
+        [...registeredMembers, ...inboxNames]
+          .map((name) => name.trim())
+          .filter((name) => expectedMembers.includes(name))
+      )
+    );
+    const missingMembers = expectedMembers.filter((name) => !confirmedMembers.includes(name));
+
+    if (missingMembers.length === 0 || confirmedMembers.length === 0) {
+      await this.clearPartialLaunchState(run.teamName);
+      return;
+    }
+
+    const payload: PartialLaunchStateFile = {
+      version: 1,
+      state: 'partial_launch_failure',
+      updatedAt: new Date().toISOString(),
+      ...(leadSessionId ? { leadSessionId } : {}),
+      expectedMembers,
+      confirmedMembers,
+      missingMembers,
+    };
+
+    try {
+      await atomicWriteAsync(
+        getTeamLaunchStatePath(run.teamName),
+        JSON.stringify(payload, null, 2)
+      );
+    } catch (error) {
+      logger.warn(
+        `[${run.teamName}] Failed to persist partial launch state: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
     }
   }
@@ -5349,6 +5919,47 @@ export class TeamProvisioningService {
     return null;
   }
 
+  private appendProvisioningAssistantText(
+    run: ProvisioningRun,
+    msg: Record<string, unknown>,
+    text: string
+  ): void {
+    const normalized = text.trim();
+    if (normalized.length === 0) {
+      return;
+    }
+
+    const stableMessageId = this.getStableLeadThoughtMessageId(msg);
+    if (stableMessageId) {
+      const existingIndex = run.provisioningOutputIndexByMessageId.get(stableMessageId);
+      if (existingIndex != null) {
+        run.provisioningOutputParts[existingIndex] = text;
+        return;
+      }
+    }
+
+    const lastIndex = run.provisioningOutputParts.length - 1;
+    if (lastIndex >= 0 && run.provisioningOutputParts[lastIndex]?.trim() === normalized) {
+      return;
+    }
+
+    const newIndex = run.provisioningOutputParts.push(text) - 1;
+    if (stableMessageId) {
+      run.provisioningOutputIndexByMessageId.set(stableMessageId, newIndex);
+    }
+  }
+
+  private shiftProvisioningOutputIndexesAfterRemoval(
+    run: ProvisioningRun,
+    removedIndex: number
+  ): void {
+    for (const [messageId, index] of run.provisioningOutputIndexByMessageId.entries()) {
+      if (index > removedIndex) {
+        run.provisioningOutputIndexByMessageId.set(messageId, index - 1);
+      }
+    }
+  }
+
   private pushLiveLeadTextMessage(
     run: ProvisioningRun,
     cleanText: string,
@@ -5392,6 +6003,8 @@ export class TeamProvisioningService {
    * Always uses SIGKILL via killTeamProcess() to prevent CLI cleanup.
    */
   stopTeam(teamName: string): void {
+    this.stopPersistentTeamMembers(teamName);
+
     const runId = this.getTrackedRunId(teamName);
     if (!runId) {
       return;
@@ -5414,6 +6027,112 @@ export class TeamProvisioningService {
     logger.info(`[${teamName}] Process stopped (SIGKILL)`);
   }
 
+  private stopPersistentTeamMembers(teamName: string): void {
+    const members = this.readPersistedRuntimeMembers(teamName);
+    if (members.length > 0) {
+      this.killPersistedPaneMembers(teamName, members);
+    }
+    this.killOrphanedTeamAgentProcesses(teamName);
+  }
+
+  private readPersistedRuntimeMembers(teamName: string): PersistedRuntimeMemberLike[] {
+    const configPath = path.join(getTeamsBasePath(), teamName, 'config.json');
+    try {
+      const raw = fs.readFileSync(configPath, 'utf8');
+      const parsed = JSON.parse(raw) as { members?: unknown };
+      if (!Array.isArray(parsed.members)) {
+        return [];
+      }
+      return parsed.members.filter((member): member is PersistedRuntimeMemberLike => {
+        return !!member && typeof member === 'object';
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  private listPersistedTeamNames(): string[] {
+    try {
+      return fs
+        .readdirSync(getTeamsBasePath(), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name.trim())
+        .filter((name) => name.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  private killPersistedPaneMembers(teamName: string, members: PersistedRuntimeMemberLike[]): void {
+    for (const member of members) {
+      const name = typeof member.name === 'string' ? member.name.trim() : '';
+      const paneId = typeof member.tmuxPaneId === 'string' ? member.tmuxPaneId.trim() : '';
+      const backendType =
+        typeof member.backendType === 'string' ? member.backendType.trim().toLowerCase() : '';
+      if (!name || name === 'team-lead' || !paneId || backendType !== 'tmux') {
+        continue;
+      }
+      try {
+        execFileSync('tmux', ['kill-pane', '-t', paneId], { stdio: 'ignore' });
+        logger.info(`[${teamName}] Killed teammate pane ${name} (${paneId}) during stop`);
+      } catch (error) {
+        logger.debug(
+          `[${teamName}] Failed to kill teammate pane ${name} (${paneId}) during stop: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
+  }
+
+  private killOrphanedTeamAgentProcesses(teamName: string): void {
+    if (process.platform === 'win32') {
+      return;
+    }
+
+    let output = '';
+    try {
+      output = execFileSync('ps', ['-ax', '-o', 'pid=,command='], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      return;
+    }
+
+    const currentRunPid = this.getTrackedRunId(teamName)
+      ? this.runs.get(this.getTrackedRunId(teamName)!)?.child?.pid
+      : undefined;
+    const marker = `--team-name ${teamName}`;
+    const pids = new Set<number>();
+
+    for (const line of output.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.includes(marker) || !trimmed.includes('--agent-id')) {
+        continue;
+      }
+      const match = trimmed.match(/^(\d+)\s+(.*)$/);
+      if (!match) continue;
+      const pid = Number.parseInt(match[1], 10);
+      if (!Number.isFinite(pid) || pid <= 0) continue;
+      if (currentRunPid && pid === currentRunPid) continue;
+      pids.add(pid);
+    }
+
+    for (const pid of pids) {
+      try {
+        killProcessByPid(pid);
+        logger.info(`[${teamName}] Killed orphaned teammate process pid=${pid} during stop`);
+      } catch (error) {
+        logger.debug(
+          `[${teamName}] Failed to kill orphaned teammate process pid=${pid}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
+  }
+
   /**
    * Stop all running team processes. Called during app shutdown.
    * Uses killTeamProcess() (SIGKILL) to guarantee instant death
@@ -5421,10 +6140,20 @@ export class TeamProvisioningService {
    */
   stopAllTeams(): void {
     const alive = this.getAliveTeams();
-    if (alive.length === 0) return;
-    logger.info(`Killing all team processes on shutdown (SIGKILL): ${alive.join(', ')}`);
-    for (const teamName of alive) {
-      this.stopTeam(teamName);
+    if (alive.length > 0) {
+      logger.info(`Killing all team processes on shutdown (SIGKILL): ${alive.join(', ')}`);
+      for (const teamName of alive) {
+        this.stopTeam(teamName);
+      }
+    }
+
+    const persistedTeamNames = this.listPersistedTeamNames();
+    const orphanOnly = persistedTeamNames.filter((teamName) => !alive.includes(teamName));
+    if (orphanOnly.length > 0) {
+      logger.info(`Cleaning up persisted teammate runtimes on shutdown: ${orphanOnly.join(', ')}`);
+      for (const teamName of orphanOnly) {
+        this.stopPersistentTeamMembers(teamName);
+      }
     }
   }
 
@@ -5489,7 +6218,7 @@ export class TeamProvisioningService {
         // During provisioning (before provisioningComplete), accumulate for live UI preview.
         // Emission is handled by the throttled emitLogsProgress() in the stdout data handler.
         if (!run.provisioningComplete) {
-          run.provisioningOutputParts.push(text);
+          this.appendProvisioningAssistantText(run, msg, text);
         }
 
         // Once relay capture is settled, later assistant chunks belong to the normal live
@@ -6334,6 +7063,8 @@ export class TeamProvisioningService {
 
   private formatToolApprovalBody(toolName: string, toolInput: Record<string, unknown>): string {
     switch (toolName) {
+      case 'AskUserQuestion':
+        return this.formatAskUserQuestionApprovalBody(toolInput);
       case 'Bash':
         return `Bash: ${typeof toolInput.command === 'string' ? toolInput.command.slice(0, 150) : 'command'}`;
       case 'Write':
@@ -6344,6 +7075,30 @@ export class TeamProvisioningService {
       default:
         return `${toolName}: ${JSON.stringify(toolInput).slice(0, 150)}`;
     }
+  }
+
+  private formatAskUserQuestionApprovalBody(toolInput: Record<string, unknown>): string {
+    const rawQuestions = Array.isArray(toolInput.questions) ? toolInput.questions : [];
+    const questions = rawQuestions
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const question =
+          'question' in item && typeof item.question === 'string' ? item.question.trim() : null;
+        return question && question.length > 0 ? question.replace(/\s+/g, ' ') : null;
+      })
+      .filter((question): question is string => Boolean(question));
+
+    if (questions.length === 0) {
+      return 'Question: User input is required';
+    }
+
+    const firstQuestion = questions[0]!;
+    const truncatedQuestion =
+      firstQuestion.length > 140 ? `${firstQuestion.slice(0, 137)}...` : firstQuestion;
+
+    return questions.length === 1
+      ? `Question: ${truncatedQuestion}`
+      : `Questions (${questions.length}): ${truncatedQuestion}`;
   }
 
   /**
@@ -6970,10 +7725,17 @@ export class TeamProvisioningService {
 
       // Audit: flag any expected member not registered in config.json after launch.
       await this.auditMemberSpawnStatuses(run);
-
-      const readyMessage = 'Team launched — process alive and ready';
+      await this.persistPartialLaunchState(run);
+      const failedSpawnMembers = this.getFailedSpawnMembers(run);
+      const hasSpawnFailures = failedSpawnMembers.length > 0;
+      const readyMessage = hasSpawnFailures
+        ? `Launch completed with teammate errors — ${failedSpawnMembers
+            .map((member) => member.name)
+            .join(', ')} failed to start`
+        : 'Team launched — process alive and ready';
       const progress = updateProgress(run, 'ready', readyMessage, {
         cliLogsTail: extractCliLogsFromRun(run),
+        messageSeverity: hasSpawnFailures ? 'warning' : undefined,
       });
       run.onProgress(progress);
       this.provisioningRunByTeam.delete(run.teamName);
@@ -6989,8 +7751,25 @@ export class TeamProvisioningService {
         detail: 'lead-session-sync',
       });
 
-      // Fire "Team Launched" notification
-      void this.fireTeamLaunchedNotification(run);
+      if (!hasSpawnFailures) {
+        // Fire "Team Launched" notification only for clean launches.
+        void this.fireTeamLaunchedNotification(run);
+      }
+
+      if (hasSpawnFailures) {
+        const failureNotice = [
+          `Системное замечание: часть команды не запустилась.`,
+          `Не стартовали тиммейты: ${failedSpawnMembers.map((member) => `@${member.name}`).join(', ')}.`,
+          `Не считай их доступными, пока их запуск не будет повторён успешно.`,
+        ].join(' ');
+        await this.sendMessageToTeam(run.teamName, failureNotice).catch((error: unknown) =>
+          logger.warn(
+            `[${run.teamName}] failed to send teammate-start failure notice to lead: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )
+        );
+      }
 
       // Pick up any direct messages that arrived before/while reconnecting.
       void this.relayLeadInboxMessages(run.teamName).catch((e: unknown) =>
@@ -7085,10 +7864,22 @@ export class TeamProvisioningService {
 
     // Audit: flag any expected member not registered in config.json after provisioning.
     await this.auditMemberSpawnStatuses(run);
-
-    const progress = updateProgress(run, 'ready', 'Team provisioned — process alive and ready', {
-      cliLogsTail: extractCliLogsFromRun(run),
-    });
+    await this.clearPartialLaunchState(run.teamName);
+    const failedSpawnMembers = this.getFailedSpawnMembers(run);
+    const hasSpawnFailures = failedSpawnMembers.length > 0;
+    const progress = updateProgress(
+      run,
+      'ready',
+      hasSpawnFailures
+        ? `Provisioning completed with teammate errors — ${failedSpawnMembers
+            .map((member) => member.name)
+            .join(', ')} failed to start`
+        : 'Team provisioned — process alive and ready',
+      {
+        cliLogsTail: extractCliLogsFromRun(run),
+        messageSeverity: hasSpawnFailures ? 'warning' : undefined,
+      }
+    );
     run.onProgress(progress);
     this.provisioningRunByTeam.delete(run.teamName);
     this.aliveRunByTeam.set(run.teamName, run.runId);
@@ -7103,8 +7894,25 @@ export class TeamProvisioningService {
       detail: 'lead-session-sync',
     });
 
-    // Fire "Team Launched" notification
-    void this.fireTeamLaunchedNotification(run);
+    if (!hasSpawnFailures) {
+      // Fire "Team Launched" notification only for clean launches.
+      void this.fireTeamLaunchedNotification(run);
+    }
+
+    if (hasSpawnFailures) {
+      const failureNotice = [
+        `Системное замечание: часть команды не запустилась.`,
+        `Не стартовали тиммейты: ${failedSpawnMembers.map((member) => `@${member.name}`).join(', ')}.`,
+        `Не считай их доступными, пока их запуск не будет повторён успешно.`,
+      ].join(' ');
+      await this.sendMessageToTeam(run.teamName, failureNotice).catch((error: unknown) =>
+        logger.warn(
+          `[${run.teamName}] failed to send teammate-start failure notice to lead: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        )
+      );
+    }
 
     // Pick up any direct messages that arrived during provisioning.
     void this.relayLeadInboxMessages(run.teamName).catch((e: unknown) =>
@@ -7410,6 +8218,9 @@ export class TeamProvisioningService {
    * Remove a run from tracking maps.
    */
   private cleanupRun(run: ProvisioningRun): void {
+    if (run.isLaunch && !run.provisioningComplete) {
+      void this.persistPartialLaunchState(run);
+    }
     this.resetRuntimeToolActivity(run);
     this.setLeadActivity(run, 'offline');
     run.pendingDirectCrossTeamSendRefresh = false;
@@ -7553,14 +8364,14 @@ export class TeamProvisioningService {
               const progress = updateProgress(
                 run,
                 'finalizing',
-                `All ${inboxCount} member inboxes created, preparing workspace`
+                `Prepared communication channels for all ${inboxCount} members, preparing workspace`
               );
               run.onProgress(progress);
             } else if (inboxCount > 0) {
               const progress = updateProgress(
                 run,
                 'assembling',
-                `${inboxCount}/${request.members.length} member inboxes created`
+                `Prepared communication channels for ${inboxCount}/${request.members.length} members`
               );
               run.onProgress(progress);
             }
@@ -7940,6 +8751,7 @@ export class TeamProvisioningService {
         : {}),
       CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
     };
+    applyConfiguredRuntimeBackendsEnv(env);
     applyProviderRuntimeEnv(env, providerId);
 
     const controlApiBaseUrl = await this.resolveControlApiBaseUrl();
@@ -7968,16 +8780,20 @@ export class TeamProvisioningService {
     }
 
     if (resolveTeamProviderId(providerId) === 'codex') {
-      return { env, authSource: 'codex_runtime' };
+      return { env, authSource: 'codex_runtime', geminiRuntimeAuth: null };
     }
 
     if (resolveTeamProviderId(providerId) === 'gemini') {
-      return { env, authSource: 'gemini_runtime' };
+      return {
+        env,
+        authSource: 'gemini_runtime',
+        geminiRuntimeAuth: await resolveGeminiRuntimeAuth(env),
+      };
     }
 
     // 1. Explicit ANTHROPIC_API_KEY — works with `-p` mode directly
     if (typeof env.ANTHROPIC_API_KEY === 'string' && env.ANTHROPIC_API_KEY.trim().length > 0) {
-      return { env, authSource: 'anthropic_api_key' };
+      return { env, authSource: 'anthropic_api_key', geminiRuntimeAuth: null };
     }
 
     // 2. Proxy token (ANTHROPIC_AUTH_TOKEN) — `-p` mode does NOT read this var,
@@ -7987,7 +8803,7 @@ export class TeamProvisioningService {
       env.ANTHROPIC_AUTH_TOKEN.trim().length > 0
     ) {
       env.ANTHROPIC_API_KEY = env.ANTHROPIC_AUTH_TOKEN;
-      return { env, authSource: 'anthropic_auth_token' };
+      return { env, authSource: 'anthropic_auth_token', geminiRuntimeAuth: null };
     }
 
     // 3. No explicit API key — let the CLI handle its own OAuth auth.
@@ -7995,7 +8811,7 @@ export class TeamProvisioningService {
     //    tokens in-memory. Injecting CLAUDE_CODE_OAUTH_TOKEN from the
     //    credentials file causes 401 errors because the stored token is
     //    often stale (CLI refreshes in-memory but rarely writes back).
-    return { env, authSource: 'none' };
+    return { env, authSource: 'none', geminiRuntimeAuth: null };
   }
 
   private async resolveControlApiBaseUrl(): Promise<string | null> {
@@ -8742,10 +9558,7 @@ export class TeamProvisioningService {
           name: member.name.trim(),
           role: member.role?.trim() || undefined,
           workflow: member.workflow?.trim() || undefined,
-          providerId:
-            member.providerId === 'codex' || member.providerId === 'gemini'
-              ? member.providerId
-              : undefined,
+          providerId: normalizeOptionalTeamProviderId(member.providerId),
           model: member.model?.trim() || undefined,
           effort:
             member.effort === 'low' || member.effort === 'medium' || member.effort === 'high'
@@ -8788,10 +9601,7 @@ export class TeamProvisioningService {
         const role = typeof member.role === 'string' ? member.role.trim() || undefined : undefined;
         const workflow =
           typeof member.workflow === 'string' ? member.workflow.trim() || undefined : undefined;
-        const providerId =
-          member.providerId === 'codex' || member.providerId === 'gemini'
-            ? member.providerId
-            : undefined;
+        const providerId = normalizeOptionalTeamProviderId(member.providerId);
         const model =
           typeof member.model === 'string' ? member.model.trim() || undefined : undefined;
         const effort =

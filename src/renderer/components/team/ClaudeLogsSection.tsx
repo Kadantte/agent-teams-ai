@@ -29,6 +29,8 @@ const PREVIEW_ICONS = {
 interface ClaudeLogsSectionProps {
   teamName: string;
   position?: 'sidebar' | 'inline';
+  sidebarViewerMaxHeight?: number;
+  onOpenChange?: (isOpen: boolean) => void;
 }
 
 /**
@@ -70,6 +72,8 @@ const LogPreviewInline = ({ preview }: { preview: LastLogPreview }): React.JSX.E
 export const ClaudeLogsSection = ({
   teamName,
   position = 'inline',
+  sidebarViewerMaxHeight,
+  onOpenChange,
 }: ClaudeLogsSectionProps): React.JSX.Element => {
   const ctrl = useClaudeLogsController(teamName);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -95,7 +99,7 @@ export const ClaudeLogsSection = ({
     <>
       <CollapsibleTeamSection
         sectionId="claude-logs"
-        title="Claude logs"
+        title="Logs"
         icon={null}
         badge={ctrl.badge}
         afterBadge={
@@ -119,9 +123,13 @@ export const ClaudeLogsSection = ({
             </Tooltip>
           ) : undefined
         }
+        headerClassName={isSidebar ? '-mx-3 w-[calc(100%+1.5rem)] py-0' : undefined}
+        headerSurfaceClassName={isSidebar ? '!rounded-none' : undefined}
         headerContentClassName={isSidebar ? 'flex-wrap items-center gap-y-1 py-1 pr-1' : 'pr-1'}
         headerExtra={sectionHeaderExtra}
         defaultOpen={false}
+        onOpenChange={onOpenChange}
+        contentWrapperClassName={isSidebar ? 'mt-0 pb-0' : undefined}
         contentClassName="pt-0 [overflow-anchor:none]"
       >
         {/* When dialog is open, hide the compact log viewer to avoid two competing scroll containers */}
@@ -131,7 +139,11 @@ export const ClaudeLogsSection = ({
             Viewing in fullscreen mode
           </div>
         ) : (
-          <ClaudeLogsPanel ctrl={ctrl} viewerClassName="max-h-[213px]" />
+          <ClaudeLogsPanel
+            ctrl={ctrl}
+            viewerClassName="max-h-[213px]"
+            viewerMaxHeight={isSidebar ? sidebarViewerMaxHeight : undefined}
+          />
         )}
       </CollapsibleTeamSection>
 

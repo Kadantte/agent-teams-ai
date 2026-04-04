@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@renderer/components/ui/button';
 import { cn } from '@renderer/lib/utils';
-import { CheckCircle2, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
 
 import { MarkdownViewer } from '../chat/viewers/MarkdownViewer';
 
@@ -39,6 +39,8 @@ export interface ProvisioningProgressBlockProps {
   onCancel?: (() => void) | null;
   /** Success message shown inside the block header (e.g. "Team launched — all N teammates online") */
   successMessage?: string | null;
+  /** Visual tone for the status banner above the block. */
+  successMessageSeverity?: 'success' | 'warning';
   /** Dismiss handler — renders an X button in the block header top-right */
   onDismiss?: (() => void) | null;
   /** ISO timestamp when provisioning started */
@@ -132,6 +134,7 @@ export const ProvisioningProgressBlock = ({
   loading = false,
   onCancel,
   successMessage,
+  successMessageSeverity = 'success',
   onDismiss,
   startedAt,
   pid,
@@ -199,8 +202,21 @@ export const ProvisioningProgressBlock = ({
     >
       {successMessage ? (
         <div className="mb-1.5 flex items-center gap-2">
-          <CheckCircle2 size={14} className="shrink-0 text-[var(--step-done-text)]" />
-          <p className="flex-1 text-xs text-[var(--step-success-text)]">{successMessage}</p>
+          {successMessageSeverity === 'warning' ? (
+            <AlertTriangle size={14} className="shrink-0 text-amber-400" />
+          ) : (
+            <CheckCircle2 size={14} className="shrink-0 text-[var(--step-done-text)]" />
+          )}
+          <p
+            className={cn(
+              'flex-1 text-xs',
+              successMessageSeverity === 'warning'
+                ? 'text-amber-400'
+                : 'text-[var(--step-success-text)]'
+            )}
+          >
+            {successMessage}
+          </p>
           {onDismiss ? (
             <Button
               variant="ghost"

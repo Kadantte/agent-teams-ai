@@ -762,8 +762,10 @@ export interface TeamSlice {
   // Messages panel UI state
   messagesPanelMode: 'sidebar' | 'inline';
   messagesPanelWidth: number;
+  sidebarLogsHeight: number;
   setMessagesPanelMode: (mode: 'sidebar' | 'inline') => void;
   setMessagesPanelWidth: (width: number) => void;
+  setSidebarLogsHeight: (height: number) => void;
 }
 
 // --- Per-team launch params persistence ---
@@ -998,8 +1000,10 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   // Messages panel UI state
   messagesPanelMode: 'sidebar' as const,
   messagesPanelWidth: 340,
+  sidebarLogsHeight: 213,
   setMessagesPanelMode: (mode: 'sidebar' | 'inline') => set({ messagesPanelMode: mode }),
   setMessagesPanelWidth: (width: number) => set({ messagesPanelWidth: width }),
+  setSidebarLogsHeight: (height: number) => set({ sidebarLogsHeight: height }),
 
   fetchBranches: async (paths: string[]) => {
     const entries = await Promise.all(
@@ -2381,10 +2385,24 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     }
 
     if (isCanonicalRun && TERMINAL_PROVISIONING_STATES.has(progress.state)) {
-      // Clear spawn statuses — provisioning is complete, members now tracked via normal status
       set((prev) => {
         const next = { ...prev.memberSpawnStatusesByTeam };
-        delete next[progress.teamName];
+        const currentStatuses = next[progress.teamName];
+        if (!currentStatuses) {
+          return { memberSpawnStatusesByTeam: next };
+        }
+        if (progress.state === 'ready') {
+          next[progress.teamName] = currentStatuses;
+          return { memberSpawnStatusesByTeam: next };
+        }
+        const retainedStatuses = Object.fromEntries(
+          Object.entries(currentStatuses).filter(([, entry]) => entry.status === 'error')
+        );
+        if (Object.keys(retainedStatuses).length > 0) {
+          next[progress.teamName] = retainedStatuses;
+        } else {
+          delete next[progress.teamName];
+        }
         return { memberSpawnStatusesByTeam: next };
       });
     }

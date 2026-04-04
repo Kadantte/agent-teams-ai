@@ -37,6 +37,7 @@ import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
 import { normalizePath } from '@renderer/utils/pathNormalize';
+import { isTeamProviderId, normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 
 import { AdvancedCliSection } from './AdvancedCliSection';
@@ -44,6 +45,7 @@ import { OptionalSettingsSection } from './OptionalSettingsSection';
 import {
   createInitialProviderChecks,
   failIncompleteProviderChecks,
+  getProvisioningProviderBackendSummary,
   getProvisioningFailureHint,
   ProvisioningProviderStatusList,
   shouldHideProvisioningProviderStatusList,
@@ -270,6 +272,9 @@ export const CreateTeamDialog = ({
 }: CreateTeamDialogProps): React.JSX.Element => {
   const { isLight } = useTheme();
   const multimodelEnabled = useStore((s) => s.appConfig?.general?.multimodelEnabled ?? true);
+  const cliStatus = useStore((s) => s.cliStatus);
+  const cliStatusLoading = useStore((s) => s.cliStatusLoading);
+  const fetchCliStatus = useStore((s) => s.fetchCliStatus);
 
   // ── Persisted draft state (survives tab navigation) ──────────────────
   const {
@@ -460,11 +465,24 @@ export const CreateTeamDialog = ({
       new Set([
         selectedProviderId,
         ...members.flatMap((member) =>
-          member.providerId === 'codex' || member.providerId === 'gemini' ? [member.providerId] : []
+          isTeamProviderId(member.providerId) ? [member.providerId] : []
         ),
       ])
     );
   }, [members, multimodelEnabled, selectedProviderId, soloTeam, syncModelsWithLead]);
+
+  const runtimeBackendSummaryByProvider = useMemo(() => {
+    const entries: Array<readonly [TeamProviderId, string | null]> = (
+      cliStatus?.providers ?? []
+    ).map(
+      (provider) =>
+        [
+          provider.providerId as TeamProviderId,
+          getProvisioningProviderBackendSummary(provider),
+        ] as const
+    );
+    return new Map<TeamProviderId, string | null>(entries);
+  }, [cliStatus?.providers]);
 
   useEffect(() => {
     if (multimodelEnabled) {
@@ -480,6 +498,13 @@ export const CreateTeamDialog = ({
       setMembers(nextMembers);
     }
   }, [members, multimodelEnabled, selectedProviderId, setMembers]);
+
+  useEffect(() => {
+    if (!open || cliStatus || cliStatusLoading) {
+      return;
+    }
+    void fetchCliStatus();
+  }, [open, cliStatus, cliStatusLoading, fetchCliStatus]);
 
   useEffect(() => {
     if (!open || !canCreate || !launchTeam) {
@@ -523,6 +548,7 @@ export const CreateTeamDialog = ({
           for (const providerId of selectedMemberProviders) {
             checks = updateProviderCheck(checks, providerId, {
               status: 'checking',
+              backendSummary: runtimeBackendSummaryByProvider.get(providerId) ?? null,
               details: [],
             });
             if (!cancelled && prepareRequestSeqRef.current === requestSeq) {
@@ -552,6 +578,7 @@ export const CreateTeamDialog = ({
             }
             checks = updateProviderCheck(checks, providerId, {
               status: !prepResult.ready ? 'failed' : detailLines.length > 0 ? 'notes' : 'ready',
+              backendSummary: runtimeBackendSummaryByProvider.get(providerId) ?? null,
               details: detailLines,
             });
             if (!cancelled && prepareRequestSeqRef.current === requestSeq) {
@@ -584,7 +611,15 @@ export const CreateTeamDialog = ({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [open, canCreate, launchTeam, effectiveCwd, selectedProviderId, selectedMemberProviders]);
+  }, [
+    open,
+    canCreate,
+    launchTeam,
+    effectiveCwd,
+    selectedProviderId,
+    selectedMemberProviders,
+    runtimeBackendSummaryByProvider,
+  ]);
 
   useEffect(() => {
     if (!open) {
@@ -660,12 +695,8 @@ export const CreateTeamDialog = ({
               roleSelection: isCustom ? CUSTOM_ROLE : (m.role ?? ''),
               customRole: isCustom ? m.role : '',
               workflow: m.workflow,
-              providerId: normalizeProviderForMode(m.providerId, multimodelEnabled),
-              model:
-                normalizeProviderForMode(m.providerId, multimodelEnabled) ===
-                normalizeProviderForMode(m.providerId, true)
-                  ? (m.model ?? '')
-                  : '',
+              providerId: normalizeOptionalTeamProviderId(m.providerId),
+              model: m.model ?? '',
               effort: m.effort,
             }),
             multimodelEnabled
@@ -777,9 +808,10 @@ export const CreateTeamDialog = ({
   );
 
   const sanitizedTeamName = sanitizeTeamName(teamName.trim());
+  const teamNameInlineError = validateTeamNameInline(teamName);
+  const isNameTakenByExistingTeam = existingTeamNames.includes(sanitizedTeamName);
   const isNameProvisioning =
-    provisioningTeamNames.includes(sanitizedTeamName) &&
-    !existingTeamNames.includes(sanitizedTeamName);
+    provisioningTeamNames.includes(sanitizedTeamName) && !isNameTakenByExistingTeam;
 
   const request = useMemo<TeamCreateRequest>(
     () => ({
@@ -815,6 +847,15 @@ export const CreateTeamDialog = ({
       customArgs,
     ]
   );
+  const requestValidation = useMemo(
+    () => validateRequest(request, { requireCwd: launchTeam }),
+    [request, launchTeam]
+  );
+  const hasCreateFormErrors =
+    !!teamNameInlineError ||
+    isNameTakenByExistingTeam ||
+    isNameProvisioning ||
+    !requestValidation.valid;
 
   const internalArgs = useMemo(() => {
     const args: string[] = [];
@@ -1055,20 +1096,24 @@ export const CreateTeamDialog = ({
               id="team-name"
               className={cn(
                 'h-8 text-xs',
-                (fieldErrors.teamName || allTakenTeamNames.includes(sanitizedTeamName)) &&
+                (fieldErrors.teamName || teamNameInlineError || isNameTakenByExistingTeam) &&
                   'border-[var(--field-error-border)] bg-[var(--field-error-bg)] focus-visible:ring-[var(--field-error-border)]'
               )}
               value={teamName}
               onChange={(event) => handleTeamNameChange(event.target.value)}
               placeholder={suggestedTeamName}
             />
-            {allTakenTeamNames.includes(sanitizedTeamName) ? (
+            {isNameTakenByExistingTeam ? (
               <p className="text-[11px]" style={{ color: 'var(--field-error-text)' }}>
-                {isNameProvisioning ? 'Team is currently launching' : 'Team name already exists'}
+                Team name already exists
               </p>
-            ) : validateTeamNameInline(teamName) ? (
+            ) : teamNameInlineError ? (
               <p className="text-[11px]" style={{ color: 'var(--field-error-text)' }}>
-                {validateTeamNameInline(teamName)}
+                {teamNameInlineError}
+              </p>
+            ) : isNameProvisioning ? (
+              <p className="text-[11px]" style={{ color: 'var(--warning-text)' }}>
+                A team with this name is currently launching
               </p>
             ) : fieldErrors.teamName ? (
               <p className="text-[11px]" style={{ color: 'var(--field-error-text)' }}>
@@ -1391,7 +1436,7 @@ export const CreateTeamDialog = ({
             </Button>
             <Button
               size="sm"
-              disabled={!canCreate || !draftLoaded || isSubmitting}
+              disabled={!canCreate || !draftLoaded || isSubmitting || hasCreateFormErrors}
               onClick={handleSubmit}
             >
               {isSubmitting ? (

@@ -41,7 +41,13 @@ import { ClaudeMultimodelBridgeService } from '../runtime/ClaudeMultimodelBridge
 import { ClaudeBinaryResolver } from '../team/ClaudeBinaryResolver';
 import { getConfiguredCliFlavor, getCliFlavorUiOptions } from '../team/cliFlavor';
 
-import type { CliInstallationStatus, CliInstallerProgress, CliPlatform } from '@shared/types';
+import type {
+  CliInstallationStatus,
+  CliInstallerProgress,
+  CliPlatform,
+  CliProviderId,
+  CliProviderStatus,
+} from '@shared/types';
 import type { BrowserWindow } from 'electron';
 import type { IncomingMessage } from 'http';
 
@@ -131,6 +137,11 @@ function cloneCliInstallationStatus(status: CliInstallationStatus): CliInstallat
     providers: status.providers.map((provider) => ({
       ...provider,
       capabilities: { ...provider.capabilities },
+      selectedBackendId: provider.selectedBackendId ?? null,
+      resolvedBackendId: provider.resolvedBackendId ?? null,
+      availableBackends: provider.availableBackends?.map((backend) => ({ ...backend })) ?? [],
+      externalRuntimeDiagnostics:
+        provider.externalRuntimeDiagnostics?.map((diagnostic) => ({ ...diagnostic })) ?? [],
       backend: provider.backend ? { ...provider.backend } : null,
       models: [...provider.models],
     })),
@@ -477,6 +488,23 @@ export class CliInstallerService {
         logger.error('writeCliInstallerStatusDiag failed:', getErrorMessage(diagErr));
       }
     }
+  }
+
+  async getProviderStatus(providerId: CliProviderId): Promise<CliProviderStatus | null> {
+    await resolveInteractiveShellEnv();
+
+    const binaryPath = await ClaudeBinaryResolver.resolve();
+    if (!binaryPath) {
+      return null;
+    }
+
+    const flavor = getConfiguredCliFlavor();
+    if (flavor !== 'free-code') {
+      const fullStatus = await this.getStatus();
+      return fullStatus.providers.find((provider) => provider.providerId === providerId) ?? null;
+    }
+
+    return this.multimodelBridgeService.getProviderStatus(binaryPath, providerId);
   }
 
   /**

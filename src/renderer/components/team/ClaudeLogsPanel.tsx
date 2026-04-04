@@ -25,6 +25,7 @@ interface ClaudeLogsPanelProps {
   ctrl: ClaudeLogsController;
   /** Maximum height class for the log viewer (e.g. "max-h-[213px]" for compact). */
   viewerClassName?: string;
+  viewerMaxHeight?: number;
   /** Extra className for the panel wrapper. */
   className?: string;
 }
@@ -36,6 +37,7 @@ interface ClaudeLogsPanelProps {
 export const ClaudeLogsPanel = ({
   ctrl,
   viewerClassName,
+  viewerMaxHeight,
   className,
 }: ClaudeLogsPanelProps): React.JSX.Element => {
   const {
@@ -130,6 +132,7 @@ export const ClaudeLogsPanel = ({
             order="newest-first"
             searchQueryOverride={searchQuery.trim() ? searchQuery : undefined}
             className={cn('p-2', viewerClassName)}
+            style={viewerMaxHeight ? { maxHeight: `${viewerMaxHeight}px` } : undefined}
             containerRefCallback={containerRefCallback}
             onScroll={handleScroll}
             viewerState={viewerState}

@@ -64,7 +64,7 @@ function generateUniqueName(sourceName: string, existingNames: string[]): string
   }
 }
 
-type TeamStatus = 'active' | 'idle' | 'provisioning' | 'offline';
+type TeamStatus = 'active' | 'idle' | 'provisioning' | 'offline' | 'partial_failure';
 
 function getRecentProjects(team: TeamSummary): string[] {
   const history = team.projectPathHistory;
@@ -157,6 +157,7 @@ function renderTeamRecentPaths(
 }
 
 function resolveTeamStatus(
+  team: TeamSummary,
   teamName: string,
   aliveTeams: string[],
   currentProgress: ReturnType<typeof getCurrentProvisioningProgressForTeam>,
@@ -172,6 +173,9 @@ function resolveTeamStatus(
     )
   ) {
     return 'provisioning';
+  }
+  if (team.partialLaunchFailure) {
+    return 'partial_failure';
   }
   return 'offline';
 }
@@ -204,6 +208,13 @@ const StatusBadge = ({ status }: { status: TeamStatus }): React.JSX.Element => {
         <span className="inline-flex items-center gap-1 rounded-full bg-zinc-500/15 px-2 py-0.5 text-[10px] font-medium text-zinc-500">
           <span className="size-1.5 rounded-full bg-zinc-500" />
           Offline
+        </span>
+      );
+    case 'partial_failure':
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-400">
+          <span className="size-1.5 rounded-full bg-amber-400" />
+          Launch failed partway
         </span>
       );
   }
@@ -364,12 +375,13 @@ export const TeamListView = (): React.JSX.Element => {
     if (filter.selectedStatuses.size > 0) {
       result = result.filter((t) => {
         const status = resolveTeamStatus(
+          t,
           t.teamName,
           aliveTeams,
           getCurrentProvisioningProgressForTeam(provisioningState, t.teamName),
           leadActivityByTeam
         );
-        const isRunning = status !== 'offline';
+        const isRunning = status !== 'offline' && status !== 'partial_failure';
         if (filter.selectedStatuses.has('running') && isRunning) return true;
         if (filter.selectedStatuses.has('offline') && !isRunning) return true;
         return false;
@@ -780,6 +792,7 @@ export const TeamListView = (): React.JSX.Element => {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {activeFiltered.map((team) => {
             const status = resolveTeamStatus(
+              team,
               team.teamName,
               aliveTeams,
               getCurrentProvisioningProgressForTeam(provisioningState, team.teamName),
@@ -837,24 +850,27 @@ export const TeamListView = (): React.JSX.Element => {
                         })()}
                     </div>
                     <div className="flex shrink-0 gap-1">
-                      {status === 'offline' && team.projectPath && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-50 group-hover:opacity-100"
-                              onClick={(e) => handleLaunchTeam(team.teamName, team.projectPath, e)}
-                              disabled={launchingTeamName === team.teamName}
-                              aria-label="Launch team"
-                            >
-                              <Play size={14} fill="currentColor" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            {launchingTeamName === team.teamName ? 'Launching…' : 'Launch team'}
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
+                      {(status === 'offline' || status === 'partial_failure') &&
+                        team.projectPath && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className="shrink-0 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-50 group-hover:opacity-100"
+                                onClick={(e) =>
+                                  handleLaunchTeam(team.teamName, team.projectPath, e)
+                                }
+                                disabled={launchingTeamName === team.teamName}
+                                aria-label="Launch team"
+                              >
+                                <Play size={14} fill="currentColor" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">
+                              {launchingTeamName === team.teamName ? 'Launching…' : 'Launch team'}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
                       {(status === 'active' || status === 'idle') && (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -908,6 +924,13 @@ export const TeamListView = (): React.JSX.Element => {
                       {team.description || 'No description'}
                     </p>
                   </div>
+                  {team.partialLaunchFailure ? (
+                    <p className="mt-2 text-[11px] text-amber-400">
+                      {team.missingMembers?.length
+                        ? `Last launch stopped before ${team.missingMembers.length}/${team.expectedMemberCount ?? team.missingMembers.length} teammate${team.missingMembers.length === 1 ? '' : 's'} joined.`
+                        : 'Last launch stopped before all teammates joined.'}
+                    </p>
+                  ) : null}
                   <div className="mt-3 flex flex-wrap items-center gap-1.5">
                     {team.members && team.members.length > 0 ? (
                       renderMemberChips(team.members, isLight)

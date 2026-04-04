@@ -18,6 +18,7 @@ import { CurrentTaskIndicator } from './CurrentTaskIndicator';
 import type { TaskStatusCounts } from '@renderer/utils/pathNormalize';
 import type {
   LeadActivityState,
+  MemberSpawnLivenessSource,
   MemberSpawnStatus,
   ResolvedTeamMember,
   TeamTaskWithKanban,
@@ -37,6 +38,7 @@ interface MemberCardProps {
   isRemoved?: boolean;
   spawnStatus?: MemberSpawnStatus;
   spawnError?: string;
+  spawnLivenessSource?: MemberSpawnLivenessSource;
   onOpenTask?: () => void;
   onOpenReviewTask?: () => void;
   onClick?: () => void;
@@ -58,6 +60,7 @@ export const MemberCard = ({
   isRemoved,
   spawnStatus,
   spawnError,
+  spawnLivenessSource,
   onOpenTask,
   onOpenReviewTask,
   onClick,
@@ -79,6 +82,7 @@ export const MemberCard = ({
   const presenceLabel = getSpawnAwarePresenceLabel(
     member,
     spawnStatus,
+    spawnLivenessSource,
     isTeamAlive,
     isTeamProvisioning,
     leadActivity

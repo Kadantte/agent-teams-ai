@@ -12,6 +12,7 @@ import type {
   HttpServerConfig,
   NotificationConfig,
   NotificationTrigger,
+  RuntimeConfig,
   SshPersistConfig,
 } from '../services';
 
@@ -31,6 +32,7 @@ interface ValidationFailure {
 export type ConfigUpdateValidationResult =
   | ValidationSuccess<'notifications'>
   | ValidationSuccess<'general'>
+  | ValidationSuccess<'runtime'>
   | ValidationSuccess<'display'>
   | ValidationSuccess<'httpServer'>
   | ValidationSuccess<'ssh'>
@@ -39,6 +41,7 @@ export type ConfigUpdateValidationResult =
 const VALID_SECTIONS = new Set<ConfigSection>([
   'notifications',
   'general',
+  'runtime',
   'display',
   'httpServer',
   'ssh',
@@ -398,6 +401,60 @@ function validateGeneralSection(data: unknown): ValidationSuccess<'general'> | V
   };
 }
 
+function validateRuntimeSection(data: unknown): ValidationSuccess<'runtime'> | ValidationFailure {
+  if (!isPlainObject(data)) {
+    return { valid: false, error: 'runtime update must be an object' };
+  }
+
+  const result: Partial<RuntimeConfig> = {};
+
+  for (const [key, value] of Object.entries(data)) {
+    if (key !== 'providerBackends') {
+      return { valid: false, error: `runtime.${key} is not a valid setting` };
+    }
+
+    if (!isPlainObject(value)) {
+      return { valid: false, error: 'runtime.providerBackends must be an object' };
+    }
+
+    const providerBackends: Partial<RuntimeConfig['providerBackends']> = {};
+
+    for (const [providerId, backendId] of Object.entries(value)) {
+      if (providerId === 'gemini') {
+        if (backendId !== 'auto' && backendId !== 'api' && backendId !== 'cli-sdk') {
+          return {
+            valid: false,
+            error: 'runtime.providerBackends.gemini must be one of: auto, api, cli-sdk',
+          };
+        }
+        providerBackends.gemini = backendId;
+        continue;
+      }
+
+      if (providerId === 'codex') {
+        if (backendId !== 'auto' && backendId !== 'adapter') {
+          return {
+            valid: false,
+            error: 'runtime.providerBackends.codex must be one of: auto, adapter',
+          };
+        }
+        providerBackends.codex = backendId;
+        continue;
+      }
+
+      return { valid: false, error: `runtime.providerBackends.${providerId} is not supported` };
+    }
+
+    result.providerBackends = providerBackends as RuntimeConfig['providerBackends'];
+  }
+
+  return {
+    valid: true,
+    section: 'runtime',
+    data: result,
+  };
+}
+
 function validateDisplaySection(data: unknown): ValidationSuccess<'display'> | ValidationFailure {
   if (!isPlainObject(data)) {
     return { valid: false, error: 'display update must be an object' };
@@ -544,7 +601,7 @@ export function validateConfigUpdatePayload(
   if (typeof section !== 'string' || !VALID_SECTIONS.has(section as ConfigSection)) {
     return {
       valid: false,
-      error: 'Section must be one of: notifications, general, display, httpServer, ssh',
+      error: 'Section must be one of: notifications, general, runtime, display, httpServer, ssh',
     };
   }
 
@@ -553,6 +610,8 @@ export function validateConfigUpdatePayload(
       return validateNotificationsSection(data);
     case 'general':
       return validateGeneralSection(data);
+    case 'runtime':
+      return validateRuntimeSection(data);
     case 'display':
       return validateDisplaySection(data);
     case 'httpServer':

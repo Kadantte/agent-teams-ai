@@ -8,7 +8,9 @@ import {
 import { createLogger } from '@shared/utils/logger';
 
 import type { CliProviderId, CliProviderStatus } from '@shared/types';
+import { configManager } from '../infrastructure/ConfigManager';
 import { resolveGeminiRuntimeAuth } from './geminiRuntimeAuth';
+import { applyConfiguredRuntimeBackendsEnv } from './providerRuntimeEnv';
 
 const logger = createLogger('ClaudeMultimodelBridgeService');
 
@@ -51,6 +53,53 @@ interface ProviderModelsCommandResponse {
   >;
 }
 
+interface UnifiedRuntimeStatusResponse {
+  schemaVersion?: number;
+  providers?: Record<
+    string,
+    {
+      supported?: boolean;
+      authenticated?: boolean;
+      authMethod?: string | null;
+      verificationState?: 'verified' | 'unknown' | 'offline' | 'error';
+      canLoginFromUi?: boolean;
+      statusMessage?: string | null;
+      detailMessage?: string | null;
+      selectedBackendId?: string | null;
+      resolvedBackendId?: string | null;
+      availableBackends?: Array<{
+        id?: string;
+        label?: string;
+        description?: string;
+        selectable?: boolean;
+        recommended?: boolean;
+        available?: boolean;
+        statusMessage?: string | null;
+        detailMessage?: string | null;
+      }>;
+      externalRuntimeDiagnostics?: Array<{
+        id?: string;
+        label?: string;
+        detected?: boolean;
+        statusMessage?: string | null;
+        detailMessage?: string | null;
+      }>;
+      models?: Array<string | { id?: string; label?: string; description?: string }>;
+      capabilities?: {
+        teamLaunch?: boolean;
+        oneShot?: boolean;
+      };
+      backend?: {
+        kind?: string;
+        label?: string;
+        endpointLabel?: string | null;
+        projectId?: string | null;
+        authMethodDetail?: string | null;
+      } | null;
+    }
+  >;
+}
+
 const ORDERED_PROVIDER_IDS: CliProviderId[] = ['anthropic', 'codex', 'gemini'];
 
 function extractJsonObject<T>(raw: string): T {
@@ -83,6 +132,10 @@ function createDefaultProviderStatus(providerId: CliProviderId): CliProviderStat
       teamLaunch: false,
       oneShot: false,
     },
+    selectedBackendId: null,
+    resolvedBackendId: null,
+    availableBackends: [],
+    externalRuntimeDiagnostics: [],
     backend: null,
   };
 }
@@ -117,11 +170,12 @@ export class ClaudeMultimodelBridgeService {
     if (home) {
       env.HOME = home;
     }
-    return env;
+    return applyConfiguredRuntimeBackendsEnv(env, configManager.getConfig().runtime);
   }
 
   private buildProviderCliEnv(binaryPath: string, providerId: CliProviderId): NodeJS.ProcessEnv {
     const env = { ...this.buildCliEnv(binaryPath) };
+    delete env.CLAUDE_CODE_ENTRY_PROVIDER;
     delete env.CLAUDE_CODE_USE_OPENAI;
     delete env.CLAUDE_CODE_USE_BEDROCK;
     delete env.CLAUDE_CODE_USE_VERTEX;
@@ -129,12 +183,114 @@ export class ClaudeMultimodelBridgeService {
     delete env.CLAUDE_CODE_USE_GEMINI;
 
     if (providerId === 'codex') {
-      env.CLAUDE_CODE_USE_OPENAI = '1';
+      env.CLAUDE_CODE_ENTRY_PROVIDER = 'codex';
     } else if (providerId === 'gemini') {
-      env.CLAUDE_CODE_USE_GEMINI = '1';
+      env.CLAUDE_CODE_ENTRY_PROVIDER = 'gemini';
     }
 
     return env;
+  }
+
+  private isUnifiedRuntimeUnsupported(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
+    return (
+      lower.includes('unknown command') ||
+      lower.includes('unknown option') ||
+      lower.includes('no such command') ||
+      lower.includes('did you mean') ||
+      lower.includes('runtime status')
+    );
+  }
+
+  private mapRuntimeProviderStatus(
+    providerId: CliProviderId,
+    runtimeStatus: NonNullable<UnifiedRuntimeStatusResponse['providers']>[string] | undefined
+  ): CliProviderStatus {
+    const provider = createDefaultProviderStatus(providerId);
+    if (!runtimeStatus) {
+      return provider;
+    }
+
+    return {
+      ...provider,
+      supported: runtimeStatus.supported === true,
+      authenticated: runtimeStatus.authenticated === true,
+      authMethod: runtimeStatus.authMethod ?? null,
+      verificationState: runtimeStatus.verificationState ?? 'unknown',
+      statusMessage: runtimeStatus.statusMessage ?? null,
+      canLoginFromUi: runtimeStatus.canLoginFromUi !== false,
+      capabilities: {
+        teamLaunch: runtimeStatus.capabilities?.teamLaunch === true,
+        oneShot: runtimeStatus.capabilities?.oneShot === true,
+      },
+      selectedBackendId: runtimeStatus.selectedBackendId ?? null,
+      resolvedBackendId: runtimeStatus.resolvedBackendId ?? null,
+      availableBackends:
+        runtimeStatus.availableBackends?.map((backend) => ({
+          id: backend.id ?? 'unknown',
+          label: backend.label ?? backend.id ?? 'Unknown',
+          description: backend.description ?? '',
+          selectable: backend.selectable !== false,
+          recommended: backend.recommended === true,
+          available: backend.available === true,
+          statusMessage: backend.statusMessage ?? null,
+          detailMessage: backend.detailMessage ?? null,
+        })) ?? [],
+      externalRuntimeDiagnostics:
+        runtimeStatus.externalRuntimeDiagnostics?.map((diagnostic) => ({
+          id: diagnostic.id ?? 'unknown',
+          label: diagnostic.label ?? diagnostic.id ?? 'Unknown',
+          detected: diagnostic.detected === true,
+          statusMessage: diagnostic.statusMessage ?? null,
+          detailMessage: diagnostic.detailMessage ?? null,
+        })) ?? [],
+      models: extractModelIds(runtimeStatus.models),
+      backend: runtimeStatus.backend?.kind
+        ? {
+            kind: runtimeStatus.backend.kind,
+            label: runtimeStatus.backend.label ?? runtimeStatus.backend.kind,
+            endpointLabel: runtimeStatus.backend.endpointLabel ?? null,
+            projectId: runtimeStatus.backend.projectId ?? null,
+            authMethodDetail: runtimeStatus.backend.authMethodDetail ?? null,
+          }
+        : null,
+    };
+  }
+
+  async getProviderStatus(
+    binaryPath: string,
+    providerId: CliProviderId
+  ): Promise<CliProviderStatus> {
+    await resolveInteractiveShellEnv();
+    const env = this.buildCliEnv(binaryPath);
+
+    try {
+      const { stdout } = await execCli(
+        binaryPath,
+        ['runtime', 'status', '--json', '--provider', providerId],
+        {
+          timeout: PROVIDER_STATUS_TIMEOUT_MS,
+          env,
+        }
+      );
+      const parsed = extractJsonObject<UnifiedRuntimeStatusResponse>(stdout);
+      return this.mapRuntimeProviderStatus(providerId, parsed.providers?.[providerId]);
+    } catch (error) {
+      if (!this.isUnifiedRuntimeUnsupported(error)) {
+        logger.warn(
+          `Provider-scoped runtime status unavailable for ${providerId}, falling back to full probe: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
+
+    const providers = await this.getProviderStatuses(binaryPath);
+    return (
+      providers.find((provider) => provider.providerId === providerId) ??
+      createDefaultProviderStatus(providerId)
+    );
   }
 
   private async buildGeminiStatus(binaryPath: string): Promise<CliProviderStatus> {
@@ -199,6 +355,27 @@ export class ClaudeMultimodelBridgeService {
   ): Promise<CliProviderStatus[]> {
     await resolveInteractiveShellEnv();
     const env = this.buildCliEnv(binaryPath);
+
+    try {
+      const { stdout } = await execCli(binaryPath, ['runtime', 'status', '--json'], {
+        timeout: PROVIDER_STATUS_TIMEOUT_MS,
+        env,
+      });
+      const parsed = extractJsonObject<UnifiedRuntimeStatusResponse>(stdout);
+      const providers = ORDERED_PROVIDER_IDS.map((providerId) =>
+        this.mapRuntimeProviderStatus(providerId, parsed.providers?.[providerId])
+      );
+      onUpdate?.(providers);
+      return providers;
+    } catch (error) {
+      if (!this.isUnifiedRuntimeUnsupported(error)) {
+        logger.warn(
+          `Unified runtime status unavailable, falling back to legacy probes: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
 
     const [statusResult, modelsResult] = await Promise.allSettled([
       execCli(binaryPath, ['auth', 'status', '--json', '--provider', 'all'], {

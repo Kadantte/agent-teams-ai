@@ -1,6 +1,7 @@
 import React from 'react';
 
 import type { TeamProviderId } from '@shared/types';
+import type { CliProviderStatus } from '@shared/types';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
 export type ProvisioningProviderCheckStatus = 'pending' | 'checking' | 'ready' | 'notes' | 'failed';
@@ -8,6 +9,7 @@ export type ProvisioningProviderCheckStatus = 'pending' | 'checking' | 'ready' |
 export interface ProvisioningProviderCheck {
   providerId: TeamProviderId;
   status: ProvisioningProviderCheckStatus;
+  backendSummary?: string | null;
   details: string[];
 }
 
@@ -29,8 +31,33 @@ export function createInitialProviderChecks(
   return providerIds.map((providerId) => ({
     providerId,
     status: 'pending',
+    backendSummary: null,
     details: [],
   }));
+}
+
+export function getProvisioningProviderBackendSummary(
+  provider:
+    | Pick<
+        CliProviderStatus,
+        'selectedBackendId' | 'resolvedBackendId' | 'availableBackends' | 'backend'
+      >
+    | null
+    | undefined
+): string | null {
+  if (!provider) {
+    return null;
+  }
+
+  const options = provider.availableBackends ?? [];
+  const optionById = new Map(options.map((option) => [option.id, option.label]));
+  const effectiveBackendId = provider.resolvedBackendId ?? provider.selectedBackendId;
+
+  if (effectiveBackendId) {
+    return optionById.get(effectiveBackendId) ?? provider.backend?.label ?? effectiveBackendId;
+  }
+
+  return provider.backend?.label ?? null;
 }
 
 export function updateProviderCheck(
@@ -207,7 +234,9 @@ export function ProvisioningProviderStatusList({
             >
               <StatusIcon status={check.status} />
               <span>
-                {getProvisioningProviderLabel(check.providerId)}: {getDisplayStatusText(check)}
+                {getProvisioningProviderLabel(check.providerId)}
+                {check.backendSummary ? ` (${check.backendSummary})` : ''}:{' '}
+                {getDisplayStatusText(check)}
               </span>
             </div>
             {visibleDetails.length > 0 ? (

@@ -51,6 +51,7 @@ interface MemberDraftRowProps {
   modelLockReason?: string;
   isRemoved?: boolean;
   onRestore?: (id: string) => void;
+  warningText?: string | null;
 }
 
 export const MemberDraftRow = ({
@@ -81,6 +82,7 @@ export const MemberDraftRow = ({
   modelLockReason,
   isRemoved = false,
   onRestore,
+  warningText,
 }: MemberDraftRowProps): React.JSX.Element => {
   const { isLight } = useTheme();
   const memberColorSet = getTeamColorSet(
@@ -289,6 +291,14 @@ export const MemberDraftRow = ({
           <div className="pl-1 text-[11px] text-[var(--color-text-muted)]">Removed</div>
         ) : null}
       </div>
+      {!isRemoved && warningText ? (
+        <div className="md:col-span-3">
+          <div className="bg-amber-500/8 ml-3 flex items-start gap-2 rounded-md border border-amber-500/25 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+            <Info className="mt-0.5 size-3.5 shrink-0 text-amber-300" />
+            <p>{warningText}</p>
+          </div>
+        </div>
+      ) : null}
       {showWorkflow && onWorkflowChange && workflowExpanded ? (
         <div className="space-y-0.5 pl-3 md:col-span-3">
           <label

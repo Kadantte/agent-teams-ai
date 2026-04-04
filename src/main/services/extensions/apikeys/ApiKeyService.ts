@@ -50,10 +50,13 @@ const PBKDF2_ITERATIONS = 100_000;
 const PBKDF2_KEY_BYTES = 32;
 const PBKDF2_SALT = 'claude-apikey-storage-v1';
 
+export const RUNTIME_MANAGED_API_KEY_ENV_VARS = ['GEMINI_API_KEY'] as const;
+
 export class ApiKeyService {
   private readonly filePath: string;
   private cache: StoredApiKey[] | null = null;
   private aesKey: Buffer | null = null;
+  private readonly originalProcessEnv = new Map<string, string | undefined>();
 
   constructor(claudeDir?: string) {
     const baseDir = claudeDir ?? path.join(os.homedir(), '.claude');
@@ -161,6 +164,34 @@ export class ApiKeyService {
       backend,
       fileSecure,
     };
+  }
+
+  async syncProcessEnv(envVarNames: readonly string[]): Promise<void> {
+    if (!envVarNames.length) {
+      return;
+    }
+
+    const lookups = await this.lookup([...envVarNames]);
+    const valueByEnv = new Map(lookups.map((entry) => [entry.envVarName, entry.value]));
+
+    for (const envVarName of envVarNames) {
+      if (!this.originalProcessEnv.has(envVarName)) {
+        this.originalProcessEnv.set(envVarName, process.env[envVarName]);
+      }
+
+      const nextValue = valueByEnv.get(envVarName);
+      if (nextValue && nextValue.trim().length > 0) {
+        process.env[envVarName] = nextValue;
+        continue;
+      }
+
+      const originalValue = this.originalProcessEnv.get(envVarName);
+      if (typeof originalValue === 'string' && originalValue.length > 0) {
+        process.env[envVarName] = originalValue;
+      } else {
+        delete process.env[envVarName];
+      }
+    }
   }
 
   // ── Encryption ──────────────────────────────────────────────────────────

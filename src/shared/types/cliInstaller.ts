@@ -25,6 +25,25 @@ export type CliFlavor = 'claude' | 'free-code';
 
 export type CliProviderId = 'anthropic' | 'codex' | 'gemini';
 
+export interface CliProviderBackendOption {
+  id: string;
+  label: string;
+  description: string;
+  selectable: boolean;
+  recommended: boolean;
+  available: boolean;
+  statusMessage?: string | null;
+  detailMessage?: string | null;
+}
+
+export interface CliExternalRuntimeDiagnostic {
+  id: string;
+  label: string;
+  detected: boolean;
+  statusMessage?: string | null;
+  detailMessage?: string | null;
+}
+
 export interface CliProviderStatus {
   providerId: CliProviderId;
   displayName: string;
@@ -39,6 +58,10 @@ export interface CliProviderStatus {
     teamLaunch: boolean;
     oneShot: boolean;
   };
+  selectedBackendId?: string | null;
+  resolvedBackendId?: string | null;
+  availableBackends?: CliProviderBackendOption[];
+  externalRuntimeDiagnostics?: CliExternalRuntimeDiagnostic[];
   backend?: {
     kind: string;
     label: string;
@@ -131,6 +154,8 @@ export interface CliInstallerProgress {
 export interface CliInstallerAPI {
   /** Get current CLI installation status */
   getStatus: () => Promise<CliInstallationStatus>;
+  /** Get current runtime/auth status for a single provider */
+  getProviderStatus: (providerId: CliProviderId) => Promise<CliProviderStatus | null>;
   /** Start install/update flow. Progress sent via onProgress events. */
   install: () => Promise<void>;
   /** Invalidate cached status (forces fresh check on next getStatus) */

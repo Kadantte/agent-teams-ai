@@ -321,6 +321,13 @@ export interface AppConfig {
     /** Send anonymous crash & performance telemetry (requires SENTRY_DSN at build time) */
     telemetryEnabled: boolean;
   };
+  /** Runtime backend preferences for app-launched free-code sessions */
+  runtime: {
+    providerBackends: {
+      gemini: 'auto' | 'api' | 'cli-sdk';
+      codex: 'auto' | 'adapter';
+    };
+  };
   /** Display and UI settings */
   display: {
     /** Whether to show timestamps in message views */

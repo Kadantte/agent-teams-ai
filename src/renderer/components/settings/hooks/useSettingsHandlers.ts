@@ -321,6 +321,12 @@ export function useSettingsHandlers({
           useNativeTitleBar: false,
           telemetryEnabled: true,
         },
+        runtime: {
+          providerBackends: {
+            gemini: 'auto',
+            codex: 'auto',
+          },
+        },
         display: {
           showTimestamps: true,
           compactMode: false,
@@ -334,6 +340,7 @@ export function useSettingsHandlers({
 
       await api.config.update('notifications', defaultConfig.notifications);
       await api.config.update('general', defaultConfig.general);
+      await api.config.update('runtime', defaultConfig.runtime);
       const updatedConfig = await api.config.update('display', defaultConfig.display);
       setConfig(updatedConfig);
       setOptimisticConfig(updatedConfig);

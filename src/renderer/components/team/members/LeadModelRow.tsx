@@ -28,6 +28,7 @@ interface LeadModelRowProps {
   onLimitContextChange: (value: boolean) => void;
   syncModelsWithTeammates: boolean;
   onSyncModelsWithTeammatesChange: (value: boolean) => void;
+  warningText?: string | null;
 }
 
 export const LeadModelRow = ({
@@ -41,6 +42,7 @@ export const LeadModelRow = ({
   onLimitContextChange,
   syncModelsWithTeammates,
   onSyncModelsWithTeammatesChange,
+  warningText,
 }: LeadModelRowProps): React.JSX.Element => {
   const { isLight } = useTheme();
   const [modelExpanded, setModelExpanded] = useState(false);
@@ -102,6 +104,14 @@ export const LeadModelRow = ({
           </Button>
         </div>
       </div>
+      {warningText ? (
+        <div className="md:col-span-3">
+          <div className="bg-amber-500/8 ml-3 flex items-start gap-2 rounded-md border border-amber-500/25 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+            <Info className="mt-0.5 size-3.5 shrink-0 text-amber-300" />
+            <p>{warningText}</p>
+          </div>
+        </div>
+      ) : null}
       {modelExpanded ? (
         <div className="space-y-2 md:col-span-3">
           <TeamModelSelector

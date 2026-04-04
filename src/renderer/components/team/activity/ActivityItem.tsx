@@ -23,6 +23,12 @@ import {
   parseMessageReply,
   parseStructuredAgentMessage,
 } from '@renderer/utils/agentMessageFormatting';
+import {
+  getBootstrapAcknowledgementDisplay,
+  getBootstrapPromptDisplay,
+  getSanitizedInboxMessageSummary,
+  getSanitizedInboxMessageText,
+} from '@renderer/utils/bootstrapPromptSanitizer';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { linkifyAllMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import {
@@ -291,6 +297,80 @@ const NoiseRow = ({
   </div>
 );
 
+const BootstrapSystemRow = ({
+  senderName,
+  recipientName,
+  runtime,
+  senderColor,
+  recipientColor,
+  timestamp,
+  onMemberNameClick,
+}: {
+  senderName: string;
+  recipientName: string;
+  runtime?: string;
+  senderColor?: string;
+  recipientColor?: string;
+  timestamp: string;
+  onMemberNameClick?: (memberName: string) => void;
+}): React.JSX.Element => (
+  <div className="flex items-center gap-2 px-3 py-2" style={{ opacity: 0.82 }}>
+    <span className="bg-sky-500/12 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-300">
+      start
+    </span>
+    <MemberBadge name={senderName} color={senderColor} hideAvatar onClick={onMemberNameClick} />
+    <MoveRight size={10} style={{ color: CARD_ICON_MUTED }} className="shrink-0" />
+    <MemberBadge
+      name={recipientName}
+      color={recipientColor}
+      hideAvatar
+      onClick={onMemberNameClick}
+    />
+    <span className="min-w-0 flex-1 truncate text-[11px]" style={{ color: CARD_ICON_MUTED }}>
+      {runtime || 'Starting teammate'}
+    </span>
+    <span className="shrink-0 text-[10px]" style={{ color: CARD_ICON_MUTED }}>
+      {timestamp}
+    </span>
+  </div>
+);
+
+const BootstrapAcknowledgementRow = ({
+  senderName,
+  recipientName,
+  senderColor,
+  recipientColor,
+  timestamp,
+  onMemberNameClick,
+}: {
+  senderName: string;
+  recipientName: string;
+  senderColor?: string;
+  recipientColor?: string;
+  timestamp: string;
+  onMemberNameClick?: (memberName: string) => void;
+}): React.JSX.Element => (
+  <div className="flex items-center gap-2 px-3 py-2" style={{ opacity: 0.72 }}>
+    <span className="bg-emerald-500/12 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-300">
+      bootstrap
+    </span>
+    <MemberBadge name={senderName} color={senderColor} hideAvatar onClick={onMemberNameClick} />
+    <MoveRight size={10} style={{ color: CARD_ICON_MUTED }} className="shrink-0" />
+    <MemberBadge
+      name={recipientName}
+      color={recipientColor}
+      hideAvatar
+      onClick={onMemberNameClick}
+    />
+    <span className="min-w-0 flex-1 truncate text-[11px]" style={{ color: CARD_ICON_MUTED }}>
+      Bootstrap acknowledged
+    </span>
+    <span className="shrink-0 text-[10px]" style={{ color: CARD_ICON_MUTED }}>
+      {timestamp}
+    </span>
+  </div>
+);
+
 // ---------------------------------------------------------------------------
 // Detect historical system/automated messages that should be collapsed by default.
 // These patterns are kept only for legacy compatibility with old inbox/session rows;
@@ -452,6 +532,11 @@ export const ActivityItem = memo(
     }, [message.timestamp]);
 
     const structured = parseStructuredAgentMessage(message.text);
+    const bootstrapDisplay = useMemo(() => getBootstrapPromptDisplay(message), [message]);
+    const bootstrapAcknowledgement = useMemo(
+      () => getBootstrapAcknowledgementDisplay(message),
+      [message]
+    );
     // Only flag agent messages as rate-limited, not user's own quotes
     const rateLimited = message.from !== 'user' && isRateLimitMessage(message.text);
     // Highlight messages containing API errors
@@ -510,7 +595,10 @@ export const ActivityItem = memo(
     // Strip agent-only blocks + normalize escape sequences (before linkification)
     const strippedText = useMemo(() => {
       if (structured) return null;
-      let stripped = stripAgentBlocks(message.text).trim();
+      let stripped = getSanitizedInboxMessageText(message).trim();
+      if (!bootstrapDisplay) {
+        stripped = stripAgentBlocks(stripped).trim();
+      }
       if (!stripped) return null; // All content was agent-only blocks → show summary instead
       // Strip cross-team metadata tag (e.g. `<cross-team from="team.lead" depth="0" />\n`)
       // — kept in stored text for CLI agents / durable artifacts.
@@ -519,7 +607,7 @@ export const ActivityItem = memo(
       }
       // Normalize literal \n from historical CLI-produced text to real newlines
       return stripped.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
-    }, [structured, message.text, isCrossTeamAny]);
+    }, [structured, message, bootstrapDisplay, isCrossTeamAny]);
     const standaloneSlashCommand = useMemo(
       () => (strippedText ? parseStandaloneSlashCommand(strippedText) : null),
       [strippedText]
@@ -580,10 +668,12 @@ export const ActivityItem = memo(
       }
       if (crossTeamPreview) return crossTeamPreview;
       const s =
-        message.summary || (structured ? getStructuredMessageSummary(structured) : '') || '';
+        getSanitizedInboxMessageSummary(message) ||
+        (structured ? getStructuredMessageSummary(structured) : '') ||
+        '';
       if (s) return s;
       // Fallback: use the beginning of message text as preview for plain-text messages
-      const plain = stripAgentBlocks(message.text).trim();
+      const plain = getSanitizedInboxMessageText(message).trim();
       if (!plain) return '';
       const oneLine = plain.replace(/\n+/g, ' ');
       return oneLine.length > 80 ? oneLine.slice(0, 80) + '…' : oneLine;
@@ -592,10 +682,8 @@ export const ActivityItem = memo(
       isSlashCommandMessage,
       isSlashCommandResult,
       message.commandOutput,
-      message.summary,
-      message.text,
+      message,
       slashCommandMeta,
-      standaloneSlashCommand,
       structured,
     ]);
     const summaryText = useMemo(() => extractMarkdownPlainText(rawSummary), [rawSummary]);
@@ -632,6 +720,33 @@ export const ActivityItem = memo(
       );
     }
 
+    if (bootstrapDisplay) {
+      return (
+        <BootstrapSystemRow
+          senderName={senderName}
+          recipientName={bootstrapDisplay.teammateName ?? message.to ?? 'teammate'}
+          runtime={bootstrapDisplay.runtime}
+          senderColor={senderColor}
+          recipientColor={recipientColor}
+          timestamp={timestamp}
+          onMemberNameClick={onMemberNameClick}
+        />
+      );
+    }
+
+    if (bootstrapAcknowledgement) {
+      return (
+        <BootstrapAcknowledgementRow
+          senderName={senderName}
+          recipientName={message.to ?? 'lead'}
+          senderColor={senderColor}
+          recipientColor={recipientColor}
+          timestamp={timestamp}
+          onMemberNameClick={onMemberNameClick}
+        />
+      );
+    }
+
     const messageType =
       structured && typeof structured.type === 'string'
         ? getMessageTypeLabel(structured.type)
@@ -642,18 +757,10 @@ export const ActivityItem = memo(
       const subject = message.summary || autoSummary || `Task from ${message.from}`;
       const plainText = structured
         ? JSON.stringify(structured, null, 2)
-        : stripAgentBlocks(message.text);
+        : getSanitizedInboxMessageText(message);
       const description = `From: ${message.from}\nAt: ${timestamp}\n\n${plainText}`.slice(0, 2000);
       onCreateTask?.(subject, description);
-    }, [
-      autoSummary,
-      message.from,
-      message.summary,
-      message.text,
-      onCreateTask,
-      structured,
-      timestamp,
-    ]);
+    }, [autoSummary, message.from, message.summary, message, onCreateTask, structured, timestamp]);
 
     const isHeaderClickable = isManaged && canToggleCollapse;
     const showChevron = isHeaderClickable && !compactHeader;

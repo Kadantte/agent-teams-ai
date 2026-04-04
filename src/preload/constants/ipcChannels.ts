@@ -417,6 +417,9 @@ export const CROSS_TEAM_GET_OUTBOX = 'crossTeam:getOutbox';
 /** Get CLI installation status */
 export const CLI_INSTALLER_GET_STATUS = 'cliInstaller:getStatus';
 
+/** Get status for a single provider */
+export const CLI_INSTALLER_GET_PROVIDER_STATUS = 'cliInstaller:getProviderStatus';
+
 /** Start CLI install/update */
 export const CLI_INSTALLER_INSTALL = 'cliInstaller:install';
 

@@ -215,6 +215,13 @@ export interface GeneralConfig {
   telemetryEnabled: boolean;
 }
 
+export interface RuntimeConfig {
+  providerBackends: {
+    gemini: 'auto' | 'api' | 'cli-sdk';
+    codex: 'auto' | 'adapter';
+  };
+}
+
 export interface DisplayConfig {
   showTimestamps: boolean;
   compactMode: boolean;
@@ -247,6 +254,7 @@ export interface HttpServerConfig {
 export interface AppConfig {
   notifications: NotificationConfig;
   general: GeneralConfig;
+  runtime: RuntimeConfig;
   display: DisplayConfig;
   sessions: SessionsConfig;
   ssh: SshPersistConfig;
@@ -298,6 +306,12 @@ const DEFAULT_CONFIG: AppConfig = {
     useNativeTitleBar: false,
     customProjectPaths: [],
     telemetryEnabled: true,
+  },
+  runtime: {
+    providerBackends: {
+      gemini: 'auto',
+      codex: 'auto',
+    },
   },
   display: {
     showTimestamps: true,
@@ -468,6 +482,12 @@ export class ConfigManager {
         triggers: mergedTriggers,
       },
       general: mergedGeneral,
+      runtime: {
+        providerBackends: {
+          ...DEFAULT_CONFIG.runtime.providerBackends,
+          ...(loaded.runtime?.providerBackends ?? {}),
+        },
+      },
       display: {
         ...DEFAULT_CONFIG.display,
         ...(loaded.display ?? {}),
@@ -540,8 +560,19 @@ export class ConfigManager {
     section: K,
     data: Partial<AppConfig[K]>
   ): Partial<AppConfig[K]> {
-    if (section !== 'general') {
+    if (section !== 'general' && section !== 'runtime') {
       return data;
+    }
+
+    if (section === 'runtime') {
+      const runtimeUpdate = data as Partial<RuntimeConfig>;
+      return {
+        ...runtimeUpdate,
+        providerBackends: {
+          ...this.config.runtime.providerBackends,
+          ...runtimeUpdate.providerBackends,
+        },
+      } as unknown as Partial<AppConfig[K]>;
     }
 
     if (!Object.prototype.hasOwnProperty.call(data, 'claudeRootPath')) {

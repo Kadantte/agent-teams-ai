@@ -62,6 +62,7 @@ import { initializeIpcHandlers, removeIpcHandlers } from './ipc/handlers';
 import { setReviewMainWindow } from './ipc/review';
 import {
   ApiKeyService,
+  RUNTIME_MANAGED_API_KEY_ENV_VARS,
   ExtensionFacadeService,
   GlamaMcpEnrichmentService,
   McpCatalogAggregator,
@@ -536,9 +537,6 @@ function wireFileWatcherEvents(context: ServiceContext): void {
           if (match && teamDataService) {
             const inboxName = match[1];
 
-            // Mark member as online when their first inbox message arrives (spawn tracking).
-            teamProvisioningService.markMemberOnlineFromInbox(teamName, inboxName);
-
             void teamDataService
               .getLeadMemberName(teamName)
               .then((leadName) => {
@@ -716,7 +714,7 @@ function reconfigureLocalContextForClaudeRoot(): void {
 /**
  * Initializes all services.
  */
-function initializeServices(): void {
+async function initializeServices(): Promise<void> {
   logger.info('Initializing services...');
 
   // Initialize SSH connection manager
@@ -839,6 +837,7 @@ function initializeServices(): void {
   const pluginInstallService = new PluginInstallService(pluginCatalogService);
   const mcpInstallService = new McpInstallService(mcpAggregator);
   const apiKeyService = new ApiKeyService();
+  await apiKeyService.syncProcessEnv(RUNTIME_MANAGED_API_KEY_ENV_VARS);
   // warmup() and ensureInstalled() are deferred to after window creation
   // (did-finish-load handler) to avoid thread pool contention at startup.
   httpServer = new HttpServer();
@@ -1392,7 +1391,7 @@ function createWindow(): void {
 /**
  * Application ready handler.
  */
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   logger.info('App ready, initializing...');
 
   // Pre-warm interactive shell env cache (non-blocking).
@@ -1403,7 +1402,7 @@ void app.whenReady().then(() => {
 
   try {
     // Initialize services first
-    initializeServices();
+    await initializeServices();
 
     // Apply configuration settings
     const config = configManager.getConfig();

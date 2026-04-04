@@ -144,7 +144,12 @@ export function initializeNotificationListeners(): () => void {
     const isWindows = platform.toLowerCase().includes('win');
     const delayMs = isWindows ? 3000 : 0;
     cliStatusTimer = setTimeout(() => {
-      void useStore.getState().fetchCliStatus();
+      const multimodelEnabled = useStore.getState().appConfig?.general?.multimodelEnabled ?? true;
+      if (multimodelEnabled) {
+        void useStore.getState().bootstrapCliStatus({ multimodelEnabled: true });
+      } else {
+        void useStore.getState().fetchCliStatus();
+      }
       cliStatusTimer = null;
     }, delayMs);
   }

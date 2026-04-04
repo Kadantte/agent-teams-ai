@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@renderer/components/ui/button';
 import { useStore } from '@renderer/store';
 import { getCurrentProvisioningProgressForTeam } from '@renderer/store/slices/teamSlice';
+import { isLeadMember } from '@shared/utils/leadDetection';
 import { X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -16,11 +17,12 @@ interface TeamProvisioningBannerProps {
 export const TeamProvisioningBanner = ({
   teamName,
 }: TeamProvisioningBannerProps): React.JSX.Element | null => {
-  const { progress, cancelProvisioning, teamMembers } = useStore(
+  const { progress, cancelProvisioning, teamMembers, memberSpawnStatuses } = useStore(
     useShallow((s) => ({
       progress: getCurrentProvisioningProgressForTeam(s, teamName),
       cancelProvisioning: s.cancelProvisioning,
       teamMembers: s.selectedTeamData?.members,
+      memberSpawnStatuses: s.memberSpawnStatusesByTeam[teamName],
     }))
   );
   const [dismissed, setDismissed] = useState(false);
@@ -102,15 +104,37 @@ export const TeamProvisioningBanner = ({
     );
   }
 
-  const allTeammatesOnline =
-    teamMembers != null &&
-    teamMembers.length > 0 &&
-    teamMembers.every((m) => m.status === 'active' || m.status === 'idle');
+  const teammates = (teamMembers ?? []).filter((member) => !isLeadMember(member));
+  const failedSpawnEntries = Object.entries(memberSpawnStatuses ?? {}).filter(
+    ([, entry]) => entry.status === 'error'
+  );
+  const failedSpawnCount = failedSpawnEntries.length;
+  const heartbeatConfirmedCount = teammates.filter((member) => {
+    const entry = memberSpawnStatuses?.[member.name];
+    return entry?.status === 'online' && entry.livenessSource === 'heartbeat';
+  }).length;
+  const processOnlyAliveCount = teammates.filter((member) => {
+    const entry = memberSpawnStatuses?.[member.name];
+    return entry?.status === 'online' && entry.livenessSource === 'process';
+  }).length;
+  const awaitingHeartbeatCount = teammates.filter((member) => {
+    const entry = memberSpawnStatuses?.[member.name];
+    return entry?.status === 'waiting';
+  }).length;
+  const allTeammatesConfirmedAlive =
+    teammates.length > 0 && failedSpawnCount === 0 && heartbeatConfirmedCount === teammates.length;
 
   if (isReady) {
-    const readyMessage = allTeammatesOnline
-      ? `Team launched — all ${teamMembers.length} teammates online`
-      : 'Team launched — teammates may still be starting';
+    const readyMessage =
+      failedSpawnCount > 0
+        ? `Launch finished with errors — ${failedSpawnCount}/${Math.max(teammates.length, failedSpawnCount)} teammates failed to start`
+        : teammates.length === 0
+          ? 'Team launched — lead online'
+          : allTeammatesConfirmedAlive
+            ? `Team launched — all ${teammates.length} teammates confirmed alive`
+            : processOnlyAliveCount > 0 || awaitingHeartbeatCount > 0
+              ? `Team launched — ${heartbeatConfirmedCount}/${teammates.length} teammates confirmed alive${processOnlyAliveCount > 0 ? `, ${processOnlyAliveCount} runtime${processOnlyAliveCount === 1 ? '' : 's'} alive but bootstrap still pending` : ''}${awaitingHeartbeatCount > 0 ? `${processOnlyAliveCount > 0 ? ', ' : ', '}${awaitingHeartbeatCount} awaiting first heartbeat` : ''}`
+              : 'Team launched — teammate liveness is still being confirmed';
 
     return (
       <div className="mb-3">
@@ -127,6 +151,7 @@ export const TeamProvisioningBanner = ({
           defaultLiveOutputOpen={false}
           onCancel={null}
           successMessage={readyMessage}
+          successMessageSeverity={failedSpawnCount > 0 ? 'warning' : 'success'}
           onDismiss={() => setDismissed(true)}
         />
       </div>

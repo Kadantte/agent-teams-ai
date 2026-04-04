@@ -458,8 +458,10 @@ export const TeamDetailView = ({
     launchParams,
     messagesPanelMode,
     messagesPanelWidth,
+    sidebarLogsHeight,
     setMessagesPanelMode,
     setMessagesPanelWidth,
+    setSidebarLogsHeight,
   } = useStore(
     useShallow((s) => ({
       data: s.selectedTeamData,
@@ -507,8 +509,10 @@ export const TeamDetailView = ({
       launchParams: teamName ? s.launchParamsByTeam[teamName] : undefined,
       messagesPanelMode: s.messagesPanelMode,
       messagesPanelWidth: s.messagesPanelWidth,
+      sidebarLogsHeight: s.sidebarLogsHeight,
       setMessagesPanelMode: s.setMessagesPanelMode,
       setMessagesPanelWidth: s.setMessagesPanelWidth,
+      setSidebarLogsHeight: s.setSidebarLogsHeight,
     }))
   );
 
@@ -533,6 +537,13 @@ export const TeamDetailView = ({
       maxWidth: 600,
       side: 'left',
     });
+  const { isResizing: isLogsPanelResizing, handleProps: logsPanelHandleProps } = useResizablePanel({
+    height: sidebarLogsHeight,
+    onHeightChange: setSidebarLogsHeight,
+    minHeight: 120,
+    maxHeight: 520,
+    side: 'top',
+  });
 
   const toggleMessagesPanelMode = useCallback(() => {
     setMessagesPanelMode(messagesPanelMode === 'sidebar' ? 'inline' : 'sidebar');
@@ -554,17 +565,28 @@ export const TeamDetailView = ({
 
   // Fetch initial spawn statuses when provisioning starts
   useEffect(() => {
-    if (isTeamProvisioning && teamName) {
+    if (teamName && (isTeamProvisioning || memberSpawnStatuses == null)) {
       void fetchMemberSpawnStatuses(teamName);
     }
-  }, [isTeamProvisioning, teamName, fetchMemberSpawnStatuses]);
+  }, [isTeamProvisioning, memberSpawnStatuses, teamName, fetchMemberSpawnStatuses]);
 
   // Convert Record<string, MemberSpawnStatusEntry> → Map<string, MemberSpawnEntry>
   const memberSpawnStatusMap = useMemo(() => {
     if (!memberSpawnStatuses) return undefined;
-    const map = new Map<string, { status: MemberSpawnStatusEntry['status']; error?: string }>();
+    const map = new Map<
+      string,
+      {
+        status: MemberSpawnStatusEntry['status'];
+        error?: string;
+        livenessSource?: MemberSpawnStatusEntry['livenessSource'];
+      }
+    >();
     for (const [name, entry] of Object.entries(memberSpawnStatuses)) {
-      map.set(name, { status: entry.status, error: entry.error });
+      map.set(name, {
+        status: entry.status,
+        error: entry.error,
+        livenessSource: entry.livenessSource,
+      });
     }
     return map.size > 0 ? map : undefined;
   }, [memberSpawnStatuses]);
@@ -631,6 +653,11 @@ export const TeamDetailView = ({
       clearKanbanFilter();
     }
   }, [kanbanFilterQuery, clearKanbanFilter]);
+
+  const currentTeamSummary = useMemo(
+    () => teams.find((team) => team.teamName === teamName) ?? null,
+    [teams, teamName]
+  );
 
   // Load sessions for the team's project
   const projectId = useMemo(
@@ -1303,6 +1330,9 @@ export const TeamDetailView = ({
               messagesPanelProps={sharedMessagesPanelProps}
               isResizing={isMessagesPanelResizing}
               onResizeMouseDown={messagesPanelHandleProps.onMouseDown}
+              logsHeight={sidebarLogsHeight}
+              isLogsResizing={isLogsPanelResizing}
+              onLogsResizeMouseDown={logsPanelHandleProps.onMouseDown}
             />
           </TeamSidebarPortalSource>
         </TeamSidebarHost>
@@ -1382,27 +1412,6 @@ export const TeamDetailView = ({
                       Launching...
                     </span>
                   )}
-                  {data.isAlive &&
-                    launchParams?.model &&
-                    (() => {
-                      const MODEL_LABELS: Record<string, string> = {
-                        default: 'Default',
-                        opus: 'Opus 4.6',
-                        sonnet: 'Sonnet 4.6',
-                        haiku: 'Haiku 4.5',
-                      };
-                      const modelLabel = MODEL_LABELS[launchParams.model] ?? launchParams.model;
-                      const effortLabel = launchParams.effort
-                        ? launchParams.effort.charAt(0).toUpperCase() + launchParams.effort.slice(1)
-                        : '';
-                      const limitLabel = launchParams.limitContext ? '200K' : '';
-                      const parts = [modelLabel, effortLabel, limitLabel].filter(Boolean).join(' ');
-                      return (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-secondary)]">
-                          {parts}
-                        </span>
-                      );
-                    })()}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
@@ -1542,7 +1551,11 @@ export const TeamDetailView = ({
             >
               <span className="flex items-center gap-1.5 text-xs">
                 <AlertTriangle size={14} className="shrink-0" />
-                Team is offline
+                {currentTeamSummary?.partialLaunchFailure
+                  ? currentTeamSummary.missingMembers?.length
+                    ? `Last launch failed partway — ${currentTeamSummary.missingMembers.length}/${currentTeamSummary.expectedMemberCount ?? currentTeamSummary.missingMembers.length} teammates did not join`
+                    : 'Last launch failed partway'
+                  : 'Team is offline'}
               </span>
               <Button
                 variant="ghost"

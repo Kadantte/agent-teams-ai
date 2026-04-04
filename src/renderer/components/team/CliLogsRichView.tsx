@@ -49,6 +49,7 @@ interface CliLogsRichViewProps {
   /** Optional local search query override for inline highlighting */
   searchQueryOverride?: string;
   className?: string;
+  style?: React.CSSProperties;
   /** Content rendered at the very bottom of the scroll container (e.g. "Show more" button). */
   footer?: React.ReactNode;
 
@@ -341,6 +342,7 @@ export const CliLogsRichView = ({
   containerRefCallback,
   searchQueryOverride,
   className,
+  style,
   footer,
   viewerState: controlledState,
   onViewerStateChange,
@@ -557,6 +559,7 @@ export const CliLogsRichView = ({
           'max-h-[400px] overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-surface)]',
           className
         )}
+        style={style}
         onScroll={(e) => handleScrollEvent(e.currentTarget)}
       >
         <div className="flex items-center gap-2 p-3">
@@ -582,6 +585,7 @@ export const CliLogsRichView = ({
         containerRefCallback?.(el);
       }}
       className={cn('cli-logs-compact max-h-[400px] space-y-1 overflow-y-auto', className)}
+      style={style}
       onScroll={(e) => handleScrollEvent(e.currentTarget)}
     >
       {visibleEntries.map((entry) =>

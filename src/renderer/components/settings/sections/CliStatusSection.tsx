@@ -9,10 +9,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { isElectronMode } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
+import { ProviderRuntimeSettingsDialog } from '@renderer/components/runtime/ProviderRuntimeSettingsDialog';
+import { getProviderRuntimeBackendSummary } from '@renderer/components/runtime/ProviderRuntimeBackendSelector';
 import { SettingsToggle } from '@renderer/components/settings/components';
 import { TerminalModal } from '@renderer/components/terminal/TerminalModal';
 import { useCliInstaller } from '@renderer/hooks/useCliInstaller';
 import { useStore } from '@renderer/store';
+import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import { formatBytes } from '@renderer/utils/formatters';
 import {
   AlertTriangle,
@@ -23,12 +26,13 @@ import {
   LogOut,
   Puzzle,
   RefreshCw,
+  SlidersHorizontal,
   Terminal,
 } from 'lucide-react';
 
 import { SettingsSectionHeader } from '../components';
 
-import type { CliInstallationStatus, CliProviderId } from '@shared/types';
+import type { CliProviderId, CliProviderStatus } from '@shared/types';
 
 function formatModelBadgeLabel(providerId: CliProviderId, model: string): string {
   if (providerId === 'anthropic') {
@@ -69,6 +73,40 @@ function ModelBadges({
   );
 }
 
+function ProviderDetailSkeleton(): React.JSX.Element {
+  return (
+    <div className="mt-1 space-y-2">
+      <div
+        className="skeleton-shimmer h-3 rounded-sm"
+        style={{ width: '58%', backgroundColor: 'var(--skeleton-base)' }}
+      />
+      <div className="flex flex-wrap gap-1.5">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className="skeleton-shimmer h-6 rounded-md border"
+            style={{
+              width: index === 0 ? 56 : index === 1 ? 84 : index === 2 ? 72 : 96,
+              borderColor: 'var(--color-border-subtle)',
+              backgroundColor: 'var(--skeleton-base-dim)',
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function isProviderCardLoading(provider: CliProviderStatus, providerLoading: boolean): boolean {
+  return (
+    providerLoading ||
+    (!provider.authenticated &&
+      provider.statusMessage === 'Checking...' &&
+      provider.models.length === 0 &&
+      provider.backend == null)
+  );
+}
+
 function getProviderLabel(providerId: CliProviderId): string {
   switch (providerId) {
     case 'anthropic':
@@ -80,74 +118,41 @@ function getProviderLabel(providerId: CliProviderId): string {
   }
 }
 
-function getProviderTerminalCommand(providerId: CliProviderId): {
+function getProviderTerminalCommand(provider: CliProviderStatus): {
   args: string[];
   env?: Record<string, string>;
 } {
-  if (providerId === 'gemini') {
+  if (provider.providerId === 'gemini') {
     return {
       args: ['login'],
-      env: { CLAUDE_CODE_USE_GEMINI: '1' },
+      env: {
+        CLAUDE_CODE_ENTRY_PROVIDER: 'gemini',
+        CLAUDE_CODE_GEMINI_BACKEND: provider.selectedBackendId ?? 'auto',
+      },
     };
   }
 
   return {
-    args: ['auth', 'login', '--provider', providerId],
+    args: ['auth', 'login', '--provider', provider.providerId],
   };
 }
 
-function getProviderTerminalLogoutCommand(providerId: CliProviderId): {
+function getProviderTerminalLogoutCommand(provider: CliProviderStatus): {
   args: string[];
   env?: Record<string, string>;
 } {
-  if (providerId === 'gemini') {
+  if (provider.providerId === 'gemini') {
     return {
       args: ['logout'],
-      env: { CLAUDE_CODE_USE_GEMINI: '1' },
+      env: {
+        CLAUDE_CODE_ENTRY_PROVIDER: 'gemini',
+        CLAUDE_CODE_GEMINI_BACKEND: provider.selectedBackendId ?? 'auto',
+      },
     };
   }
 
   return {
-    args: ['auth', 'logout', '--provider', providerId],
-  };
-}
-
-function createLoadingMultimodelStatus(): CliInstallationStatus {
-  const providers: Array<{ providerId: CliProviderId; displayName: string }> = [
-    { providerId: 'anthropic', displayName: 'Anthropic' },
-    { providerId: 'codex', displayName: 'Codex' },
-    { providerId: 'gemini', displayName: 'Gemini' },
-  ];
-
-  return {
-    flavor: 'free-code',
-    displayName: 'free-code-gemini-research',
-    supportsSelfUpdate: false,
-    showVersionDetails: false,
-    showBinaryPath: false,
-    installed: true,
-    installedVersion: null,
-    binaryPath: null,
-    latestVersion: null,
-    updateAvailable: false,
-    authLoggedIn: false,
-    authStatusChecking: true,
-    authMethod: null,
-    providers: providers.map((provider) => ({
-      ...provider,
-      supported: false,
-      authenticated: false,
-      authMethod: null,
-      verificationState: 'unknown' as const,
-      statusMessage: 'Checking...',
-      models: [],
-      canLoginFromUi: true,
-      capabilities: {
-        teamLaunch: false,
-        oneShot: false,
-      },
-      backend: null,
-    })),
+    args: ['auth', 'logout', '--provider', provider.providerId],
   };
 }
 
@@ -163,28 +168,39 @@ export const CliStatusSection = (): React.JSX.Element | null => {
     downloadTotal,
     installerError,
     completedVersion,
+    bootstrapCliStatus,
     fetchCliStatus,
+    fetchCliProviderStatus,
     installCli,
     isBusy,
     cliStatusLoading,
+    cliProviderStatusLoading,
     invalidateCliStatus,
   } = useCliInstaller();
   const [providerTerminal, setProviderTerminal] = useState<{
     providerId: CliProviderId;
     action: 'login' | 'logout';
   } | null>(null);
+  const [manageProviderId, setManageProviderId] = useState<CliProviderId>('gemini');
+  const [manageDialogOpen, setManageDialogOpen] = useState(false);
   const [isSwitchingFlavor, setIsSwitchingFlavor] = useState(false);
   const multimodelEnabled = appConfig?.general?.multimodelEnabled ?? true;
   const effectiveCliStatus =
     !cliStatus && cliStatusLoading && multimodelEnabled
-      ? createLoadingMultimodelStatus()
+      ? createLoadingMultimodelCliStatus()
       : cliStatus;
 
   useEffect(() => {
     if (isElectron) {
-      void fetchCliStatus();
+      if (!cliStatus) {
+        if (multimodelEnabled) {
+          void bootstrapCliStatus({ multimodelEnabled: true });
+        } else {
+          void fetchCliStatus();
+        }
+      }
     }
-  }, [isElectron, fetchCliStatus]);
+  }, [bootstrapCliStatus, cliStatus, fetchCliStatus, isElectron, multimodelEnabled]);
 
   const handleInstall = useCallback(() => {
     installCli();
@@ -213,6 +229,11 @@ export const CliStatusSection = (): React.JSX.Element | null => {
     });
   }, []);
 
+  const handleProviderManage = useCallback((providerId: CliProviderId) => {
+    setManageProviderId(providerId);
+    setManageDialogOpen(true);
+  }, []);
+
   const recheckStatus = useCallback(() => {
     void (async () => {
       await invalidateCliStatus();
@@ -225,18 +246,22 @@ export const CliStatusSection = (): React.JSX.Element | null => {
       setIsSwitchingFlavor(true);
       try {
         useStore.setState({
-          cliStatus: enabled ? createLoadingMultimodelStatus() : null,
+          cliStatus: enabled ? createLoadingMultimodelCliStatus() : null,
           cliStatusLoading: true,
           cliStatusError: null,
         });
         await updateConfig('general', { multimodelEnabled: enabled });
         await invalidateCliStatus();
-        await fetchCliStatus();
+        if (enabled) {
+          await bootstrapCliStatus({ multimodelEnabled: true });
+        } else {
+          await fetchCliStatus();
+        }
       } finally {
         setIsSwitchingFlavor(false);
       }
     },
-    [fetchCliStatus, invalidateCliStatus, updateConfig]
+    [bootstrapCliStatus, fetchCliStatus, invalidateCliStatus, updateConfig]
   );
 
   if (!isElectron) return null;
@@ -250,11 +275,39 @@ export const CliStatusSection = (): React.JSX.Element | null => {
         ? `${effectiveCliStatus.displayName} v${effectiveCliStatus.installedVersion ?? 'unknown'}`
         : (effectiveCliStatus?.displayName ?? 'Claude CLI');
 
-  const providerTerminalCommand = providerTerminal
-    ? providerTerminal.action === 'login'
-      ? getProviderTerminalCommand(providerTerminal.providerId)
-      : getProviderTerminalLogoutCommand(providerTerminal.providerId)
+  const activeTerminalProvider = providerTerminal
+    ? (effectiveCliStatus?.providers.find(
+        (provider) => provider.providerId === providerTerminal.providerId
+      ) ?? null)
     : null;
+  const providerTerminalCommand =
+    providerTerminal && activeTerminalProvider
+      ? providerTerminal.action === 'login'
+        ? getProviderTerminalCommand(activeTerminalProvider)
+        : getProviderTerminalLogoutCommand(activeTerminalProvider)
+      : null;
+
+  const handleRuntimeBackendChange = useCallback(
+    async (providerId: CliProviderId, backendId: string) => {
+      const currentBackends = appConfig?.runtime?.providerBackends ?? {
+        gemini: 'auto' as const,
+        codex: 'auto' as const,
+      };
+
+      if (providerId !== 'gemini' && providerId !== 'codex') {
+        return;
+      }
+
+      await updateConfig('runtime', {
+        providerBackends: {
+          ...currentBackends,
+          [providerId]: backendId,
+        },
+      });
+      await fetchCliProviderStatus(providerId);
+    },
+    [appConfig?.runtime?.providerBackends, fetchCliProviderStatus, updateConfig]
+  );
 
   return (
     <div className="mb-2">
@@ -381,94 +434,141 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                     {effectiveCliStatus.providers.map((provider) => (
                       <div
                         key={provider.providerId}
-                        className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-md border px-3 py-2"
+                        className="grid min-h-[132px] grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-md border px-3 py-2"
                         style={{
                           borderColor: 'var(--color-border-subtle)',
                           backgroundColor: 'rgba(255, 255, 255, 0.02)',
                         }}
                       >
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-xs">
-                            <span
-                              className="font-medium"
-                              style={{ color: 'var(--color-text-secondary)' }}
-                            >
-                              {provider.displayName}
-                            </span>
-                            <span
-                              style={{
-                                color: provider.authenticated
-                                  ? '#4ade80'
-                                  : 'var(--color-text-muted)',
-                              }}
-                            >
-                              {provider.authenticated
-                                ? provider.authMethod
-                                  ? `Authenticated via ${provider.authMethod}`
-                                  : 'Authenticated'
-                                : provider.statusMessage || 'Not connected'}
-                            </span>
-                          </div>
-                          <div
-                            className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"
-                            style={{ color: 'var(--color-text-muted)' }}
-                          >
-                            {provider.backend?.label && (
-                              <span>Backend: {provider.backend.label}</span>
-                            )}
-                            {provider.models.length === 0 && (
-                              <span>Models unavailable for this runtime build</span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-2">
-                          {provider.authenticated ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleProviderLogout(provider.providerId)}
-                              disabled={!effectiveCliStatus.binaryPath}
-                              className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                              style={{
-                                borderColor: 'var(--color-border)',
-                                color: 'var(--color-text-secondary)',
-                              }}
-                            >
-                              <LogOut className="size-3" />
-                              Logout
-                            </button>
-                          ) : provider.canLoginFromUi ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setProviderTerminal({
-                                  providerId: provider.providerId,
-                                  action: 'login',
-                                })
-                              }
-                              disabled={!effectiveCliStatus.binaryPath || !provider.canLoginFromUi}
-                              className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                              style={{
-                                borderColor: 'var(--color-border)',
-                                color: 'var(--color-text-secondary)',
-                              }}
-                            >
-                              <LogIn className="size-3" />
-                              Login
-                            </button>
-                          ) : null}
-                        </div>
-                        {provider.models.length > 0 && (
-                          <div className="col-span-2">
-                            <ModelBadges
-                              providerId={provider.providerId}
-                              models={provider.models}
-                            />
-                          </div>
-                        )}
+                        {(() => {
+                          const providerLoading =
+                            cliProviderStatusLoading[provider.providerId] === true;
+                          const showSkeleton = isProviderCardLoading(provider, providerLoading);
+                          const runtimeSummary = getProviderRuntimeBackendSummary(provider);
+
+                          return (
+                            <>
+                              <div className="col-span-2 flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 text-xs">
+                                    <span
+                                      className="font-medium"
+                                      style={{ color: 'var(--color-text-secondary)' }}
+                                    >
+                                      {provider.displayName}
+                                    </span>
+                                    <span
+                                      style={{
+                                        color: provider.authenticated
+                                          ? '#4ade80'
+                                          : 'var(--color-text-muted)',
+                                      }}
+                                    >
+                                      {provider.authenticated
+                                        ? provider.authMethod
+                                          ? `Authenticated via ${provider.authMethod}`
+                                          : 'Authenticated'
+                                        : provider.statusMessage || 'Not connected'}
+                                    </span>
+                                  </div>
+                                  {showSkeleton ? (
+                                    <ProviderDetailSkeleton />
+                                  ) : (
+                                    <div
+                                      className="mt-1 flex min-h-[2.75rem] flex-wrap gap-x-3 gap-y-1 text-[11px]"
+                                      style={{ color: 'var(--color-text-muted)' }}
+                                    >
+                                      {provider.backend?.label && (
+                                        <span>Backend: {provider.backend.label}</span>
+                                      )}
+                                      {runtimeSummary ? (
+                                        <span>Runtime: {runtimeSummary}</span>
+                                      ) : null}
+                                      {provider.models.length === 0 && (
+                                        <span>Models unavailable for this runtime build</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex shrink-0 items-start gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleProviderManage(provider.providerId)}
+                                    disabled={!effectiveCliStatus.binaryPath}
+                                    className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
+                                    style={{
+                                      borderColor: 'var(--color-border)',
+                                      color: 'var(--color-text-secondary)',
+                                    }}
+                                  >
+                                    <SlidersHorizontal className="size-3" />
+                                    Manage
+                                  </button>
+                                  {provider.authenticated && provider.canLoginFromUi ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleProviderLogout(provider.providerId)}
+                                      disabled={!effectiveCliStatus.binaryPath}
+                                      className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
+                                      style={{
+                                        borderColor: 'var(--color-border)',
+                                        color: 'var(--color-text-secondary)',
+                                      }}
+                                    >
+                                      <LogOut className="size-3" />
+                                      Logout
+                                    </button>
+                                  ) : provider.canLoginFromUi ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setProviderTerminal({
+                                          providerId: provider.providerId,
+                                          action: 'login',
+                                        })
+                                      }
+                                      disabled={
+                                        !effectiveCliStatus.binaryPath || !provider.canLoginFromUi
+                                      }
+                                      className="flex items-center gap-1 rounded-md border px-2 py-[3px] text-[10px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
+                                      style={{
+                                        borderColor: 'var(--color-border)',
+                                        color: 'var(--color-text-secondary)',
+                                      }}
+                                    >
+                                      <LogIn className="size-3" />
+                                      Login
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {!showSkeleton && provider.models.length > 0 && (
+                                <div className="col-span-2">
+                                  <ModelBadges
+                                    providerId={provider.providerId}
+                                    models={provider.models}
+                                  />
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     ))}
                   </div>
                 )}
+                <ProviderRuntimeSettingsDialog
+                  open={manageDialogOpen}
+                  onOpenChange={setManageDialogOpen}
+                  providers={effectiveCliStatus.providers}
+                  initialProviderId={manageProviderId}
+                  providerStatusLoading={cliProviderStatusLoading}
+                  disabled={!effectiveCliStatus.binaryPath || isBusy || cliStatusLoading}
+                  onSelectBackend={(providerId, backendId) => {
+                    void handleRuntimeBackendChange(providerId, backendId);
+                  }}
+                  onRefreshProvider={(providerId) => fetchCliProviderStatus(providerId)}
+                />
               </div>
             ) : (
               <div

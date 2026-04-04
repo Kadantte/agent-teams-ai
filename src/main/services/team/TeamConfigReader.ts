@@ -24,6 +24,63 @@ const MAX_CONFIG_READ_BYTES = 10 * 1024 * 1024; // 10MB hard limit for full conf
 const PER_TEAM_READ_TIMEOUT_MS = 5_000;
 const MAX_SESSION_HISTORY_IN_SUMMARY = 2000;
 const MAX_PROJECT_PATH_HISTORY_IN_SUMMARY = 200;
+const MAX_LAUNCH_STATE_BYTES = 32 * 1024;
+const TEAM_LAUNCH_STATE_FILE = 'launch-state.json';
+
+interface PartialLaunchStateSummary {
+  partialLaunchFailure: true;
+  expectedMemberCount: number;
+  confirmedMemberCount: number;
+  missingMembers: string[];
+}
+
+async function readPartialLaunchStateSummary(
+  teamDir: string
+): Promise<PartialLaunchStateSummary | null> {
+  const launchStatePath = path.join(teamDir, TEAM_LAUNCH_STATE_FILE);
+  try {
+    const stat = await fs.promises.stat(launchStatePath);
+    if (!stat.isFile() || stat.size > MAX_LAUNCH_STATE_BYTES) {
+      return null;
+    }
+    const raw = await readFileUtf8WithTimeout(launchStatePath, PER_TEAM_READ_TIMEOUT_MS);
+    const parsed = JSON.parse(raw) as {
+      state?: unknown;
+      expectedMembers?: unknown;
+      confirmedMembers?: unknown;
+      missingMembers?: unknown;
+    };
+    if (parsed.state !== 'partial_launch_failure') {
+      return null;
+    }
+    const expectedMembers = Array.isArray(parsed.expectedMembers)
+      ? parsed.expectedMembers.filter(
+          (name): name is string => typeof name === 'string' && name.trim().length > 0
+        )
+      : [];
+    const confirmedMembers = Array.isArray(parsed.confirmedMembers)
+      ? parsed.confirmedMembers.filter(
+          (name): name is string => typeof name === 'string' && name.trim().length > 0
+        )
+      : [];
+    const missingMembers = Array.isArray(parsed.missingMembers)
+      ? parsed.missingMembers.filter(
+          (name): name is string => typeof name === 'string' && name.trim().length > 0
+        )
+      : [];
+    if (expectedMembers.length === 0 || missingMembers.length === 0) {
+      return null;
+    }
+    return {
+      partialLaunchFailure: true,
+      expectedMemberCount: expectedMembers.length,
+      confirmedMemberCount: confirmedMembers.length,
+      missingMembers,
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function mapLimit<T, R>(
   items: readonly T[],
@@ -132,6 +189,7 @@ export class TeamConfigReader {
 
   private async readTeamSummary(teamsDir: string, teamName: string): Promise<TeamSummary | null> {
     const configPath = path.join(teamsDir, teamName, 'config.json');
+    const teamDir = path.join(teamsDir, teamName);
 
     try {
       let config: TeamConfig | null = null;
@@ -204,6 +262,8 @@ export class TeamConfigReader {
       // Case-insensitive dedup: key is lowercase name, value keeps the original casing
       const memberMap = new Map<string, TeamSummaryMember>();
       const removedKeys = new Set<string>();
+      const expectedTeammateNames = new Set<string>();
+      const confirmedArtifactNames = new Set<string>();
 
       const mergeMember = (m: TeamMember): void => {
         const name = m.name?.trim();
@@ -235,6 +295,7 @@ export class TeamConfigReader {
             removedKeys.add(key);
             continue;
           }
+          expectedTeammateNames.add(name);
           mergeMember(member);
         }
       } catch {
@@ -245,9 +306,26 @@ export class TeamConfigReader {
       if (config && Array.isArray(config.members)) {
         for (const member of config.members) {
           if (member && typeof member.name === 'string') {
+            const name = member.name.trim();
+            if (name && name !== 'user' && !isLeadMember(member)) {
+              confirmedArtifactNames.add(name);
+            }
             mergeMember(member);
           }
         }
+      }
+
+      try {
+        const inboxDir = path.join(teamDir, 'inboxes');
+        const inboxEntries = await fs.promises.readdir(inboxDir, { withFileTypes: true });
+        for (const entry of inboxEntries) {
+          if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+          const inboxName = entry.name.slice(0, -'.json'.length).trim();
+          if (!inboxName || inboxName === 'user' || isLeadMember({ name: inboxName })) continue;
+          confirmedArtifactNames.add(inboxName);
+        }
+      } catch {
+        // best-effort
       }
 
       // Defense: drop CLI auto-suffixed duplicates (alice-2) when base name exists.
@@ -262,6 +340,29 @@ export class TeamConfigReader {
       }
 
       const members = Array.from(memberMap.values());
+      const partialLaunchState =
+        (await readPartialLaunchStateSummary(teamDir)) ??
+        (() => {
+          if (
+            !leadSessionId ||
+            expectedTeammateNames.size === 0 ||
+            confirmedArtifactNames.size === 0
+          ) {
+            return null;
+          }
+          const missingMembers = Array.from(expectedTeammateNames).filter(
+            (name) => !confirmedArtifactNames.has(name)
+          );
+          if (missingMembers.length === 0) {
+            return null;
+          }
+          return {
+            partialLaunchFailure: true as const,
+            expectedMemberCount: expectedTeammateNames.size,
+            confirmedMemberCount: confirmedArtifactNames.size,
+            missingMembers,
+          };
+        })();
       const summary: TeamSummary = {
         teamName,
         displayName,
@@ -276,6 +377,7 @@ export class TeamConfigReader {
         ...(projectPathHistory ? { projectPathHistory } : {}),
         ...(sessionHistory ? { sessionHistory } : {}),
         ...(deletedAt ? { deletedAt } : {}),
+        ...(partialLaunchState ?? {}),
       };
       return summary;
     } catch {

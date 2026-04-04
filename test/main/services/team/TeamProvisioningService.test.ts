@@ -481,4 +481,34 @@ describe('TeamProvisioningService', () => {
       })
     ).toContain('but no logs for 2m is already unusual.');
   });
+
+  it('formats AskUserQuestion approvals with readable question text', () => {
+    const svc = new TeamProvisioningService();
+
+    expect(
+      (svc as any).formatToolApprovalBody('AskUserQuestion', {
+        questions: [
+          {
+            question:
+              'Я испытываю технические трудности с отправкой сообщений с помощью инструмента `SendMessage`.',
+          },
+        ],
+      })
+    ).toBe(
+      'Question: Я испытываю технические трудности с отправкой сообщений с помощью инструмента `SendMessage`.'
+    );
+  });
+
+  it('formats AskUserQuestion approvals with a compact multi-question summary', () => {
+    const svc = new TeamProvisioningService();
+
+    expect(
+      (svc as any).formatToolApprovalBody('AskUserQuestion', {
+        questions: [
+          { question: '  First question with   extra spacing.  ' },
+          { question: 'Second question.' },
+        ],
+      })
+    ).toBe('Questions (2): First question with extra spacing.');
+  });
 });

@@ -1076,6 +1076,7 @@ export class HttpAPIClient implements ElectronAPI {
       authMethod: null,
       providers: [],
     }),
+    getProviderStatus: async (): Promise<null> => null,
     install: async (): Promise<void> => {
       console.warn('[HttpAPIClient] CLI installer not available in browser mode');
     },

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@renderer/components/ui/button';
 import { Label } from '@renderer/components/ui/label';
 import { CUSTOM_ROLE, NO_ROLE, PRESET_ROLES } from '@renderer/constants/teamRoles';
+import { normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 import { Plus } from 'lucide-react';
 
 import { MembersJsonEditor } from '../dialogs/MembersJsonEditor';
@@ -31,7 +32,7 @@ function membersToJsonText(drafts: MemberDraft[]): string {
       if (role) obj.role = role;
       const workflow = getWorkflowForExport(d);
       if (workflow) obj.workflow = workflow;
-      if (d.providerId && d.providerId !== 'anthropic') obj.providerId = d.providerId;
+      if (d.providerId) obj.providerId = d.providerId;
       if (d.model?.trim()) obj.model = d.model.trim();
       if (d.effort) obj.effort = d.effort;
       return obj;
@@ -46,8 +47,7 @@ function parseJsonToDrafts(text: string): MemberDraft[] {
     const name = typeof item.name === 'string' ? item.name : '';
     const role = typeof item.role === 'string' ? item.role.trim() : '';
     const workflow = typeof item.workflow === 'string' ? item.workflow.trim() : '';
-    const providerId: TeamProviderId =
-      item.providerId === 'codex' || item.providerId === 'gemini' ? item.providerId : 'anthropic';
+    const providerId = normalizeOptionalTeamProviderId(item.providerId);
     const model = typeof item.model === 'string' ? item.model.trim() : '';
     const effort: EffortLevel | undefined =
       item.effort === 'low' || item.effort === 'medium' || item.effort === 'high'
@@ -99,6 +99,7 @@ export interface MembersEditorSectionProps {
   forceInheritedModelSettings?: boolean;
   modelLockReason?: string;
   softDeleteMembers?: boolean;
+  memberWarningById?: Record<string, string | null | undefined>;
 }
 
 export const MembersEditorSection = ({
@@ -124,6 +125,7 @@ export const MembersEditorSection = ({
   forceInheritedModelSettings = false,
   modelLockReason,
   softDeleteMembers = false,
+  memberWarningById,
 }: MembersEditorSectionProps): React.JSX.Element => {
   const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
   const [jsonText, setJsonText] = useState('');
@@ -310,6 +312,7 @@ export const MembersEditorSection = ({
                 teamSuggestions={teamSuggestions}
                 lockProviderModel={lockProviderModel}
                 modelLockReason={modelLockReason}
+                warningText={memberWarningById?.[member.id] ?? null}
               />
             ))}
             {softDeleteMembers && removedMembers.length > 0 ? (
@@ -348,6 +351,7 @@ export const MembersEditorSection = ({
                       lockProviderModel
                       modelLockReason="Removed members are kept for soft delete history. Restore them to edit settings."
                       isRemoved
+                      warningText={null}
                     />
                   ))}
                 </div>

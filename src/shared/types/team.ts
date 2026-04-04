@@ -58,6 +58,14 @@ export interface TeamSummary {
   deletedAt?: string;
   /** True when team.meta.json exists but config.json doesn't — provisioning failed before TeamCreate. */
   pendingCreate?: boolean;
+  /** True when the last launch partially succeeded (e.g. lead started, but not all teammates joined). */
+  partialLaunchFailure?: boolean;
+  /** Planned teammate count for the last persisted partial launch marker. */
+  expectedMemberCount?: number;
+  /** Confirmed teammate count from runtime artifacts/config for the last partial launch marker. */
+  confirmedMemberCount?: number;
+  /** Missing teammate names from the last partial launch marker. */
+  missingMembers?: string[];
 }
 
 export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted';
@@ -434,9 +442,10 @@ export type MemberStatus = 'active' | 'idle' | 'terminated' | 'unknown';
 
 /**
  * Spawn lifecycle status for a team member during team launch/reconnect.
- * - offline: not yet spawned (no Agent tool_use seen)
+ * - offline: queued, Agent tool_use not sent yet
  * - spawning: Agent tool_use sent, awaiting tool_result
- * - online: tool_result received, agent is active
+ * - waiting: teammate process accepted by runtime, awaiting first heartbeat/inbox signal
+ * - online: first heartbeat/inbox signal received
  * - error: spawn failed (tool_result with error)
  */
 export type MemberSpawnStatus = 'offline' | 'waiting' | 'spawning' | 'online' | 'error';
@@ -574,6 +583,8 @@ export interface MemberSpawnStatusesSnapshot {
   runId: string | null;
 }
 
+export type MemberSpawnLivenessSource = 'heartbeat' | 'process';
+
 export interface TeamChangeEvent {
   type:
     | 'config'
@@ -601,6 +612,12 @@ export interface MemberSpawnStatusEntry {
   status: MemberSpawnStatus;
   /** Error message when status === 'error'. */
   error?: string;
+  /**
+   * Optional provenance for `online`.
+   * - heartbeat: teammate sent a real inbox/native message after bootstrap
+   * - process: runtime process is alive, but bootstrap/first reply is not yet confirmed
+   */
+  livenessSource?: MemberSpawnLivenessSource;
   /** ISO timestamp of the last status change. */
   updatedAt: string;
 }

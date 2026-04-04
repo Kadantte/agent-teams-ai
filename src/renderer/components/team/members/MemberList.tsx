@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
+  formatTeamModelSummary,
   getTeamEffortLabel,
   getTeamModelLabel,
   getTeamProviderLabel,
@@ -14,6 +15,7 @@ import { MemberCard } from './MemberCard';
 import type { TaskStatusCounts } from '@renderer/utils/pathNormalize';
 import type {
   LeadActivityState,
+  MemberSpawnLivenessSource,
   MemberSpawnStatus,
   ResolvedTeamMember,
   TeamTaskWithKanban,
@@ -22,6 +24,7 @@ import type {
 export interface MemberSpawnEntry {
   status: MemberSpawnStatus;
   error?: string;
+  livenessSource?: MemberSpawnLivenessSource;
 }
 
 interface MemberListProps {
@@ -87,39 +90,11 @@ export const MemberList = ({
 
   const buildRuntimeSummary = useCallback(
     (member: ResolvedTeamMember): string | undefined => {
-      const hasMemberOverride = Boolean(member.providerId || member.model || member.effort);
-      if (!hasMemberOverride && launchParams) {
-        return undefined;
-      }
+      const effectiveProvider = member.providerId ?? launchParams?.providerId ?? 'anthropic';
+      const effectiveModel = member.model?.trim() || launchParams?.model?.trim() || '';
+      const effectiveEffort = member.effort ?? launchParams?.effort;
 
-      const defaultProvider = launchParams?.providerId ?? 'anthropic';
-      const memberProvider = member.providerId ?? defaultProvider;
-      const defaultModel = launchParams?.model?.trim() || '';
-      const memberModel = member.model?.trim() || '';
-      const defaultEffort = launchParams?.effort;
-      const memberEffort = member.effort;
-
-      const showProvider =
-        !launchParams || Boolean(member.providerId && memberProvider !== defaultProvider);
-      const showModel = !launchParams
-        ? Boolean(memberModel)
-        : Boolean(memberModel && memberModel !== defaultModel);
-      const showEffort = !launchParams
-        ? Boolean(memberEffort)
-        : Boolean(memberEffort && memberEffort !== defaultEffort);
-
-      const parts: string[] = [];
-      if (showProvider) {
-        parts.push(getTeamProviderLabel(memberProvider));
-      }
-      if (showModel) {
-        parts.push(getTeamModelLabel(memberModel));
-      }
-      if (showEffort && memberEffort) {
-        parts.push(getTeamEffortLabel(memberEffort));
-      }
-
-      return parts.length > 0 ? parts.join(' · ') : undefined;
+      return formatTeamModelSummary(effectiveProvider, effectiveModel, effectiveEffort);
     },
     [launchParams]
   );
@@ -161,6 +136,7 @@ export const MemberList = ({
         runtimeSummary={isRemoved ? buildRuntimeSummary(member) : buildRuntimeSummary(member)}
         spawnStatus={isRemoved ? undefined : spawnEntry?.status}
         spawnError={isRemoved ? undefined : spawnEntry?.error}
+        spawnLivenessSource={isRemoved ? undefined : spawnEntry?.livenessSource}
         onOpenTask={!isRemoved && currentTask ? () => onOpenTask?.(currentTask) : undefined}
         onOpenReviewTask={!isRemoved && reviewTask ? () => onOpenTask?.(reviewTask) : undefined}
         onClick={() => onMemberClick?.(member)}

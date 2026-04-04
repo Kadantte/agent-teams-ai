@@ -7,6 +7,7 @@ import { isLeadMember } from '@shared/utils/leadDetection';
 
 import type {
   LeadActivityState,
+  MemberSpawnLivenessSource,
   MemberSpawnStatus,
   MemberStatus,
   ResolvedTeamMember,
@@ -98,9 +99,9 @@ export const SPAWN_DOT_COLORS: Record<MemberSpawnStatus, string> = {
 
 export const SPAWN_PRESENCE_LABELS: Record<MemberSpawnStatus, string> = {
   offline: 'offline',
-  waiting: 'waiting',
-  spawning: 'spawning',
-  online: 'online',
+  waiting: 'awaiting heartbeat',
+  spawning: 'starting',
+  online: 'ready',
   error: 'spawn failed',
 };
 
@@ -115,8 +116,20 @@ export function getSpawnAwareDotClass(
   isTeamProvisioning?: boolean,
   leadActivity?: LeadActivityState
 ): string {
-  if (spawnStatus && isTeamProvisioning) {
-    return SPAWN_DOT_COLORS[spawnStatus];
+  if (spawnStatus === 'error') {
+    return SPAWN_DOT_COLORS.error;
+  }
+  if (spawnStatus === 'waiting') {
+    return SPAWN_DOT_COLORS.waiting;
+  }
+  if (spawnStatus === 'online') {
+    return SPAWN_DOT_COLORS.online;
+  }
+  if (spawnStatus === 'offline' && isTeamProvisioning) {
+    return SPAWN_DOT_COLORS.offline;
+  }
+  if (spawnStatus === 'spawning' && isTeamProvisioning) {
+    return SPAWN_DOT_COLORS.spawning;
   }
   return getMemberDotClass(member, isTeamAlive, isTeamProvisioning, leadActivity);
 }
@@ -127,10 +140,23 @@ export function getSpawnAwareDotClass(
 export function getSpawnAwarePresenceLabel(
   member: ResolvedTeamMember,
   spawnStatus: MemberSpawnStatus | undefined,
+  livenessSource: MemberSpawnLivenessSource | undefined,
   isTeamAlive?: boolean,
   isTeamProvisioning?: boolean,
   leadActivity?: LeadActivityState
 ): string {
+  if (spawnStatus === 'error') {
+    return SPAWN_PRESENCE_LABELS.error;
+  }
+  if (spawnStatus === 'offline' && isTeamProvisioning) {
+    return 'waiting for Agent';
+  }
+  if (spawnStatus === 'waiting') {
+    return SPAWN_PRESENCE_LABELS.waiting;
+  }
+  if (spawnStatus === 'online' && livenessSource === 'process') {
+    return 'running';
+  }
   if (spawnStatus && isTeamProvisioning) {
     return SPAWN_PRESENCE_LABELS[spawnStatus];
   }

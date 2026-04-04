@@ -183,9 +183,11 @@ function getRepoLocalCliCandidates(): string[] {
 
   const repoRoot = process.cwd();
   return [
+    // Prefer an already compiled repo-local binary when available.
+    path.resolve(repoRoot, '..', 'free-code-gemini-research', 'dist', 'cli'),
+    // Fall back to launcher scripts for normal local development.
     path.resolve(repoRoot, '..', 'free-code-gemini-research', 'cli'),
     path.resolve(repoRoot, '..', 'free-code-gemini-research', 'cli-dev'),
-    path.resolve(repoRoot, '..', 'free-code-gemini-research', 'dist', 'cli'),
   ];
 }
 

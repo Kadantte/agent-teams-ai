@@ -21,6 +21,7 @@ import { getKanbanColumnFromReviewState, normalizeReviewState } from '@shared/ut
 import { buildStandaloneSlashCommandMeta } from '@shared/utils/slashCommands';
 import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import { parseNumericSuffixName } from '@shared/utils/teamMemberName';
+import { normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 import { extractToolPreview, formatToolSummaryFromCalls } from '@shared/utils/toolSummary';
 import * as agentTeamsControllerModule from 'agent-teams-controller';
 import { randomUUID } from 'crypto';
@@ -589,6 +590,68 @@ export class TeamDataService {
       });
     }
 
+    // Dedup exact message copies that can appear as both live lead_process rows and
+    // their persisted inbox/sent-message counterpart. If the messageId is identical,
+    // keep a single row so the UI does not show the same SendMessage twice
+    // (for example "LIVE" plus the stored copy).
+    const duplicateMessageIds = new Set<string>();
+    const messageIdCounts = new Map<string, number>();
+    for (const msg of messages) {
+      const id = typeof msg.messageId === 'string' ? msg.messageId.trim() : '';
+      if (!id) continue;
+      const nextCount = (messageIdCounts.get(id) ?? 0) + 1;
+      messageIdCounts.set(id, nextCount);
+      if (nextCount > 1) duplicateMessageIds.add(id);
+    }
+    if (duplicateMessageIds.size > 0) {
+      const choosePreferredMessage = (
+        current: InboxMessage,
+        candidate: InboxMessage
+      ): InboxMessage => {
+        const score = (msg: InboxMessage): number => {
+          let value = 0;
+          if (msg.source !== 'lead_process') value += 4;
+          if (msg.read === false) value += 2;
+          if (msg.relayOfMessageId) value += 1;
+          if (msg.summary) value += 1;
+          if (msg.to) value += 1;
+          return value;
+        };
+        const currentScore = score(current);
+        const candidateScore = score(candidate);
+        if (candidateScore !== currentScore) {
+          return candidateScore > currentScore ? candidate : current;
+        }
+        const currentTs = Date.parse(current.timestamp);
+        const candidateTs = Date.parse(candidate.timestamp);
+        if (
+          Number.isFinite(currentTs) &&
+          Number.isFinite(candidateTs) &&
+          candidateTs !== currentTs
+        ) {
+          return candidateTs > currentTs ? candidate : current;
+        }
+        return current;
+      };
+
+      const dedupedById = new Map<string, InboxMessage>();
+      const dedupedWithoutId: InboxMessage[] = [];
+      for (const msg of messages) {
+        const id = typeof msg.messageId === 'string' ? msg.messageId.trim() : '';
+        if (!id) {
+          dedupedWithoutId.push(msg);
+          continue;
+        }
+        const existing = dedupedById.get(id);
+        if (!existing) {
+          dedupedById.set(id, msg);
+          continue;
+        }
+        dedupedById.set(id, choosePreferredMessage(existing, msg));
+      }
+      messages = [...dedupedWithoutId, ...dedupedById.values()];
+    }
+
     // Enrich inbox messages without leadSessionId by assigning the nearest neighbor's
     // session ID (by timestamp). This avoids the old forward-only propagation bug.
     if (config.leadSessionId || messages.some((m) => m.leadSessionId)) {
@@ -1021,10 +1084,7 @@ export class TeamDataService {
         name,
         role: member.role?.trim() || undefined,
         workflow: member.workflow?.trim() || undefined,
-        providerId:
-          member.providerId === 'codex' || member.providerId === 'gemini'
-            ? member.providerId
-            : undefined,
+        providerId: normalizeOptionalTeamProviderId(member.providerId),
         model: member.model?.trim() || undefined,
         effort:
           member.effort === 'low' || member.effort === 'medium' || member.effort === 'high'
@@ -1985,10 +2045,7 @@ export class TeamDataService {
         })(),
         role: member.role?.trim() || undefined,
         workflow: member.workflow?.trim() || undefined,
-        providerId:
-          member.providerId === 'codex' || member.providerId === 'gemini'
-            ? member.providerId
-            : undefined,
+        providerId: normalizeOptionalTeamProviderId(member.providerId),
         model: member.model?.trim() || undefined,
         effort:
           member.effort === 'low' || member.effort === 'medium' || member.effort === 'high'

@@ -123,7 +123,22 @@ export function formatTeamModelSummary(
   const providerLabel = getTeamProviderLabel(providerId);
   const modelLabel = model.trim() ? getTeamModelLabel(model.trim()) : 'Default';
   const effortLabel = effort?.trim() ? getTeamEffortLabel(effort) : '';
-  return [providerLabel, modelLabel, effortLabel].filter(Boolean).join(' · ');
+
+  const normalizedProvider = providerLabel.trim().toLowerCase();
+  const normalizedModel = modelLabel.trim().toLowerCase();
+  const modelAlreadyCarriesProviderBrand =
+    modelLabel !== 'Default' &&
+    (normalizedModel.startsWith(normalizedProvider) ||
+      (providerId === 'anthropic' && normalizedModel.startsWith('claude')) ||
+      (providerId === 'codex' && normalizedModel.startsWith('codex')) ||
+      (providerId === 'codex' && normalizedModel.startsWith('gpt')) ||
+      (providerId === 'gemini' && normalizedModel.startsWith('gemini')));
+
+  const parts = modelAlreadyCarriesProviderBrand
+    ? [modelLabel, effortLabel]
+    : [providerLabel, modelLabel, effortLabel];
+
+  return parts.filter(Boolean).join(' · ');
 }
 
 /**

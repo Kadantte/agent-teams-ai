@@ -73,6 +73,75 @@ function truncateStr(str: string, max: number): string {
   return str.length <= max ? str : str.slice(0, max) + '...';
 }
 
+function formatProviderName(providerId: string): string {
+  switch (providerId.trim().toLowerCase()) {
+    case 'anthropic':
+      return 'Anthropic';
+    case 'codex':
+      return 'Codex';
+    case 'gemini':
+      return 'Gemini';
+    default:
+      return providerId;
+  }
+}
+
+function formatEffortName(effort: string): string {
+  const trimmed = effort.trim();
+  return trimmed ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1) : trimmed;
+}
+
+export interface AgentToolDisplayDetails {
+  action: string;
+  teammateName?: string;
+  teamName?: string;
+  runtime?: string;
+  subagentType?: string;
+}
+
+export function getAgentToolDisplayDetails(
+  input: Record<string, unknown>
+): AgentToolDisplayDetails {
+  const teammateName = typeof input.name === 'string' ? input.name.trim() || undefined : undefined;
+  const teamName =
+    typeof input.team_name === 'string' ? input.team_name.trim() || undefined : undefined;
+  const description =
+    typeof input.description === 'string' ? input.description.trim() || undefined : undefined;
+  const provider =
+    typeof input.provider === 'string'
+      ? formatProviderName(input.provider)
+      : typeof input.providerId === 'string'
+        ? formatProviderName(input.providerId)
+        : undefined;
+  const model = typeof input.model === 'string' ? input.model.trim() || undefined : undefined;
+  const effort = typeof input.effort === 'string' ? formatEffortName(input.effort) : undefined;
+  const subagentType =
+    typeof input.subagent_type === 'string'
+      ? input.subagent_type.trim() || undefined
+      : typeof input.subagentType === 'string'
+        ? input.subagentType.trim() || undefined
+        : undefined;
+
+  const runtimeParts = [provider, model, effort].filter(
+    (part): part is string => typeof part === 'string' && part.length > 0
+  );
+  const runtime = runtimeParts.length > 0 ? runtimeParts.join(' · ') : undefined;
+
+  return {
+    action: description ?? (teammateName ? `Spawn teammate ${teammateName}` : 'Spawn subagent'),
+    teammateName,
+    teamName,
+    runtime,
+    subagentType,
+  };
+}
+
+export function summarizeAgentToolInput(input: Record<string, unknown>, max = 60): string {
+  const details = getAgentToolDisplayDetails(input);
+  const text = details.runtime ? `${details.action} · ${details.runtime}` : details.action;
+  return truncateStr(text, max);
+}
+
 /** Extract a short human-readable preview from tool_use input arguments. */
 export function extractToolPreview(
   name: string,
@@ -95,10 +164,13 @@ export function extractToolPreview(
     case 'Agent':
     case 'Task':
     case 'TaskCreate':
-      return typeof input.prompt === 'string'
-        ? input.prompt
-        : typeof input.description === 'string'
-          ? input.description
+      if (name === 'Agent') {
+        return summarizeAgentToolInput(input, 80);
+      }
+      return typeof input.description === 'string'
+        ? input.description
+        : typeof input.prompt === 'string'
+          ? truncateStr(input.prompt, 80)
           : undefined;
     case 'WebFetch':
       if (typeof input.url === 'string') {

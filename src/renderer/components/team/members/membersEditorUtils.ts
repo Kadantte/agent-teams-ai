@@ -1,6 +1,7 @@
 import { CUSTOM_ROLE, NO_ROLE, PRESET_ROLES } from '@renderer/constants/teamRoles';
 import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
+import { normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 
 import type { MemberDraft } from './membersEditorTypes';
 import type { MentionSuggestion } from '@renderer/types/mention';
@@ -62,10 +63,7 @@ export function createMemberDraftsFromInputs(
         roleSelection: role ? (isPreset ? role : CUSTOM_ROLE) : '',
         customRole: role && !isPreset ? role : '',
         workflow: member.workflow,
-        providerId:
-          member.providerId === 'codex' || member.providerId === 'gemini'
-            ? member.providerId
-            : 'anthropic',
+        providerId: normalizeOptionalTeamProviderId(member.providerId),
         model: member.model ?? '',
         effort: normalizeDraftEffort(member.effort),
         removedAt: member.removedAt,
@@ -196,11 +194,8 @@ export function buildMembersFromDrafts(members: MemberDraft[]): TeamProvisioning
       const result: TeamProvisioningMemberInput = { name, role };
       const workflow = getWorkflowForExport(member);
       if (workflow) result.workflow = workflow;
-      const providerId: TeamProviderId =
-        member.providerId === 'codex' || member.providerId === 'gemini'
-          ? member.providerId
-          : 'anthropic';
-      if (providerId !== 'anthropic') {
+      const providerId = normalizeOptionalTeamProviderId(member.providerId);
+      if (providerId) {
         result.providerId = providerId;
       }
       const model = member.model?.trim();

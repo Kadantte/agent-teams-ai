@@ -9,6 +9,7 @@ import {
   API_KEYS_STORAGE_STATUS,
   APP_RELAUNCH,
   CLI_INSTALLER_GET_STATUS,
+  CLI_INSTALLER_GET_PROVIDER_STATUS,
   CLI_INSTALLER_INSTALL,
   CLI_INSTALLER_INVALIDATE_STATUS,
   CLI_INSTALLER_PROGRESS,
@@ -1343,6 +1344,9 @@ const electronAPI: ElectronAPI = {
   cliInstaller: {
     getStatus: async (): Promise<CliInstallationStatus> => {
       return invokeIpcWithResult<CliInstallationStatus>(CLI_INSTALLER_GET_STATUS);
+    },
+    getProviderStatus: async (providerId: import('@shared/types').CliProviderId) => {
+      return invokeIpcWithResult(CLI_INSTALLER_GET_PROVIDER_STATUS, providerId);
     },
     install: async (): Promise<void> => {
       return invokeIpcWithResult<void>(CLI_INSTALLER_INSTALL);
