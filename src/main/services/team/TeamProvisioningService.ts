@@ -581,6 +581,11 @@ interface ProvisioningRun {
   pendingPostCompactReminder: boolean;
   postCompactReminderInFlight: boolean;
   suppressPostCompactReminderOutput: boolean;
+  /** Gemini-only phase-2 launch hydration after the first successful provisioning turn. */
+  pendingGeminiPostLaunchHydration: boolean;
+  geminiPostLaunchHydrationInFlight: boolean;
+  geminiPostLaunchHydrationSent: boolean;
+  suppressGeminiPostLaunchHydrationOutput: boolean;
   /** Per-member spawn lifecycle statuses tracked from stream-json output. */
   memberSpawnStatuses: Map<
     string,
@@ -843,6 +848,66 @@ function extractBootstrapFailureReason(text: string): string | null {
 
 function normalizeMemberDiagnosticText(memberName: string, text: string): string {
   return `${memberName}: ${text.trim()}`;
+}
+
+function shouldUseGeminiStagedLaunch(providerId: TeamProviderId | undefined): boolean {
+  return resolveTeamProviderId(providerId) === 'gemini';
+}
+
+function buildGeminiMemberSpawnPrompt(
+  member: TeamCreateRequest['members'][number],
+  displayName: string,
+  teamName: string,
+  leadName: string
+): string {
+  const role = member.role?.trim() || 'team member';
+  const providerLine =
+    member.providerId && member.providerId !== 'anthropic'
+      ? `\nProvider override: ${member.providerId}.`
+      : '';
+  const modelLine = member.model?.trim() ? `\nModel override: ${member.model.trim()}.` : '';
+  const effortLine = member.effort ? `\nEffort override: ${member.effort}.` : '';
+  const workflowBlock = member.workflow?.trim() ? `\nWorkflow:\n${member.workflow.trim()}` : '';
+
+  return `You are ${member.name}, a ${role} on team "${displayName}" (${teamName}).${providerLine}${modelLine}${effortLine}${workflowBlock}
+
+${getAgentLanguageInstruction()}
+Your FIRST action: call MCP tool member_briefing with:
+{ teamName: "${teamName}", memberName: "${member.name}" }
+Call member_briefing directly. Do NOT use Agent, any subagent, or any delegated helper for this step.
+If member_briefing fails, SendMessage "${leadName}" one short natural-language sentence with the exact error text. Do NOT send only "bootstrap failed".
+${getCanonicalSendMessageFieldRule()}
+Correct example:
+${buildCanonicalSendMessageExample({ to: leadName, summary: 'bootstrap error', message: 'exact error text' })}
+After member_briefing succeeds, stay silent until you have a real blocker, question, or task result. Do NOT send raw tool output, JSON, dict/object dumps, or internal state payloads.`;
+}
+
+function buildGeminiReconnectMemberSpawnPrompt(
+  member: TeamCreateRequest['members'][number],
+  teamName: string,
+  leadName: string
+): string {
+  const role = member.role?.trim() || 'team member';
+  const providerLine =
+    member.providerId && member.providerId !== 'anthropic'
+      ? `\nProvider override: ${member.providerId}.`
+      : '';
+  const modelLine = member.model?.trim() ? `\nModel override: ${member.model.trim()}.` : '';
+  const effortLine = member.effort ? `\nEffort override: ${member.effort}.` : '';
+  const workflowBlock = member.workflow?.trim() ? `\nWorkflow:\n${member.workflow.trim()}` : '';
+
+  return `You are ${member.name}, a ${role} on team "${teamName}" (${teamName}).${providerLine}${modelLine}${effortLine}${workflowBlock}
+
+${getAgentLanguageInstruction()}
+The team has just been reconnected after a restart.
+Your FIRST action: call MCP tool member_briefing with:
+{ teamName: "${teamName}", memberName: "${member.name}" }
+Call member_briefing directly. Do NOT use Agent, any subagent, or any delegated helper for this step.
+If member_briefing fails, SendMessage "${leadName}" one short natural-language sentence with the exact error text. Do NOT send only "bootstrap failed".
+${getCanonicalSendMessageFieldRule()}
+Correct example:
+${buildCanonicalSendMessageExample({ to: leadName, summary: 'bootstrap error', message: 'exact error text' })}
+After member_briefing succeeds, stay silent unless you have a real blocker, question, or task result. Do NOT send raw tool output, JSON, dict/object dumps, or internal state payloads.`;
 }
 
 function buildMemberSpawnPrompt(
@@ -1314,6 +1379,10 @@ function buildProvisioningPrompt(
   request: TeamCreateRequest,
   effectiveMembers: TeamCreateRequest['members']
 ): string {
+  if (shouldUseGeminiStagedLaunch(request.providerId)) {
+    return buildGeminiProvisioningPrompt(request, effectiveMembers);
+  }
+
   const displayName = request.displayName?.trim() || request.teamName;
   const userPromptBlock = request.prompt?.trim()
     ? `\nAdditional instructions from the user:\n${request.prompt.trim()}\n`
@@ -1422,6 +1491,10 @@ function buildLaunchPrompt(
   tasks: TeamTask[],
   isResume: boolean
 ): string {
+  if (shouldUseGeminiStagedLaunch(request.providerId)) {
+    return buildGeminiLaunchPrompt(request, members, isResume);
+  }
+
   const userPromptBlock = request.prompt?.trim()
     ? `\nAdditional instructions from the user:\n${request.prompt.trim()}\n`
     : '';
@@ -1519,6 +1592,174 @@ CRITICAL: If any Agent teammate spawn returns an error, that teammate is NOT onl
 `;
 }
 
+function buildGeminiProvisioningPrompt(
+  request: TeamCreateRequest,
+  effectiveMembers: TeamCreateRequest['members']
+): string {
+  const displayName = request.displayName?.trim() || request.teamName;
+  const userPromptBlock = request.prompt?.trim()
+    ? `\nAdditional user instructions (apply AFTER launch is stable):\n${request.prompt.trim()}\n`
+    : '';
+  const leadName =
+    effectiveMembers.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
+  const projectName = path.basename(request.cwd);
+  const isSolo = effectiveMembers.length === 0;
+
+  const spawnBlock = isSolo
+    ? '2) Skip teammate spawning — this is a solo team.'
+    : `2) Spawn each teammate using the BUILT-IN Agent tool with team_name="${request.teamName}", subagent_type="general-purpose", and the exact prompt shown below.
+Do NOT use Agent for anything except spawning these persistent teammates in this turn.
+
+Per-member spawn instructions:
+${effectiveMembers
+  .map((m) => {
+    const providerLine =
+      m.providerId && m.providerId !== 'anthropic' ? `   - provider: "${m.providerId}"\n` : '';
+    const modelLine = m.model?.trim() ? `   - model: "${m.model.trim()}"\n` : '';
+    const effortLine = m.effort ? `   - effort: "${m.effort}"\n` : '';
+    return `   For "${m.name}":
+   - name: "${m.name}"
+${providerLine}${modelLine}${effortLine}   - prompt:
+${buildGeminiMemberSpawnPrompt(m, displayName, request.teamName, leadName)
+  .split('\n')
+  .map((line) => `     ${line}`)
+  .join('\n')}`;
+  })
+  .join('\n\n')}`;
+
+  return `agent_teams_ui [Gemini launch phase 1 | Team: "${request.teamName}" | Project: "${projectName}" | Lead: "${leadName}"]
+
+You are running headless in a non-interactive CLI session. Do not ask questions.
+This is PHASE 1 only: create the team and start teammate runtimes. A second follow-up message with the full operating rules will arrive automatically after this launch turn completes successfully.
+You are "${leadName}", the team lead.
+${getAgentLanguageInstruction()}${userPromptBlock}
+
+Execute exactly these steps:
+1) Call the BUILT-IN TeamCreate tool with team_name="${request.teamName}".
+
+${spawnBlock}
+
+${isSolo ? '3' : '3'}) Do NOT create tasks, do NOT review code, do NOT inspect files, and do NOT start implementation work in this turn. Focus only on launch.
+
+4) Output a short summary that distinguishes these states precisely:
+- "runtime started, bootstrap pending"
+- "bootstrap confirmed"
+- "failed to start"
+Do NOT call a teammate online/ready/confirmed alive unless the teammate has actually completed bootstrap or sent a real post-bootstrap confirmation message.`;
+}
+
+function buildGeminiLaunchPrompt(
+  request: TeamLaunchRequest,
+  members: TeamCreateRequest['members'],
+  isResume: boolean
+): string {
+  const userPromptBlock = request.prompt?.trim()
+    ? `\nAdditional user instructions (apply AFTER reconnect is stable):\n${request.prompt.trim()}\n`
+    : '';
+  const leadName = members.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
+  const projectName = path.basename(request.cwd);
+  const startLabel = isResume ? 'Team Start (resume)' : 'Team Start';
+  const isSolo = members.length === 0;
+
+  const spawnBlock = isSolo
+    ? '2) Skip teammate restore — this is a solo team.'
+    : `2) Restore existing teammates using the BUILT-IN Agent tool with team_name="${request.teamName}", subagent_type="general-purpose", and the exact prompt shown below.
+Do NOT use Agent for anything except restoring these persistent teammates in this turn.
+
+Per-member restore instructions:
+${members
+  .map((m) => {
+    const providerLine =
+      m.providerId && m.providerId !== 'anthropic' ? `   - provider: "${m.providerId}"\n` : '';
+    const modelLine = m.model?.trim() ? `   - model: "${m.model.trim()}"\n` : '';
+    const effortLine = m.effort ? `   - effort: "${m.effort}"\n` : '';
+    return `   For "${m.name}":
+   - name: "${m.name}"
+${providerLine}${modelLine}${effortLine}   - prompt:
+${buildGeminiReconnectMemberSpawnPrompt(m, request.teamName, leadName)
+  .split('\n')
+  .map((line) => `     ${line}`)
+  .join('\n')}`;
+  })
+  .join('\n\n')}`;
+
+  return `${startLabel} [Gemini launch phase 1 | Team: "${request.teamName}" | Project: "${projectName}" | Lead: "${leadName}"]
+
+You are running headless in a non-interactive CLI session. Do not ask questions.
+This is PHASE 1 only: reconnect the team and restore teammate runtimes. A second follow-up message with the full operating rules will arrive automatically after this reconnect turn completes successfully.
+You are "${leadName}", the team lead.
+${getAgentLanguageInstruction()}${userPromptBlock}
+
+Execute exactly these steps:
+1) Reconnect the existing team state. Do not inspect files or the task board before teammate restore.
+
+${spawnBlock}
+
+3) Do NOT create tasks, do NOT review code, and do NOT start implementation work in this turn. Focus only on reconnect/bootstrap.
+
+4) Output a short summary that distinguishes these states precisely:
+- "runtime started, bootstrap pending"
+- "bootstrap confirmed"
+- "failed to start"
+Do NOT call a teammate online/ready/confirmed alive unless the teammate has actually completed bootstrap or sent a real post-bootstrap confirmation message.`;
+}
+
+function buildGeminiPostLaunchHydrationPrompt(
+  run: ProvisioningRun,
+  leadName: string,
+  members: TeamCreateRequest['members'],
+  tasks: TeamTask[]
+): string {
+  const isSolo = members.length === 0;
+  const userPromptBlock = run.request.prompt?.trim()
+    ? `\nOriginal user instructions to apply now:\n${run.request.prompt.trim()}\n`
+    : '';
+  const taskBoardSnapshot = buildTaskBoardSnapshot(tasks);
+  const teammateBootstrapSnapshot = members.length
+    ? `Current teammate launch status:\n${members
+        .map((member) => {
+          const status = run.memberSpawnStatuses.get(member.name);
+          const label =
+            status?.status === 'error'
+              ? `failed to start${status.error ? ` — ${status.error}` : ''}`
+              : status?.status === 'online'
+                ? 'bootstrap confirmed'
+                : status?.status === 'waiting'
+                  ? 'runtime started, bootstrap pending'
+                  : status?.status === 'spawning'
+                    ? 'spawn in progress'
+                    : 'runtime state unclear';
+          return `- @${member.name}: ${label}`;
+        })
+        .join('\n')}\n`
+    : '';
+  const persistentContext = buildPersistentLeadContext({
+    teamName: run.teamName,
+    leadName,
+    isSolo,
+    members,
+  });
+  const nextStepInstruction = isSolo
+    ? 'From this point on, use the full operating rules below for all future turns. If the original user instructions describe substantial work that should be tracked, you MAY now create board tasks for yourself, but do not start implementation in this context-refresh turn.'
+    : 'From this point on, use the full team operating rules below for all future turns. If the original user instructions describe substantial work that should be tracked, you MAY now translate them into board tasks and prepare delegation, but do not start implementation work in this context-refresh turn. Do NOT assume bootstrap-pending or failed teammates are ready; only treat teammates with confirmed bootstrap as immediately available for blocking assignments.';
+
+  return `Gemini launch phase 2 — operating context for team "${run.teamName}".
+
+The first launch/reconnect turn has already completed.
+Do NOT call TeamCreate again.
+Do NOT respawn teammates unless you are explicitly retrying a teammate that truly failed to start.
+Do NOT repeat the previous launch summary.
+You are "${leadName}", the team lead.
+${getAgentLanguageInstruction()}${userPromptBlock}
+
+${nextStepInstruction}
+
+${teammateBootstrapSnapshot}${taskBoardSnapshot}
+${persistentContext}
+
+This is a context-refresh turn only. Do not re-run launch. If no task planning or delegation is needed right now, reply with exactly one word: "OK".`;
+}
+
 /**
  * Unconditionally clears all post-compact reminder state on a run.
  * Called from cleanupRun, cancel, and error paths.
@@ -1527,6 +1768,12 @@ function clearPostCompactReminderState(run: ProvisioningRun): void {
   run.pendingPostCompactReminder = false;
   run.postCompactReminderInFlight = false;
   run.suppressPostCompactReminderOutput = false;
+}
+
+function clearGeminiPostLaunchHydrationState(run: ProvisioningRun): void {
+  run.pendingGeminiPostLaunchHydration = false;
+  run.geminiPostLaunchHydrationInFlight = false;
+  run.suppressGeminiPostLaunchHydrationOutput = false;
 }
 
 function updateProgress(
@@ -3811,6 +4058,10 @@ export class TeamProvisioningService {
         pendingPostCompactReminder: false,
         postCompactReminderInFlight: false,
         suppressPostCompactReminderOutput: false,
+        pendingGeminiPostLaunchHydration: false,
+        geminiPostLaunchHydrationInFlight: false,
+        geminiPostLaunchHydrationSent: false,
+        suppressGeminiPostLaunchHydrationOutput: false,
         memberSpawnStatuses: new Map(
           request.members.map((m) => [m.name, { status: 'offline' as const, updatedAt: nowIso() }])
         ),
@@ -4289,6 +4540,10 @@ export class TeamProvisioningService {
         pendingPostCompactReminder: false,
         postCompactReminderInFlight: false,
         suppressPostCompactReminderOutput: false,
+        pendingGeminiPostLaunchHydration: false,
+        geminiPostLaunchHydrationInFlight: false,
+        geminiPostLaunchHydrationSent: false,
+        suppressGeminiPostLaunchHydrationOutput: false,
         memberSpawnStatuses: new Map(
           expectedMembers.map((name) => [name, { status: 'offline' as const, updatedAt: nowIso() }])
         ),
@@ -6241,6 +6496,7 @@ export class TeamProvisioningService {
           if (
             !run.silentUserDmForward &&
             !run.suppressPostCompactReminderOutput &&
+            !run.suppressGeminiPostLaunchHydrationOutput &&
             !hasCapturedVisibleMessageToUser
           ) {
             const cleanText = stripAgentBlocks(text).trim();
@@ -6450,6 +6706,11 @@ export class TeamProvisioningService {
               }`
             );
           }
+          if (run.geminiPostLaunchHydrationInFlight) {
+            run.geminiPostLaunchHydrationInFlight = false;
+            run.suppressGeminiPostLaunchHydrationOutput = false;
+            logger.info(`[${run.teamName}] Gemini post-launch hydration turn completed`);
+          }
 
           this.resetRuntimeToolActivity(run, this.getRunLeadName(run));
           this.setLeadActivity(run, 'idle');
@@ -6485,6 +6746,13 @@ export class TeamProvisioningService {
           !run.postCompactReminderInFlight
         ) {
           void this.injectPostCompactReminder(run);
+        }
+        if (
+          run.provisioningComplete &&
+          run.pendingGeminiPostLaunchHydration &&
+          !run.geminiPostLaunchHydrationInFlight
+        ) {
+          void this.injectGeminiPostLaunchHydration(run);
         }
 
         if (!run.provisioningComplete && !run.cancelRequested) {
@@ -6536,6 +6804,15 @@ export class TeamProvisioningService {
             clearPostCompactReminderState(run);
             logger.warn(
               `[${run.teamName}] post-compact reminder ${wasInFlight ? 'turn errored' : 'pending dropped'} — clearing (strict policy)`
+            );
+          }
+          if (run.pendingGeminiPostLaunchHydration || run.geminiPostLaunchHydrationInFlight) {
+            const wasInFlight = run.geminiPostLaunchHydrationInFlight;
+            clearGeminiPostLaunchHydrationState(run);
+            logger.warn(
+              `[${run.teamName}] Gemini post-launch hydration ${
+                wasInFlight ? 'turn errored' : 'pending dropped'
+              } — clearing (strict policy)`
             );
           }
           this.resetRuntimeToolActivity(run, this.getRunLeadName(run));
@@ -6822,6 +7099,145 @@ export class TeamProvisioningService {
       this.setLeadActivity(run, 'idle');
       logger.warn(
         `[${run.teamName}] post-compact reminder injection failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  private async injectGeminiPostLaunchHydration(run: ProvisioningRun): Promise<void> {
+    run.pendingGeminiPostLaunchHydration = false;
+
+    if (
+      run.geminiPostLaunchHydrationSent ||
+      !run.child?.stdin?.writable ||
+      run.processKilled ||
+      run.cancelRequested
+    ) {
+      logger.warn(
+        `[${run.teamName}] Gemini post-launch hydration skipped — process not writable, killed, or already sent`
+      );
+      return;
+    }
+
+    if (run.leadActivityState !== 'idle') {
+      logger.info(
+        `[${run.teamName}] Gemini post-launch hydration deferred — lead is ${run.leadActivityState}, not idle`
+      );
+      run.pendingGeminiPostLaunchHydration = true;
+      return;
+    }
+
+    if (run.leadRelayCapture) {
+      logger.info(
+        `[${run.teamName}] Gemini post-launch hydration deferred — relay capture in-flight`
+      );
+      run.pendingGeminiPostLaunchHydration = true;
+      return;
+    }
+
+    if (run.silentUserDmForward) {
+      logger.info(
+        `[${run.teamName}] Gemini post-launch hydration deferred — silent DM forward in progress`
+      );
+      run.pendingGeminiPostLaunchHydration = true;
+      return;
+    }
+
+    let currentMembers: TeamCreateRequest['members'] = run.effectiveMembers;
+    let leadName =
+      run.effectiveMembers.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
+    try {
+      const config = await this.configReader.getConfig(run.teamName);
+      if (config?.members) {
+        const configLead = config.members.find((m) => isLeadMember(m));
+        leadName = configLead?.name?.trim() || leadName;
+        const configTeammates = config.members
+          .filter((m) => !isLeadMember(m) && m?.name)
+          .map((m) => ({
+            name: m.name,
+            role: m.role ?? undefined,
+          }));
+        if (configTeammates.length > 0) {
+          const launchMembersByName = new Map(
+            run.effectiveMembers.map((member) => [member.name, member] as const)
+          );
+          currentMembers = configTeammates.map((member) => ({
+            ...launchMembersByName.get(member.name),
+            ...member,
+          }));
+        }
+      }
+    } catch {
+      logger.warn(
+        `[${run.teamName}] Gemini post-launch hydration: config unavailable, using launch-time members`
+      );
+    }
+
+    let tasks: TeamTask[] = [];
+    try {
+      tasks = await new TeamTaskReader().getTasks(run.teamName);
+    } catch {
+      logger.warn(
+        `[${run.teamName}] Gemini post-launch hydration: task board snapshot unavailable`
+      );
+    }
+
+    if (
+      run.geminiPostLaunchHydrationSent ||
+      !run.child?.stdin?.writable ||
+      run.processKilled ||
+      run.cancelRequested
+    ) {
+      logger.warn(
+        `[${run.teamName}] Gemini post-launch hydration aborted — process state changed during preparation`
+      );
+      return;
+    }
+    if (run.leadActivityState !== 'idle') {
+      logger.info(
+        `[${run.teamName}] Gemini post-launch hydration deferred — lead activity changed to ${run.leadActivityState as string}`
+      );
+      run.pendingGeminiPostLaunchHydration = true;
+      return;
+    }
+
+    const message = buildGeminiPostLaunchHydrationPrompt(run, leadName, currentMembers, tasks);
+    const promptSize = getPromptSizeSummary(message);
+    logger.info(
+      `[${run.teamName}] Gemini post-launch hydration prepared (${promptSize.chars} chars / ${promptSize.lines} lines)`
+    );
+
+    const payload = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: message }],
+      },
+    });
+
+    run.geminiPostLaunchHydrationInFlight = true;
+    run.geminiPostLaunchHydrationSent = true;
+    run.suppressGeminiPostLaunchHydrationOutput = true;
+    this.setLeadActivity(run, 'active');
+
+    try {
+      const stdin = run.child.stdin;
+      await new Promise<void>((resolve, reject) => {
+        stdin.write(payload + '\n', (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      logger.info(`[${run.teamName}] Gemini post-launch hydration injected`);
+    } catch (error) {
+      run.geminiPostLaunchHydrationInFlight = false;
+      run.geminiPostLaunchHydrationSent = false;
+      run.suppressGeminiPostLaunchHydrationOutput = false;
+      this.resetRuntimeToolActivity(run, this.getRunLeadName(run));
+      this.setLeadActivity(run, 'idle');
+      logger.warn(
+        `[${run.teamName}] Gemini post-launch hydration injection failed: ${
           error instanceof Error ? error.message : String(error)
         }`
       );
@@ -7742,6 +8158,10 @@ export class TeamProvisioningService {
       this.aliveRunByTeam.set(run.teamName, run.runId);
       logger.info(`[${run.teamName}] Launch complete. Process alive for subsequent tasks.`);
 
+      if (shouldUseGeminiStagedLaunch(run.request.providerId)) {
+        run.pendingGeminiPostLaunchHydration = true;
+      }
+
       // Force a post-ready detail refresh so Messages reload persisted lead_session
       // texts from JSONL even if the last visible assistant output only reached disk.
       this.teamChangeEmitter?.({
@@ -7779,7 +8199,10 @@ export class TeamProvisioningService {
       // Solo teams have no teammate processes to resume work; kick off task execution
       // as a separate turn AFTER the launch is marked ready so the UI doesn't mix
       // long-running task output into the "Launching team" live output stream.
-      if (run.request.members.length === 0) {
+      if (
+        run.request.members.length === 0 &&
+        !shouldUseGeminiStagedLaunch(run.request.providerId)
+      ) {
         void (async () => {
           try {
             const taskReader = new TeamTaskReader();
@@ -7816,6 +8239,13 @@ export class TeamProvisioningService {
             );
           }
         })();
+      }
+      if (
+        run.pendingGeminiPostLaunchHydration &&
+        !run.geminiPostLaunchHydrationInFlight &&
+        !run.cancelRequested
+      ) {
+        void this.injectGeminiPostLaunchHydration(run);
       }
       return;
     }
@@ -7885,6 +8315,10 @@ export class TeamProvisioningService {
     this.aliveRunByTeam.set(run.teamName, run.runId);
     logger.info(`[${run.teamName}] Provisioning complete. Process alive for subsequent tasks.`);
 
+    if (shouldUseGeminiStagedLaunch(run.request.providerId)) {
+      run.pendingGeminiPostLaunchHydration = true;
+    }
+
     // Force a post-ready detail refresh so Messages reload persisted lead_session
     // texts from JSONL even if the last visible assistant output only reached disk.
     this.teamChangeEmitter?.({
@@ -7918,6 +8352,13 @@ export class TeamProvisioningService {
     void this.relayLeadInboxMessages(run.teamName).catch((e: unknown) =>
       logger.warn(`[${run.teamName}] post-provisioning relay failed: ${String(e)}`)
     );
+    if (
+      run.pendingGeminiPostLaunchHydration &&
+      !run.geminiPostLaunchHydrationInFlight &&
+      !run.cancelRequested
+    ) {
+      void this.injectGeminiPostLaunchHydration(run);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -8234,6 +8675,7 @@ export class TeamProvisioningService {
       run.silentUserDmForwardClearHandle = null;
     }
     clearPostCompactReminderState(run);
+    clearGeminiPostLaunchHydrationState(run);
     this.stopFilesystemMonitor(run);
     // Remove stream listeners to prevent data handlers firing on a cleaned-up run
     if (run.child) {
