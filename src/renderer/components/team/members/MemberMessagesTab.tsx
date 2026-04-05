@@ -99,24 +99,28 @@ export const MemberMessagesTab = ({
     [effectiveMessages]
   );
 
-  if (displayMessages.length === 0) {
-    return (
-      <div className="rounded-md border border-[var(--color-border)] px-4 py-6 text-center text-sm text-[var(--color-text-muted)]">
-        No messages with this member
-      </div>
-    );
-  }
+  const emptyStateText = loading
+    ? 'Loading messages...'
+    : hasMore
+      ? 'No loaded messages for this member yet'
+      : 'No messages with this member';
 
   return (
     <div className="max-h-[320px] space-y-2 overflow-y-auto">
-      {displayMessages.map((msg, idx) => (
-        <ActivityItem
-          key={msg.messageId ?? idx}
-          message={msg}
-          teamName={teamName}
-          onCreateTask={onCreateTask}
-        />
-      ))}
+      {displayMessages.length > 0 ? (
+        displayMessages.map((msg, idx) => (
+          <ActivityItem
+            key={msg.messageId ?? idx}
+            message={msg}
+            teamName={teamName}
+            onCreateTask={onCreateTask}
+          />
+        ))
+      ) : (
+        <div className="rounded-md border border-[var(--color-border)] px-4 py-6 text-center text-sm text-[var(--color-text-muted)]">
+          {emptyStateText}
+        </div>
+      )}
       {hasMore && (
         <div className="flex justify-center pt-2">
           <Button variant="ghost" size="sm" className="text-xs" disabled={loading} onClick={() => void loadOlderMessages()}>
