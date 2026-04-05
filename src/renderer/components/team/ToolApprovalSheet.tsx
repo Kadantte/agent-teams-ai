@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { shortenDisplayPath } from '@renderer/utils/pathDisplay';
 import { highlightLines } from '@renderer/utils/syntaxHighlighter';
 import { AlertTriangle, FileText, MessageCircleQuestion, Search, Terminal } from 'lucide-react';
@@ -141,12 +142,23 @@ function useElapsed(receivedAt: string): number {
 const RESPOND_TIMEOUT_MS = 10_000;
 
 export const ToolApprovalSheet: React.FC = () => {
-  const pendingApprovals = useStore((s) => s.pendingApprovals);
-  const respondToToolApproval = useStore((s) => s.respondToToolApproval);
-  const updateToolApprovalSettings = useStore((s) => s.updateToolApprovalSettings);
-  const teams = useStore((s) => s.teams);
-  const selectedTeamName = useStore((s) => s.selectedTeamName);
-  const selectedTeamData = useStore((s) => s.selectedTeamData);
+  const {
+    pendingApprovals,
+    respondToToolApproval,
+    updateToolApprovalSettings,
+    teams,
+    selectedTeamName,
+    selectedTeamData,
+  } = useStore(
+    useShallow((s) => ({
+      pendingApprovals: s.pendingApprovals,
+      respondToToolApproval: s.respondToToolApproval,
+      updateToolApprovalSettings: s.updateToolApprovalSettings,
+      teams: s.teams,
+      selectedTeamName: s.selectedTeamName,
+      selectedTeamData: s.selectedTeamData,
+    }))
+  );
   const { isLight } = useTheme();
 
   const current: ToolApprovalRequest | undefined = pendingApprovals[0];
@@ -606,7 +618,7 @@ const ToolInputPreview = ({
 // ---------------------------------------------------------------------------
 
 const TimeoutProgress = ({ receivedAt }: { receivedAt: string }): React.JSX.Element | null => {
-  const settings = useStore((s) => s.toolApprovalSettings);
+  const settings = useStore(useShallow((s) => s.toolApprovalSettings));
   const elapsed = useElapsed(receivedAt);
 
   if (settings.timeoutAction === 'wait') return null;

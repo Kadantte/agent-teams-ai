@@ -728,12 +728,19 @@ export class TeamDataService {
       this.processHealthTeams.delete(teamName);
     }
 
+    // Cap messages to keep IPC/postMessage payloads under ~300KB.
+    // Without this, teams with 2000+ messages produce 3MB+ payloads that
+    // stall Chromium's IPC serialization for ~1 second per transfer.
+    const MAX_RETURN_MESSAGES = 200;
+    const cappedMessages =
+      messages.length > MAX_RETURN_MESSAGES ? messages.slice(0, MAX_RETURN_MESSAGES) : messages;
+
     return {
       teamName,
       config,
       tasks: tasksWithKanban,
       members,
-      messages,
+      messages: cappedMessages,
       kanbanState,
       processes,
       warnings: warnings.length > 0 ? warnings : undefined,

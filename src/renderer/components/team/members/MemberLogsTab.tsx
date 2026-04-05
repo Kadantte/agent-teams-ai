@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useStore } from '@renderer/store';
+import { useTabIdOptional } from '@renderer/contexts/useTabUIContext';
+
 import { api } from '@renderer/api';
 import { MemberExecutionLog } from '@renderer/components/team/members/MemberExecutionLog';
 import {
@@ -107,6 +110,11 @@ export const MemberLogsTab = ({
   showLeadPreview = false,
   onPreviewOnlineChange,
 }: MemberLogsTabProps): React.JSX.Element => {
+  // Visibility check: skip polling when tab is hidden (display:none) to avoid OOM
+  const tabId = useTabIdOptional();
+  const activeTabId = useStore((s) => s.activeTabId);
+  const isTabActive = tabId ? activeTabId === tabId : true; // default true when no tab context (e.g. standalone dialog)
+
   const MIN_REFRESH_VISIBLE_MS = 250;
   const intervalsKey = useMemo(
     () => (taskWorkIntervals ? JSON.stringify(taskWorkIntervals) : ''),
@@ -475,14 +483,14 @@ export const MemberLogsTab = ({
 
     void load();
 
-    const interval = shouldAutoRefresh ? setInterval(() => void load(), 5000) : null;
+    const interval = shouldAutoRefresh && isTabActive ? setInterval(() => void load(), 5000) : null;
 
     return () => {
       cancelled = true;
       if (interval) clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intervalsKey + taskSince drive refresh; deps intentionally minimal to avoid refetch loops
-  }, [teamName, memberName, taskId, taskOwner, taskStatus, intervalsKey, taskSince]);
+  }, [teamName, memberName, taskId, taskOwner, taskStatus, intervalsKey, taskSince, isTabActive]);
 
   const fetchDetailForLog = useCallback(
     async (
@@ -537,7 +545,7 @@ export const MemberLogsTab = ({
     if (!previewLog) return;
 
     const shouldAutoRefreshPreview = taskStatus === 'in_progress' || previewLog.isOngoing;
-    if (!shouldAutoRefreshPreview) return;
+    if (!shouldAutoRefreshPreview || !isTabActive) return;
 
     let cancelled = false;
     const interval = setInterval(async () => {
@@ -566,12 +574,14 @@ export const MemberLogsTab = ({
     shouldShowPreview,
     taskStatus,
     intervalsKey,
+    isTabActive,
   ]);
 
   useEffect(() => {
     const shouldAutoRefreshSummary = taskId != null && taskStatus === 'in_progress';
     if (!expandedLogSummary) return;
     if (!shouldAutoRefreshSummary && !expandedLogSummary.isOngoing) return;
+    if (!isTabActive) return;
 
     let cancelled = false;
 
@@ -604,6 +614,7 @@ export const MemberLogsTab = ({
     taskId,
     taskStatus,
     intervalsKey,
+    isTabActive,
   ]);
 
   const handleExpand = useCallback(

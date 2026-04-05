@@ -13,6 +13,7 @@ import {
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { Check, Loader2, Trash2 } from 'lucide-react';
 
 import type { ExtensionOperationState } from '@shared/types/extensions';
@@ -36,7 +37,7 @@ export const InstallButton = ({
   size = 'sm',
   errorMessage,
 }: InstallButtonProps) => {
-  const cliStatus = useStore((s) => s.cliStatus);
+  const cliStatus = useStore(useShallow((s) => s.cliStatus));
   const cliMissing = cliStatus !== null && !cliStatus.installed;
   const isDisabled = disabled || cliMissing;
   const [lastAction, setLastAction] = useState<'install' | 'uninstall' | null>(null);

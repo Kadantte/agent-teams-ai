@@ -31,7 +31,7 @@ const ATTRIBUTION_CACHE_MAX = 5_000;
 const SCAN_CONCURRENCY = 15;
 
 /** TTL for discoverProjectSessions cache — avoids re-reading config/dirs within rapid successive calls. */
-const DISCOVERY_CACHE_TTL = 5_000;
+const DISCOVERY_CACHE_TTL = 30_000;
 
 /** Signal sources for subagent member attribution, ordered by reliability. */
 type AttributionSignalSource = 'process_team' | 'routing_sender' | 'teammate_id' | 'text_mention';

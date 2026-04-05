@@ -7,6 +7,7 @@ import { useMemo } from 'react';
 
 import { KanbanTaskCard } from '@renderer/components/team/kanban/KanbanTaskCard';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 
 import type { GraphNode } from '@claude-teams/agent-graph';
 import type { KanbanColumnId, TeamTask, TeamTaskWithKanban } from '@shared/types';
@@ -84,9 +85,13 @@ export const GraphTaskCard = ({
 }: GraphTaskCardProps): React.JSX.Element => {
   const taskId = node.domainRef.kind === 'task' ? node.domainRef.taskId : '';
 
-  const task = useStore((s) => s.selectedTeamData?.tasks.find((t) => t.id === taskId));
-  const tasks = useStore((s) => s.selectedTeamData?.tasks ?? []);
-  const members = useStore((s) => s.selectedTeamData?.members ?? []);
+  const { task, tasks, members } = useStore(
+    useShallow((s) => ({
+      task: s.selectedTeamData?.tasks.find((t) => t.id === taskId),
+      tasks: s.selectedTeamData?.tasks ?? [],
+      members: s.selectedTeamData?.members ?? [],
+    }))
+  );
 
   const taskMap = useMemo(() => {
     const map = new Map<string, TeamTask>();

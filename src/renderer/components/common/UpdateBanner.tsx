@@ -6,14 +6,26 @@
 
 import { useStore } from '@renderer/store';
 import { CheckCircle, Loader2, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 export const UpdateBanner = (): React.JSX.Element | null => {
-  const showUpdateBanner = useStore((s) => s.showUpdateBanner);
-  const updateStatus = useStore((s) => s.updateStatus);
-  const downloadProgress = useStore((s) => s.downloadProgress);
-  const availableVersion = useStore((s) => s.availableVersion);
-  const installUpdate = useStore((s) => s.installUpdate);
-  const dismissUpdateBanner = useStore((s) => s.dismissUpdateBanner);
+  const {
+    showUpdateBanner,
+    updateStatus,
+    downloadProgress,
+    availableVersion,
+    installUpdate,
+    dismissUpdateBanner,
+  } = useStore(
+    useShallow((s) => ({
+      showUpdateBanner: s.showUpdateBanner,
+      updateStatus: s.updateStatus,
+      downloadProgress: s.downloadProgress,
+      availableVersion: s.availableVersion,
+      installUpdate: s.installUpdate,
+      dismissUpdateBanner: s.dismissUpdateBanner,
+    }))
+  );
 
   if (!showUpdateBanner || (updateStatus !== 'downloading' && updateStatus !== 'downloaded')) {
     return null;

@@ -2,6 +2,7 @@ import { CARD_BG, CARD_BORDER_STYLE, CARD_ICON_MUTED } from '@renderer/constants
 import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import {
   agentAvatarUrl,
@@ -33,7 +34,7 @@ export const PendingRepliesBlock = ({
   onMemberClick,
 }: PendingRepliesBlockProps): React.JSX.Element | null => {
   const { isLight } = useTheme();
-  const pendingApprovals = useStore((s) => s.pendingApprovals);
+  const pendingApprovals = useStore(useShallow((s) => s.pendingApprovals));
   const colorMap = buildMemberColorMap(members);
   const memberPending = Object.entries(pendingRepliesByMember)
     .map(([name, sentAtMs]) => ({

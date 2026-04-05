@@ -4,6 +4,7 @@ import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer
 import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { buildMemberColorMap, REVIEW_STATE_DISPLAY } from '@renderer/utils/memberHelpers';
 import { linkifyTaskIdsInMarkdown } from '@renderer/utils/taskReferenceUtils';
 import { getTaskKanbanColumn } from '@shared/utils/reviewState';
@@ -69,10 +70,14 @@ export const TaskTooltip = ({
   children,
   side = 'top',
 }: TaskTooltipProps): React.JSX.Element => {
-  const selectedTeamName = useStore((s) => s.selectedTeamName);
-  const selectedTeamData = useStore((s) => s.selectedTeamData);
-  const globalTasks = useStore((s) => s.globalTasks);
-  const teamByName = useStore((s) => s.teamByName);
+  const { selectedTeamName, selectedTeamData, globalTasks, teamByName } = useStore(
+    useShallow((s) => ({
+      selectedTeamName: s.selectedTeamName,
+      selectedTeamData: s.selectedTeamData,
+      globalTasks: s.globalTasks,
+      teamByName: s.teamByName,
+    }))
+  );
 
   const task = useMemo(() => {
     if (teamName && selectedTeamName === teamName) {

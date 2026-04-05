@@ -8,10 +8,11 @@
 
 import { isElectronMode } from '@renderer/api';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { AlertTriangle } from 'lucide-react';
 
 export const CliInstallWarningBanner = (): React.JSX.Element | null => {
-  const cliStatus = useStore((s) => s.cliStatus);
+  const cliStatus = useStore(useShallow((s) => s.cliStatus));
   const openDashboard = useStore((s) => s.openDashboard);
 
   // Returns a primitive boolean — minimizes re-renders

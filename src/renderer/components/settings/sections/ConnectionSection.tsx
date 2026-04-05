@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
 import { Loader2, Monitor, Server, Wifi, WifiOff } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { SettingRow } from '../components/SettingRow';
 import { SettingsSectionHeader } from '../components/SettingsSectionHeader';
@@ -37,16 +38,31 @@ const authMethodOptions: readonly { value: SshAuthMethod; label: string }[] = [
 ];
 
 export const ConnectionSection = (): React.JSX.Element => {
-  const connectionState = useStore((s) => s.connectionState);
-  const connectedHost = useStore((s) => s.connectedHost);
-  const connectionError = useStore((s) => s.connectionError);
-  const connectSsh = useStore((s) => s.connectSsh);
-  const disconnectSsh = useStore((s) => s.disconnectSsh);
-  const testConnection = useStore((s) => s.testConnection);
-  const sshConfigHosts = useStore((s) => s.sshConfigHosts);
-  const fetchSshConfigHosts = useStore((s) => s.fetchSshConfigHosts);
-  const lastSshConfig = useStore((s) => s.lastSshConfig);
-  const loadLastConnection = useStore((s) => s.loadLastConnection);
+  const {
+    connectionState,
+    connectedHost,
+    connectionError,
+    connectSsh,
+    disconnectSsh,
+    testConnection,
+    sshConfigHosts,
+    fetchSshConfigHosts,
+    lastSshConfig,
+    loadLastConnection,
+  } = useStore(
+    useShallow((s) => ({
+      connectionState: s.connectionState,
+      connectedHost: s.connectedHost,
+      connectionError: s.connectionError,
+      connectSsh: s.connectSsh,
+      disconnectSsh: s.disconnectSsh,
+      testConnection: s.testConnection,
+      sshConfigHosts: s.sshConfigHosts,
+      fetchSshConfigHosts: s.fetchSshConfigHosts,
+      lastSshConfig: s.lastSshConfig,
+      loadLastConnection: s.loadLastConnection,
+    }))
+  );
 
   // Form state
   const [host, setHost] = useState('');

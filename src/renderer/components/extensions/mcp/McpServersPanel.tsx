@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { formatRelativeTime } from '@renderer/utils/formatters';
 import { CLI_NOT_FOUND_MARKER } from '@shared/constants/cli';
 import { sanitizeMcpServerName } from '@shared/utils/extensionNormalizers';
@@ -72,18 +73,35 @@ export const McpServersPanel = ({
   selectedMcpServerId,
   setSelectedMcpServerId,
 }: McpServersPanelProps): React.JSX.Element => {
-  const browseCatalog = useStore((s) => s.mcpBrowseCatalog);
-  const browseNextCursor = useStore((s) => s.mcpBrowseNextCursor);
-  const browseLoading = useStore((s) => s.mcpBrowseLoading);
-  const browseError = useStore((s) => s.mcpBrowseError);
-  const mcpBrowse = useStore((s) => s.mcpBrowse);
-  const installedServers = useStore((s) => s.mcpInstalledServers);
-  const fetchMcpGitHubStars = useStore((s) => s.fetchMcpGitHubStars);
-  const mcpDiagnostics = useStore((s) => s.mcpDiagnostics);
-  const mcpDiagnosticsLoading = useStore((s) => s.mcpDiagnosticsLoading);
-  const mcpDiagnosticsError = useStore((s) => s.mcpDiagnosticsError);
-  const mcpDiagnosticsLastCheckedAt = useStore((s) => s.mcpDiagnosticsLastCheckedAt);
-  const runMcpDiagnostics = useStore((s) => s.runMcpDiagnostics);
+  const {
+    browseCatalog,
+    browseNextCursor,
+    browseLoading,
+    browseError,
+    mcpBrowse,
+    installedServers,
+    fetchMcpGitHubStars,
+    mcpDiagnostics,
+    mcpDiagnosticsLoading,
+    mcpDiagnosticsError,
+    mcpDiagnosticsLastCheckedAt,
+    runMcpDiagnostics,
+  } = useStore(
+    useShallow((s) => ({
+      browseCatalog: s.mcpBrowseCatalog,
+      browseNextCursor: s.mcpBrowseNextCursor,
+      browseLoading: s.mcpBrowseLoading,
+      browseError: s.mcpBrowseError,
+      mcpBrowse: s.mcpBrowse,
+      installedServers: s.mcpInstalledServers,
+      fetchMcpGitHubStars: s.fetchMcpGitHubStars,
+      mcpDiagnostics: s.mcpDiagnostics,
+      mcpDiagnosticsLoading: s.mcpDiagnosticsLoading,
+      mcpDiagnosticsError: s.mcpDiagnosticsError,
+      mcpDiagnosticsLastCheckedAt: s.mcpDiagnosticsLastCheckedAt,
+      runMcpDiagnostics: s.runMcpDiagnostics,
+    }))
+  );
 
   const [mcpSort, setMcpSort] = useState<McpSortValue>('name-asc');
 

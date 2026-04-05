@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { inferCapabilities, normalizeCategory } from '@shared/utils/extensionNormalizers';
 import { ArrowUpDown, Filter, Puzzle, Search } from 'lucide-react';
 
@@ -122,9 +123,13 @@ export const PluginsPanel = ({
   hasActiveFilters,
   setPluginSort,
 }: PluginsPanelProps): React.JSX.Element => {
-  const catalog = useStore((s) => s.pluginCatalog);
-  const loading = useStore((s) => s.pluginCatalogLoading);
-  const error = useStore((s) => s.pluginCatalogError);
+  const { catalog, loading, error } = useStore(
+    useShallow((s) => ({
+      catalog: s.pluginCatalog,
+      loading: s.pluginCatalogLoading,
+      error: s.pluginCatalogError,
+    }))
+  );
 
   const filtered = useMemo(
     () => selectFilteredPlugins(catalog, pluginFilters, pluginSort),

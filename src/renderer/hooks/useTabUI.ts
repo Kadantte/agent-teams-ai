@@ -65,7 +65,7 @@ export function useTabUI(): UseTabUIReturn {
 
   // Subscribe to tabUIStates MAP directly for reactivity
   // This ensures re-renders when any tab state changes
-  const tabUIStates = useStore((s) => s.tabUIStates);
+  const tabUIStates = useStore(useShallow((s) => s.tabUIStates));
 
   // Get the current tab's state (derived from subscribed state)
   const tabState = useMemo(() => {

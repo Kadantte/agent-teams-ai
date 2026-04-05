@@ -690,7 +690,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
   const [showRaw, setShowRaw] = React.useState(false);
   const [rawLimit, setRawLimit] = React.useState(LARGE_PREVIEW_CHARS);
   const { isLight } = useTheme();
-  const teams = useStore((s) => (providedTeamColorByName ? EMPTY_TEAMS : s.teams));
+  const teams = useStore(useShallow((s) => (providedTeamColorByName ? EMPTY_TEAMS : s.teams)));
   const openTeamTab = useStore((s) => (providedOnTeamClick ? NOOP_TEAM_CLICK : s.openTeamTab));
 
   const fallbackTeamColorByName = React.useMemo(() => {

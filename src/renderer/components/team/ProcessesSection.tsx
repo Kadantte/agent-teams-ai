@@ -1,4 +1,5 @@
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { ExternalLink, Square, Terminal } from 'lucide-react';
 
@@ -25,7 +26,7 @@ function formatShortTime(date: Date): string {
 
 export const ProcessesSection = (): React.JSX.Element | null => {
   const teamName = useStore((s) => s.selectedTeamName);
-  const data = useStore((s) => s.selectedTeamData);
+  const data = useStore(useShallow((s) => s.selectedTeamData));
 
   if (!teamName || !data?.processes?.length) return null;
 

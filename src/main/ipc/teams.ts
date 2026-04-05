@@ -1,5 +1,6 @@
 import { addMainBreadcrumb } from '@main/sentry';
 import { setCurrentMainOp } from '@main/services/infrastructure/EventLoopLagMonitor';
+import { getTeamDataWorkerClient } from '@main/services/team/TeamDataWorkerClient';
 import { getAppIconPath } from '@main/utils/appIcon';
 import { getAppDataPath, getTeamsBasePath } from '@main/utils/pathDecoder';
 import { stripMarkdown } from '@main/utils/textFormatting';
@@ -535,7 +536,20 @@ async function handleGetData(
   const startedAt = Date.now();
   let data: TeamData;
   try {
-    data = await getTeamDataService().getTeamData(tn);
+    // Prefer worker thread to keep main event loop responsive
+    const worker = getTeamDataWorkerClient();
+    if (worker.isAvailable()) {
+      try {
+        data = await worker.getTeamData(tn);
+      } catch (workerErr) {
+        logger.warn(
+          `[teams:getData] worker failed, falling back: ${workerErr instanceof Error ? workerErr.message : workerErr}`
+        );
+        data = await getTeamDataService().getTeamData(tn);
+      }
+    } else {
+      data = await getTeamDataService().getTeamData(tn);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (
@@ -555,6 +569,7 @@ async function handleGetData(
     return { success: false, error: message };
   }
   const getDataMs = Date.now() - startedAt;
+
   if (getDataMs >= 1500) {
     logger.warn(`[teams:getData] slow team=${tn} ms=${getDataMs}`);
   }
@@ -2138,6 +2153,19 @@ async function handleGetLogsForTask(
             : undefined,
         }
       : undefined;
+  // Prefer worker thread to keep main event loop responsive
+  const worker = getTeamDataWorkerClient();
+  if (worker.isAvailable()) {
+    try {
+      return await wrapTeamHandler('getLogsForTask', () =>
+        worker.findLogsForTask(vTeam.value!, vTask.value!, opts)
+      );
+    } catch (workerErr) {
+      logger.warn(
+        `[teams:getLogsForTask] worker failed, falling back: ${workerErr instanceof Error ? workerErr.message : workerErr}`
+      );
+    }
+  }
   return wrapTeamHandler('getLogsForTask', () =>
     getTeamMemberLogsFinder().findLogsForTask(vTeam.value!, vTask.value!, opts)
   );

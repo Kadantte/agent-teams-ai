@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { ChevronDown, ChevronRight, Settings } from 'lucide-react';
 
 import type { ToolApprovalSettings, ToolApprovalTimeoutAction } from '@shared/types';
@@ -42,7 +43,7 @@ export const ToolApprovalSettingsContent: React.FC<{
   teamName?: string;
 }> = ({ expanded, teamName }) => {
   const [localSeconds, setLocalSeconds] = useState<string>('');
-  const settings = useStore((s) => s.toolApprovalSettings);
+  const settings = useStore(useShallow((s) => s.toolApprovalSettings));
   const rawUpdateSettings = useStore((s) => s.updateToolApprovalSettings);
   const updateSettings = useCallback(
     (patch: Partial<ToolApprovalSettings>) => rawUpdateSettings(patch, teamName),

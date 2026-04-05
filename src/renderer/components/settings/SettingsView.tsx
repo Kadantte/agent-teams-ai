@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 
 import { useStore } from '@renderer/store';
 import { Loader2 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { useSettingsConfig, useSettingsHandlers } from './hooks';
 import {
@@ -19,8 +20,12 @@ import { type SettingsSection, SettingsTabs } from './SettingsTabs';
 
 export const SettingsView = (): React.JSX.Element | null => {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
-  const pendingSettingsSection = useStore((s) => s.pendingSettingsSection);
-  const clearPendingSettingsSection = useStore((s) => s.clearPendingSettingsSection);
+  const { pendingSettingsSection, clearPendingSettingsSection } = useStore(
+    useShallow((s) => ({
+      pendingSettingsSection: s.pendingSettingsSection,
+      clearPendingSettingsSection: s.clearPendingSettingsSection,
+    }))
+  );
 
   // Consume pending section (avoid setState during render)
   useEffect(() => {

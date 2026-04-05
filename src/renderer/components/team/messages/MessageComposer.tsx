@@ -14,6 +14,7 @@ import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { isTeamProvisioningActive } from '@renderer/store/slices/teamSlice';
 import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
@@ -104,7 +105,7 @@ export const MessageComposer = ({
   const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
   const [teamSelectorOpen, setTeamSelectorOpen] = useState(false);
   const [aliveTeams, setAliveTeams] = useState<Set<string>>(new Set());
-  const allCrossTeamTargets = useStore((s) => s.crossTeamTargets);
+  const allCrossTeamTargets = useStore(useShallow((s) => s.crossTeamTargets));
   const fetchCrossTeamTargets = useStore((s) => s.fetchCrossTeamTargets);
 
   useEffect(() => {

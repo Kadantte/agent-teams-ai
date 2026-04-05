@@ -7,6 +7,7 @@ import { useStableTeamMentionMeta } from '@renderer/hooks/useStableTeamMentionMe
 import { useTeamMessagesExpanded } from '@renderer/hooks/useTeamMessagesExpanded';
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { filterTeamMessages } from '@renderer/utils/teamMessageFiltering';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import {
@@ -105,13 +106,25 @@ export const MessagesPanel = memo(function MessagesPanel({
   onRestartTeam,
   onTaskIdClick,
 }: MessagesPanelProps): React.JSX.Element {
-  const sendTeamMessage = useStore((s) => s.sendTeamMessage);
-  const sendCrossTeamMessage = useStore((s) => s.sendCrossTeamMessage);
-  const sendingMessage = useStore((s) => s.sendingMessage);
-  const sendMessageError = useStore((s) => s.sendMessageError);
-  const lastSendMessageResult = useStore((s) => s.lastSendMessageResult);
-  const teams = useStore((s) => s.teams);
-  const openTeamTab = useStore((s) => s.openTeamTab);
+  const {
+    sendTeamMessage,
+    sendCrossTeamMessage,
+    sendingMessage,
+    sendMessageError,
+    lastSendMessageResult,
+    teams,
+    openTeamTab,
+  } = useStore(
+    useShallow((s) => ({
+      sendTeamMessage: s.sendTeamMessage,
+      sendCrossTeamMessage: s.sendCrossTeamMessage,
+      sendingMessage: s.sendingMessage,
+      sendMessageError: s.sendMessageError,
+      lastSendMessageResult: s.lastSendMessageResult,
+      teams: s.teams,
+      openTeamTab: s.openTeamTab,
+    }))
+  );
 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null);

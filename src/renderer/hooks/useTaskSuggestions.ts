@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { createEncodedTaskReference } from '@renderer/utils/taskReferenceUtils';
 import { getTaskDisplayId } from '@shared/utils/taskIdentity';
 
@@ -56,10 +57,14 @@ function isVisibleTask(task: TeamTaskWithKanban | GlobalTask): boolean {
 }
 
 export function useTaskSuggestions(currentTeamName: string | null): UseTaskSuggestionsResult {
-  const globalTasks = useStore((s) => s.globalTasks);
-  const selectedTeamName = useStore((s) => s.selectedTeamName);
-  const selectedTeamData = useStore((s) => s.selectedTeamData);
-  const teamByName = useStore((s) => s.teamByName);
+  const { globalTasks, selectedTeamName, selectedTeamData, teamByName } = useStore(
+    useShallow((s) => ({
+      globalTasks: s.globalTasks,
+      selectedTeamName: s.selectedTeamName,
+      selectedTeamData: s.selectedTeamData,
+      teamByName: s.teamByName,
+    }))
+  );
 
   const suggestions = useMemo<MentionSuggestion[]>(() => {
     const tasks: TaskWithTeamContext[] = [];

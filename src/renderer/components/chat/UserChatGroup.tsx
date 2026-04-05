@@ -388,15 +388,17 @@ const UserChatGroupInner = ({ userGroup }: Readonly<UserChatGroupProps>): React.
     return (td?.sessionDetail ?? s.sessionDetail)?.session?.projectPath;
   });
 
-  // Get team members for @mention highlighting
-  const members = useStore((s) => s.selectedTeamData?.members);
+  // Get team members for @mention highlighting and team names for @team linkification
+  const { members, teams } = useStore(
+    useShallow((s) => ({
+      members: s.selectedTeamData?.members,
+      teams: s.teams,
+    }))
+  );
   const memberColorMap = useMemo(
     () => (members ? buildMemberColorMap(members) : new Map<string, string>()),
     [members]
   );
-
-  // Get team names for @team linkification
-  const teams = useStore((s) => s.teams);
   const teamNames = useMemo(
     () => teams.filter((t) => !t.deletedAt).map((t) => t.teamName),
     [teams]

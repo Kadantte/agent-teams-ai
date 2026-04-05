@@ -15,15 +15,28 @@ import { useStore } from '@renderer/store';
 import { REHYPE_PLUGINS } from '@renderer/utils/markdownPlugins';
 import { ExternalLink, X } from 'lucide-react';
 import remarkGfm from 'remark-gfm';
+import { useShallow } from 'zustand/react/shallow';
 
 export const UpdateDialog = (): React.JSX.Element | null => {
-  const showUpdateDialog = useStore((s) => s.showUpdateDialog);
-  const updateStatus = useStore((s) => s.updateStatus);
-  const availableVersion = useStore((s) => s.availableVersion);
-  const releaseNotes = useStore((s) => s.releaseNotes);
-  const downloadUpdate = useStore((s) => s.downloadUpdate);
-  const installUpdate = useStore((s) => s.installUpdate);
-  const dismissUpdateDialog = useStore((s) => s.dismissUpdateDialog);
+  const {
+    showUpdateDialog,
+    updateStatus,
+    availableVersion,
+    releaseNotes,
+    downloadUpdate,
+    installUpdate,
+    dismissUpdateDialog,
+  } = useStore(
+    useShallow((s) => ({
+      showUpdateDialog: s.showUpdateDialog,
+      updateStatus: s.updateStatus,
+      availableVersion: s.availableVersion,
+      releaseNotes: s.releaseNotes,
+      downloadUpdate: s.downloadUpdate,
+      installUpdate: s.installUpdate,
+      dismissUpdateDialog: s.dismissUpdateDialog,
+    }))
+  );
 
   const dialogRef = useRef<HTMLDivElement>(null);
 

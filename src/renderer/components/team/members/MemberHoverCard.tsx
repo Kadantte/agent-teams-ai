@@ -8,6 +8,7 @@ import {
 } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import {
   agentAvatarUrl,
@@ -44,14 +45,19 @@ export const MemberHoverCard = ({
   children,
 }: MemberHoverCardProps): React.JSX.Element => {
   const { isLight } = useTheme();
-  const member = useStore((s) => s.selectedTeamData?.members.find((m) => m.name === name) ?? null);
-  const isTeamAlive = useStore((s) => s.selectedTeamData?.isAlive);
-  const teamName = useStore((s) => s.selectedTeamName);
-  const leadActivity: LeadActivityState | undefined = useStore((s) =>
-    teamName ? s.leadActivityByTeam[teamName] : undefined
+  const { member, isTeamAlive, teamName, leadActivity, openMemberProfile, tasks } = useStore(
+    useShallow((s) => {
+      const tn = s.selectedTeamName;
+      return {
+        member: s.selectedTeamData?.members.find((m) => m.name === name) ?? null,
+        isTeamAlive: s.selectedTeamData?.isAlive,
+        teamName: tn,
+        leadActivity: tn ? s.leadActivityByTeam[tn] : undefined,
+        openMemberProfile: s.openMemberProfile,
+        tasks: s.selectedTeamData?.tasks,
+      };
+    })
   );
-  const openMemberProfile = useStore((s) => s.openMemberProfile);
-  const tasks = useStore((s) => s.selectedTeamData?.tasks);
 
   if (!member) {
     return <>{children}</>;

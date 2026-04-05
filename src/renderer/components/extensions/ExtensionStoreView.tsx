@@ -18,6 +18,7 @@ import {
 import { useTabIdOptional } from '@renderer/contexts/useTabUIContext';
 import { useExtensionsTabState } from '@renderer/hooks/useExtensionsTabState';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { AlertTriangle, BookOpen, Info, Key, Plus, Puzzle, RefreshCw, Server } from 'lucide-react';
 
 import { ApiKeysPanel } from './apikeys/ApiKeysPanel';
@@ -29,18 +30,35 @@ import { ExtensionsSubTabTrigger } from './ExtensionsSubTabTrigger';
 
 export const ExtensionStoreView = (): React.JSX.Element => {
   const tabId = useTabIdOptional();
-  const fetchPluginCatalog = useStore((s) => s.fetchPluginCatalog);
-  const fetchApiKeys = useStore((s) => s.fetchApiKeys);
-  const fetchSkillsCatalog = useStore((s) => s.fetchSkillsCatalog);
-  const mcpBrowse = useStore((s) => s.mcpBrowse);
-  const mcpFetchInstalled = useStore((s) => s.mcpFetchInstalled);
-  const pluginCatalogLoading = useStore((s) => s.pluginCatalogLoading);
-  const mcpBrowseLoading = useStore((s) => s.mcpBrowseLoading);
-  const skillsLoading = useStore((s) => s.skillsLoading);
-  const cliStatus = useStore((s) => s.cliStatus);
-  const cliInstalled = cliStatus?.installed ?? true; // assume installed until checked
-  const hasOngoingSessions = useStore((s) => s.sessions.some((sess) => sess.isOngoing));
-  const projects = useStore((s) => s.projects);
+  const {
+    fetchPluginCatalog,
+    fetchApiKeys,
+    fetchSkillsCatalog,
+    mcpBrowse,
+    mcpFetchInstalled,
+    pluginCatalogLoading,
+    mcpBrowseLoading,
+    skillsLoading,
+    cliStatus,
+    sessions,
+    projects,
+  } = useStore(
+    useShallow((s) => ({
+      fetchPluginCatalog: s.fetchPluginCatalog,
+      fetchApiKeys: s.fetchApiKeys,
+      fetchSkillsCatalog: s.fetchSkillsCatalog,
+      mcpBrowse: s.mcpBrowse,
+      mcpFetchInstalled: s.mcpFetchInstalled,
+      pluginCatalogLoading: s.pluginCatalogLoading,
+      mcpBrowseLoading: s.mcpBrowseLoading,
+      skillsLoading: s.skillsLoading,
+      cliStatus: s.cliStatus,
+      sessions: s.sessions,
+      projects: s.projects,
+    }))
+  );
+  const cliInstalled = cliStatus?.installed ?? true;
+  const hasOngoingSessions = sessions.some((sess) => sess.isOngoing);
   const extensionsTabProjectId = useStore((s) =>
     tabId
       ? (s.paneLayout.panes.flatMap((pane) => pane.tabs).find((tab) => tab.id === tabId)

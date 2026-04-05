@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { formatNextRun, getCronDescription } from '@renderer/utils/scheduleFormatters';
 import {
@@ -68,7 +69,7 @@ const ScheduleListItem = ({
 }: ScheduleListItemProps): React.JSX.Element => {
   const [expanded, setExpanded] = useState(false);
   const [selectedRun, setSelectedRun] = useState<ScheduleRun | null>(null);
-  const runs = useStore((s) => s.scheduleRuns[schedule.id] ?? []);
+  const runs = useStore(useShallow((s) => s.scheduleRuns[schedule.id] ?? []));
   const runsLoading = useStore((s) => s.scheduleRunsLoading[schedule.id] ?? false);
   const fetchRunHistory = useStore((s) => s.fetchRunHistory);
 
@@ -240,15 +241,29 @@ const ScheduleListItem = ({
 // =============================================================================
 
 export const SchedulesView = (): React.JSX.Element => {
-  const schedules = useStore((s) => s.schedules);
-  const schedulesLoading = useStore((s) => s.schedulesLoading);
-  const fetchSchedules = useStore((s) => s.fetchSchedules);
-  const pauseSchedule = useStore((s) => s.pauseSchedule);
-  const resumeSchedule = useStore((s) => s.resumeSchedule);
-  const deleteSchedule = useStore((s) => s.deleteSchedule);
-  const triggerNow = useStore((s) => s.triggerNow);
-  const openTeamTab = useStore((s) => s.openTeamTab);
-  const teamByName = useStore((s) => s.teamByName);
+  const {
+    schedules,
+    schedulesLoading,
+    fetchSchedules,
+    pauseSchedule,
+    resumeSchedule,
+    deleteSchedule,
+    triggerNow,
+    openTeamTab,
+    teamByName,
+  } = useStore(
+    useShallow((s) => ({
+      schedules: s.schedules,
+      schedulesLoading: s.schedulesLoading,
+      fetchSchedules: s.fetchSchedules,
+      pauseSchedule: s.pauseSchedule,
+      resumeSchedule: s.resumeSchedule,
+      deleteSchedule: s.deleteSchedule,
+      triggerNow: s.triggerNow,
+      openTeamTab: s.openTeamTab,
+      teamByName: s.teamByName,
+    }))
+  );
 
   /** Resolve team color dot style for a given team name */
   const getTeamColor = useCallback(

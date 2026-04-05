@@ -17,6 +17,7 @@ import {
 import { getTeamColorSet, getThemedBorder } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import {
   getMessageTypeLabel,
   getStructuredMessageSummary,
@@ -601,8 +602,8 @@ export const ActivityItem = memo(
     const summaryText = useMemo(() => extractMarkdownPlainText(rawSummary), [rawSummary]);
 
     // Permission request status icon (check/x/clock)
-    const pendingApprovals = useStore((s) => s.pendingApprovals);
-    const resolvedApprovals = useStore((s) => s.resolvedApprovals);
+    const pendingApprovals = useStore(useShallow((s) => s.pendingApprovals));
+    const resolvedApprovals = useStore(useShallow((s) => s.resolvedApprovals));
     const permissionIcon = useMemo(() => {
       if (!structured) return null;
       const type = typeof structured.type === 'string' ? structured.type : null;

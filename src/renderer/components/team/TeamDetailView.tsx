@@ -457,6 +457,9 @@ export const TeamDetailView = ({
     messagesPanelWidth,
     setMessagesPanelMode,
     setMessagesPanelWidth,
+    selectReviewFile,
+    pendingReviewRequest,
+    setPendingReviewRequest,
   } = useStore(
     useShallow((s) => ({
       data: s.selectedTeamData,
@@ -506,6 +509,9 @@ export const TeamDetailView = ({
       messagesPanelWidth: s.messagesPanelWidth,
       setMessagesPanelMode: s.setMessagesPanelMode,
       setMessagesPanelWidth: s.setMessagesPanelWidth,
+      selectReviewFile: s.selectReviewFile,
+      pendingReviewRequest: s.pendingReviewRequest,
+      setPendingReviewRequest: s.setPendingReviewRequest,
     }))
   );
 
@@ -960,10 +966,6 @@ export const TeamDetailView = ({
       setStoppingTeam(false);
     }
   }, [teamName, refreshTeamData]);
-
-  const selectReviewFile = useStore((s) => s.selectReviewFile);
-  const pendingReviewRequest = useStore((s) => s.pendingReviewRequest);
-  const setPendingReviewRequest = useStore((s) => s.setPendingReviewRequest);
 
   // Pick up pending review request from GlobalTaskDetailDialog
   useEffect(() => {

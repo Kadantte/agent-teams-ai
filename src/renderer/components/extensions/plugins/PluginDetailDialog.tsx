@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import {
   getCapabilityLabel,
   inferCapabilities,
@@ -53,14 +54,18 @@ export const PluginDetailDialog = ({
   open,
   onClose,
 }: PluginDetailDialogProps): React.JSX.Element => {
-  const fetchPluginReadme = useStore((s) => s.fetchPluginReadme);
-  const readmes = useStore((s) => s.pluginReadmes);
-  const readmeLoading = useStore((s) => s.pluginReadmeLoading);
+  const { fetchPluginReadme, readmes, readmeLoading, installPlugin, uninstallPlugin } = useStore(
+    useShallow((s) => ({
+      fetchPluginReadme: s.fetchPluginReadme,
+      readmes: s.pluginReadmes,
+      readmeLoading: s.pluginReadmeLoading,
+      installPlugin: s.installPlugin,
+      uninstallPlugin: s.uninstallPlugin,
+    }))
+  );
   const installProgress = useStore(
     (s) => (plugin ? s.pluginInstallProgress[plugin.pluginId] : undefined) ?? 'idle'
   );
-  const installPlugin = useStore((s) => s.installPlugin);
-  const uninstallPlugin = useStore((s) => s.uninstallPlugin);
   const installError = useStore((s) => (plugin ? s.installErrors[plugin.pluginId] : undefined));
 
   const [scope, setScope] = useState<InstallScope>('user');

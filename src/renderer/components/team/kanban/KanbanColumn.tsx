@@ -1,3 +1,5 @@
+import { memo } from 'react';
+
 import { Badge } from '@renderer/components/ui/badge';
 import { cn } from '@renderer/lib/utils';
 
@@ -15,7 +17,7 @@ interface KanbanColumnProps {
   children: React.ReactNode;
 }
 
-export const KanbanColumn = ({
+export const KanbanColumn = memo(function KanbanColumn({
   title,
   count,
   icon,
@@ -27,7 +29,7 @@ export const KanbanColumn = ({
   headerDragClassName,
   headerAccessory,
   children,
-}: KanbanColumnProps): React.JSX.Element => {
+}: KanbanColumnProps): React.JSX.Element {
   return (
     <section
       className={cn(
@@ -64,4 +66,4 @@ export const KanbanColumn = ({
       </div>
     </section>
   );
-};
+});

@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { AlertTriangle, Info, Key, Plus } from 'lucide-react';
 
 import { ApiKeyCard } from './ApiKeyCard';
@@ -15,11 +16,15 @@ import { ApiKeyFormDialog } from './ApiKeyFormDialog';
 import type { ApiKeyEntry } from '@shared/types/extensions';
 
 export const ApiKeysPanel = (): React.JSX.Element => {
-  const apiKeys = useStore((s) => s.apiKeys);
-  const apiKeysLoading = useStore((s) => s.apiKeysLoading);
-  const apiKeysError = useStore((s) => s.apiKeysError);
-  const storageStatus = useStore((s) => s.apiKeyStorageStatus);
-  const fetchStorageStatus = useStore((s) => s.fetchApiKeyStorageStatus);
+  const { apiKeys, apiKeysLoading, apiKeysError, storageStatus, fetchStorageStatus } = useStore(
+    useShallow((s) => ({
+      apiKeys: s.apiKeys,
+      apiKeysLoading: s.apiKeysLoading,
+      apiKeysError: s.apiKeysError,
+      storageStatus: s.apiKeyStorageStatus,
+      fetchStorageStatus: s.fetchApiKeyStorageStatus,
+    }))
+  );
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<ApiKeyEntry | null>(null);

@@ -20,6 +20,7 @@ import {
 import { useTabUI } from '@renderer/hooks/useTabUI';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { buildDisplayItemsFromMessages, buildSummary } from '@renderer/utils/aiGroupEnhancer';
 import { computeSubagentPhaseBreakdown } from '@renderer/utils/aiGroupHelpers';
 import { formatDuration, formatTokensCompact } from '@renderer/utils/formatters';
@@ -82,7 +83,7 @@ export const SubagentItem: React.FC<SubagentItemProps> = ({
   const truncatedDesc = description.length > 60 ? description.slice(0, 60) + '...' : description;
 
   // Agent configs from .claude/agents/ for color lookup
-  const agentConfigs = useStore((s) => s.agentConfigs);
+  const agentConfigs = useStore(useShallow((s) => s.agentConfigs));
 
   // Team member colors (when this subagent is a team member)
   const teamColors = subagent.team ? getTeamColorSet(subagent.team.memberColor) : null;
@@ -171,7 +172,7 @@ export const SubagentItem: React.FC<SubagentItemProps> = ({
   }, [subagent.messages]);
 
   // Search expansion
-  const searchExpandedSubagentIds = useStore((s) => s.searchExpandedSubagentIds);
+  const searchExpandedSubagentIds = useStore(useShallow((s) => s.searchExpandedSubagentIds));
   const searchCurrentSubagentItemId = useStore((s) => s.searchCurrentSubagentItemId);
   const shouldExpandForSearch = searchExpandedSubagentIds.has(subagent.id);
 

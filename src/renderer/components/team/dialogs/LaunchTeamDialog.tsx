@@ -23,6 +23,7 @@ import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { normalizePath } from '@renderer/utils/pathNormalize';
@@ -119,8 +120,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   // Team name: always present for launch mode, may be absent in schedule mode (standalone page)
   const propsTeamName = props.teamName ?? '';
   const [selectedTeamName, setSelectedTeamName] = useState('');
-  const teamByName = useStore((s) => s.teamByName);
-  const openDashboard = useStore((s) => s.openDashboard);
+  const { teamByName, openDashboard } = useStore(
+    useShallow((s) => ({
+      teamByName: s.teamByName,
+      openDashboard: s.openDashboard,
+    }))
+  );
   const teamOptions = useMemo(
     () =>
       Object.values(teamByName)
@@ -401,7 +406,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   // Shared effects: projects
   // ---------------------------------------------------------------------------
 
-  const repositoryGroups = useStore((s) => s.repositoryGroups);
+  const repositoryGroups = useStore(useShallow((s) => s.repositoryGroups));
 
   useEffect(() => {
     if (!open) return;
@@ -490,7 +495,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   // Mention suggestions (shared — from props in launch, from store in schedule)
   // ---------------------------------------------------------------------------
 
-  const storeMembers = useStore((s) => s.selectedTeamData?.members ?? []);
+  const storeMembers = useStore(useShallow((s) => s.selectedTeamData?.members ?? []));
   const members = isLaunch ? props.members : storeMembers;
 
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
