@@ -1167,7 +1167,7 @@ type RuntimeBootstrapMemberSpec = {
 type RuntimeBootstrapSpec = {
   version: 1;
   runId: string;
-  mode: 'create';
+  mode: 'create' | 'launch';
   initiator: {
     kind: 'app';
     source: 'claude_team_freecode';
@@ -1198,7 +1198,11 @@ type RuntimeBootstrapSpec = {
   };
 };
 
-function buildDeterministicBootstrapSpec(
+function memberHasAssignedBoardWork(memberName: string, tasks: TeamTask[]): boolean {
+  return tasks.some((task) => task.owner === memberName && !task.id.startsWith('_internal'));
+}
+
+function buildDeterministicCreateBootstrapSpec(
   runId: string,
   request: TeamCreateRequest,
   effectiveMembers: TeamCreateRequest['members']
@@ -1244,6 +1248,68 @@ function buildDeterministicBootstrapSpec(
       ...(member.effort ? { effort: member.effort } : {}),
       ...(member.role?.trim() ? { description: member.role.trim() } : {}),
     })),
+    launch: {
+      continueOnPartialFailure: true,
+    },
+    ui: {
+      emitStructuredEvents: true,
+    },
+  };
+}
+
+function buildDeterministicLaunchBootstrapSpec(
+  runId: string,
+  request: TeamLaunchRequest,
+  effectiveMembers: TeamCreateRequest['members'],
+  tasks: TeamTask[]
+): RuntimeBootstrapSpec {
+  const leadName =
+    effectiveMembers.find((member) => member.role?.toLowerCase().includes('lead'))?.name ||
+    'team-lead';
+
+  return {
+    version: 1,
+    runId,
+    mode: 'launch',
+    initiator: {
+      kind: 'app',
+      source: 'claude_team_freecode',
+    },
+    team: {
+      name: request.teamName,
+      cwd: request.cwd,
+    },
+    lead: {
+      ...(request.providerId ? { providerId: request.providerId } : {}),
+      ...(request.model?.trim() ? { model: request.model.trim() } : {}),
+      ...(request.effort ? { effort: request.effort } : {}),
+      ...(request.skipPermissions !== undefined
+        ? { skipPermissions: request.skipPermissions }
+        : {}),
+      ...(request.worktree ? { worktree: request.worktree } : {}),
+      ...(request.extraCliArgs ? { extraCliArgs: parseCliArgs(request.extraCliArgs) } : {}),
+    },
+    members: effectiveMembers.map((member) => {
+      const reconnectPrompt = shouldUseGeminiStagedLaunch(member.providerId)
+        ? buildGeminiReconnectMemberSpawnPrompt(member, request.teamName, leadName)
+        : buildReconnectMemberSpawnPrompt(
+            member,
+            request.teamName,
+            leadName,
+            memberHasAssignedBoardWork(member.name, tasks)
+          );
+      return {
+        name: member.name,
+        prompt: reconnectPrompt,
+        ...(request.cwd ? { cwd: request.cwd } : {}),
+        ...(member.model?.trim() ? { model: member.model.trim() } : {}),
+        ...(member.providerId ? { provider: member.providerId } : {}),
+        ...(member.effort ? { effort: member.effort } : {}),
+        ...(member.role?.trim() ? { role: member.role.trim() } : {}),
+        ...(member.workflow?.trim() ? { workflow: member.workflow.trim() } : {}),
+        ...(member.role?.trim() ? { description: member.role.trim() } : {}),
+      };
+    }),
     launch: {
       continueOnPartialFailure: true,
     },
@@ -1386,7 +1452,7 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
  * Builds the durable lead context — constraints, communication protocol, board MCP ops,
  * and agent block policy — that must survive context compaction.
  *
- * Used by: buildProvisioningPrompt, buildLaunchPrompt, and post-compact reinjection.
+ * Used by: buildProvisioningPrompt, deterministic launch hydration, and post-compact reinjection.
  */
 function buildPersistentLeadContext(opts: {
   teamName: string;
@@ -1539,30 +1605,6 @@ function getAgentLanguageInstruction(): string {
   return `IMPORTANT: Communicate in ${languageName}. All messages, summaries, and task descriptions MUST be in ${languageName}.`;
 }
 
-/** Build a concise task snapshot for a specific member (pending/in_progress tasks only). */
-function buildMemberTaskSnapshot(memberName: string, tasks: TeamTask[]): string {
-  const activeTasks = tasks.filter(
-    (t) =>
-      t.owner === memberName &&
-      (t.status === 'pending' || t.status === 'in_progress') &&
-      !t.id.startsWith('_internal')
-  );
-  if (activeTasks.length === 0) return '';
-
-  const lines = activeTasks.map((t) => {
-    const desc = t.description ? ` — ${t.description.slice(0, 120)}` : '';
-    const deps = t.blockedBy?.length
-      ? ` [blocked by: ${t.blockedBy
-          .map((id) => tasks.find((candidate) => candidate.id === id))
-          .filter((task): task is TeamTask => Boolean(task))
-          .map((task) => formatTaskDisplayLabel(task))
-          .join(', ')}]`
-      : '';
-    return `  - ${formatTaskDisplayLabel(t)} (taskId: ${t.id}) [${t.status}] ${t.subject}${deps}${desc}`;
-  });
-  return `\nYour active tasks from last session (resume in_progress first, then pending):\n${lines.join('\n')}\n`;
-}
-
 /** Build a full task board snapshot for the lead. */
 function buildTaskBoardSnapshot(tasks: TeamTask[]): string {
   const active = tasks.filter(
@@ -1698,116 +1740,6 @@ CRITICAL: If zero teammates have confirmed bootstrap yet and there are no launch
 `;
 }
 
-function buildLaunchPrompt(
-  request: TeamLaunchRequest,
-  members: TeamCreateRequest['members'],
-  tasks: TeamTask[],
-  isResume: boolean
-): string {
-  if (shouldUseGeminiStagedLaunch(request.providerId)) {
-    return buildGeminiLaunchPrompt(request, members, isResume);
-  }
-
-  const userPromptBlock = request.prompt?.trim()
-    ? `\nAdditional instructions from the user:\n${request.prompt.trim()}\n`
-    : '';
-  const taskBoardSnapshot = buildTaskBoardSnapshot(tasks);
-
-  const leadName = members.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
-  const projectName = path.basename(request.cwd);
-
-  const isSolo = members.length === 0;
-
-  let step2And3Block: string;
-  if (isSolo) {
-    step2And3Block = `2) Skip — solo team, no teammates to spawn.
-
-3) SOLO TASK EXECUTION (IMPORTANT — timing matters):
-   - Do NOT start executing tasks in THIS reconnect turn.
-   - This turn is ONLY to reconnect and confirm you are ready.
-   - After the reconnect is marked ready, you will receive a follow-up message telling you to begin work.
-
-   When you receive that follow-up message:
-   - Execute tasks sequentially and keep the board + user updated:
-   - Identify the next READY task (pending, not blocked by incomplete dependencies).
-   - If the task is unassigned or assigned to someone else but you are the one about to do the work, set yourself ("${leadName}") as owner.
-   - If the work you are about to do is not represented on the board yet, create/update the task first before continuing.
-   - BEFORE doing any work on a task: mark it started (in_progress).
-   - Immediately SendMessage "user" that you started task #<id> (what you're doing + next step).
-   - While working: after each meaningful milestone/decision/blocker, add a task comment on #<id>. If the milestone is user-relevant, also SendMessage "user".
-   - On completion: add a final task comment with your full results (findings, report, analysis, code changes summary, or any deliverable), mark the task completed, then SendMessage "user" with a brief summary of the outcome (2-4 sentences) and "Full details in task comment <first-8-chars-of-commentId>". The task comment is the primary delivery channel — the user reads results on the task board.
-   - Do NOT start the next task until the current task is completed (default: one task in_progress at a time).
-
-   For this reconnect turn: review the task board snapshot above and output a short summary (1–2 sentences) confirming reconnect is complete and you are ready.`;
-  } else {
-    // Build per-member task snapshots to include in each teammate's spawn prompt
-    const memberTaskBlocks = new Map<string, string>();
-    for (const m of members) {
-      const snapshot = buildMemberTaskSnapshot(m.name, tasks);
-      if (snapshot) memberTaskBlocks.set(m.name, snapshot);
-    }
-
-    // Build the teammate spawn prompt template with member-specific task presence
-    const memberSpawnInstructions = members
-      .map((m) => {
-        const taskBlock = memberTaskBlocks.get(m.name) || '';
-        const hasTasks = Boolean(taskBlock);
-        return buildReconnectMemberSpawnPrompt(m, request.teamName, leadName, hasTasks);
-      })
-      .join('\n\n');
-
-    step2And3Block = `2) Spawn each existing member as a live teammate using the **Agent** tool:
-   CRITICAL: Every Agent call MUST include team_name="${request.teamName}". Without team_name the agent becomes an ephemeral subagent that exits immediately instead of a persistent teammate.
-   - team_name: "${request.teamName}"  ← MANDATORY, never omit
-   - name: the member's name
-   - subagent_type: "general-purpose"
-   - IMPORTANT: Use the exact prompt shown for each member.
-     With member_briefing bootstrap enabled, the teammate will fetch durable rules after spawn.
-
-   Per-member spawn instructions:
-${memberSpawnInstructions}
-
-3) After spawning all members, check the task board. If any pending tasks are unassigned, assign them to appropriate members using the board MCP tools.
-   - If you assign a task to a member who already has another in_progress task, keep the newly assigned task pending/TODO. Do NOT move it to in_progress until that member actually starts it.`;
-  }
-
-  const persistentContext = buildPersistentLeadContext({
-    teamName: request.teamName,
-    leadName,
-    isSolo,
-    members,
-  });
-
-  const startLabel = isResume ? 'Team Start (resume)' : 'Team Start';
-
-  return `${startLabel} [Agent Team: "${request.teamName}" | Project: "${projectName}" | Lead: "${leadName}"]
-
-You are running in a non-interactive CLI session. Do not ask questions. Do everything in a single turn.
-CRITICAL: Execute ALL steps directly yourself in sequence. Do NOT delegate any step to a sub-agent via the Agent tool. The ONLY valid use of the Agent tool is spawning individual teammates in step 2.
-CRITICAL: Do NOT call mcp__agent-teams__team_launch, mcp__agent-teams__team_stop, or any other mcp__agent-teams__ runtime tool during this turn. MCP board tools (task_create, task_set_status, etc.) are allowed.
-You are "${leadName}", the team lead.
-
-Goal: Reconnect with existing team "${request.teamName}" and resume pending work.
-${userPromptBlock}
-${taskBoardSnapshot}
-${persistentContext}
-
-Steps (execute in this exact order):
-
-1) Restore/start the existing teammates first. Do NOT delay this reconnect turn by reading internal config files before teammates are back online.
-
-${step2And3Block}
-
-4) If something about team state looks unclear or inconsistent, you MAY inspect ~/.claude/teams/${request.teamName}/config.json after teammates are restored (or immediately in solo mode). Treat it as a diagnostic cross-check, not as the first reconnect action.
-
-5) After all steps, output a short summary of reconnected members and what happens next.
-CRITICAL: If any Agent teammate spawn returns an error, that teammate is NOT online. Do NOT claim they were restored/spawned successfully. In your final summary, explicitly list which teammate names failed to start.
-CRITICAL: In the user-facing final summary, do NOT mention internal tool names like "member_briefing" unless that tool actually failed. Describe pending bootstrap in plain language such as "runtime started, waiting for bootstrap confirmation" or "waiting for first heartbeat".
-CRITICAL: If no teammates failed to start, say that plainly. Do NOT write awkward forms like "failed: none", "Не удалось запустить: нет", or similar pseudo-error phrasing.
-CRITICAL: If zero teammates have confirmed bootstrap yet and there are no launch errors, keep the summary brief. Say that runtimes started and initialization is continuing. Do NOT add a second sentence just to restate that no bootstrap confirmations arrived yet.
-`;
-}
-
 function buildGeminiProvisioningPrompt(
   request: TeamCreateRequest,
   effectiveMembers: TeamCreateRequest['members']
@@ -1867,63 +1799,54 @@ If no teammates failed to start, say that plainly. Do NOT write awkward forms li
 If zero teammates have confirmed bootstrap yet and there are no launch errors, keep the summary brief. Say that runtimes started and initialization is continuing. Do NOT add a second sentence just to restate that no bootstrap confirmations arrived yet.`;
 }
 
-function buildGeminiLaunchPrompt(
+function buildDeterministicLaunchHydrationPrompt(
   request: TeamLaunchRequest,
   members: TeamCreateRequest['members'],
+  tasks: TeamTask[],
   isResume: boolean
 ): string {
-  const userPromptBlock = request.prompt?.trim()
-    ? `\nAdditional user instructions (apply AFTER reconnect is stable):\n${request.prompt.trim()}\n`
-    : '';
-  const leadName = members.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
+  const leadName =
+    members.find((member) => member.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
+  const isSolo = members.length === 0;
   const projectName = path.basename(request.cwd);
   const startLabel = isResume ? 'Team Start (resume)' : 'Team Start';
-  const isSolo = members.length === 0;
+  const userPromptBlock = request.prompt?.trim()
+    ? `\nOriginal user instructions to apply after reconnect is stable:\n${request.prompt.trim()}\n`
+    : '';
+  const taskBoardSnapshot = buildTaskBoardSnapshot(tasks);
+  const persistentContext = buildPersistentLeadContext({
+    teamName: request.teamName,
+    leadName,
+    isSolo,
+    members,
+  });
+  const nextSteps = isSolo
+    ? `This reconnect/bootstrap step has already been completed deterministically by the runtime.
+Do NOT call TeamCreate.
+Do NOT use Agent to spawn or restore teammates.
+Do NOT start implementation in this turn.
+Use this turn only to refresh context, review the current board snapshot, and confirm you are ready.
+If the user instructions imply new substantial work that is not on the board yet, you MAY create or update board tasks for yourself, but do not begin executing them yet.`
+    : `This reconnect/bootstrap step has already been completed deterministically by the runtime.
+Do NOT call TeamCreate.
+Do NOT use Agent to spawn or restore teammates.
+Do NOT repeat the launch summary.
+Use this turn only to refresh context, review the current board snapshot, and prepare the next delegation step.
+If the user instructions imply new substantial work that is not on the board yet, you MAY create or update team-board tasks and assign owners now, but do NOT start implementation work in this turn.
+Treat teammates whose bootstrap is still pending as not-yet-available for blocking assignments.`;
 
-  const spawnBlock = isSolo
-    ? '2) Skip teammate restore — this is a solo team.'
-    : `2) Restore existing teammates using the BUILT-IN Agent tool with team_name="${request.teamName}", subagent_type="general-purpose", and the exact prompt shown below.
-Do NOT use Agent for anything except restoring these persistent teammates in this turn.
-
-Per-member restore instructions:
-${members
-  .map((m) => {
-    const providerLine =
-      m.providerId && m.providerId !== 'anthropic' ? `   - provider: "${m.providerId}"\n` : '';
-    const modelLine = m.model?.trim() ? `   - model: "${m.model.trim()}"\n` : '';
-    const effortLine = m.effort ? `   - effort: "${m.effort}"\n` : '';
-    return `   For "${m.name}":
-   - name: "${m.name}"
-${providerLine}${modelLine}${effortLine}   - prompt:
-${buildGeminiReconnectMemberSpawnPrompt(m, request.teamName, leadName)
-  .split('\n')
-  .map((line) => `     ${line}`)
-  .join('\n')}`;
-  })
-  .join('\n\n')}`;
-
-  return `${startLabel} [Gemini launch phase 1 | Team: "${request.teamName}" | Project: "${projectName}" | Lead: "${leadName}"]
+  return `${startLabel} [Deterministic reconnect | Team: "${request.teamName}" | Project: "${projectName}" | Lead: "${leadName}"]
 
 You are running headless in a non-interactive CLI session. Do not ask questions.
-This is PHASE 1 only: reconnect the team and restore teammate runtimes. A second follow-up message with the full operating rules will arrive automatically after this reconnect turn completes successfully.
 You are "${leadName}", the team lead.
 ${getAgentLanguageInstruction()}${userPromptBlock}
 
-Execute exactly these steps:
-1) Reconnect the existing team state. Do not inspect files or the task board before teammate restore.
+${nextSteps}
 
-${spawnBlock}
+${taskBoardSnapshot}
+${persistentContext}
 
-3) Do NOT create tasks, do NOT review code, and do NOT start implementation work in this turn. Focus only on reconnect/bootstrap.
-
-4) Output a short summary that distinguishes these states precisely:
-- "runtime started, bootstrap pending"
-- "bootstrap confirmed"
-- "failed to start"
-Do NOT call a teammate online/ready/confirmed alive unless the teammate has actually completed bootstrap or sent a real post-bootstrap confirmation message.
-In the user-facing summary, do NOT mention internal tool names like "member_briefing" unless that tool actually failed.
-If no teammates failed to start, say that plainly. Do NOT write awkward forms like "failed: none" or "Не удалось запустить: нет".
-If zero teammates have confirmed bootstrap yet and there are no launch errors, keep the summary brief. Say that runtimes started and initialization is continuing. Do NOT add a second sentence just to restate that no bootstrap confirmations arrived yet.`;
+If there is nothing else to say after refreshing context, reply with exactly one word: "OK".`;
 }
 
 function buildGeminiPostLaunchHydrationPrompt(
@@ -4337,7 +4260,13 @@ export class TeamProvisioningService {
       run.onProgress(run.progress);
       this.startFilesystemMonitor(run, run.request);
     } else {
-      updateProgress(run, 'configuring', 'CLI running — reconnecting with teammates');
+      updateProgress(
+        run,
+        'configuring',
+        run.deterministicBootstrap
+          ? 'CLI running — deterministic reconnect in progress'
+          : 'CLI running — reconnecting with teammates'
+      );
       run.onProgress(run.progress);
     }
 
@@ -4625,7 +4554,11 @@ export class TeamProvisioningService {
       run.onProgress(run.progress);
       await this.clearPersistedLaunchState(request.teamName);
 
-      const bootstrapSpec = buildDeterministicBootstrapSpec(runId, request, effectiveMemberSpecs);
+      const bootstrapSpec = buildDeterministicCreateBootstrapSpec(
+        runId,
+        request,
+        effectiveMemberSpecs
+      );
       const initialUserPrompt = request.prompt?.trim() ?? '';
       const promptSize = getPromptSizeSummary(initialUserPrompt);
       let child: ReturnType<typeof spawn>;
@@ -5081,7 +5014,7 @@ export class TeamProvisioningService {
         bootstrapSpecPath: null,
         bootstrapUserPromptPath: null,
         isLaunch: true,
-        deterministicBootstrap: false,
+        deterministicBootstrap: true,
         fsPhase: 'waiting_members',
         leadRelayCapture: null,
         activeCrossTeamReplyHints: [],
@@ -5137,6 +5070,7 @@ export class TeamProvisioningService {
       this.runs.set(runId, run);
       this.provisioningRunByTeam.set(request.teamName, runId);
       run.onProgress(run.progress);
+      await this.clearPersistedLaunchState(request.teamName);
 
       // Read existing tasks to include in teammate prompts for work resumption
       const taskReader = new TeamTaskReader();
@@ -5149,7 +5083,7 @@ export class TeamProvisioningService {
         );
       }
 
-      const prompt = buildLaunchPrompt(
+      const prompt = buildDeterministicLaunchHydrationPrompt(
         request,
         effectiveMemberSpecs,
         existingTasks,
@@ -5160,18 +5094,37 @@ export class TeamProvisioningService {
       const { env: shellEnv, geminiRuntimeAuth } = await this.buildProvisioningEnv(
         request.providerId
       );
+      shellEnv.CLAUDE_ENABLE_DETERMINISTIC_TEAM_BOOTSTRAP = '1';
       const teammateModeDecision = await resolveDesktopTeammateModeDecision(request.extraCliArgs);
       if (teammateModeDecision.forceProcessTeammates) {
         shellEnv.CLAUDE_TEAM_FORCE_PROCESS_TEAMMATES = '1';
       }
       let mcpConfigPath: string;
+      let bootstrapSpecPath: string;
+      let bootstrapUserPromptPath: string | null = null;
       try {
+        const bootstrapSpec = buildDeterministicLaunchBootstrapSpec(
+          runId,
+          request,
+          effectiveMemberSpecs,
+          existingTasks
+        );
+        bootstrapSpecPath = await writeDeterministicBootstrapSpecFile(bootstrapSpec);
+        run.bootstrapSpecPath = bootstrapSpecPath;
+        bootstrapUserPromptPath = await writeDeterministicBootstrapUserPromptFile(prompt);
+        run.bootstrapUserPromptPath = bootstrapUserPromptPath;
         mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
         run.mcpConfigPath = mcpConfigPath;
         await this.validateAgentTeamsMcpRuntime(claudePath, request.cwd, shellEnv, mcpConfigPath);
       } catch (error) {
         this.runs.delete(runId);
         this.provisioningRunByTeam.delete(request.teamName);
+        await removeDeterministicBootstrapSpecFile(run.bootstrapSpecPath).catch(() => {});
+        run.bootstrapSpecPath = null;
+        await removeDeterministicBootstrapUserPromptFile(run.bootstrapUserPromptPath).catch(
+          () => {}
+        );
+        run.bootstrapUserPromptPath = null;
         await this.restorePrelaunchConfig(request.teamName);
         throw error;
       }
@@ -5185,6 +5138,11 @@ export class TeamProvisioningService {
         'user,project,local',
         '--mcp-config',
         mcpConfigPath,
+        '--team-bootstrap-spec',
+        bootstrapSpecPath,
+        ...(bootstrapUserPromptPath
+          ? ['--team-bootstrap-user-prompt-file', bootstrapUserPromptPath]
+          : []),
         '--disallowedTools',
         APP_TEAM_RUNTIME_DISALLOWED_TOOLS,
         // Explicit --permission-mode overrides user's defaultMode in ~/.claude/settings.json
@@ -5236,6 +5194,12 @@ export class TeamProvisioningService {
           await this.mcpConfigBuilder.removeConfigFile(run.mcpConfigPath).catch(() => {});
           run.mcpConfigPath = null;
         }
+        await removeDeterministicBootstrapSpecFile(run.bootstrapSpecPath).catch(() => {});
+        run.bootstrapSpecPath = null;
+        await removeDeterministicBootstrapUserPromptFile(run.bootstrapUserPromptPath).catch(
+          () => {}
+        );
+        run.bootstrapUserPromptPath = null;
         this.runs.delete(runId);
         this.provisioningRunByTeam.delete(request.teamName);
         await this.restorePrelaunchConfig(request.teamName);
@@ -5257,18 +5221,6 @@ export class TeamProvisioningService {
         prompt,
       };
 
-      // Send launch prompt
-      if (child.stdin?.writable) {
-        const message = JSON.stringify({
-          type: 'user',
-          message: {
-            role: 'user',
-            content: [{ type: 'text', text: prompt }],
-          },
-        });
-        child.stdin.write(message + '\n');
-      }
-
       this.attachStdoutHandler(run);
       this.attachStderrHandler(run);
 
@@ -5281,7 +5233,7 @@ export class TeamProvisioningService {
       // For launch, skip the filesystem monitor — files (config, inboxes, tasks)
       // already exist from the previous run and would trigger immediate false
       // completion on the first poll. Rely on stream-json result.success instead.
-      updateProgress(run, 'configuring', 'CLI running — reconnecting with teammates');
+      updateProgress(run, 'configuring', 'CLI running — deterministic reconnect in progress');
       run.onProgress(run.progress);
 
       run.timeoutHandle = setTimeout(() => {
@@ -9157,7 +9109,7 @@ export class TeamProvisioningService {
       this.aliveRunByTeam.set(run.teamName, run.runId);
       logger.info(`[${run.teamName}] Launch complete. Process alive for subsequent tasks.`);
 
-      if (shouldUseGeminiStagedLaunch(run.request.providerId)) {
+      if (!run.deterministicBootstrap && shouldUseGeminiStagedLaunch(run.request.providerId)) {
         run.pendingGeminiPostLaunchHydration = true;
       }
 
@@ -9321,7 +9273,7 @@ export class TeamProvisioningService {
     this.aliveRunByTeam.set(run.teamName, run.runId);
     logger.info(`[${run.teamName}] Provisioning complete. Process alive for subsequent tasks.`);
 
-    if (shouldUseGeminiStagedLaunch(run.request.providerId)) {
+    if (!run.deterministicBootstrap && shouldUseGeminiStagedLaunch(run.request.providerId)) {
       run.pendingGeminiPostLaunchHydration = true;
     }
 
