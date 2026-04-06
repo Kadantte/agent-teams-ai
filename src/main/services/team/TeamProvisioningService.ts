@@ -1260,7 +1260,6 @@ type RuntimeBootstrapSpec = {
   };
   members: RuntimeBootstrapMemberSpec[];
   launch?: {
-    initialUserPrompt?: string | null;
     bootstrapTimeoutMs?: number;
     continueOnPartialFailure?: boolean;
   };
