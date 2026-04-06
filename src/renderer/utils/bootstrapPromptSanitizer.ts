@@ -2,15 +2,28 @@ import { displayMemberName } from '@renderer/utils/memberHelpers';
 
 import type { InboxMessage } from '@shared/types';
 
-const BOOTSTRAP_REQUIRED_MARKERS = [
-  'Your FIRST action: call MCP tool member_briefing',
-  'Do NOT start work, claim tasks, or improvise workflow/task/process rules before member_briefing succeeds.',
+const BOOTSTRAP_REQUIRED_MARKER_SETS = [
+  [
+    'Your FIRST action: call MCP tool member_briefing',
+    'Do NOT start work, claim tasks, or improvise workflow/task/process rules before member_briefing succeeds.',
+  ],
+  [
+    'Your FIRST action: call MCP tool member_briefing',
+    'The team has already been created and you are being attached as a persistent teammate.',
+  ],
+  [
+    'Your FIRST action: call MCP tool member_briefing',
+    'The team has already been reconnected and you are being re-attached as a persistent teammate.',
+  ],
 ] as const;
 
 const BOOTSTRAP_SUPPORTING_MARKERS = [
   'If member_briefing fails, send',
   'member_briefing is expected to be available in your initial MCP tool list.',
   'IMPORTANT: When sending messages to the team lead',
+  'Call member_briefing directly yourself. Do NOT use Agent',
+  'wait for instructions from the lead and use team mailbox/task tools normally',
+  'resume your queue normally and prioritize already-assigned board work',
 ] as const;
 
 type TeamProviderId = 'anthropic' | 'codex' | 'gemini';
@@ -136,7 +149,9 @@ export function getBootstrapPromptDisplay(
   message: Pick<InboxMessage, 'text' | 'to'>
 ): BootstrapPromptDisplay | null {
   const text = typeof message.text === 'string' ? message.text.trim() : '';
-  const hasRequiredMarkers = BOOTSTRAP_REQUIRED_MARKERS.every((marker) => text.includes(marker));
+  const hasRequiredMarkers = BOOTSTRAP_REQUIRED_MARKER_SETS.some((markerSet) =>
+    markerSet.every((marker) => text.includes(marker))
+  );
   const hasSupportingMarker = BOOTSTRAP_SUPPORTING_MARKERS.some((marker) => text.includes(marker));
   if (!text.startsWith('You are ') || !hasRequiredMarkers || !hasSupportingMarker) {
     return null;
@@ -147,10 +162,10 @@ export function getBootstrapPromptDisplay(
     (typeof message.to === 'string' ? message.to.trim() : undefined);
   const teamName = matchField(text, /on team "([^"]+)"/);
   const providerId = parseProviderId(
-    matchField(text, /Provider override for this teammate:\s*([^\.\n]+)/i)
+    matchField(text, /Provider override(?: for this teammate)?:\s*([^\.\n]+)/i)
   );
-  const model = matchField(text, /Model override for this teammate:\s*([^\.\n]+)/i);
-  const effort = matchField(text, /Effort override for this teammate:\s*([^\.\n]+)/i);
+  const model = matchField(text, /Model override(?: for this teammate)?:\s*([^\.\n]+)/i);
+  const effort = matchField(text, /Effort override(?: for this teammate)?:\s*([^\.\n]+)/i);
   const runtime = buildRuntimeSummary(providerId, model, effort);
   const displayName = teammateName ? displayMemberName(teammateName) : 'teammate';
   const summary = `Starting ${displayName}`;
