@@ -73,6 +73,7 @@ import { TeamMetaStore } from './TeamMetaStore';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskReader } from './TeamTaskReader';
 import { TeamLaunchStateStore } from './TeamLaunchStateStore';
+import { getDesktopPreferredTeammateMode } from './runtimeTeammateMode';
 import {
   createPersistedLaunchSnapshot,
   snapshotFromRuntimeMemberStatuses,
@@ -4356,6 +4357,7 @@ export class TeamProvisioningService {
       const { env: shellEnv, geminiRuntimeAuth } = await this.buildProvisioningEnv(
         request.providerId
       );
+      const preferredTeammateMode = await getDesktopPreferredTeammateMode(request.extraCliArgs);
       let mcpConfigPath: string;
       try {
         mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
@@ -4386,6 +4388,7 @@ export class TeamProvisioningService {
         ...(request.model ? ['--model', request.model] : []),
         ...(request.effort ? ['--effort', request.effort] : []),
         ...(request.worktree ? ['--worktree', request.worktree] : []),
+        ...(preferredTeammateMode ? ['--teammate-mode', preferredTeammateMode] : []),
         ...parseCliArgs(request.extraCliArgs),
       ];
       const runtimeWarning = buildRuntimeLaunchWarning(request, shellEnv, {
@@ -4859,6 +4862,7 @@ export class TeamProvisioningService {
       const { env: shellEnv, geminiRuntimeAuth } = await this.buildProvisioningEnv(
         request.providerId
       );
+      const preferredTeammateMode = await getDesktopPreferredTeammateMode(request.extraCliArgs);
       let mcpConfigPath: string;
       try {
         mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
@@ -4902,6 +4906,9 @@ export class TeamProvisioningService {
       }
       if (request.worktree) {
         launchArgs.push('--worktree', request.worktree);
+      }
+      if (preferredTeammateMode) {
+        launchArgs.push('--teammate-mode', preferredTeammateMode);
       }
       launchArgs.push(...parseCliArgs(request.extraCliArgs));
       const runtimeWarning = buildRuntimeLaunchWarning(request, shellEnv, {
@@ -9653,6 +9660,7 @@ export class TeamProvisioningService {
         ? { CLAUDE_CONFIG_DIR: getClaudeBasePath() }
         : {}),
       CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+      CLAUDE_CODE_ENTRYPOINT: 'claude-desktop',
     };
     applyConfiguredRuntimeBackendsEnv(env);
     applyProviderRuntimeEnv(env, providerId);
