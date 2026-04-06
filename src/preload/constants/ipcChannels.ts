@@ -429,6 +429,9 @@ export const CLI_INSTALLER_PROGRESS = 'cliInstaller:progress';
 /** Invalidate cached CLI status (forces fresh check on next getStatus) */
 export const CLI_INSTALLER_INVALIDATE_STATUS = 'cliInstaller:invalidateStatus';
 
+/** Get current tmux runtime availability for dashboard diagnostics */
+export const TMUX_GET_STATUS = 'tmux:getStatus';
+
 // =============================================================================
 // Terminal API Channels
 // =============================================================================

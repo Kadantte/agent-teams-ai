@@ -61,6 +61,8 @@ import type {
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
+  TmuxAPI,
+  TmuxStatus,
   TriggerTestResult,
   UpdateKanbanPatch,
   UpdaterAPI,
@@ -1084,6 +1086,18 @@ export class HttpAPIClient implements ElectronAPI {
     onProgress: (): (() => void) => {
       return () => {};
     },
+  };
+
+  tmux: TmuxAPI = {
+    getStatus: async (): Promise<TmuxStatus> => ({
+      available: true,
+      version: null,
+      binaryPath: null,
+      platform: 'unknown',
+      nativeSupported: true,
+      checkedAt: new Date().toISOString(),
+      error: null,
+    }),
   };
 
   // ---------------------------------------------------------------------------

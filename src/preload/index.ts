@@ -13,6 +13,7 @@ import {
   CLI_INSTALLER_INSTALL,
   CLI_INSTALLER_INVALIDATE_STATUS,
   CLI_INSTALLER_PROGRESS,
+  TMUX_GET_STATUS,
   CONTEXT_CHANGED,
   CONTEXT_GET_ACTIVE,
   CONTEXT_LIST,
@@ -290,6 +291,7 @@ import type {
   ToolApprovalEvent,
   ToolApprovalFileContent,
   ToolApprovalSettings,
+  TmuxStatus,
   TriggerTestResult,
   UpdateKanbanPatch,
   UpdateSchedulePatch,
@@ -1365,6 +1367,12 @@ const electronAPI: ElectronAPI = {
           callback as (event: Electron.IpcRendererEvent, ...args: unknown[]) => void
         );
       };
+    },
+  },
+
+  tmux: {
+    getStatus: async (): Promise<TmuxStatus> => {
+      return invokeIpcWithResult<TmuxStatus>(TMUX_GET_STATUS);
     },
   },
 

@@ -81,6 +81,7 @@ import type {
   UpdateKanbanPatch,
 } from './team';
 import type { TerminalAPI } from './terminal';
+import type { TmuxAPI } from './tmux';
 import type { WaterfallData } from './visualization';
 import type {
   ConversationGroup,
@@ -822,6 +823,9 @@ export interface ElectronAPI {
 
   // CLI Installer API
   cliInstaller: CliInstallerAPI;
+
+  // tmux runtime diagnostics API
+  tmux: TmuxAPI;
 
   // Embedded Terminal API (xterm.js + node-pty)
   terminal: TerminalAPI;
