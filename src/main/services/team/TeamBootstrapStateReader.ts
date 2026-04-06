@@ -84,6 +84,89 @@ type BootstrapRuntimePhase =
   | 'failed'
   | 'canceled';
 
+type ComparableStat = {
+  dev?: number;
+  ino?: number;
+  size: number;
+  mode?: number;
+  mtimeMs?: number;
+};
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function sameFiniteNumber(a: unknown, b: unknown): boolean {
+  return isFiniteNumber(a) && isFiniteNumber(b) && a === b;
+}
+
+function didValidatedFileChange(expected: ComparableStat, actual: ComparableStat): boolean {
+  const comparableIdentity =
+    isFiniteNumber(expected.dev) &&
+    isFiniteNumber(actual.dev) &&
+    isFiniteNumber(expected.ino) &&
+    isFiniteNumber(actual.ino);
+  if (comparableIdentity) {
+    return expected.dev !== actual.dev || expected.ino !== actual.ino;
+  }
+
+  if (sameFiniteNumber(expected.dev, actual.dev) && sameFiniteNumber(expected.ino, actual.ino)) {
+    return false;
+  }
+
+  return (
+    expected.size !== actual.size ||
+    expected.mode !== actual.mode ||
+    expected.mtimeMs !== actual.mtimeMs
+  );
+}
+
+async function readBoundRegularUtf8File(
+  targetPath: string,
+  maxBytes: number,
+  messages: {
+    notRegular: string;
+    oversized: string;
+    invalid: string;
+  }
+): Promise<{ contents: string } | { issue: string } | null> {
+  try {
+    const validated = await fs.promises.lstat(targetPath);
+    if (validated.isSymbolicLink() || !validated.isFile()) {
+      return { issue: messages.notRegular };
+    }
+    if (validated.size > maxBytes) {
+      return { issue: messages.oversized };
+    }
+
+    let handle: fs.promises.FileHandle;
+    try {
+      handle = await fs.promises.open(targetPath, 'r');
+    } catch {
+      return { issue: messages.invalid };
+    }
+    try {
+      const opened = await handle.stat();
+      if (!opened.isFile() || didValidatedFileChange(validated, opened)) {
+        return { issue: messages.invalid };
+      }
+      if (opened.size > maxBytes) {
+        return { issue: messages.oversized };
+      }
+      return {
+        contents: await handle.readFile({ encoding: 'utf8' }),
+      };
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+      return null;
+    }
+    return { issue: messages.invalid };
+  }
+}
+
 function isBootstrapPhaseTerminal(phase: BootstrapRuntimePhase): boolean {
   return phase === 'completed' || phase === 'failed' || phase === 'canceled';
 }
@@ -136,30 +219,25 @@ function classifyBootstrapOwnerState(raw: RawBootstrapState): {
 
 async function inspectBootstrapState(teamName: string): Promise<BootstrapStateInspection> {
   const targetPath = getTeamBootstrapStatePath(teamName);
+  const file = await readBoundRegularUtf8File(targetPath, MAX_BOOTSTRAP_STATE_BYTES, {
+    notRegular:
+      'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is a symlink or not a regular file.',
+    oversized:
+      'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is oversized.',
+    invalid:
+      'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is invalid, truncated, inaccessible, or changed while being read.',
+  });
+  if (!file) {
+    return { raw: null };
+  }
+  if ('issue' in file) {
+    return {
+      raw: null,
+      issue: file.issue,
+    };
+  }
   try {
-    const stat = await fs.promises.lstat(targetPath);
-    if (stat.isSymbolicLink()) {
-      return {
-        raw: null,
-        issue:
-          'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is a symlink.',
-      };
-    }
-    if (!stat.isFile()) {
-      return {
-        raw: null,
-        issue:
-          'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is not a regular file.',
-      };
-    }
-    if (stat.size > MAX_BOOTSTRAP_STATE_BYTES) {
-      return {
-        raw: null,
-        issue:
-          'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is oversized.',
-      };
-    }
-    const raw = JSON.parse(await fs.promises.readFile(targetPath, 'utf8')) as RawBootstrapState;
+    const raw = JSON.parse(file.contents) as RawBootstrapState;
     if (raw.version !== 1) {
       return {
         raw: null,
@@ -168,14 +246,11 @@ async function inspectBootstrapState(teamName: string): Promise<BootstrapStateIn
       };
     }
     return { raw };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
-      return { raw: null };
-    }
+  } catch {
     return {
       raw: null,
       issue:
-        'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is invalid, truncated, or inaccessible.',
+        'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is invalid, truncated, inaccessible, or changed while being read.',
     };
   }
 }
@@ -333,14 +408,16 @@ function getTeamBootstrapLockMetadataPath(teamName: string): string {
 
 async function readBootstrapLockMetadata(teamName: string): Promise<BootstrapLockMetadata | null> {
   const targetPath = getTeamBootstrapLockMetadataPath(teamName);
+  const file = await readBoundRegularUtf8File(targetPath, MAX_BOOTSTRAP_LOCK_METADATA_BYTES, {
+    notRegular: '',
+    oversized: '',
+    invalid: '',
+  });
+  if (!file || 'issue' in file) {
+    return null;
+  }
   try {
-    const stat = await fs.promises.lstat(targetPath);
-    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_BOOTSTRAP_LOCK_METADATA_BYTES) {
-      return null;
-    }
-    const raw = JSON.parse(
-      await fs.promises.readFile(targetPath, 'utf8')
-    ) as RawBootstrapLockMetadata;
+    const raw = JSON.parse(file.contents) as RawBootstrapLockMetadata;
     if (
       typeof raw.pid !== 'number' ||
       !Number.isFinite(raw.pid) ||
@@ -373,28 +450,24 @@ async function readBootstrapJournalWarnings(teamName: string): Promise<string[] 
 
 async function inspectBootstrapJournal(teamName: string): Promise<BootstrapJournalInspection> {
   const targetPath = getTeamBootstrapJournalPath(teamName);
+  const file = await readBoundRegularUtf8File(targetPath, MAX_BOOTSTRAP_JOURNAL_BYTES, {
+    notRegular:
+      'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is a symlink or not a regular file.',
+    oversized:
+      'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is oversized.',
+    invalid:
+      'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is invalid, truncated, inaccessible, or changed while being read.',
+  });
+  if (!file) {
+    return {};
+  }
+  if ('issue' in file) {
+    return {
+      issue: file.issue,
+    };
+  }
   try {
-    const stat = await fs.promises.lstat(targetPath);
-    if (stat.isSymbolicLink()) {
-      return {
-        issue:
-          'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is a symlink.',
-      };
-    }
-    if (!stat.isFile()) {
-      return {
-        issue:
-          'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is not a regular file.',
-      };
-    }
-    if (stat.size > MAX_BOOTSTRAP_JOURNAL_BYTES) {
-      return {
-        issue:
-          'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is oversized.',
-      };
-    }
-
-    const raw = await fs.promises.readFile(targetPath, 'utf8');
+    const raw = file.contents;
     const lines = raw
       .split('\n')
       .map((line) => line.trim())
@@ -446,7 +519,7 @@ async function inspectBootstrapJournal(teamName: string): Promise<BootstrapJourn
     if (lines.length > 0 && messages.length === 0) {
       return {
         issue:
-          'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is invalid, truncated, or inaccessible.',
+          'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is invalid, truncated, inaccessible, or changed while being read.',
       };
     }
 
@@ -466,13 +539,10 @@ async function inspectBootstrapJournal(teamName: string): Promise<BootstrapJourn
           ? [`Recent deterministic bootstrap events: ${messages.join(' | ')}`]
           : undefined,
     };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
-      return {};
-    }
+  } catch {
     return {
       issue:
-        'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is invalid, truncated, or inaccessible.',
+        'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is invalid, truncated, inaccessible, or changed while being read.',
     };
   }
 }

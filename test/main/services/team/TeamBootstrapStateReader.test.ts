@@ -7,6 +7,16 @@ const hoisted = vi.hoisted(() => {
       contents: string;
       size?: number;
       symbolicLink?: boolean;
+      ino?: number;
+      dev?: number;
+      mode?: number;
+      mtimeMs?: number;
+      openedContents?: string;
+      openedSize?: number;
+      openedIno?: number;
+      openedDev?: number;
+      openedMode?: number;
+      openedMtimeMs?: number;
     }
   >();
 
@@ -23,6 +33,10 @@ const hoisted = vi.hoisted(() => {
       isFile: () => !entry.symbolicLink,
       isSymbolicLink: () => Boolean(entry.symbolicLink),
       size: entry.size ?? Buffer.byteLength(entry.contents, 'utf8'),
+      ino: entry.ino ?? 1,
+      dev: entry.dev ?? 1,
+      mode: entry.mode ?? 0o100600,
+      mtimeMs: entry.mtimeMs ?? 1,
     };
   });
 
@@ -34,6 +48,30 @@ const hoisted = vi.hoisted(() => {
       throw error;
     }
     return entry.contents;
+  });
+
+  const open = vi.fn(async (filePath: string) => {
+    const entry = files.get(norm(filePath));
+    if (!entry) {
+      const error = new Error('ENOENT') as NodeJS.ErrnoException;
+      error.code = 'ENOENT';
+      throw error;
+    }
+    return {
+      stat: vi.fn(async () => ({
+        isFile: () => !entry.symbolicLink,
+        size:
+          entry.openedSize ??
+          entry.size ??
+          Buffer.byteLength(entry.openedContents ?? entry.contents, 'utf8'),
+        ino: entry.openedIno ?? entry.ino ?? 1,
+        dev: entry.openedDev ?? entry.dev ?? 1,
+        mode: entry.openedMode ?? entry.mode ?? 0o100600,
+        mtimeMs: entry.openedMtimeMs ?? entry.mtimeMs ?? 1,
+      })),
+      readFile: vi.fn(async () => entry.openedContents ?? entry.contents),
+      close: vi.fn(async () => undefined),
+    };
   });
 
   const access = vi.fn(async (filePath: string) => {
@@ -49,7 +87,7 @@ const hoisted = vi.hoisted(() => {
     files.delete(norm(filePath));
   });
 
-  return { files, lstat, readFile, access, rm };
+  return { files, lstat, open, readFile, access, rm };
 });
 
 vi.mock('fs', async (importOriginal) => {
@@ -59,6 +97,7 @@ vi.mock('fs', async (importOriginal) => {
     promises: {
       ...actual.promises,
       lstat: hoisted.lstat,
+      open: hoisted.open,
       readFile: hoisted.readFile,
       access: hoisted.access,
       rm: hoisted.rm,
@@ -81,6 +120,7 @@ describe('TeamBootstrapStateReader', () => {
   beforeEach(() => {
     hoisted.files.clear();
     hoisted.lstat.mockClear();
+    hoisted.open.mockClear();
     hoisted.readFile.mockClear();
     hoisted.access.mockClear();
     hoisted.rm.mockClear();
@@ -169,7 +209,49 @@ describe('TeamBootstrapStateReader', () => {
         state: 'assembling',
         message: 'Spawning teammate runtimes (1)',
         warnings: [
-          'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is invalid, truncated, or inaccessible.',
+          'Persisted deterministic bootstrap journal is unreadable because bootstrap-journal.jsonl is invalid, truncated, inaccessible, or changed while being read.',
+        ],
+      },
+    });
+
+    killSpy.mockRestore();
+  });
+
+  it('treats bootstrap-state replacement during read as degraded recovery, not trusted truth', async () => {
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true as never);
+
+    hoisted.files.set('/mock/teams/demo/bootstrap-state.json', {
+      contents: JSON.stringify({
+        version: 1,
+        runId: 'run-123',
+        teamName: 'demo',
+        ownerPid: 4242,
+        startedAt: 1700000000000,
+        updatedAt: 1700000000500,
+        phase: 'spawning_members',
+        members: [],
+      }),
+      ino: 1,
+      openedIno: 2,
+    });
+    hoisted.files.set('/mock/teams/demo/.bootstrap.lock/metadata.json', {
+      contents: JSON.stringify({
+        pid: 4242,
+        runId: 'run-123',
+        ownerStartedAt: 1700000000000,
+      }),
+    });
+
+    await expect(readBootstrapRuntimeState('demo')).resolves.toMatchObject({
+      teamName: 'demo',
+      isAlive: false,
+      runId: 'run-123',
+      progress: {
+        state: 'configuring',
+        message:
+          'Deterministic bootstrap recovery is degraded because persisted bootstrap state is unreadable',
+        warnings: [
+          'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is invalid, truncated, inaccessible, or changed while being read.',
         ],
       },
     });
@@ -336,7 +418,7 @@ describe('TeamBootstrapStateReader', () => {
         messageSeverity: 'warning',
         pid: 4242,
         warnings: [
-          'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is invalid, truncated, or inaccessible.',
+          'Persisted deterministic bootstrap state is unreadable because bootstrap-state.json is invalid, truncated, inaccessible, or changed while being read.',
           'Recent deterministic bootstrap events: bootstrap phase: spawning_members | alice: spawn_started',
         ],
       },
