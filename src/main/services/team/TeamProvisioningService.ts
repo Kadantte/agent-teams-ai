@@ -73,6 +73,13 @@ import { TeamMetaStore } from './TeamMetaStore';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskReader } from './TeamTaskReader';
 import { TeamLaunchStateStore } from './TeamLaunchStateStore';
+import {
+  choosePreferredLaunchSnapshot,
+  clearBootstrapState,
+  readBootstrapLaunchSnapshot,
+  readBootstrapRealTaskSubmissionState,
+  readBootstrapRuntimeState,
+} from './TeamBootstrapStateReader';
 import { resolveDesktopTeammateModeDecision } from './runtimeTeammateMode';
 import {
   createPersistedLaunchSnapshot,
@@ -131,6 +138,7 @@ import type {
   TeamProvisioningState,
   TeamRuntimeState,
   TeamTask,
+  EffortLevel,
   ToolActivityEventPayload,
   ToolApprovalAutoResolved,
   ToolApprovalEvent,
@@ -501,7 +509,12 @@ interface ProvisioningRun {
   provisioningComplete: boolean;
   /** Path to the generated MCP config file for later cleanup. */
   mcpConfigPath: string | null;
+  /** Path to the deterministic bootstrap spec file for later cleanup. */
+  bootstrapSpecPath: string | null;
+  /** Path to the deferred first-user-task file consumed by runtime after bootstrap. */
+  bootstrapUserPromptPath: string | null;
   isLaunch: boolean;
+  deterministicBootstrap: boolean;
   leadRelayCapture: {
     leadName: string;
     startedAt: string;
@@ -1136,6 +1149,142 @@ export function buildAddMemberSpawnMessage(
     `Please spawn them immediately using the **Agent** tool with team_name="${teamName}", name="${member.name}", subagent_type="general-purpose"${providerPart}${modelPart}${effortPart}, and the exact prompt below:${workflowHint}\n\n` +
     indentMultiline(prompt, '  ')
   );
+}
+
+type RuntimeBootstrapMemberSpec = {
+  name: string;
+  prompt: string;
+  cwd?: string;
+  model?: string;
+  provider?: TeamProviderId;
+  effort?: EffortLevel;
+  agentType?: string;
+  description?: string;
+  useSplitPane?: boolean;
+  planModeRequired?: boolean;
+};
+
+type RuntimeBootstrapSpec = {
+  version: 1;
+  runId: string;
+  mode: 'create';
+  initiator: {
+    kind: 'app';
+    source: 'claude_team_freecode';
+  };
+  team: {
+    name: string;
+    displayName?: string;
+    description?: string;
+    color?: string;
+    cwd: string;
+  };
+  lead: {
+    providerId?: TeamProviderId;
+    model?: string;
+    effort?: EffortLevel;
+    skipPermissions?: boolean;
+    worktree?: string | null;
+    extraCliArgs?: string[];
+  };
+  members: RuntimeBootstrapMemberSpec[];
+  launch?: {
+    initialUserPrompt?: string | null;
+    bootstrapTimeoutMs?: number;
+    continueOnPartialFailure?: boolean;
+  };
+  ui?: {
+    emitStructuredEvents?: boolean;
+  };
+};
+
+function buildDeterministicBootstrapSpec(
+  runId: string,
+  request: TeamCreateRequest,
+  effectiveMembers: TeamCreateRequest['members']
+): RuntimeBootstrapSpec {
+  const displayName = request.displayName?.trim() || request.teamName;
+  const leadName =
+    effectiveMembers.find((member) => member.role?.toLowerCase().includes('lead'))?.name ||
+    'team-lead';
+
+  return {
+    version: 1,
+    runId,
+    mode: 'create',
+    initiator: {
+      kind: 'app',
+      source: 'claude_team_freecode',
+    },
+    team: {
+      name: request.teamName,
+      ...(request.displayName?.trim() ? { displayName: request.displayName.trim() } : {}),
+      ...(request.description?.trim() ? { description: request.description.trim() } : {}),
+      ...(request.color?.trim() ? { color: request.color.trim() } : {}),
+      cwd: request.cwd,
+    },
+    lead: {
+      ...(request.providerId ? { providerId: request.providerId } : {}),
+      ...(request.model?.trim() ? { model: request.model.trim() } : {}),
+      ...(request.effort ? { effort: request.effort } : {}),
+      ...(request.skipPermissions !== undefined
+        ? { skipPermissions: request.skipPermissions }
+        : {}),
+      ...(request.worktree ? { worktree: request.worktree } : {}),
+      ...(request.extraCliArgs ? { extraCliArgs: parseCliArgs(request.extraCliArgs) } : {}),
+    },
+    members: effectiveMembers.map((member) => ({
+      name: member.name,
+      prompt: buildMemberSpawnPrompt(member, displayName, request.teamName, leadName),
+      ...(member.role?.trim() ? { role: member.role.trim() } : {}),
+      ...(member.workflow?.trim() ? { workflow: member.workflow.trim() } : {}),
+      ...(request.cwd ? { cwd: request.cwd } : {}),
+      ...(member.model?.trim() ? { model: member.model.trim() } : {}),
+      ...(member.providerId ? { provider: member.providerId } : {}),
+      ...(member.effort ? { effort: member.effort } : {}),
+      ...(member.role?.trim() ? { description: member.role.trim() } : {}),
+    })),
+    launch: {
+      continueOnPartialFailure: true,
+    },
+    ui: {
+      emitStructuredEvents: true,
+    },
+  };
+}
+
+async function writeDeterministicBootstrapSpecFile(spec: RuntimeBootstrapSpec): Promise<string> {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-teams-bootstrap-'));
+  const filePath = path.join(tempDir, `${spec.team.name}-${randomUUID()}.json`);
+  await fs.promises.writeFile(filePath, JSON.stringify(spec), {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  return filePath;
+}
+
+async function removeDeterministicBootstrapSpecFile(filePath: string | null): Promise<void> {
+  if (!filePath) return;
+  await fs.promises.rm(filePath, { force: true }).catch(() => {});
+  await fs.promises.rmdir(path.dirname(filePath)).catch(() => {});
+}
+
+async function writeDeterministicBootstrapUserPromptFile(prompt: string): Promise<string> {
+  const tempDir = await fs.promises.mkdtemp(
+    path.join(os.tmpdir(), 'agent-teams-bootstrap-prompt-')
+  );
+  const filePath = path.join(tempDir, `${randomUUID()}.txt`);
+  await fs.promises.writeFile(filePath, prompt, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  return filePath;
+}
+
+async function removeDeterministicBootstrapUserPromptFile(filePath: string | null): Promise<void> {
+  if (!filePath) return;
+  await fs.promises.rm(filePath, { force: true }).catch(() => {});
+  await fs.promises.rmdir(path.dirname(filePath)).catch(() => {});
 }
 
 function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string {
@@ -4030,6 +4179,7 @@ export class TeamProvisioningService {
 
     // Verify --mcp-config still exists; regenerate if deleted (e.g. by stale GC)
     const mcpFlagIdx = ctx.args.indexOf('--mcp-config');
+    const bootstrapPromptFlagIdx = ctx.args.indexOf('--team-bootstrap-user-prompt-file');
     if (mcpFlagIdx !== -1 && mcpFlagIdx + 1 < ctx.args.length) {
       const existingConfigPath = ctx.args[mcpFlagIdx + 1];
       try {
@@ -4050,6 +4200,73 @@ export class TeamProvisioningService {
           run.onProgress(progress);
           this.cleanupRun(run);
           return;
+        }
+      }
+    }
+
+    if (bootstrapPromptFlagIdx !== -1 && bootstrapPromptFlagIdx + 1 < ctx.args.length) {
+      const existingPromptPath = ctx.args[bootstrapPromptFlagIdx + 1];
+      try {
+        await fs.promises.access(existingPromptPath, fs.constants.F_OK);
+      } catch {
+        const submissionState = await readBootstrapRealTaskSubmissionState(run.teamName);
+        if (submissionState === 'submitted') {
+          ctx.args.splice(bootstrapPromptFlagIdx, 2);
+          ctx.prompt = '';
+          run.bootstrapUserPromptPath = null;
+        } else if (submissionState === 'unknown') {
+          run.authRetryInProgress = false;
+          const progress = updateProgress(
+            run,
+            'failed',
+            'Unable to safely retry first task after auth failure',
+            {
+              error:
+                'deterministic bootstrap recorded the first real task as unknown, so retry would risk a duplicate submission',
+              cliLogsTail: extractCliLogsFromRun(run),
+            }
+          );
+          run.onProgress(progress);
+          this.cleanupRun(run);
+          return;
+        } else if (ctx.prompt.trim().length === 0) {
+          run.authRetryInProgress = false;
+          const progress = updateProgress(
+            run,
+            'failed',
+            'Failed to restore deferred first task after auth retry',
+            {
+              error:
+                'deterministic bootstrap user prompt file was missing and no prompt was available to regenerate it',
+              cliLogsTail: extractCliLogsFromRun(run),
+            }
+          );
+          run.onProgress(progress);
+          this.cleanupRun(run);
+          return;
+        } else {
+          logger.warn(
+            `[${run.teamName}] Bootstrap user prompt file ${existingPromptPath} missing, regenerating`
+          );
+          try {
+            const newPromptPath = await writeDeterministicBootstrapUserPromptFile(ctx.prompt);
+            ctx.args[bootstrapPromptFlagIdx + 1] = newPromptPath;
+            run.bootstrapUserPromptPath = newPromptPath;
+          } catch (regenErr) {
+            run.authRetryInProgress = false;
+            const progress = updateProgress(
+              run,
+              'failed',
+              'Failed to regenerate deferred first task for auth retry',
+              {
+                error: regenErr instanceof Error ? regenErr.message : String(regenErr),
+                cliLogsTail: extractCliLogsFromRun(run),
+              }
+            );
+            run.onProgress(progress);
+            this.cleanupRun(run);
+            return;
+          }
         }
       }
     }
@@ -4091,8 +4308,9 @@ export class TeamProvisioningService {
     });
     run.onProgress(run.progress);
 
-    // Resend prompt
-    if (child.stdin?.writable) {
+    // Resend prompt only for legacy direct-stdin flows. Deterministic bootstrap
+    // owns the first real task via --team-bootstrap-user-prompt-file.
+    if (bootstrapPromptFlagIdx === -1 && child.stdin?.writable) {
       const message = JSON.stringify({
         type: 'user',
         message: {
@@ -4352,7 +4570,10 @@ export class TeamProvisioningService {
         waitingTasksSince: null,
         provisioningComplete: false,
         mcpConfigPath: null,
+        bootstrapSpecPath: null,
+        bootstrapUserPromptPath: null,
         isLaunch: false,
+        deterministicBootstrap: true,
         fsPhase: 'waiting_config',
         leadRelayCapture: null,
         activeCrossTeamReplyHints: [],
@@ -4404,24 +4625,41 @@ export class TeamProvisioningService {
       run.onProgress(run.progress);
       await this.clearPersistedLaunchState(request.teamName);
 
-      const prompt = buildProvisioningPrompt(request, effectiveMemberSpecs);
-      const promptSize = getPromptSizeSummary(prompt);
+      const bootstrapSpec = buildDeterministicBootstrapSpec(runId, request, effectiveMemberSpecs);
+      const initialUserPrompt = request.prompt?.trim() ?? '';
+      const promptSize = getPromptSizeSummary(initialUserPrompt);
       let child: ReturnType<typeof spawn>;
       const { env: shellEnv, geminiRuntimeAuth } = await this.buildProvisioningEnv(
         request.providerId
       );
+      shellEnv.CLAUDE_ENABLE_DETERMINISTIC_TEAM_BOOTSTRAP = '1';
       const teammateModeDecision = await resolveDesktopTeammateModeDecision(request.extraCliArgs);
       if (teammateModeDecision.forceProcessTeammates) {
         shellEnv.CLAUDE_TEAM_FORCE_PROCESS_TEAMMATES = '1';
       }
       let mcpConfigPath: string;
+      let bootstrapSpecPath: string;
+      let bootstrapUserPromptPath: string | null = null;
       try {
+        bootstrapSpecPath = await writeDeterministicBootstrapSpecFile(bootstrapSpec);
+        run.bootstrapSpecPath = bootstrapSpecPath;
+        if (initialUserPrompt) {
+          bootstrapUserPromptPath =
+            await writeDeterministicBootstrapUserPromptFile(initialUserPrompt);
+          run.bootstrapUserPromptPath = bootstrapUserPromptPath;
+        }
         mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
         run.mcpConfigPath = mcpConfigPath;
         await this.validateAgentTeamsMcpRuntime(claudePath, request.cwd, shellEnv, mcpConfigPath);
       } catch (error) {
         this.runs.delete(runId);
         this.provisioningRunByTeam.delete(request.teamName);
+        await removeDeterministicBootstrapSpecFile(run.bootstrapSpecPath).catch(() => {});
+        run.bootstrapSpecPath = null;
+        await removeDeterministicBootstrapUserPromptFile(run.bootstrapUserPromptPath).catch(
+          () => {}
+        );
+        run.bootstrapUserPromptPath = null;
         throw error;
       }
       const spawnArgs = [
@@ -4434,6 +4672,11 @@ export class TeamProvisioningService {
         'user,project,local',
         '--mcp-config',
         mcpConfigPath,
+        '--team-bootstrap-spec',
+        bootstrapSpecPath,
+        ...(bootstrapUserPromptPath
+          ? ['--team-bootstrap-user-prompt-file', bootstrapUserPromptPath]
+          : []),
         '--disallowedTools',
         APP_TEAM_RUNTIME_DISALLOWED_TOOLS,
         // Explicit --permission-mode overrides user's defaultMode in ~/.claude/settings.json
@@ -4505,6 +4748,12 @@ export class TeamProvisioningService {
         const tasksDir = path.join(getTasksBasePath(), request.teamName);
         await fs.promises.rm(teamDir, { recursive: true, force: true }).catch(() => {});
         await fs.promises.rm(tasksDir, { recursive: true, force: true }).catch(() => {});
+        await removeDeterministicBootstrapSpecFile(run.bootstrapSpecPath).catch(() => {});
+        run.bootstrapSpecPath = null;
+        await removeDeterministicBootstrapUserPromptFile(run.bootstrapUserPromptPath).catch(
+          () => {}
+        );
+        run.bootstrapUserPromptPath = null;
         if (run.mcpConfigPath) {
           await this.mcpConfigBuilder.removeConfigFile(run.mcpConfigPath).catch(() => {});
           run.mcpConfigPath = null;
@@ -4525,20 +4774,8 @@ export class TeamProvisioningService {
         args: spawnArgs,
         cwd: request.cwd,
         env: { ...shellEnv },
-        prompt,
+        prompt: initialUserPrompt,
       };
-
-      // Send provisioning prompt as first stream-json message (SDKUserMessage format)
-      if (child.stdin?.writable) {
-        const message = JSON.stringify({
-          type: 'user',
-          message: {
-            role: 'user',
-            content: [{ type: 'text', text: prompt }],
-          },
-        });
-        child.stdin.write(message + '\n');
-      }
 
       this.attachStdoutHandler(run);
       this.attachStderrHandler(run);
@@ -4841,7 +5078,10 @@ export class TeamProvisioningService {
         waitingTasksSince: null,
         provisioningComplete: false,
         mcpConfigPath: null,
+        bootstrapSpecPath: null,
+        bootstrapUserPromptPath: null,
         isLaunch: true,
+        deterministicBootstrap: false,
         fsPhase: 'waiting_members',
         leadRelayCapture: null,
         activeCrossTeamReplyHints: [],
@@ -5840,9 +6080,16 @@ export class TeamProvisioningService {
     return Array.from(this.aliveRunByTeam.keys()).filter((name) => this.isTeamAlive(name));
   }
 
-  getRuntimeState(teamName: string): TeamRuntimeState {
+  async getRuntimeState(teamName: string): Promise<TeamRuntimeState> {
     const runId = this.getTrackedRunId(teamName);
     const run = runId ? (this.runs.get(runId) ?? null) : null;
+
+    if (!run) {
+      const recovered = await readBootstrapRuntimeState(teamName);
+      if (recovered) {
+        return recovered;
+      }
+    }
 
     return {
       teamName,
@@ -6175,7 +6422,11 @@ export class TeamProvisioningService {
       }
 
       const current = run.memberSpawnStatuses.get(expected);
-      if (current?.launchState === 'failed_to_start') {
+      if (
+        current?.launchState === 'failed_to_start' ||
+        current?.bootstrapConfirmed ||
+        current?.runtimeAlive
+      ) {
         continue;
       }
 
@@ -6224,6 +6475,7 @@ export class TeamProvisioningService {
 
   private async clearPersistedLaunchState(teamName: string): Promise<void> {
     await this.launchStateStore.clear(teamName);
+    await clearBootstrapState(teamName);
   }
 
   private getFailedSpawnMembers(
@@ -6338,7 +6590,15 @@ export class TeamProvisioningService {
     snapshot: ReturnType<typeof createPersistedLaunchSnapshot> | null;
     statuses: Record<string, MemberSpawnStatusEntry>;
   }> {
+    const bootstrapSnapshot = await readBootstrapLaunchSnapshot(teamName);
     const persisted = await this.launchStateStore.read(teamName);
+    const preferredSnapshot = choosePreferredLaunchSnapshot(bootstrapSnapshot, persisted);
+    if (preferredSnapshot) {
+      return {
+        snapshot: preferredSnapshot,
+        statuses: snapshotToMemberSpawnStatuses(preferredSnapshot),
+      };
+    }
     if (!persisted) {
       return { snapshot: null, statuses: {} };
     }
@@ -6998,6 +7258,152 @@ export class TeamProvisioningService {
    * Process a parsed stream-json message from stdout.
    * Extracts assistant text for progress reporting and detects turn completion.
    */
+  private handleDeterministicBootstrapEvent(
+    run: ProvisioningRun,
+    msg: Record<string, unknown>
+  ): boolean {
+    if (msg.type !== 'system' || msg.subtype !== 'team_bootstrap') {
+      return false;
+    }
+
+    const event = typeof msg.event === 'string' ? msg.event : undefined;
+    if (!event) {
+      return true;
+    }
+
+    if (event === 'started') {
+      const progress = updateProgress(run, 'configuring', 'Starting deterministic team bootstrap');
+      run.onProgress(progress);
+      return true;
+    }
+
+    if (event === 'phase_changed') {
+      const phase = typeof msg.phase === 'string' ? msg.phase : '';
+      if (phase === 'loading_existing_state') {
+        const progress = updateProgress(run, 'configuring', 'Loading existing team state');
+        run.onProgress(progress);
+      } else if (phase === 'acquiring_bootstrap_lock') {
+        const progress = updateProgress(
+          run,
+          'configuring',
+          'Acquiring deterministic bootstrap lock'
+        );
+        run.onProgress(progress);
+      } else if (phase === 'creating_team') {
+        const progress = updateProgress(run, 'assembling', 'Creating team config');
+        run.onProgress(progress);
+      } else if (phase === 'spawning_members') {
+        const progress = updateProgress(run, 'assembling', 'Spawning teammate runtimes');
+        run.onProgress(progress);
+      } else if (phase === 'auditing_truth') {
+        const progress = updateProgress(
+          run,
+          'finalizing',
+          'Auditing registered teammates and bootstrap truth',
+          { configReady: true }
+        );
+        run.onProgress(progress);
+      }
+      return true;
+    }
+
+    if (event === 'team_created') {
+      const reused = msg.reused_existing_team === true;
+      const progress = updateProgress(
+        run,
+        'assembling',
+        reused
+          ? 'Attached to existing team, starting teammates'
+          : 'Team config created, starting teammates',
+        { configReady: true }
+      );
+      run.onProgress(progress);
+      return true;
+    }
+
+    if (event === 'member_spawn_started') {
+      const memberName = typeof msg.member_name === 'string' ? msg.member_name.trim() : '';
+      if (memberName) {
+        this.setMemberSpawnStatus(run, memberName, 'spawning');
+      }
+      return true;
+    }
+
+    if (event === 'member_spawn_result') {
+      const memberName = typeof msg.member_name === 'string' ? msg.member_name.trim() : '';
+      const outcome = typeof msg.outcome === 'string' ? msg.outcome : '';
+      const reason = typeof msg.reason === 'string' ? msg.reason.trim() : undefined;
+      if (!memberName) {
+        return true;
+      }
+
+      if (outcome === 'failed') {
+        this.setMemberSpawnStatus(
+          run,
+          memberName,
+          'error',
+          reason || 'Deterministic bootstrap failed to spawn teammate.'
+        );
+        return true;
+      }
+
+      if (outcome === 'already_running') {
+        this.setMemberSpawnStatus(run, memberName, 'online', undefined, 'process');
+        return true;
+      }
+
+      this.setMemberSpawnStatus(run, memberName, 'waiting');
+      return true;
+    }
+
+    if (event === 'completed') {
+      const failedMembers = Array.isArray(msg.failed_members) ? msg.failed_members : [];
+      for (const failed of failedMembers) {
+        const memberName = typeof failed?.name === 'string' ? failed.name.trim() : '';
+        const reason = typeof failed?.reason === 'string' ? failed.reason.trim() : undefined;
+        if (memberName) {
+          this.setMemberSpawnStatus(
+            run,
+            memberName,
+            'error',
+            reason || 'Deterministic bootstrap failed to spawn teammate.'
+          );
+        }
+      }
+      if (!run.provisioningComplete && !run.cancelRequested) {
+        void this.handleProvisioningTurnComplete(run).catch((error: unknown) => {
+          logger.error(
+            `[${run.teamName}] deterministic bootstrap completion handler failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        });
+      }
+      return true;
+    }
+
+    if (event === 'failed') {
+      if (run.progress.state === 'failed' || run.cancelRequested) {
+        return true;
+      }
+      const reason =
+        typeof msg.reason === 'string' && msg.reason.trim().length > 0
+          ? msg.reason.trim()
+          : 'Deterministic bootstrap failed.';
+      const progress = updateProgress(run, 'failed', 'Deterministic bootstrap failed', {
+        error: reason,
+        cliLogsTail: extractCliLogsFromRun(run),
+      });
+      run.onProgress(progress);
+      run.processKilled = true;
+      killTeamProcess(run.child);
+      this.cleanupRun(run);
+      return true;
+    }
+
+    return true;
+  }
+
   private handleStreamJsonMessage(run: ProvisioningRun, msg: Record<string, unknown>): void {
     // stream-json output has various message types:
     // {"type":"assistant","content":[{"type":"text","text":"..."},...]}
@@ -7192,6 +7598,10 @@ export class TeamProvisioningService {
           `[${run.teamName}] Detected session ID from stream-json: ${run.detectedSessionId}`
         );
       }
+    }
+
+    if (this.handleDeterministicBootstrapEvent(run, msg)) {
+      return;
     }
 
     // Handle control_request — tool approval protocol (only when --dangerously-skip-permissions is NOT set)
@@ -9334,6 +9744,14 @@ export class TeamProvisioningService {
       void this.mcpConfigBuilder.removeConfigFile(run.mcpConfigPath);
       run.mcpConfigPath = null;
     }
+    if (run.bootstrapSpecPath) {
+      void removeDeterministicBootstrapSpecFile(run.bootstrapSpecPath);
+      run.bootstrapSpecPath = null;
+    }
+    if (run.bootstrapUserPromptPath) {
+      void removeDeterministicBootstrapUserPromptFile(run.bootstrapUserPromptPath);
+      run.bootstrapUserPromptPath = null;
+    }
     // Remove from runs Map to free memory (stdoutBuffer, stderrBuffer, claudeLogLines)
     this.runs.delete(run.runId);
   }
@@ -9397,10 +9815,32 @@ export class TeamProvisioningService {
         }
 
         if (run.fsPhase === 'waiting_members') {
+          if (run.deterministicBootstrap) {
+            const registeredNames = await this.getRegisteredTeamMemberNames(run.teamName);
+            const registeredMembers = registeredNames
+              ? request.members.filter((member) => registeredNames.has(member.name)).length
+              : 0;
+
+            if (registeredMembers >= request.members.length) {
+              run.fsPhase = 'all_files_found';
+              if (!run.provisioningComplete) {
+                void this.handleProvisioningTurnComplete(run);
+              }
+              return;
+            }
+          }
+
           if (request.members.length === 0) {
-            run.fsPhase = 'waiting_tasks';
-            const progress = updateProgress(run, 'finalizing', 'Solo team, preparing workspace');
-            run.onProgress(progress);
+            if (run.deterministicBootstrap) {
+              run.fsPhase = 'all_files_found';
+              if (!run.provisioningComplete) {
+                void this.handleProvisioningTurnComplete(run);
+              }
+            } else {
+              run.fsPhase = 'waiting_tasks';
+              const progress = updateProgress(run, 'finalizing', 'Solo team, preparing workspace');
+              run.onProgress(progress);
+            }
           } else {
             const teamDir = (await resolveTeamDir()) ?? configuredTeamDir;
             const inboxDir = path.join(teamDir, 'inboxes');
@@ -9735,6 +10175,10 @@ export class TeamProvisioningService {
         members: run.effectiveMembers,
       }
     );
+    await this.refreshMemberSpawnStatusesFromLeadInbox(run);
+    await this.maybeAuditMemberSpawnStatuses(run, { force: true });
+    await this.finalizeMissingRegisteredMembersAsFailed(run);
+    await this.persistLaunchStateSnapshot(run, 'finished');
     // Process was killed by timeout — mark as disconnected, not ready
     const progress = updateProgress(run, 'disconnected', 'Team provisioned but process timed out', {
       warnings,

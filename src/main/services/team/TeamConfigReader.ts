@@ -12,6 +12,10 @@ import * as path from 'path';
 import { getTeamFsWorkerClient } from './TeamFsWorkerClient';
 import { TeamMembersMetaStore } from './TeamMembersMetaStore';
 import { TeamMetaStore } from './TeamMetaStore';
+import {
+  choosePreferredLaunchSnapshot,
+  readBootstrapLaunchSnapshot,
+} from './TeamBootstrapStateReader';
 import { normalizePersistedLaunchSnapshot } from './TeamLaunchStateEvaluator';
 
 import type { TeamConfig, TeamMember, TeamSummary, TeamSummaryMember } from '@shared/types';
@@ -42,17 +46,27 @@ interface LaunchStateSummary {
 }
 
 async function readLaunchStateSummary(teamDir: string): Promise<LaunchStateSummary | null> {
+  const bootstrapSnapshot = await readBootstrapLaunchSnapshot(path.basename(teamDir));
   const launchStatePath = path.join(teamDir, TEAM_LAUNCH_STATE_FILE);
+  let launchSnapshot = null;
   try {
     const stat = await fs.promises.stat(launchStatePath);
     if (!stat.isFile() || stat.size > MAX_LAUNCH_STATE_BYTES) {
-      return null;
+      launchSnapshot = null;
+    } else {
+      const raw = await readFileUtf8WithTimeout(launchStatePath, PER_TEAM_READ_TIMEOUT_MS);
+      launchSnapshot = normalizePersistedLaunchSnapshot(path.basename(teamDir), JSON.parse(raw));
     }
-    const raw = await readFileUtf8WithTimeout(launchStatePath, PER_TEAM_READ_TIMEOUT_MS);
-    const snapshot = normalizePersistedLaunchSnapshot(path.basename(teamDir), JSON.parse(raw));
-    if (!snapshot) {
-      return null;
-    }
+  } catch {
+    launchSnapshot = null;
+  }
+
+  const snapshot = choosePreferredLaunchSnapshot(bootstrapSnapshot, launchSnapshot);
+  if (!snapshot) {
+    return null;
+  }
+
+  try {
     const missingMembers = snapshot.expectedMembers.filter((name) => {
       const member = snapshot.members[name];
       return member?.launchState === 'failed_to_start';
