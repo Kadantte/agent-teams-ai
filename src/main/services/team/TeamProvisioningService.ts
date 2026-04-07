@@ -6376,13 +6376,13 @@ export class TeamProvisioningService {
         launchSummary.runtimeAlivePendingCount > 0 &&
         launchSummary.runtimeAlivePendingCount === run.expectedMembers.length;
       return allRuntimeAlive
-        ? `${prefix} — teammate runtimes online`
+        ? `${prefix} — teammates online`
         : launchSummary.runtimeAlivePendingCount > 0
-          ? `${prefix} — ${launchSummary.runtimeAlivePendingCount}/${run.expectedMembers.length} teammate runtime${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online${stillStartingCount > 0 ? `, ${stillStartingCount} still starting` : ''}`
+          ? `${prefix} — ${launchSummary.runtimeAlivePendingCount}/${run.expectedMembers.length} teammate${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online${stillStartingCount > 0 ? `, ${stillStartingCount} still starting` : ''}`
           : `${prefix} — teammates are still starting`;
     }
 
-    return `${prefix} — ${launchSummary.confirmedCount}/${run.expectedMembers.length} teammates made contact${launchSummary.runtimeAlivePendingCount > 0 ? `, ${launchSummary.runtimeAlivePendingCount} runtime${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online` : ''}${stillStartingCount > 0 ? `${launchSummary.runtimeAlivePendingCount > 0 ? ', ' : ', '}${stillStartingCount} still joining` : ''}`;
+    return `${prefix} — ${launchSummary.confirmedCount}/${run.expectedMembers.length} teammates made contact${launchSummary.runtimeAlivePendingCount > 0 ? `, ${launchSummary.runtimeAlivePendingCount} teammate${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online` : ''}${stillStartingCount > 0 ? `${launchSummary.runtimeAlivePendingCount > 0 ? ', ' : ', '}${stillStartingCount} still joining` : ''}`;
   }
 
   private buildRuntimeSpawnStatusRecord(
