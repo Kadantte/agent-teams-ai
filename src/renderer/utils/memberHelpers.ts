@@ -101,7 +101,7 @@ export const SPAWN_DOT_COLORS: Record<MemberSpawnStatus, string> = {
 
 export const SPAWN_PRESENCE_LABELS: Record<MemberSpawnStatus, string> = {
   offline: 'offline',
-  waiting: 'check-in pending',
+  waiting: 'first contact pending',
   spawning: 'starting',
   online: 'ready',
   error: 'spawn failed',
@@ -160,13 +160,13 @@ export function getSpawnAwarePresenceLabel(
     return 'waiting for Agent';
   }
   if (spawnLaunchState === 'runtime_pending_bootstrap' && runtimeAlive) {
-    return 'check-in pending';
+    return 'first contact pending';
   }
   if (spawnStatus === 'waiting') {
     return SPAWN_PRESENCE_LABELS.waiting;
   }
   if (spawnStatus === 'online' && livenessSource === 'process') {
-    return 'check-in pending';
+    return 'first contact pending';
   }
   if (spawnStatus && isTeamProvisioning) {
     return SPAWN_PRESENCE_LABELS[spawnStatus];
