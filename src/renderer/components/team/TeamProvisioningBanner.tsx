@@ -154,10 +154,10 @@ export const TeamProvisioningBanner = ({
           : allTeammatesConfirmedAlive
             ? `Team provisioned — all ${fallbackTeammateCount} teammates made contact`
             : allPendingRuntimesStarted
-              ? 'Team provisioned — teammate runtimes online, waiting for first contact'
+              ? 'Team provisioned — teammate runtimes online'
               : processOnlyAliveCount > 0 || pendingSpawnCount > 0
-                ? `Team provisioned — ${heartbeatConfirmedCount}/${fallbackTeammateCount} teammates made contact${processOnlyAliveCount > 0 ? `, ${processOnlyAliveCount} runtime${processOnlyAliveCount === 1 ? '' : 's'} online and waiting for first contact` : ''}${pendingSpawnCount > 0 ? `${processOnlyAliveCount > 0 ? ', ' : ', '}${pendingSpawnCount} still starting` : ''}`
-                : 'Team provisioned — teammate first contacts are still coming in';
+                ? `Team provisioned — ${heartbeatConfirmedCount}/${fallbackTeammateCount} teammates made contact${processOnlyAliveCount > 0 ? `, ${processOnlyAliveCount} runtime${processOnlyAliveCount === 1 ? '' : 's'} online` : ''}${pendingSpawnCount > 0 ? `${processOnlyAliveCount > 0 ? ', ' : ', '}${pendingSpawnCount} still starting` : ''}`
+                : 'Team provisioned — teammate runtimes are still starting';
     const readyDetailSeverity =
       failedSpawnCount > 0 || processOnlyAliveCount > 0 || pendingSpawnCount > 0
         ? 'warning'
@@ -170,10 +170,10 @@ export const TeamProvisioningBanner = ({
           : allTeammatesConfirmedAlive
             ? `Team launched — all ${fallbackTeammateCount} teammates made contact`
             : allPendingRuntimesStarted
-              ? 'Team launched — teammate runtimes online, waiting for first contact'
+              ? 'Team launched — teammate runtimes online'
               : processOnlyAliveCount > 0 || pendingSpawnCount > 0
-                ? `Team launched — ${heartbeatConfirmedCount}/${fallbackTeammateCount} teammates made contact${processOnlyAliveCount > 0 ? `, ${processOnlyAliveCount} runtime${processOnlyAliveCount === 1 ? '' : 's'} online and waiting for first contact` : ''}${pendingSpawnCount > 0 ? `${processOnlyAliveCount > 0 ? ', ' : ', '}${pendingSpawnCount} still starting` : ''}`
-                : 'Team launched — teammate first contacts are still coming in';
+                ? `Team launched — ${heartbeatConfirmedCount}/${fallbackTeammateCount} teammates made contact${processOnlyAliveCount > 0 ? `, ${processOnlyAliveCount} runtime${processOnlyAliveCount === 1 ? '' : 's'} online` : ''}${pendingSpawnCount > 0 ? `${processOnlyAliveCount > 0 ? ', ' : ', '}${pendingSpawnCount} still starting` : ''}`
+                : 'Team launched — teammate runtimes are still starting';
 
     return (
       <div className="mb-3">

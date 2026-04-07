@@ -1751,9 +1751,9 @@ function buildGeminiPostLaunchHydrationPrompt(
               : status?.launchState === 'confirmed_alive'
                 ? 'bootstrap confirmed'
                 : status?.runtimeAlive
-                  ? 'runtime started, first contact pending'
+                  ? 'runtime online and ready for instructions'
                   : status?.launchState === 'runtime_pending_bootstrap'
-                    ? 'spawn accepted, first contact pending'
+                    ? 'spawn accepted, runtime not confirmed yet'
                     : status?.status === 'spawning'
                       ? 'spawn in progress'
                       : 'runtime state unclear';
@@ -3011,7 +3011,7 @@ export class TeamProvisioningService {
           const detail =
             parsedStatus.reason === 'already_running'
               ? 'duplicate spawn skipped - already running'
-              : 'duplicate spawn skipped - first contact pending';
+              : 'duplicate spawn skipped - teammate already online';
           this.appendMemberBootstrapDiagnostic(run, spawnedMemberName, detail);
           return;
         }
@@ -6104,7 +6104,7 @@ export class TeamProvisioningService {
         this.appendMemberBootstrapDiagnostic(
           run,
           memberName,
-          'respawn blocked as duplicate — teammate already alive or first contact pending'
+          'respawn blocked as duplicate — teammate already online'
         );
         continue;
       }
@@ -6376,13 +6376,13 @@ export class TeamProvisioningService {
         launchSummary.runtimeAlivePendingCount > 0 &&
         launchSummary.runtimeAlivePendingCount === run.expectedMembers.length;
       return allRuntimeAlive
-        ? `${prefix} — teammate runtimes online, waiting for first contact`
+        ? `${prefix} — teammate runtimes online`
         : launchSummary.runtimeAlivePendingCount > 0
-          ? `${prefix} — ${launchSummary.runtimeAlivePendingCount}/${run.expectedMembers.length} teammate runtime${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online${stillStartingCount > 0 ? `, ${stillStartingCount} still starting` : ''}, waiting for first contact`
-          : `${prefix} — teammates are still starting, waiting for first contact`;
+          ? `${prefix} — ${launchSummary.runtimeAlivePendingCount}/${run.expectedMembers.length} teammate runtime${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online${stillStartingCount > 0 ? `, ${stillStartingCount} still starting` : ''}`
+          : `${prefix} — teammates are still starting`;
     }
 
-    return `${prefix} — ${launchSummary.confirmedCount}/${run.expectedMembers.length} teammates made contact${launchSummary.runtimeAlivePendingCount > 0 ? `, ${launchSummary.runtimeAlivePendingCount} runtime${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} waiting for first contact` : ''}${stillStartingCount > 0 ? `${launchSummary.runtimeAlivePendingCount > 0 ? ', ' : ', '}${stillStartingCount} still joining` : ''}`;
+    return `${prefix} — ${launchSummary.confirmedCount}/${run.expectedMembers.length} teammates made contact${launchSummary.runtimeAlivePendingCount > 0 ? `, ${launchSummary.runtimeAlivePendingCount} runtime${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online` : ''}${stillStartingCount > 0 ? `${launchSummary.runtimeAlivePendingCount > 0 ? ', ' : ', '}${stillStartingCount} still joining` : ''}`;
   }
 
   private buildRuntimeSpawnStatusRecord(
