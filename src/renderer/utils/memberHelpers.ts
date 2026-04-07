@@ -101,7 +101,7 @@ export const SPAWN_DOT_COLORS: Record<MemberSpawnStatus, string> = {
 
 export const SPAWN_PRESENCE_LABELS: Record<MemberSpawnStatus, string> = {
   offline: 'offline',
-  waiting: 'online',
+  waiting: 'starting',
   spawning: 'starting',
   online: 'ready',
   error: 'spawn failed',
@@ -123,7 +123,7 @@ export function getSpawnAwareDotClass(
     return SPAWN_DOT_COLORS.error;
   }
   if (spawnLaunchState === 'runtime_pending_bootstrap' && spawnStatus === 'online') {
-    return SPAWN_DOT_COLORS.spawning;
+    return SPAWN_DOT_COLORS.online;
   }
   if (spawnStatus === 'waiting') {
     return SPAWN_DOT_COLORS.waiting;

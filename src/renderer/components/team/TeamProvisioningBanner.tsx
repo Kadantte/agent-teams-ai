@@ -159,9 +159,7 @@ export const TeamProvisioningBanner = ({
                 ? `Team provisioned — ${heartbeatConfirmedCount}/${fallbackTeammateCount} teammates made contact${processOnlyAliveCount > 0 ? `, ${processOnlyAliveCount} teammate${processOnlyAliveCount === 1 ? '' : 's'} online` : ''}${pendingSpawnCount > 0 ? `${processOnlyAliveCount > 0 ? ', ' : ', '}${pendingSpawnCount} still starting` : ''}`
                 : 'Team provisioned — teammates are still starting';
     const readyDetailSeverity =
-      failedSpawnCount > 0 || processOnlyAliveCount > 0 || pendingSpawnCount > 0
-        ? 'warning'
-        : undefined;
+      failedSpawnCount > 0 || pendingSpawnCount > 0 ? 'warning' : undefined;
     const readyMessage =
       failedSpawnCount > 0
         ? `Launch finished with errors — ${failedSpawnCount}/${Math.max(fallbackTeammateCount, failedSpawnCount)} teammates failed to start`
@@ -191,9 +189,7 @@ export const TeamProvisioningBanner = ({
           onCancel={null}
           successMessage={readyMessage}
           successMessageSeverity={
-            failedSpawnCount > 0 || processOnlyAliveCount > 0 || pendingSpawnCount > 0
-              ? 'warning'
-              : 'success'
+            failedSpawnCount > 0 || pendingSpawnCount > 0 ? 'warning' : 'success'
           }
           onDismiss={() => setDismissed(true)}
         />

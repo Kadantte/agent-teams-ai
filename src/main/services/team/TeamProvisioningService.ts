@@ -8995,8 +8995,12 @@ export class TeamProvisioningService {
       const failedSpawnMembers = this.getFailedSpawnMembers(run);
       const launchSummary = this.getMemberLaunchSummary(run);
       const hasSpawnFailures = failedSpawnMembers.length > 0;
+      const stillStartingCount = Math.max(
+        0,
+        launchSummary.pendingCount - launchSummary.runtimeAlivePendingCount
+      );
       const hasPendingBootstrap =
-        !hasSpawnFailures && launchSummary.pendingCount > 0 && run.expectedMembers.length > 0;
+        !hasSpawnFailures && stillStartingCount > 0 && run.expectedMembers.length > 0;
       const readyMessage = hasSpawnFailures
         ? `Launch completed with teammate errors — ${failedSpawnMembers
             .map((member) => member.name)
@@ -9155,8 +9159,12 @@ export class TeamProvisioningService {
     const failedSpawnMembers = this.getFailedSpawnMembers(run);
     const launchSummary = this.getMemberLaunchSummary(run);
     const hasSpawnFailures = failedSpawnMembers.length > 0;
+    const stillStartingCount = Math.max(
+      0,
+      launchSummary.pendingCount - launchSummary.runtimeAlivePendingCount
+    );
     const hasPendingBootstrap =
-      !hasSpawnFailures && launchSummary.pendingCount > 0 && run.expectedMembers.length > 0;
+      !hasSpawnFailures && stillStartingCount > 0 && run.expectedMembers.length > 0;
     const progress = updateProgress(
       run,
       'ready',
