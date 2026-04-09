@@ -24,6 +24,7 @@ const storeState = {
     tasks: [],
   },
   selectedTeamName: 'northstar-core',
+  progress: null as Record<string, unknown> | null,
   memberSpawnStatusesByTeam: {
     'northstar-core': {
       alice: {
@@ -33,13 +34,32 @@ const storeState = {
         runtimeAlive: false,
       },
     },
-  },
+  } as Record<
+    string,
+    Record<
+      string,
+      {
+        status: string;
+        launchState: string;
+        updatedAt: string;
+        runtimeAlive: boolean;
+        livenessSource?: string;
+      }
+    >
+  >,
+  memberSpawnSnapshotsByTeam: {
+    'northstar-core': undefined,
+  } as Record<string, unknown>,
   leadActivityByTeam: {},
   openMemberProfile: vi.fn(),
 };
 
 vi.mock('@renderer/store', () => ({
   useStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
+}));
+
+vi.mock('@renderer/store/slices/teamSlice', () => ({
+  getCurrentProvisioningProgressForTeam: () => storeState.progress,
 }));
 
 vi.mock('@renderer/hooks/useTheme', () => ({
@@ -77,12 +97,14 @@ describe('MemberHoverCard spawn-aware presence', () => {
     storeState.selectedTeamData.isAlive = true;
     storeState.selectedTeamData.tasks = [];
     storeState.selectedTeamName = 'northstar-core';
+    storeState.progress = null;
     storeState.memberSpawnStatusesByTeam['northstar-core'].alice = {
       status: 'spawning',
       launchState: 'starting',
       updatedAt: '2026-04-09T10:00:00.000Z',
       runtimeAlive: false,
     };
+    storeState.memberSpawnSnapshotsByTeam['northstar-core'] = undefined;
     storeState.openMemberProfile.mockReset();
   });
 
@@ -104,6 +126,59 @@ describe('MemberHoverCard spawn-aware presence', () => {
 
     expect(host.textContent).toContain('starting');
     expect(host.textContent).not.toContain('idle');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('keeps runtime-pending members in starting state while launch is still settling', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.progress = {
+      runId: 'run-1',
+      teamName: 'northstar-core',
+      state: 'ready',
+      startedAt: '2026-04-09T10:00:00.000Z',
+      pid: 4321,
+      configReady: true,
+    };
+    storeState.memberSpawnStatusesByTeam['northstar-core'].alice = {
+      status: 'online',
+      launchState: 'runtime_pending_bootstrap',
+      updatedAt: '2026-04-09T10:00:00.000Z',
+      runtimeAlive: true,
+      livenessSource: 'process',
+    };
+    storeState.memberSpawnSnapshotsByTeam['northstar-core'] = {
+      runId: 'run-1',
+      expectedMembers: ['alice'],
+      statuses: {},
+      summary: {
+        confirmedCount: 0,
+        pendingCount: 1,
+        failedCount: 0,
+        runtimeAlivePendingCount: 1,
+      },
+      source: 'merged',
+    };
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberHoverCard, {
+          name: 'alice',
+          children: React.createElement('button', { type: 'button' }, 'alice'),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('starting');
+    expect(host.textContent).not.toContain('online');
 
     await act(async () => {
       root.unmount();

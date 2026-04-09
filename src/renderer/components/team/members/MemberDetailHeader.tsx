@@ -32,6 +32,7 @@ interface MemberDetailHeaderProps {
   spawnLaunchState?: MemberLaunchState;
   spawnLivenessSource?: MemberSpawnLivenessSource;
   spawnRuntimeAlive?: boolean;
+  isLaunchSettling?: boolean;
   onUpdateRole?: (newRole: string | undefined) => Promise<void> | void;
   updatingRole?: boolean;
 }
@@ -45,6 +46,7 @@ export const MemberDetailHeader = ({
   spawnLaunchState,
   spawnLivenessSource,
   spawnRuntimeAlive,
+  isLaunchSettling,
   onUpdateRole,
   updatingRole,
 }: MemberDetailHeaderProps): React.JSX.Element => {
@@ -65,6 +67,7 @@ export const MemberDetailHeader = ({
     spawnLivenessSource,
     spawnRuntimeAlive,
     member.runtimeAdvisory,
+    isLaunchSettling,
     isTeamAlive,
     isTeamProvisioning,
     leadActivity
@@ -74,6 +77,7 @@ export const MemberDetailHeader = ({
     spawnStatus,
     spawnLaunchState,
     spawnRuntimeAlive,
+    isLaunchSettling,
     isTeamAlive,
     isTeamProvisioning,
     leadActivity

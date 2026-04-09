@@ -30,6 +30,7 @@ interface MemberDetailDialogProps {
   messages: InboxMessage[];
   isTeamAlive?: boolean;
   isTeamProvisioning?: boolean;
+  isLaunchSettling?: boolean;
   leadActivity?: LeadActivityState;
   spawnEntry?: MemberSpawnStatusEntry;
   onClose: () => void;
@@ -50,6 +51,7 @@ export const MemberDetailDialog = ({
   messages,
   isTeamAlive,
   isTeamProvisioning,
+  isLaunchSettling,
   leadActivity,
   spawnEntry,
   onClose,
@@ -107,6 +109,7 @@ export const MemberDetailDialog = ({
               spawnLaunchState={spawnEntry?.launchState}
               spawnLivenessSource={spawnEntry?.livenessSource}
               spawnRuntimeAlive={spawnEntry?.runtimeAlive}
+              isLaunchSettling={isLaunchSettling}
               onUpdateRole={
                 onUpdateRole ? (newRole) => onUpdateRole(member.name, newRole) : undefined
               }

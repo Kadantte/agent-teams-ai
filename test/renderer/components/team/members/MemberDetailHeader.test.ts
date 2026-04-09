@@ -68,4 +68,34 @@ describe('MemberDetailHeader spawn-aware presence', () => {
       await Promise.resolve();
     });
   });
+
+  it('shows ready instead of idle while launch is still settling after contact', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberDetailHeader, {
+          member,
+          isTeamAlive: true,
+          isTeamProvisioning: false,
+          isLaunchSettling: true,
+          spawnStatus: 'online',
+          spawnLaunchState: 'confirmed_alive',
+          spawnRuntimeAlive: true,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('ready');
+    expect(host.textContent).not.toContain('idle');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
 });

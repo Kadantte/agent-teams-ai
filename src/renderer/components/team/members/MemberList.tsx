@@ -26,6 +26,7 @@ interface MemberListProps {
   taskMap?: Map<string, TeamTaskWithKanban>;
   pendingRepliesByMember?: Record<string, number>;
   memberSpawnStatuses?: Map<string, MemberSpawnStatusEntry>;
+  isLaunchSettling?: boolean;
   isTeamAlive?: boolean;
   isTeamProvisioning?: boolean;
   leadActivity?: LeadActivityState;
@@ -65,6 +66,7 @@ function areResolvedMembersEquivalent(
       leftMember.runtimeAdvisory?.observedAt !== rightMember.runtimeAdvisory?.observedAt ||
       leftMember.runtimeAdvisory?.retryUntil !== rightMember.runtimeAdvisory?.retryUntil ||
       leftMember.runtimeAdvisory?.retryDelayMs !== rightMember.runtimeAdvisory?.retryDelayMs ||
+      leftMember.runtimeAdvisory?.reasonCode !== rightMember.runtimeAdvisory?.reasonCode ||
       leftMember.runtimeAdvisory?.message !== rightMember.runtimeAdvisory?.message
     ) {
       return false;
@@ -184,6 +186,7 @@ function areMemberListPropsEqual(
     areMemberTaskMapsEquivalent(prev.taskMap, next.taskMap) &&
     arePendingRepliesEquivalent(prev.pendingRepliesByMember, next.pendingRepliesByMember) &&
     areMemberSpawnStatusesEquivalent(prev.memberSpawnStatuses, next.memberSpawnStatuses) &&
+    prev.isLaunchSettling === next.isLaunchSettling &&
     prev.isTeamAlive === next.isTeamAlive &&
     prev.isTeamProvisioning === next.isTeamProvisioning &&
     prev.leadActivity === next.leadActivity &&
@@ -197,6 +200,7 @@ export const MemberList = memo(function MemberList({
   taskMap,
   pendingRepliesByMember,
   memberSpawnStatuses,
+  isLaunchSettling,
   isTeamAlive,
   isTeamProvisioning,
   leadActivity,
@@ -287,6 +291,7 @@ export const MemberList = memo(function MemberList({
         spawnLivenessSource={isRemoved ? undefined : spawnEntry?.livenessSource}
         spawnLaunchState={isRemoved ? undefined : spawnEntry?.launchState}
         spawnRuntimeAlive={isRemoved ? undefined : spawnEntry?.runtimeAlive}
+        isLaunchSettling={isRemoved ? false : isLaunchSettling}
         onOpenTask={!isRemoved && currentTask ? () => onOpenTask?.(currentTask.id) : undefined}
         onOpenReviewTask={!isRemoved && reviewTask ? () => onOpenTask?.(reviewTask.id) : undefined}
         onClick={() => onMemberClick?.(member)}

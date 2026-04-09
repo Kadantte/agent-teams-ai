@@ -81,8 +81,14 @@ export const PendingRepliesBlock = ({
           const roleLabel = formatAgentRole(
             member.role ?? (member.agentType !== 'general-purpose' ? member.agentType : undefined)
           );
-          const advisoryLabel = getMemberRuntimeAdvisoryLabel(member.runtimeAdvisory);
-          const advisoryTitle = getMemberRuntimeAdvisoryTitle(member.runtimeAdvisory);
+          const advisoryLabel = getMemberRuntimeAdvisoryLabel(
+            member.runtimeAdvisory,
+            member.providerId
+          );
+          const advisoryTitle = getMemberRuntimeAdvisoryTitle(
+            member.runtimeAdvisory,
+            member.providerId
+          );
           const isRetrying = advisoryLabel !== null;
 
           return (

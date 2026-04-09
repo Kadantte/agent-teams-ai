@@ -38,6 +38,7 @@ function buildRetryingAdvisory(label: string): MemberRuntimeAdvisory {
     observedAt: '2026-04-09T10:00:00.000Z',
     retryUntil: '2026-04-09T10:01:00.000Z',
     retryDelayMs: 60_000,
+    reasonCode: 'backend_error',
     message: `retry:${label}`,
   };
 }
@@ -145,7 +146,49 @@ describe('TeamMemberRuntimeAdvisoryService', () => {
 
     expect(advisory).not.toBeNull();
     expect(advisory?.kind).toBe('sdk_retrying');
+    expect(advisory?.reasonCode).toBe('quota_exhausted');
     expect(advisory?.message).toContain('capacity exceeded');
+  });
+
+  it.each([
+    ['rate_limited', 'Provider returned 429 rate limit for this request.'],
+    ['auth_error', 'Authentication failed due to invalid API key.'],
+    ['network_error', 'Fetch failed because the network connection timed out.'],
+    ['provider_overloaded', 'Service unavailable: provider temporarily unavailable (503).'],
+    ['backend_error', 'Unexpected backend blew up during request processing.'],
+  ] as const)('classifies %s retry causes from api_error messages', async (expected, message) => {
+    const service = new TeamMemberRuntimeAdvisoryService({} as never);
+    const advisory = (service as any).extractApiRetryAdvisory(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'api_error',
+        timestamp: '2099-04-09T10:00:00.000Z',
+        retryInMs: 45_000,
+        error: {
+          error: {
+            error: {
+              message,
+            },
+          },
+        },
+      })
+    ) as MemberRuntimeAdvisory | null;
+
+    expect(advisory?.reasonCode).toBe(expected);
+  });
+
+  it('classifies missing api_error message text as unknown', () => {
+    const service = new TeamMemberRuntimeAdvisoryService({} as never);
+    const advisory = (service as any).extractApiRetryAdvisory(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'api_error',
+        timestamp: '2099-04-09T10:00:00.000Z',
+        retryInMs: 45_000,
+      })
+    ) as MemberRuntimeAdvisory | null;
+
+    expect(advisory?.reasonCode).toBe('unknown');
   });
 
   it('ignores expired retry advisories', async () => {

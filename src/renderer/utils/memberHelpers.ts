@@ -13,6 +13,7 @@ import type {
   MemberSpawnStatus,
   MemberStatus,
   ResolvedTeamMember,
+  TeamProviderId,
   TeamReviewState,
   TeamTaskStatus,
 } from '@shared/types';
@@ -110,13 +111,17 @@ export const SPAWN_PRESENCE_LABELS: Record<MemberSpawnStatus, string> = {
 function isLaunchStillStarting(
   spawnStatus: MemberSpawnStatus | undefined,
   spawnLaunchState: MemberLaunchState | undefined,
-  runtimeAlive: boolean | undefined
+  runtimeAlive: boolean | undefined,
+  keepRuntimePendingInStarting = false
 ): boolean {
   if (spawnLaunchState === 'failed_to_start') {
     return false;
   }
-  if (spawnLaunchState === 'runtime_pending_bootstrap' && runtimeAlive) {
-    return false;
+  if (spawnLaunchState === 'runtime_pending_bootstrap') {
+    if (runtimeAlive !== true) {
+      return true;
+    }
+    return keepRuntimePendingInStarting;
   }
   return spawnLaunchState === 'starting' || spawnStatus === 'waiting' || spawnStatus === 'spawning';
 }
@@ -130,17 +135,21 @@ export function getSpawnAwareDotClass(
   spawnStatus: MemberSpawnStatus | undefined,
   spawnLaunchState: MemberLaunchState | undefined,
   runtimeAlive: boolean | undefined,
+  isLaunchSettling = false,
   isTeamAlive?: boolean,
   isTeamProvisioning?: boolean,
   leadActivity?: LeadActivityState
 ): string {
+  const keepLaunchSettlingVisuals = isTeamProvisioning === true || isLaunchSettling;
   if (isTeamAlive === false && !isTeamProvisioning) {
     return STATUS_DOT_COLORS.terminated;
   }
   if (spawnLaunchState === 'failed_to_start' || spawnStatus === 'error') {
     return SPAWN_DOT_COLORS.error;
   }
-  if (isLaunchStillStarting(spawnStatus, spawnLaunchState, runtimeAlive)) {
+  if (
+    isLaunchStillStarting(spawnStatus, spawnLaunchState, runtimeAlive, keepLaunchSettlingVisuals)
+  ) {
     return spawnStatus === 'spawning' ? SPAWN_DOT_COLORS.spawning : SPAWN_DOT_COLORS.waiting;
   }
   if (spawnLaunchState === 'runtime_pending_bootstrap' && spawnStatus === 'online') {
@@ -170,21 +179,25 @@ export function getSpawnAwarePresenceLabel(
   spawnLaunchState: MemberLaunchState | undefined,
   livenessSource: MemberSpawnLivenessSource | undefined,
   runtimeAlive: boolean | undefined,
+  isLaunchSettling = false,
   isTeamAlive?: boolean,
   isTeamProvisioning?: boolean,
   leadActivity?: LeadActivityState
 ): string {
+  const keepLaunchSettlingVisuals = isTeamProvisioning === true || isLaunchSettling;
   if (isTeamAlive === false && !isTeamProvisioning) {
     return 'offline';
   }
   if (spawnLaunchState === 'failed_to_start' || spawnStatus === 'error') {
     return SPAWN_PRESENCE_LABELS.error;
   }
-  if (spawnLaunchState === 'runtime_pending_bootstrap' && runtimeAlive) {
-    return 'online';
-  }
-  if (isLaunchStillStarting(spawnStatus, spawnLaunchState, runtimeAlive)) {
+  if (
+    isLaunchStillStarting(spawnStatus, spawnLaunchState, runtimeAlive, keepLaunchSettlingVisuals)
+  ) {
     return 'starting';
+  }
+  if (spawnStatus === 'online' && keepLaunchSettlingVisuals) {
+    return SPAWN_PRESENCE_LABELS.online;
   }
   if (spawnStatus === 'online' && livenessSource === 'process') {
     return 'online';
@@ -203,11 +216,18 @@ export function getSpawnCardClass(
   spawnStatus: MemberSpawnStatus | undefined,
   spawnLaunchState?: MemberLaunchState,
   runtimeAlive?: boolean,
+  isLaunchSettling = false,
   isTeamAlive?: boolean,
   isTeamProvisioning?: boolean
 ): string {
+  const keepLaunchSettlingVisuals = isTeamProvisioning === true || isLaunchSettling;
   if (isTeamAlive === false && !isTeamProvisioning) {
     return 'opacity-40';
+  }
+  if (
+    isLaunchStillStarting(spawnStatus, spawnLaunchState, runtimeAlive, keepLaunchSettlingVisuals)
+  ) {
+    return 'member-waiting-shimmer';
   }
   switch (spawnStatus) {
     case 'offline':
@@ -221,9 +241,7 @@ export function getSpawnCardClass(
     case 'error':
       return 'opacity-80';
     default:
-      return isLaunchStillStarting(spawnStatus, spawnLaunchState, runtimeAlive)
-        ? 'member-waiting-shimmer'
-        : '';
+      return '';
   }
 }
 
@@ -237,34 +255,121 @@ function formatRetryCountdown(ms: number): string {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
+function getRuntimeAdvisoryProviderLabel(providerId: TeamProviderId | undefined): string | null {
+  switch (providerId) {
+    case 'anthropic':
+      return 'Anthropic';
+    case 'codex':
+      return 'Codex';
+    case 'gemini':
+      return 'Gemini';
+    default:
+      return null;
+  }
+}
+
+function appendRuntimeAdvisoryRawMessage(base: string, message: string | undefined): string {
+  const trimmed = message?.trim();
+  return trimmed ? `${base}\n\n${trimmed}` : base;
+}
+
+function formatRuntimeAdvisoryBaseLabel(
+  advisory: MemberRuntimeAdvisory,
+  providerId: TeamProviderId | undefined
+): string {
+  const providerLabel = getRuntimeAdvisoryProviderLabel(providerId);
+  switch (advisory.reasonCode) {
+    case 'quota_exhausted':
+      return providerLabel ? `${providerLabel} quota retry` : 'Quota retry';
+    case 'rate_limited':
+      return providerLabel ? `${providerLabel} rate limit` : 'Rate limit retry';
+    case 'auth_error':
+      return providerLabel ? `${providerLabel} auth retry` : 'Auth retry';
+    case 'network_error':
+      return 'Network retry';
+    case 'provider_overloaded':
+      return providerLabel ? `${providerLabel} overload retry` : 'Provider overload retry';
+    case 'backend_error':
+    case 'unknown':
+      return 'Provider retry';
+    default:
+      return 'retrying now';
+  }
+}
+
+function formatRuntimeAdvisoryTitle(
+  advisory: MemberRuntimeAdvisory,
+  providerId: TeamProviderId | undefined
+): string {
+  const providerLabel = getRuntimeAdvisoryProviderLabel(providerId);
+  switch (advisory.reasonCode) {
+    case 'quota_exhausted':
+      return appendRuntimeAdvisoryRawMessage(
+        `${providerLabel ?? 'Provider'} quota exhausted. SDK is retrying automatically.`,
+        advisory.message
+      );
+    case 'rate_limited':
+      return appendRuntimeAdvisoryRawMessage(
+        `${providerLabel ?? 'Provider'} rate limited the request. SDK is retrying automatically.`,
+        advisory.message
+      );
+    case 'auth_error':
+      return appendRuntimeAdvisoryRawMessage(
+        `${providerLabel ?? 'Provider'} authentication issue. SDK is retrying automatically.`,
+        advisory.message
+      );
+    case 'network_error':
+      return appendRuntimeAdvisoryRawMessage(
+        'Network or connectivity issue. SDK is retrying automatically.',
+        advisory.message
+      );
+    case 'provider_overloaded':
+      return appendRuntimeAdvisoryRawMessage(
+        'Provider is temporarily overloaded. SDK is retrying automatically.',
+        advisory.message
+      );
+    case 'backend_error':
+    case 'unknown':
+      return appendRuntimeAdvisoryRawMessage(
+        'The SDK is retrying this request after a provider or backend error.',
+        advisory.message
+      );
+    default:
+      return (
+        advisory.message?.trim() ||
+        'The SDK is retrying this request after a provider or backend error.'
+      );
+  }
+}
+
 export function getMemberRuntimeAdvisoryLabel(
   advisory: MemberRuntimeAdvisory | undefined,
+  providerId?: TeamProviderId,
   nowMs = Date.now()
 ): string | null {
   if (!advisory || advisory.kind !== 'sdk_retrying') {
     return null;
   }
+  const baseLabel = formatRuntimeAdvisoryBaseLabel(advisory, providerId);
   const retryUntilMs = Date.parse(advisory.retryUntil);
   if (!Number.isFinite(retryUntilMs)) {
-    return 'retrying now';
+    return baseLabel;
   }
   const remainingMs = retryUntilMs - nowMs;
   if (remainingMs <= 0) {
-    return 'retrying now';
+    return baseLabel;
   }
-  return `retrying now · ${formatRetryCountdown(remainingMs)}`;
+  return `${baseLabel} · ${formatRetryCountdown(remainingMs)}`;
 }
 
 export function getMemberRuntimeAdvisoryTitle(
-  advisory: MemberRuntimeAdvisory | undefined
+  advisory: MemberRuntimeAdvisory | undefined,
+  providerId?: TeamProviderId
 ): string | undefined {
   if (!advisory || advisory.kind !== 'sdk_retrying') {
     return undefined;
   }
-  return (
-    advisory.message?.trim() ||
-    'The SDK is retrying this request after a provider or backend error.'
-  );
+  return formatRuntimeAdvisoryTitle(advisory, providerId);
 }
 
 export function getLaunchAwarePresenceLabel(
@@ -274,13 +379,15 @@ export function getLaunchAwarePresenceLabel(
   livenessSource: MemberSpawnLivenessSource | undefined,
   runtimeAlive: boolean | undefined,
   runtimeAdvisory: MemberRuntimeAdvisory | undefined,
+  isLaunchSettling = false,
   isTeamAlive?: boolean,
   isTeamProvisioning?: boolean,
   leadActivity?: LeadActivityState
 ): string {
+  const keepLaunchSettlingVisuals = isTeamProvisioning === true || isLaunchSettling;
   const advisoryLabel =
-    spawnLaunchState === 'runtime_pending_bootstrap' && runtimeAlive
-      ? getMemberRuntimeAdvisoryLabel(runtimeAdvisory)
+    !keepLaunchSettlingVisuals && spawnLaunchState === 'runtime_pending_bootstrap' && runtimeAlive
+      ? getMemberRuntimeAdvisoryLabel(runtimeAdvisory, member.providerId)
       : null;
   if (advisoryLabel) {
     return advisoryLabel;
@@ -291,6 +398,7 @@ export function getLaunchAwarePresenceLabel(
     spawnLaunchState,
     livenessSource,
     runtimeAlive,
+    isLaunchSettling,
     isTeamAlive,
     isTeamProvisioning,
     leadActivity

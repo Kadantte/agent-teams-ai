@@ -506,6 +506,14 @@ export interface MemberRuntimeAdvisory {
   observedAt: string;
   retryUntil: string;
   retryDelayMs: number;
+  reasonCode?:
+    | 'quota_exhausted'
+    | 'rate_limited'
+    | 'auth_error'
+    | 'network_error'
+    | 'provider_overloaded'
+    | 'backend_error'
+    | 'unknown';
   message?: string;
 }
 

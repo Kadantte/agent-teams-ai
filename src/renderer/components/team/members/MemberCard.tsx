@@ -1,6 +1,6 @@
 import { Badge } from '@renderer/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
-import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
+import { getTeamColorSet, getThemedBadge, scaleColorAlpha } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import {
@@ -44,6 +44,7 @@ interface MemberCardProps {
   spawnLivenessSource?: MemberSpawnLivenessSource;
   spawnLaunchState?: MemberLaunchState;
   spawnRuntimeAlive?: boolean;
+  isLaunchSettling?: boolean;
   onOpenTask?: () => void;
   onOpenReviewTask?: () => void;
   onClick?: () => void;
@@ -68,6 +69,7 @@ export const MemberCard = ({
   spawnLivenessSource,
   spawnLaunchState,
   spawnRuntimeAlive,
+  isLaunchSettling,
   onOpenTask,
   onOpenReviewTask,
   onClick,
@@ -84,12 +86,19 @@ export const MemberCard = ({
     spawnStatus,
     spawnLaunchState,
     spawnRuntimeAlive,
+    isLaunchSettling,
     isTeamAlive,
     isTeamProvisioning,
     leadActivity
   );
-  const runtimeAdvisoryLabel = getMemberRuntimeAdvisoryLabel(member.runtimeAdvisory);
-  const runtimeAdvisoryTitle = getMemberRuntimeAdvisoryTitle(member.runtimeAdvisory);
+  const runtimeAdvisoryLabel = getMemberRuntimeAdvisoryLabel(
+    member.runtimeAdvisory,
+    member.providerId
+  );
+  const runtimeAdvisoryTitle = getMemberRuntimeAdvisoryTitle(
+    member.runtimeAdvisory,
+    member.providerId
+  );
   const presenceLabel = getLaunchAwarePresenceLabel(
     member,
     spawnStatus,
@@ -97,6 +106,7 @@ export const MemberCard = ({
     spawnLivenessSource,
     spawnRuntimeAlive,
     member.runtimeAdvisory,
+    isLaunchSettling,
     isTeamAlive,
     isTeamProvisioning,
     leadActivity
@@ -105,6 +115,7 @@ export const MemberCard = ({
     spawnStatus,
     spawnLaunchState,
     spawnRuntimeAlive,
+    isLaunchSettling,
     isTeamAlive,
     isTeamProvisioning
   );
@@ -127,6 +138,7 @@ export const MemberCard = ({
     spawnLaunchState !== 'failed_to_start' &&
     !activityTask;
   const showStartingBadge = !isRemoved && presenceLabel === 'starting' && !activityTask;
+  const cardTint = scaleColorAlpha(getThemedBadge(colors, isLight), 0.5);
 
   return (
     <div
@@ -136,7 +148,7 @@ export const MemberCard = ({
         className="group relative cursor-pointer rounded px-2 py-1.5"
         style={{
           borderLeft: `3px solid ${colors.border}`,
-          background: `linear-gradient(to right, ${getThemedBadge(colors, isLight)}, transparent)`,
+          background: `linear-gradient(to right, ${cardTint}, transparent)`,
         }}
         title={activityTitle}
         role="button"

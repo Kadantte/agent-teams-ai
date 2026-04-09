@@ -3,36 +3,16 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@renderer/components/ui/button';
 import { useStore } from '@renderer/store';
 import { getCurrentProvisioningProgressForTeam } from '@renderer/store/slices/teamSlice';
-import { isLeadMember } from '@shared/utils/leadDetection';
 import { X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { ProvisioningProgressBlock } from './ProvisioningProgressBlock';
-import { getDisplayStepIndex } from './provisioningSteps';
-
-function formatRetryingRuntimePhrase(retryingRuntimeCount: number): string {
-  if (retryingRuntimeCount <= 0) {
-    return '';
-  }
-  return `${retryingRuntimeCount} teammate${retryingRuntimeCount === 1 ? '' : 's'} retrying provider capacity`;
-}
-
-function formatProcessOnlyAlivePhrase(
-  processOnlyAliveCount: number,
-  retryingRuntimeCount: number
-): string {
-  if (processOnlyAliveCount <= 0) {
-    return '';
-  }
-  if (retryingRuntimeCount >= processOnlyAliveCount) {
-    return formatRetryingRuntimePhrase(processOnlyAliveCount);
-  }
-  const plainOnlineCount = processOnlyAliveCount - retryingRuntimeCount;
-  if (retryingRuntimeCount <= 0) {
-    return `${plainOnlineCount} teammate${plainOnlineCount === 1 ? '' : 's'} online`;
-  }
-  return `${formatRetryingRuntimePhrase(retryingRuntimeCount)}, ${plainOnlineCount} teammate${plainOnlineCount === 1 ? '' : 's'} online`;
-}
+import {
+  DISPLAY_COMPLETE_STEP_INDEX,
+  getDisplayStepIndex,
+  getLaunchJoinMilestonesFromMembers,
+  getLaunchJoinState,
+} from './provisioningSteps';
 
 interface TeamProvisioningBannerProps {
   teamName: string;
@@ -91,9 +71,37 @@ export const TeamProvisioningBanner = memo(function TeamProvisioningBanner({
     progress.state === 'finalizing' ||
     progress.state === 'verifying';
 
-  const progressStepIndex = getDisplayStepIndex(progress.state);
+  const {
+    expectedTeammateCount: fallbackTeammateCount,
+    heartbeatConfirmedCount,
+    processOnlyAliveCount,
+    pendingSpawnCount,
+    failedSpawnCount,
+  } = getLaunchJoinMilestonesFromMembers({
+    members: teamMembers ?? [],
+    memberSpawnStatuses,
+    memberSpawnSnapshot,
+  });
+  const { allTeammatesConfirmedAlive, hasMembersStillJoining, remainingJoinCount } =
+    getLaunchJoinState({
+      expectedTeammateCount: fallbackTeammateCount,
+      heartbeatConfirmedCount,
+      processOnlyAliveCount,
+      pendingSpawnCount,
+      failedSpawnCount,
+    });
+  const progressStepIndex = getDisplayStepIndex({
+    progress,
+    expectedTeammateCount: fallbackTeammateCount,
+    heartbeatConfirmedCount,
+    processOnlyAliveCount,
+    pendingSpawnCount,
+    failedSpawnCount,
+  });
 
-  // Remember last active step so we can show it as the error location when failed
+  // Keep the error marker aligned to the last meaningful UI milestone, not the
+  // raw backend phase enum. The launch flow now moves through some backend
+  // states too quickly for the old enum mapping to stay user-meaningful.
   if (progressStepIndex >= 0 && !isFailed) {
     lastActiveStepRef.current = progressStepIndex;
   }
@@ -130,92 +138,33 @@ export const TeamProvisioningBanner = memo(function TeamProvisioningBanner({
     );
   }
 
-  const teammates = (teamMembers ?? []).filter((member) => !isLeadMember(member));
-  const expectedTeammateCount = memberSpawnSnapshot?.expectedMembers?.length;
-  const fallbackTeammateCount = expectedTeammateCount ?? teammates.length;
-  const snapshotSummary = memberSpawnSnapshot?.summary;
-  const failedSpawnEntries = Object.entries(memberSpawnStatuses ?? {}).filter(
-    ([, entry]) => entry.launchState === 'failed_to_start'
-  );
-  const failedSpawnCount = snapshotSummary?.failedCount ?? failedSpawnEntries.length;
-  const heartbeatConfirmedCount =
-    snapshotSummary?.confirmedCount ??
-    teammates.filter((member) => {
-      const entry = memberSpawnStatuses?.[member.name];
-      return entry?.launchState === 'confirmed_alive';
-    }).length;
-  const processOnlyAliveCount =
-    snapshotSummary?.runtimeAlivePendingCount ??
-    teammates.filter((member) => {
-      const entry = memberSpawnStatuses?.[member.name];
-      return entry?.launchState === 'runtime_pending_bootstrap' && entry.runtimeAlive === true;
-    }).length;
-  const retryingRuntimeCount = teammates.filter((member) => {
-    const entry = memberSpawnStatuses?.[member.name];
-    return (
-      entry?.launchState === 'runtime_pending_bootstrap' &&
-      entry.runtimeAlive === true &&
-      member.runtimeAdvisory?.kind === 'sdk_retrying'
-    );
-  }).length;
-  const pendingSpawnCount = snapshotSummary
-    ? Math.max(0, snapshotSummary.pendingCount - snapshotSummary.runtimeAlivePendingCount)
-    : teammates.filter((member) => {
-        const entry = memberSpawnStatuses?.[member.name];
-        return (
-          entry?.launchState === 'starting' ||
-          (entry?.launchState === 'runtime_pending_bootstrap' && entry.runtimeAlive !== true)
-        );
-      }).length;
-  const allTeammatesConfirmedAlive =
-    fallbackTeammateCount > 0 &&
-    failedSpawnCount === 0 &&
-    heartbeatConfirmedCount === fallbackTeammateCount;
-  const allPendingRuntimesStarted =
-    fallbackTeammateCount > 0 &&
-    heartbeatConfirmedCount === 0 &&
-    processOnlyAliveCount === fallbackTeammateCount &&
-    pendingSpawnCount === 0;
-  const hasMembersStillJoining =
-    fallbackTeammateCount > 0 &&
-    failedSpawnCount === 0 &&
-    (processOnlyAliveCount > 0 || pendingSpawnCount > 0);
-
   if (isReady) {
-    const processOnlyAlivePhrase = formatProcessOnlyAlivePhrase(
-      processOnlyAliveCount,
-      retryingRuntimeCount
-    );
+    const joiningPhrase =
+      remainingJoinCount === 1
+        ? '1 teammate still joining'
+        : `${remainingJoinCount} teammates still joining`;
     const readyDetailMessage =
       failedSpawnCount > 0
         ? progress.message
         : fallbackTeammateCount === 0
-          ? 'Team provisioned — lead online'
+          ? 'Team provisioned - lead online'
           : allTeammatesConfirmedAlive
-            ? `Team provisioned — all ${fallbackTeammateCount} teammates made contact`
-            : allPendingRuntimesStarted
-              ? processOnlyAlivePhrase
-                ? `Team provisioned — ${processOnlyAlivePhrase}`
-                : 'Team provisioned — teammates online'
-              : processOnlyAliveCount > 0 || pendingSpawnCount > 0
-                ? `Team provisioned — ${heartbeatConfirmedCount}/${fallbackTeammateCount} teammates made contact${processOnlyAlivePhrase ? `, ${processOnlyAlivePhrase}` : ''}${pendingSpawnCount > 0 ? `${processOnlyAlivePhrase ? ', ' : ', '}${pendingSpawnCount} still starting` : ''}`
-                : 'Team provisioned — teammates are still starting';
+            ? `Team provisioned - all ${fallbackTeammateCount} teammates joined`
+            : hasMembersStillJoining
+              ? `Waiting for ${joiningPhrase.replace('still joining', 'to finish joining')}`
+              : 'Team provisioned - teammates are still joining';
     const readyDetailSeverity =
       failedSpawnCount > 0 || hasMembersStillJoining ? 'warning' : undefined;
     const readyMessage =
       failedSpawnCount > 0
-        ? `Launch finished with errors — ${failedSpawnCount}/${Math.max(fallbackTeammateCount, failedSpawnCount)} teammates failed to start`
+        ? `Launch finished with errors - ${failedSpawnCount}/${Math.max(fallbackTeammateCount, failedSpawnCount)} teammates failed to start`
         : fallbackTeammateCount === 0
-          ? 'Team launched — lead online'
+          ? 'Team launched - lead online'
           : allTeammatesConfirmedAlive
-            ? `Team launched — all ${fallbackTeammateCount} teammates made contact`
-            : allPendingRuntimesStarted
-              ? processOnlyAlivePhrase
-                ? `Team launched — ${processOnlyAlivePhrase}`
-                : 'Team launched — teammates online'
-              : processOnlyAliveCount > 0 || pendingSpawnCount > 0
-                ? `Team launched — ${heartbeatConfirmedCount}/${fallbackTeammateCount} teammates made contact${processOnlyAlivePhrase ? `, ${processOnlyAlivePhrase}` : ''}${pendingSpawnCount > 0 ? `${processOnlyAlivePhrase ? ', ' : ', '}${pendingSpawnCount} still starting` : ''}`
-                : 'Team launched — teammates are still starting';
+            ? `Team launched - all ${fallbackTeammateCount} teammates joined`
+            : hasMembersStillJoining
+              ? `Team launched - ${joiningPhrase}`
+              : 'Team launched - teammates are still joining';
     const readyStepIndex = hasMembersStillJoining ? 2 : DISPLAY_COMPLETE_STEP_INDEX;
 
     return (
@@ -223,7 +172,7 @@ export const TeamProvisioningBanner = memo(function TeamProvisioningBanner({
         <ProvisioningProgressBlock
           key={progress.runId}
           title="Launch details"
-          message={failedSpawnCount > 0 ? readyDetailMessage : null}
+          message={failedSpawnCount > 0 || hasMembersStillJoining ? readyDetailMessage : null}
           messageSeverity={readyDetailSeverity}
           currentStepIndex={readyStepIndex}
           startedAt={progress.startedAt}
@@ -271,5 +220,3 @@ export const TeamProvisioningBanner = memo(function TeamProvisioningBanner({
 
   return null;
 });
-
-const DISPLAY_COMPLETE_STEP_INDEX = 4;

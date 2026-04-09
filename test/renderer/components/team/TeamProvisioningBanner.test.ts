@@ -112,7 +112,117 @@ describe('TeamProvisioningBanner launch-step alignment', () => {
 
     const block = host.querySelector('[data-testid="progress-block"]');
     expect(block?.getAttribute('data-current-step-index')).toBe('2');
-    expect(block?.textContent).toContain('0/3 teammates made contact');
+    expect(block?.textContent).toContain('3 teammates still joining');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('keeps Starting active until a real provisioning pid exists', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.progress = {
+      runId: 'run-1',
+      teamName: 'northstar-core',
+      state: 'configuring',
+      startedAt: '2026-04-08T16:00:00.000Z',
+      message: 'Waiting for team configuration...',
+      messageSeverity: undefined,
+      cliLogsTail: '',
+      assistantOutput: '',
+      configReady: false,
+    };
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(TeamProvisioningBanner, { teamName: 'northstar-core' }));
+      await Promise.resolve();
+    });
+
+    const block = host.querySelector('[data-testid="progress-block"]');
+    expect(block?.getAttribute('data-current-step-index')).toBe('0');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('keeps Team setup active while config is not ready after the process starts', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.progress = {
+      runId: 'run-1',
+      teamName: 'northstar-core',
+      state: 'configuring',
+      startedAt: '2026-04-08T16:00:00.000Z',
+      message: 'Waiting for team configuration...',
+      messageSeverity: undefined,
+      pid: 4321,
+      cliLogsTail: '',
+      assistantOutput: '',
+      configReady: false,
+    };
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(TeamProvisioningBanner, { teamName: 'northstar-core' }));
+      await Promise.resolve();
+    });
+
+    const block = host.querySelector('[data-testid="progress-block"]');
+    expect(block?.getAttribute('data-current-step-index')).toBe('1');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('advances to Finalizing once teammate runtimes are attached even before contact is confirmed', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.progress = {
+      runId: 'run-1',
+      teamName: 'northstar-core',
+      state: 'finalizing',
+      startedAt: '2026-04-08T16:00:00.000Z',
+      message: 'Waiting for teammate bootstrap confirmations...',
+      messageSeverity: undefined,
+      pid: 4321,
+      cliLogsTail: '',
+      assistantOutput: '',
+      configReady: true,
+    };
+    storeState.memberSpawnSnapshotsByTeam['northstar-core'] = {
+      runId: 'run-1',
+      expectedMembers: ['alice', 'bob', 'jack'],
+      statuses: {},
+      summary: {
+        confirmedCount: 0,
+        pendingCount: 3,
+        failedCount: 0,
+        runtimeAlivePendingCount: 3,
+      },
+      source: 'merged',
+    };
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(TeamProvisioningBanner, { teamName: 'northstar-core' }));
+      await Promise.resolve();
+    });
+
+    const block = host.querySelector('[data-testid="progress-block"]');
+    expect(block?.getAttribute('data-current-step-index')).toBe('3');
 
     await act(async () => {
       root.unmount();
@@ -146,7 +256,7 @@ describe('TeamProvisioningBanner launch-step alignment', () => {
 
     const block = host.querySelector('[data-testid="progress-block"]');
     expect(block?.getAttribute('data-current-step-index')).toBe('4');
-    expect(block?.textContent).toContain('all 3 teammates made contact');
+    expect(block?.textContent).toContain('all 3 teammates joined');
 
     await act(async () => {
       root.unmount();
@@ -181,7 +291,7 @@ describe('TeamProvisioningBanner launch-step alignment', () => {
     const block = host.querySelector('[data-testid="progress-block"]');
     expect(block?.getAttribute('data-current-step-index')).toBe('2');
     expect(block?.getAttribute('data-success-severity')).toBe('warning');
-    expect(block?.textContent).toContain('teammates online');
+    expect(block?.textContent).toContain('3 teammates still joining');
 
     await act(async () => {
       root.unmount();
@@ -267,7 +377,7 @@ describe('TeamProvisioningBanner launch-step alignment', () => {
     });
 
     const block = host.querySelector('[data-testid="progress-block"]');
-    expect(block?.textContent).toContain('retrying provider capacity');
+    expect(block?.textContent).toContain('2 teammates still joining');
     expect(block?.getAttribute('data-success-severity')).toBe('warning');
 
     await act(async () => {

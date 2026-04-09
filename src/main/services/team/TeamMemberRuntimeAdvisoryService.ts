@@ -9,6 +9,35 @@ const LOOKBACK_MS = 10 * 60 * 1000;
 const CACHE_TTL_MS = 5_000;
 const TAIL_BYTES = 64 * 1024;
 const BATCH_WARN_MS = 200;
+const QUOTA_EXHAUSTED_TOKENS = [
+  'exhausted your capacity',
+  'capacity exceeded',
+  'quota exceeded',
+  'quota exhausted',
+];
+const RATE_LIMITED_TOKENS = ['rate limit', 'too many requests', '429'];
+const AUTH_ERROR_TOKENS = [
+  'unauthorized',
+  'forbidden',
+  'invalid api key',
+  'authentication',
+  'api key',
+];
+const NETWORK_ERROR_TOKENS = [
+  'timeout',
+  'timed out',
+  'network',
+  'connection',
+  'econn',
+  'enotfound',
+  'fetch failed',
+];
+const PROVIDER_OVERLOADED_TOKENS = [
+  'overloaded',
+  'temporarily unavailable',
+  'service unavailable',
+  '503',
+];
 
 const logger = createLogger('Service:TeamMemberRuntimeAdvisory');
 
@@ -21,6 +50,33 @@ interface CachedTeamBatchAdvisories {
   membersSignature: string;
   value: Map<string, MemberRuntimeAdvisory>;
   expiresAt: number;
+}
+
+function includesAnyToken(value: string, tokens: readonly string[]): boolean {
+  return tokens.some((token) => value.includes(token));
+}
+
+function classifyRetryReason(message: string | undefined): MemberRuntimeAdvisory['reasonCode'] {
+  const normalized = message?.trim().toLowerCase();
+  if (!normalized) {
+    return 'unknown';
+  }
+  if (includesAnyToken(normalized, QUOTA_EXHAUSTED_TOKENS)) {
+    return 'quota_exhausted';
+  }
+  if (includesAnyToken(normalized, RATE_LIMITED_TOKENS)) {
+    return 'rate_limited';
+  }
+  if (includesAnyToken(normalized, AUTH_ERROR_TOKENS)) {
+    return 'auth_error';
+  }
+  if (includesAnyToken(normalized, NETWORK_ERROR_TOKENS)) {
+    return 'network_error';
+  }
+  if (includesAnyToken(normalized, PROVIDER_OVERLOADED_TOKENS)) {
+    return 'provider_overloaded';
+  }
+  return 'backend_error';
 }
 
 export class TeamMemberRuntimeAdvisoryService {
@@ -308,6 +364,7 @@ export class TeamMemberRuntimeAdvisoryService {
         observedAt: new Date(observedAt).toISOString(),
         retryUntil: new Date(retryUntil).toISOString(),
         retryDelayMs: retryInMs,
+        reasonCode: classifyRetryReason(message),
         ...(message ? { message } : {}),
       };
     } catch {
