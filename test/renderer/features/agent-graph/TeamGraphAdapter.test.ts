@@ -501,4 +501,55 @@ describe('TeamGraphAdapter particles', () => {
     const alice = graph.nodes.find((node) => node.id === 'member:my-team:alice');
     expect(alice?.state).toBe('idle');
   });
+
+  it('adds compact runtime labels for lead and members and refreshes when runtime changes', () => {
+    const adapter = TeamGraphAdapter.create();
+    adapter.adapt(createBaseTeamData(), 'my-team');
+
+    const graph = adapter.adapt(
+      createBaseTeamData({
+        members: [
+          {
+            name: 'team-lead',
+            status: 'active',
+            currentTaskId: null,
+            taskCount: 0,
+            lastActiveAt: null,
+            messageCount: 0,
+            agentType: 'team-lead',
+            providerId: 'codex',
+            model: 'gpt-5.4-mini',
+            effort: 'medium',
+          },
+          {
+            name: 'alice',
+            status: 'active',
+            currentTaskId: null,
+            taskCount: 1,
+            lastActiveAt: null,
+            messageCount: 0,
+            providerId: 'anthropic',
+            model: 'sonnet',
+            effort: 'high',
+          },
+          {
+            name: 'bob',
+            status: 'active',
+            currentTaskId: null,
+            taskCount: 1,
+            lastActiveAt: null,
+            messageCount: 0,
+          },
+        ],
+      }),
+      'my-team'
+    );
+
+    expect(graph.nodes.find((node) => node.id === 'lead:my-team')?.runtimeLabel).toBe(
+      'GPT-5.4 Mini · Medium'
+    );
+    expect(graph.nodes.find((node) => node.id === 'member:my-team:alice')?.runtimeLabel).toBe(
+      'Anthropic · sonnet · High'
+    );
+  });
 });

@@ -232,6 +232,11 @@ const MemberPopoverContent = ({
           {node.role && (
             <div className="truncate text-xs text-[var(--color-text-muted)]">{node.role}</div>
           )}
+          {node.runtimeLabel && (
+            <div className="truncate text-[11px] text-[var(--color-text-muted)]">
+              {node.runtimeLabel}
+            </div>
+          )}
         </div>
       </div>
 

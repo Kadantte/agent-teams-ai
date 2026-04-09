@@ -26,6 +26,7 @@ function makeMemberNode(spawnStatus: GraphNode['spawnStatus']): GraphNode {
     kind: 'member',
     label: 'alice',
     role: 'Reviewer',
+    runtimeLabel: 'Codex · GPT-5.4 Mini · Medium',
     state: 'idle',
     color: '#60a5fa',
     avatarUrl: undefined,
@@ -70,6 +71,7 @@ describe('GraphNodePopover spawn badge labels', () => {
     });
 
     expect(host.textContent).toContain('starting');
+    expect(host.textContent).toContain('Codex · GPT-5.4 Mini · Medium');
     expect(host.textContent).not.toContain('waiting');
     expect(host.textContent).not.toContain('spawning');
 

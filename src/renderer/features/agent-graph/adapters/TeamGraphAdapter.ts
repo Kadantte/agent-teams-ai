@@ -8,6 +8,7 @@
  */
 
 import { getUnreadCount } from '@renderer/services/commentReadStorage';
+import { formatTeamRuntimeSummary } from '@renderer/utils/teamRuntimeSummary';
 import { agentAvatarUrl } from '@renderer/utils/memberHelpers';
 import { stripCrossTeamPrefix } from '@shared/constants/crossTeam';
 import {
@@ -78,7 +79,7 @@ export class TeamGraphAdapter {
     const memberKey = teamData.members
       .map(
         (member) =>
-          `${member.name}:${member.status}:${member.currentTaskId ?? ''}:${member.role ?? ''}:${member.color ?? ''}:${member.agentType ?? ''}:${member.removedAt ?? ''}`
+          `${member.name}:${member.status}:${member.currentTaskId ?? ''}:${member.role ?? ''}:${member.color ?? ''}:${member.agentType ?? ''}:${member.providerId ?? ''}:${member.model ?? ''}:${member.effort ?? ''}:${member.removedAt ?? ''}`
       )
       .sort()
       .join('|');
@@ -241,6 +242,14 @@ export class TeamGraphAdapter {
     return data.members.find((member) => isLeadMember(member))?.name ?? `${teamName}-lead`;
   }
 
+  static #getRuntimeLabel(
+    providerId: TeamData['members'][number]['providerId'],
+    model: TeamData['members'][number]['model'],
+    effort: TeamData['members'][number]['effort']
+  ): string | undefined {
+    return formatTeamRuntimeSummary(providerId, model, effort);
+  }
+
   static #selectVisibleTool(
     runningTools?: Record<string, ActiveToolCall>,
     finishedTools?: Record<string, ActiveToolCall>
@@ -266,6 +275,7 @@ export class TeamGraphAdapter {
     toolHistory?: Record<string, ActiveToolCall[]>
   ): void {
     const percent = leadContext?.percent;
+    const leadMember = data.members.find((member) => member.name === leadName);
     const activeTool = TeamGraphAdapter.#selectVisibleTool(
       activeTools?.[leadName],
       finishedVisible?.[leadName]
@@ -280,6 +290,11 @@ export class TeamGraphAdapter {
           ? 'tool_calling'
           : 'active',
       color: data.config.color ?? undefined,
+      runtimeLabel: TeamGraphAdapter.#getRuntimeLabel(
+        leadMember?.providerId,
+        leadMember?.model,
+        leadMember?.effort
+      ),
       contextUsage: percent != null ? Math.max(0, Math.min(1, percent / 100)) : undefined,
       avatarUrl: agentAvatarUrl(leadName, 64),
       activeTool: activeTool
@@ -342,6 +357,11 @@ export class TeamGraphAdapter {
           : TeamGraphAdapter.#mapMemberStatus(member.status, spawn?.status),
         color: member.color ?? undefined,
         role: member.role ?? undefined,
+        runtimeLabel: TeamGraphAdapter.#getRuntimeLabel(
+          member.providerId,
+          member.model,
+          member.effort
+        ),
         spawnStatus: spawn?.status,
         avatarUrl: agentAvatarUrl(member.name, 64),
         currentTaskId: member.currentTaskId ?? undefined,
