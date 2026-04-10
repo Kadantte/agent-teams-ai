@@ -62,6 +62,7 @@ import type {
   CreateTaskRequest,
   GlobalTask,
   InboxMessage,
+  MessagesPage,
   KanbanColumnId,
   KanbanState,
   ResolvedTeamMember,
@@ -1023,7 +1024,6 @@ export class TeamDataService {
     // Enrich members with git branch when it differs from lead's branch
     await this.enrichMemberBranches(members, config);
     mark('enrichBranches');
-
     mark('syncComments');
 
     let processes: TeamProcess[] = [];
@@ -1042,7 +1042,9 @@ export class TeamDataService {
           'inboxNames'
         )} messages=${msSince('messages')} leadTexts=${msSince('leadTexts')} sent=${msSince(
           'sentMessages'
-        )} membersMeta=${msSince('metaMembers')} kanban=${msSince('kanbanState')} post=${msBetween(
+        )} membersMeta=${msSince('metaMembers')} kanban=${msSince('kanbanState')} kanbanGc=${msSince(
+          'kanbanGc'
+        )} post=${msBetween(
           'postStart',
           'mergeMessages'
         )}/dedupLead=${msBetween('mergeMessages', 'dedupLeadTexts')}/dedupIds=${msBetween(
@@ -1086,16 +1088,189 @@ export class TeamDataService {
       this.processHealthTeams.delete(teamName);
     }
 
+    // Cap messages to keep IPC payloads small. Full history is available
+    // via the paginated getMessagesPage() API. We still include a small
+    // batch here for backward compatibility (notifications, dedup, etc.).
+    const MAX_RETURN_MESSAGES = 50;
+    const cappedMessages =
+      messages.length > MAX_RETURN_MESSAGES ? messages.slice(0, MAX_RETURN_MESSAGES) : messages;
+
     return {
       teamName,
       config,
       tasks: tasksWithKanban,
       members,
-      messages,
+      messages: cappedMessages,
       kanbanState,
       processes,
       warnings: warnings.length > 0 ? warnings : undefined,
     };
+  }
+
+  /**
+   * Paginated message retrieval for the messages panel.
+   * Uses cursor-based pagination by timestamp to handle live message insertion.
+   */
+  async getMessagesPage(
+    teamName: string,
+    options: { beforeTimestamp?: string; limit: number }
+  ): Promise<MessagesPage> {
+    const config = await this.configReader.getConfig(teamName);
+    if (!config) {
+      return { messages: [], nextCursor: null, hasMore: false };
+    }
+
+    // Collect all messages from the same sources as getTeamData
+    let messages: InboxMessage[] = [];
+
+    const [inboxMessages, leadTexts, sentMessages] = await Promise.all([
+      this.inboxReader.getMessages(teamName).catch(() => [] as InboxMessage[]),
+      this.extractLeadSessionTexts(config).catch(() => [] as InboxMessage[]),
+      this.sentMessagesStore.readMessages(teamName).catch(() => [] as InboxMessage[]),
+    ]);
+
+    messages = [...inboxMessages, ...leadTexts, ...sentMessages];
+
+    // Dedup lead_session vs lead_process (same logic as getTeamData)
+    if (leadTexts.length > 0) {
+      const normalizeText = (text: string): string => text.trim().replace(/\r\n/g, '\n');
+      const getFingerprint = (msg: Pick<InboxMessage, 'from' | 'text' | 'leadSessionId'>) =>
+        `${msg.leadSessionId ?? ''}\0${msg.from}\0${normalizeText(msg.text ?? '')}`;
+      const leadSessionFingerprints = new Set<string>();
+      for (const msg of leadTexts) {
+        if (msg.source === 'lead_session') leadSessionFingerprints.add(getFingerprint(msg));
+      }
+      messages = messages.filter((m) => {
+        if (m.source !== 'lead_process') return true;
+        if (m.to) return true;
+        return !leadSessionFingerprints.has(getFingerprint(m));
+      });
+    }
+
+    // Enrich: propagate leadSessionId to messages missing it (same as getTeamData)
+    if (config.leadSessionId || messages.some((m) => m.leadSessionId)) {
+      messages.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+      const anchors: { time: number; sessionId: string }[] = [];
+      for (const msg of messages) {
+        if (msg.leadSessionId) {
+          anchors.push({ time: Date.parse(msg.timestamp), sessionId: msg.leadSessionId });
+        }
+      }
+      if (anchors.length > 0) {
+        for (const msg of messages) {
+          if (msg.leadSessionId) continue;
+          const msgTime = Date.parse(msg.timestamp);
+          let best = anchors[0];
+          let bestDist = Math.abs(msgTime - best.time);
+          for (const a of anchors) {
+            const dist = Math.abs(msgTime - a.time);
+            if (dist < bestDist) {
+              bestDist = dist;
+              best = a;
+            } else if (dist > bestDist && a.time > msgTime) {
+              break;
+            }
+          }
+          msg.leadSessionId = best.sessionId;
+        }
+      } else if (config.leadSessionId) {
+        for (const msg of messages) {
+          msg.leadSessionId = config.leadSessionId;
+        }
+      }
+    }
+
+    // Enrich: annotate slash command responses
+    this.annotateSlashCommandResponses(messages);
+
+    // Sort newest-first, with stable tie-breaker by messageId
+    messages.sort((a, b) => {
+      const diff = Date.parse(b.timestamp) - Date.parse(a.timestamp);
+      if (diff !== 0) return diff;
+      return (a.messageId ?? '').localeCompare(b.messageId ?? '');
+    });
+
+    // Apply cursor filter. Cursor format: "timestamp|messageId" (compound)
+    // to handle multiple messages sharing the same timestamp.
+    if (options.beforeTimestamp) {
+      const [cursorTs, cursorId] = options.beforeTimestamp.split('|');
+      const cursorMs = Date.parse(cursorTs);
+      messages = messages.filter((m) => {
+        const ms = Date.parse(m.timestamp);
+        if (ms < cursorMs) return true;
+        if (ms > cursorMs) return false;
+        // Same timestamp — use messageId tie-breaker
+        if (!cursorId) return false;
+        return (m.messageId ?? '').localeCompare(cursorId) > 0;
+      });
+    }
+
+    // Paginate
+    const hasMore = messages.length > options.limit;
+    const page = messages.slice(0, options.limit);
+    const lastMsg = page[page.length - 1];
+    const nextCursor =
+      hasMore && lastMsg ? `${lastMsg.timestamp}|${lastMsg.messageId ?? ''}` : null;
+
+    return { messages: page, nextCursor, hasMore };
+  }
+
+  /**
+   * Enriches members with gitBranch when their cwd differs from the lead's.
+   * Mutates members in-place for efficiency (called right after resolveMembers).
+   */
+  private async enrichMemberBranches(
+    members: ResolvedTeamMember[],
+    config: TeamConfig
+  ): Promise<void> {
+    const leadEntry = config.members?.find((member) => isLeadMember(member));
+    const leadCwd = leadEntry?.cwd ?? config.projectPath;
+    if (!leadCwd) return;
+
+    const withTimeout = async <T>(promise: Promise<T>, ms: number): Promise<T> => {
+      let timer: NodeJS.Timeout | null = null;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<T>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error('timeout')), ms);
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+
+    let leadBranch: string | null = null;
+    try {
+      leadBranch = await withTimeout(gitIdentityResolver.getBranch(path.normalize(leadCwd)), 2000);
+    } catch {
+      return;
+    }
+
+    const candidates = members.filter((member) => member.cwd && member.cwd !== leadCwd);
+    if (candidates.length === 0) return;
+
+    const concurrency = process.platform === 'win32' ? 4 : 8;
+    for (let index = 0; index < candidates.length; index += concurrency) {
+      const batch = candidates.slice(index, index + concurrency);
+      await Promise.all(
+        batch.map(async (member) => {
+          if (!member.cwd) return;
+          try {
+            const branch = await withTimeout(
+              gitIdentityResolver.getBranch(path.normalize(member.cwd)),
+              2000
+            );
+            if (branch && branch !== leadBranch) {
+              member.gitBranch = branch;
+            }
+          } catch {
+            // Member cwd may not be a git repo - skip silently.
+          }
+        })
+      );
+    }
   }
 
   startProcessHealthPolling(): void {
@@ -1159,68 +1334,6 @@ export class TeamDataService {
       this.getController(teamName).processes.stopProcess({ pid });
     } catch {
       // Ignore missing persisted registry rows after OS-level stop.
-    }
-  }
-
-  /**
-   * Enriches members with gitBranch when their cwd differs from the lead's.
-   * Mutates members in-place for efficiency (called right after resolveMembers).
-   */
-  private async enrichMemberBranches(
-    members: ResolvedTeamMember[],
-    config: TeamConfig
-  ): Promise<void> {
-    // Determine lead's cwd — prefer explicit member entry, fall back to config.projectPath
-    const leadEntry = config.members?.find((m) => isLeadMember(m));
-    const leadCwd = leadEntry?.cwd ?? config.projectPath;
-    if (!leadCwd) return;
-
-    const withTimeout = async <T>(p: Promise<T>, ms: number): Promise<T> => {
-      let timer: NodeJS.Timeout | null = null;
-      try {
-        return await Promise.race([
-          p,
-          new Promise<T>((_resolve, reject) => {
-            timer = setTimeout(() => reject(new Error('timeout')), ms);
-          }),
-        ]);
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
-    };
-
-    let leadBranch: string | null = null;
-    try {
-      // Git can hang on some Windows setups (network drives, locked repos, credential prompts).
-      // Branch is best-effort; never block team:getData on it.
-      leadBranch = await withTimeout(gitIdentityResolver.getBranch(path.normalize(leadCwd)), 2000);
-    } catch {
-      // Lead cwd may not be a git repo — skip enrichment entirely
-      return;
-    }
-
-    const candidates = members.filter((m) => m.cwd && m.cwd !== leadCwd);
-    if (candidates.length === 0) return;
-
-    const concurrency = process.platform === 'win32' ? 4 : 8;
-    for (let i = 0; i < candidates.length; i += concurrency) {
-      const batch = candidates.slice(i, i + concurrency);
-      await Promise.all(
-        batch.map(async (member) => {
-          if (!member.cwd) return;
-          try {
-            const branch = await withTimeout(
-              gitIdentityResolver.getBranch(path.normalize(member.cwd)),
-              2000
-            );
-            if (branch && branch !== leadBranch) {
-              member.gitBranch = branch;
-            }
-          } catch {
-            // Member cwd may not be a git repo — skip silently
-          }
-        })
-      );
     }
   }
 

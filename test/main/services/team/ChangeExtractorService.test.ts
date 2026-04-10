@@ -651,6 +651,14 @@ describe('ChangeExtractorService', () => {
     const stalePromise = service.getTaskChanges(TEAM_NAME, TASK_ID, SUMMARY_OPTIONS);
     await service.invalidateTaskChangeSummaries(TEAM_NAME, [TASK_ID], { deletePersisted: true });
     const freshPromise = service.getTaskChanges(TEAM_NAME, TASK_ID, SUMMARY_OPTIONS);
+    // Flush microtasks so freshPromise advances past its internal awaits
+    // and reaches the worker mock before we resolve the stale deferred.
+    // Without this, CI timing can cause the stale resolution to race with
+    // the fresh worker call, making the test flaky.
+    await vi.advanceTimersByTimeAsync?.(0).catch(() => undefined);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     first.resolve(makeTaskChangeResult());
     const stale = await stalePromise;
     const fresh = await freshPromise;

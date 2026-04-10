@@ -76,17 +76,19 @@ export const SortableTab = ({
     )
   );
 
-  const teamColorSet = useStore((s) => {
-    if (tab.type !== 'team' || !tab.teamName) return null;
-    const team = s.teamByName[tab.teamName];
-    const explicitColor =
-      team?.color ??
-      (s.selectedTeamName === tab.teamName ? s.selectedTeamData?.config.color : undefined);
-    if (explicitColor) return getTeamColorSet(explicitColor);
-    // Fallback: deterministic color derived from display name
-    const displayName = team?.displayName ?? tab.label;
-    return nameColorSet(displayName);
-  });
+  const teamColorSet = useStore(
+    useShallow((s) => {
+      if (tab.type !== 'team' || !tab.teamName) return null;
+      const team = s.teamByName[tab.teamName];
+      const explicitColor =
+        team?.color ??
+        (s.selectedTeamName === tab.teamName ? s.selectedTeamData?.config.color : undefined);
+      if (explicitColor) return getTeamColorSet(explicitColor);
+      // Fallback: deterministic color derived from display name
+      const displayName = team?.displayName ?? tab.label;
+      return nameColorSet(displayName);
+    })
+  );
   const activeBorderColor = teamColorSet?.border ?? 'var(--color-accent, #6366f1)';
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({

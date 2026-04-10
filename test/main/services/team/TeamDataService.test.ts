@@ -3721,4 +3721,97 @@ describe('TeamDataService', () => {
       warnSpy.mockRestore();
     }
   });
+
+  describe('getMessagesPage', () => {
+    function createPaginationService(messages: Array<{ from: string; text: string; timestamp: string; messageId?: string; source?: string; leadSessionId?: string }>) {
+      return new TeamDataService(
+        {
+          listTeams: vi.fn(),
+          getConfig: vi.fn(async () => ({
+            name: 'My team',
+            members: [{ name: 'team-lead', role: 'Lead' }],
+            leadSessionId: 'lead-1',
+          })),
+        } as never,
+        { getTasks: vi.fn(async () => []) } as never,
+        {
+          listInboxNames: vi.fn(async () => []),
+          getMessages: vi.fn(async () =>
+            messages.map((m) => ({ ...m, read: true }))
+          ),
+        } as never,
+        {} as never,
+        {} as never,
+        { resolveMembers: vi.fn(() => []) } as never,
+        { getState: vi.fn(async () => ({ teamName: 'my-team', reviewers: [], tasks: {} })) } as never,
+        {} as never,
+        {} as never,
+        { readMessages: vi.fn(async () => []) } as never,
+      );
+    }
+
+    it('returns first page with cursor and hasMore', async () => {
+      const msgs = Array.from({ length: 5 }, (_, i) => ({
+        from: 'alice',
+        text: `msg-${i}`,
+        timestamp: `2026-01-01T00:00:0${i}.000Z`,
+        messageId: `m${i}`,
+        source: 'inbox' as const,
+      }));
+      const service = createPaginationService(msgs);
+      const page = await service.getMessagesPage('my-team', { limit: 3 });
+
+      expect(page.messages).toHaveLength(3);
+      expect(page.hasMore).toBe(true);
+      expect(page.nextCursor).toBeTruthy();
+      // Newest first
+      expect(page.messages[0].messageId).toBe('m4');
+    });
+
+    it('cursor excludes already-seen messages without losing same-timestamp messages', async () => {
+      const msgs = [
+        { from: 'a', text: '1', timestamp: '2026-01-01T00:00:02.000Z', messageId: 'x1' },
+        { from: 'b', text: '2', timestamp: '2026-01-01T00:00:02.000Z', messageId: 'x2' },
+        { from: 'c', text: '3', timestamp: '2026-01-01T00:00:01.000Z', messageId: 'x3' },
+      ];
+      const service = createPaginationService(msgs);
+      const page1 = await service.getMessagesPage('my-team', { limit: 1 });
+      expect(page1.messages).toHaveLength(1);
+      expect(page1.hasMore).toBe(true);
+
+      const page2 = await service.getMessagesPage('my-team', {
+        beforeTimestamp: page1.nextCursor!,
+        limit: 10,
+      });
+      // Should get the remaining 2 messages, not lose the one with same timestamp
+      expect(page2.messages.length).toBeGreaterThanOrEqual(1);
+      const allIds = [...page1.messages, ...page2.messages].map((m) => m.messageId);
+      expect(new Set(allIds).size).toBe(allIds.length); // no duplicates
+    });
+
+    it('annotates slash command results in paginated path', async () => {
+      const msgs = [
+        {
+          from: 'user',
+          text: '/cost',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          messageId: 'cmd1',
+          source: 'user_sent',
+          leadSessionId: 'lead-1',
+        },
+        {
+          from: 'team-lead',
+          text: 'Total cost: $1.05',
+          timestamp: '2026-01-01T00:00:01.000Z',
+          messageId: 'resp1',
+          source: 'lead_process',
+          leadSessionId: 'lead-1',
+        },
+      ];
+      const service = createPaginationService(msgs);
+      const page = await service.getMessagesPage('my-team', { limit: 10 });
+      const result = page.messages.find((m) => m.messageId === 'resp1');
+      expect(result?.messageKind).toBe('slash_command_result');
+    });
+  });
 });

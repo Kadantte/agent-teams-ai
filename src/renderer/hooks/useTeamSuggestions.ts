@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 
 import type { MentionSuggestion } from '@renderer/types/mention';
 
@@ -26,7 +27,7 @@ export interface UseTeamSuggestionsResult {
  * @param currentTeamName - The current team name to exclude from suggestions
  */
 export function useTeamSuggestions(currentTeamName: string | null): UseTeamSuggestionsResult {
-  const teams = useStore((s) => s.teams);
+  const teams = useStore(useShallow((s) => s.teams));
   const [aliveTeams, setAliveTeams] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
 

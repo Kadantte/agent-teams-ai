@@ -251,6 +251,8 @@ export const TeamListView = (): React.JSX.Element => {
     fetchTeams,
     openTeamTab,
     deleteTeam,
+    restoreTeam,
+    permanentlyDeleteTeam,
     projects,
     globalTasks,
     fetchAllTasks,
@@ -259,6 +261,7 @@ export const TeamListView = (): React.JSX.Element => {
     selectedRepositoryId,
     selectedWorktreeId,
     activeProjectId,
+    branchByPath,
   } = useStore(
     useShallow((s) => ({
       teams: s.teams,
@@ -277,6 +280,7 @@ export const TeamListView = (): React.JSX.Element => {
       selectedRepositoryId: s.selectedRepositoryId,
       selectedWorktreeId: s.selectedWorktreeId,
       activeProjectId: s.activeProjectId,
+      branchByPath: s.branchByPath,
     }))
   );
   const {
@@ -461,10 +465,6 @@ export const TeamListView = (): React.JSX.Element => {
     [filteredTeams]
   );
   useBranchSync(teamPaths, { live: false });
-  const branchByPath = useStore((s) => s.branchByPath);
-
-  const restoreTeam = useStore((s) => s.restoreTeam);
-  const permanentlyDeleteTeam = useStore((s) => s.permanentlyDeleteTeam);
 
   const handleDeleteTeam = useCallback(
     (teamName: string, isDraft: boolean, e: React.MouseEvent) => {

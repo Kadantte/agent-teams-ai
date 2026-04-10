@@ -128,7 +128,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
   const thisTab = effectiveTabId ? openTabs.find((t) => t.id === effectiveTabId) : null;
   const pendingNavigation = thisTab?.pendingNavigation;
 
-  const teamBySessionId = useStore((s) => s.teamBySessionId);
+  const teamBySessionId = useStore(useShallow((s) => s.teamBySessionId));
 
   // Look up whether this session belongs to a team
   const sessionTeam = useMemo(() => {

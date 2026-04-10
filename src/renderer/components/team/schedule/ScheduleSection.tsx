@@ -4,6 +4,7 @@ import { Button } from '@renderer/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { formatNextRun, getCronDescription } from '@renderer/utils/scheduleFormatters';
 import {
   ChevronDown,
@@ -57,7 +58,7 @@ const ScheduleRow = ({
 }: ScheduleRowProps): React.JSX.Element => {
   const [expanded, setExpanded] = useState(false);
   const [selectedRun, setSelectedRun] = useState<ScheduleRun | null>(null);
-  const runs = useStore((s) => s.scheduleRuns[schedule.id] ?? []);
+  const runs = useStore(useShallow((s) => s.scheduleRuns[schedule.id] ?? []));
   const runsLoading = useStore((s) => s.scheduleRunsLoading[schedule.id] ?? false);
   const fetchRunHistory = useStore((s) => s.fetchRunHistory);
 
@@ -207,17 +208,22 @@ const ScheduleRow = ({
 // =============================================================================
 
 export const ScheduleSection = ({ teamName }: ScheduleSectionProps): React.JSX.Element => {
-  const schedules = useStore((s) => s.schedules.filter((sch) => sch.teamName === teamName));
-  const pauseSchedule = useStore((s) => s.pauseSchedule);
-  const resumeSchedule = useStore((s) => s.resumeSchedule);
-  const deleteSchedule = useStore((s) => s.deleteSchedule);
-  const triggerNow = useStore((s) => s.triggerNow);
+  const { schedules, pauseSchedule, resumeSchedule, deleteSchedule, triggerNow, fetchSchedules } =
+    useStore(
+      useShallow((s) => ({
+        schedules: s.schedules.filter((sch) => sch.teamName === teamName),
+        pauseSchedule: s.pauseSchedule,
+        resumeSchedule: s.resumeSchedule,
+        deleteSchedule: s.deleteSchedule,
+        triggerNow: s.triggerNow,
+        fetchSchedules: s.fetchSchedules,
+      }))
+    );
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
 
   // Fetch schedules on mount
-  const fetchSchedules = useStore((s) => s.fetchSchedules);
   useEffect(() => {
     void fetchSchedules();
   }, [fetchSchedules]);

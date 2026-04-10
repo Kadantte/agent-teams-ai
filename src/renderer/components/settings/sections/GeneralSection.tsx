@@ -12,6 +12,7 @@ import { useStore } from '@renderer/store';
 import { getFullResetState } from '@renderer/store/utils/stateResetHelpers';
 import { AGENT_LANGUAGE_OPTIONS, resolveLanguageName } from '@shared/utils/agentLanguage';
 import { Check, Copy, FolderOpen, Laptop, Loader2, RotateCcw } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { SettingRow, SettingsSectionHeader, SettingsToggle } from '../components';
 
@@ -50,9 +51,13 @@ export const GeneralSection = ({
   const [copied, setCopied] = useState(false);
 
   // Claude Root state
-  const connectionMode = useStore((s) => s.connectionMode);
-  const fetchProjects = useStore((s) => s.fetchProjects);
-  const fetchRepositoryGroups = useStore((s) => s.fetchRepositoryGroups);
+  const { connectionMode, fetchProjects, fetchRepositoryGroups } = useStore(
+    useShallow((s) => ({
+      connectionMode: s.connectionMode,
+      fetchProjects: s.fetchProjects,
+      fetchRepositoryGroups: s.fetchRepositoryGroups,
+    }))
+  );
 
   const [claudeRootInfo, setClaudeRootInfo] = useState<ClaudeRootInfo | null>(null);
   const [updatingClaudeRoot, setUpdatingClaudeRoot] = useState(false);

@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@renderer/components/ui/dialog';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { AlertTriangle, Clock, Loader2, Terminal } from 'lucide-react';
 
 import { CliLogsRichView } from '../CliLogsRichView';
@@ -72,11 +73,13 @@ export const ScheduleRunLogDialog = ({
   onClose,
 }: ScheduleRunLogDialogProps): React.JSX.Element => {
   // Read live run data from store — falls back to initial prop if not found
-  const liveRun = useStore((s) => {
-    if (!initialRun) return null;
-    const runs = s.scheduleRuns[scheduleId] ?? [];
-    return runs.find((r) => r.id === initialRun.id) ?? initialRun;
-  });
+  const liveRun = useStore(
+    useShallow((s) => {
+      if (!initialRun) return null;
+      const runs = s.scheduleRuns[scheduleId] ?? [];
+      return runs.find((r) => r.id === initialRun.id) ?? initialRun;
+    })
+  );
   const run = liveRun ?? initialRun;
 
   const [logs, setLogs] = useState<{ stdout: string; stderr: string } | null>(null);

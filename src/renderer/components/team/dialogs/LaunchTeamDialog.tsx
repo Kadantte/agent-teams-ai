@@ -40,9 +40,10 @@ import {
   isGeminiUiFrozen,
   normalizeCreateLaunchProviderForUi,
 } from '@renderer/utils/geminiUiFreeze';
+import { isTeamProvisioningActive } from '@renderer/store/slices/teamSlice';
 import { normalizeTeamModelForUi } from '@renderer/utils/teamModelAvailability';
 import { isTeamProviderId, normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
-import { isTeamProvisioningActive } from '@renderer/store/slices/teamSlice';
+import { useShallow } from 'zustand/react/shallow';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import {
@@ -215,8 +216,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   // Team name: always present for launch mode, may be absent in schedule mode (standalone page)
   const propsTeamName = props.teamName ?? '';
   const [selectedTeamName, setSelectedTeamName] = useState('');
-  const teamByName = useStore((s) => s.teamByName);
-  const openDashboard = useStore((s) => s.openDashboard);
+  const { teamByName, openDashboard } = useStore(
+    useShallow((s) => ({
+      teamByName: s.teamByName,
+      openDashboard: s.openDashboard,
+    }))
+  );
   const openTeamTab = useStore((s) => s.openTeamTab);
   const teamOptions = useMemo(
     () =>
@@ -904,7 +909,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   // Shared effects: projects
   // ---------------------------------------------------------------------------
 
-  const repositoryGroups = useStore((s) => s.repositoryGroups);
+  const repositoryGroups = useStore(useShallow((s) => s.repositoryGroups));
 
   useEffect(() => {
     if (!open) return;

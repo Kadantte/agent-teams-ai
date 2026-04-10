@@ -407,6 +407,16 @@ export function initializeNotificationListeners(): () => void {
       return;
     }
 
+    // Cleanup cursors for teams that no longer exist (prevent unbounded growth)
+    if (inProgressChangePresenceCursorByTeam.size > 50) {
+      const teamNames = new Set(useStore.getState().teams.map((t) => t.teamName));
+      for (const key of inProgressChangePresenceCursorByTeam.keys()) {
+        if (!teamNames.has(key)) {
+          inProgressChangePresenceCursorByTeam.delete(key);
+        }
+      }
+    }
+
     const candidateTasks = selectedTeamData.tasks.filter((task) => {
       if (task.status !== 'in_progress') {
         return false;

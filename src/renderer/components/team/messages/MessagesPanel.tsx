@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import { api } from '@renderer/api';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
@@ -7,6 +8,8 @@ import { useStableTeamMentionMeta } from '@renderer/hooks/useStableTeamMentionMe
 import { useTeamMessagesExpanded } from '@renderer/hooks/useTeamMessagesExpanded';
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { useStore } from '@renderer/store';
+import { mergeTeamMessages } from '@renderer/utils/mergeTeamMessages';
+import { useShallow } from 'zustand/react/shallow';
 import { filterTeamMessages } from '@renderer/utils/teamMessageFiltering';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import { createLogger } from '@shared/utils/logger';
@@ -111,13 +114,96 @@ export const MessagesPanel = memo(function MessagesPanel({
   onRestartTeam,
   onTaskIdClick,
 }: MessagesPanelProps): React.JSX.Element {
-  const sendTeamMessage = useStore((s) => s.sendTeamMessage);
-  const sendCrossTeamMessage = useStore((s) => s.sendCrossTeamMessage);
-  const sendingMessage = useStore((s) => s.sendingMessage);
-  const sendMessageError = useStore((s) => s.sendMessageError);
-  const lastSendMessageResult = useStore((s) => s.lastSendMessageResult);
-  const teams = useStore((s) => s.teams);
-  const openTeamTab = useStore((s) => s.openTeamTab);
+  const {
+    sendTeamMessage,
+    sendCrossTeamMessage,
+    sendingMessage,
+    sendMessageError,
+    lastSendMessageResult,
+    teams,
+    openTeamTab,
+  } = useStore(
+    useShallow((s) => ({
+      sendTeamMessage: s.sendTeamMessage,
+      sendCrossTeamMessage: s.sendCrossTeamMessage,
+      sendingMessage: s.sendingMessage,
+      sendMessageError: s.sendMessageError,
+      lastSendMessageResult: s.lastSendMessageResult,
+      teams: s.teams,
+      openTeamTab: s.openTeamTab,
+    }))
+  );
+
+  // ── Paginated message fetching ──
+  // Messages are now fetched via getMessagesPage API instead of coming
+  // from getTeamData. The `messages` prop is used as initial seed if non-empty.
+  const PAGE_SIZE = 50;
+  const [fetchedMessages, setFetchedMessages] = useState<InboxMessage[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const fetchIdRef = useRef(0);
+
+  // Initial fetch on mount or team change
+  useEffect(() => {
+    const id = ++fetchIdRef.current;
+    setMessagesLoading(true);
+    void (async () => {
+      try {
+        const page = await api.teams.getMessagesPage(teamName, { limit: PAGE_SIZE });
+        if (fetchIdRef.current !== id) return;
+        setFetchedMessages(page.messages);
+        setNextCursor(page.nextCursor);
+        setHasMore(page.hasMore);
+      } catch {
+        // Fallback: use prop messages if API fails
+        if (fetchIdRef.current === id && messages.length > 0) {
+          setFetchedMessages(messages);
+        }
+      } finally {
+        if (fetchIdRef.current === id) setMessagesLoading(false);
+      }
+    })();
+  }, [teamName]); // eslint-disable-line react-hooks/exhaustive-deps -- intentionally only on teamName change
+
+  // Auto-refresh: poll for NEW messages only (prepend to head).
+  // Does NOT touch nextCursor/hasMore — those belong to the "Load older" flow.
+  useEffect(() => {
+    if (!isTeamAlive && leadActivity !== 'active') return;
+    const interval = setInterval(async () => {
+      try {
+        const page = await api.teams.getMessagesPage(teamName, { limit: PAGE_SIZE });
+        setFetchedMessages((prev) => mergeTeamMessages(prev, page.messages));
+      } catch {
+        // best-effort
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [teamName, isTeamAlive, leadActivity]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!nextCursor || messagesLoading) return;
+    setMessagesLoading(true);
+    try {
+      const page = await api.teams.getMessagesPage(teamName, {
+        beforeTimestamp: nextCursor,
+        limit: PAGE_SIZE,
+      });
+      setFetchedMessages((prev) => mergeTeamMessages(prev, page.messages));
+      setNextCursor(page.nextCursor);
+      setHasMore(page.hasMore);
+    } catch {
+      // best-effort
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, [teamName, nextCursor, messagesLoading]);
+
+  // Use fetched messages, fall back to prop messages during initial load
+  const effectiveMessages = useMemo(() => {
+    if (fetchedMessages.length === 0) return messages;
+    return mergeTeamMessages(fetchedMessages, messages);
+  }, [fetchedMessages, messages]);
 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null);
@@ -189,7 +275,7 @@ export const MessagesPanel = memo(function MessagesPanel({
 
   const filteredMessages = useMemo(() => {
     const startedAt = performance.now();
-    const result = filterTeamMessages(messages, {
+    const result = filterTeamMessages(effectiveMessages, {
       timeWindow,
       filter: messagesFilter,
       searchQuery: messagesSearchQuery,
@@ -197,17 +283,17 @@ export const MessagesPanel = memo(function MessagesPanel({
     const ms = performance.now() - startedAt;
     if (ms >= MESSAGES_PANEL_FILTER_WARN_MS) {
       logger.warn(
-        `[perf] filter team=${teamName} stage=messages ms=${ms.toFixed(1)} input=${messages.length} output=${result.length} searchLen=${messagesSearchQuery.trim().length} noise=${
+        `[perf] filter team=${teamName} stage=messages ms=${ms.toFixed(1)} input=${effectiveMessages.length} output=${result.length} searchLen=${messagesSearchQuery.trim().length} noise=${
           messagesFilter.showNoise ? 'on' : 'off'
         }`
       );
     }
     return result;
-  }, [messages, timeWindow, messagesFilter, messagesSearchQuery]);
+  }, [effectiveMessages, messagesFilter, messagesSearchQuery, teamName, timeWindow]);
 
   const activityTimelineMessages = useMemo(() => {
     const startedAt = performance.now();
-    const result = filterTeamMessages(messages, {
+    const result = filterTeamMessages(effectiveMessages, {
       includePassiveIdlePeerSummariesWhenNoiseHidden: true,
       timeWindow,
       filter: messagesFilter,
@@ -216,22 +302,22 @@ export const MessagesPanel = memo(function MessagesPanel({
     const ms = performance.now() - startedAt;
     if (ms >= MESSAGES_PANEL_FILTER_WARN_MS) {
       logger.warn(
-        `[perf] filter team=${teamName} stage=timeline ms=${ms.toFixed(1)} input=${messages.length} output=${result.length} searchLen=${messagesSearchQuery.trim().length} noise=${
+        `[perf] filter team=${teamName} stage=timeline ms=${ms.toFixed(1)} input=${effectiveMessages.length} output=${result.length} searchLen=${messagesSearchQuery.trim().length} noise=${
           messagesFilter.showNoise ? 'on' : 'off'
         }`
       );
     }
     return result;
-  }, [messages, timeWindow, messagesFilter, messagesSearchQuery]);
+  }, [effectiveMessages, messagesFilter, messagesSearchQuery, teamName, timeWindow]);
 
   const replyCandidateMessages = useMemo(
     () =>
-      messages.filter(
+      effectiveMessages.filter(
         (m) =>
           m.messageKind !== 'task_comment_notification' &&
           !shouldExcludeInboxTextFromReplyCandidates(typeof m.text === 'string' ? m.text : '')
       ),
-    [messages]
+    [effectiveMessages]
   );
 
   // Resolve the expanded item from filtered messages
@@ -320,7 +406,7 @@ export const MessagesPanel = memo(function MessagesPanel({
       }
     }
     if (changed) onPendingReplyChange(() => next);
-  }, [replyCandidateMessages, pendingRepliesByMember, onPendingReplyChange]);
+  }, [onPendingReplyChange, pendingRepliesByMember, replyCandidateMessages]);
 
   const handleSend = useCallback(
     (
@@ -403,7 +489,7 @@ export const MessagesPanel = memo(function MessagesPanel({
         teamName={teamName}
         members={members}
         filter={messagesFilter}
-        messages={messages}
+        messages={effectiveMessages}
         open={messagesFilterOpen}
         onOpenChange={setMessagesFilterOpen}
         onApply={setMessagesFilter}
@@ -451,7 +537,7 @@ export const MessagesPanel = memo(function MessagesPanel({
       <StatusBlock
         members={members}
         tasks={tasks}
-        messages={messages}
+        messages={effectiveMessages}
         pendingRepliesByMember={pendingRepliesByMember}
         position="inline"
         onMemberClick={onMemberClick}
@@ -482,6 +568,19 @@ export const MessagesPanel = memo(function MessagesPanel({
         onExpandItem={handleExpandItem}
         onExpandContent={handleExpandContent}
       />
+      {hasMore && (
+        <div className="flex justify-center py-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-text-muted"
+            disabled={messagesLoading}
+            onClick={() => void loadOlderMessages()}
+          >
+            {messagesLoading ? 'Loading...' : 'Load older messages'}
+          </Button>
+        </div>
+      )}
       <MessageExpandDialog
         expandedItem={expandedItem}
         open={expandedItemKey !== null}
@@ -616,7 +715,7 @@ export const MessagesPanel = memo(function MessagesPanel({
             <StatusBlock
               members={members}
               tasks={tasks}
-              messages={messages}
+              messages={effectiveMessages}
               pendingRepliesByMember={pendingRepliesByMember}
               position="sidebar"
               onMemberClick={onMemberClick}
@@ -648,6 +747,19 @@ export const MessagesPanel = memo(function MessagesPanel({
             onExpandItem={handleExpandItem}
             onExpandContent={handleExpandContent}
           />
+          {hasMore && (
+            <div className="flex justify-center py-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs text-text-muted"
+                disabled={messagesLoading}
+                onClick={() => void loadOlderMessages()}
+              >
+                {messagesLoading ? 'Loading...' : 'Load older messages'}
+              </Button>
+            </div>
+          )}
           <MessageExpandDialog
             expandedItem={expandedItem}
             open={expandedItemKey !== null}

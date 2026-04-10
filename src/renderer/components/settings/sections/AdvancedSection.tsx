@@ -8,6 +8,7 @@ import { api, isElectronMode } from '@renderer/api';
 import appIcon from '@renderer/favicon.png';
 import { useStore } from '@renderer/store';
 import { CheckCircle, Code2, Download, FileEdit, Loader2, RefreshCw, Upload } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { SettingsSectionHeader } from '../components';
 
@@ -32,9 +33,13 @@ export const AdvancedSection = ({
   const isElectron = useMemo(() => isElectronMode(), []);
   const [version, setVersion] = useState<string>('');
   const [configEditorOpen, setConfigEditorOpen] = useState(false);
-  const updateStatus = useStore((s) => s.updateStatus);
-  const availableVersion = useStore((s) => s.availableVersion);
-  const checkForUpdates = useStore((s) => s.checkForUpdates);
+  const { updateStatus, availableVersion, checkForUpdates } = useStore(
+    useShallow((s) => ({
+      updateStatus: s.updateStatus,
+      availableVersion: s.availableVersion,
+      checkForUpdates: s.checkForUpdates,
+    }))
+  );
 
   // Auto-revert "not-available" / "error" status back to idle after a brief display
   const revertTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);

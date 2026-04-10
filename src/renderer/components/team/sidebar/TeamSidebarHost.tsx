@@ -1,6 +1,7 @@
 import { createContext, useContext, useId, useLayoutEffect, useState } from 'react';
 
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 
 import {
   removeTeamSidebarHost,
@@ -33,10 +34,12 @@ export const TeamSidebarHost = ({
 }: TeamSidebarHostProps): React.JSX.Element => {
   const hostId = useId();
   const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const { messagesPanelMode, messagesPanelWidth } = useStore((s) => ({
-    messagesPanelMode: s.messagesPanelMode,
-    messagesPanelWidth: s.messagesPanelWidth,
-  }));
+  const { messagesPanelMode, messagesPanelWidth } = useStore(
+    useShallow((s) => ({
+      messagesPanelMode: s.messagesPanelMode,
+      messagesPanelWidth: s.messagesPanelWidth,
+    }))
+  );
   const snapshot = useTeamSidebarPortalSnapshot();
   const isVisible = messagesPanelMode === 'sidebar';
   const isOwner = isVisible && snapshot.activeHostIdByTeam[teamName] === hostId;

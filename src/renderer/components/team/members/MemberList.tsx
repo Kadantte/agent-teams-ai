@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   formatTeamModelSummary,
@@ -230,15 +230,19 @@ export const MemberList = memo(function MemberList({
   }, [handleResize]);
 
   const gridClass = isWide ? 'grid grid-cols-2 gap-1' : 'grid grid-cols-1 gap-1';
-  const activeMembers = members
-    .filter((m) => !m.removedAt)
-    .sort((a, b) => {
-      if (isLeadMember(a)) return -1;
-      if (isLeadMember(b)) return 1;
-      return 0;
-    });
-  const removedMembers = members.filter((m) => m.removedAt);
-  const colorMap = buildMemberColorMap(members);
+  const activeMembers = useMemo(
+    () =>
+      members
+        .filter((m) => !m.removedAt)
+        .sort((a, b) => {
+          if (isLeadMember(a)) return -1;
+          if (isLeadMember(b)) return 1;
+          return 0;
+        }),
+    [members]
+  );
+  const removedMembers = useMemo(() => members.filter((m) => m.removedAt), [members]);
+  const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
 
   const buildRuntimeSummary = useCallback(
     (member: ResolvedTeamMember): string | undefined => {
@@ -259,17 +263,24 @@ export const MemberList = memo(function MemberList({
     );
   }
 
+  // Pre-compute reviewer→task map to avoid O(n×m) scan per member
+  const reviewTaskByMember = useMemo(() => {
+    const result = new Map<string, TeamTaskWithKanban>();
+    if (!taskMap) return result;
+    for (const task of taskMap.values()) {
+      if (task.reviewer && (task.reviewState === 'review' || task.kanbanColumn === 'review')) {
+        result.set(task.reviewer, task);
+      }
+    }
+    return result;
+  }, [taskMap]);
+
   const renderCard = (member: ResolvedTeamMember, isRemoved: boolean): React.JSX.Element => {
     const currentTask =
       member.currentTaskId && taskMap ? (taskMap.get(member.currentTaskId) ?? null) : null;
-    const reviewTask = taskMap
-      ? (Array.from(taskMap.values()).find(
-          (task) =>
-            task.reviewer === member.name &&
-            task.id !== member.currentTaskId &&
-            (task.reviewState === 'review' || task.kanbanColumn === 'review')
-        ) ?? null)
-      : null;
+    const reviewCandidate = reviewTaskByMember.get(member.name) ?? null;
+    const reviewTask =
+      reviewCandidate && reviewCandidate.id !== member.currentTaskId ? reviewCandidate : null;
     const awaitingReply = isTeamAlive !== false && Boolean(pendingRepliesByMember?.[member.name]);
     const spawnEntry = memberSpawnStatuses?.get(member.name);
     return (

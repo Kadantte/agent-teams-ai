@@ -77,7 +77,8 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           'team-fs-worker': resolve(__dirname, 'src/main/workers/team-fs-worker.ts'),
-          'task-change-worker': resolve(__dirname, 'src/main/workers/task-change-worker.ts')
+          'task-change-worker': resolve(__dirname, 'src/main/workers/task-change-worker.ts'),
+          'team-data-worker': resolve(__dirname, 'src/main/workers/team-data-worker.ts')
         },
         output: {
           // CJS format so bundled deps can use __dirname/require.

@@ -1,5 +1,6 @@
 import { addMainBreadcrumb } from '@main/sentry';
 import { setCurrentMainOp } from '@main/services/infrastructure/EventLoopLagMonitor';
+import { getTeamDataWorkerClient } from '@main/services/team/TeamDataWorkerClient';
 import { getAppIconPath } from '@main/utils/appIcon';
 import { getAppDataPath, getTeamsBasePath } from '@main/utils/pathDecoder';
 import { stripMarkdown } from '@main/utils/textFormatting';
@@ -20,6 +21,7 @@ import {
   TEAM_GET_CLAUDE_LOGS,
   TEAM_GET_DATA,
   TEAM_GET_DELETED_TASKS,
+  TEAM_GET_MESSAGES_PAGE,
   TEAM_GET_LOGS_FOR_TASK,
   TEAM_GET_MEMBER_LOGS,
   TEAM_GET_MEMBER_STATS,
@@ -153,6 +155,7 @@ import type {
   TeamCreateRequest,
   TeamCreateResponse,
   TeamData,
+  MessagesPage,
   TeamLaunchRequest,
   TeamLaunchResponse,
   TeamMessageNotificationData,
@@ -429,6 +432,7 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_PROVISIONING_STATUS, handleProvisioningStatus);
   ipcMain.handle(TEAM_CANCEL_PROVISIONING, handleCancelProvisioning);
   ipcMain.handle(TEAM_SEND_MESSAGE, handleSendMessage);
+  ipcMain.handle(TEAM_GET_MESSAGES_PAGE, handleGetMessagesPage);
   ipcMain.handle(TEAM_CREATE_TASK, handleCreateTask);
   ipcMain.handle(TEAM_REQUEST_REVIEW, handleRequestReview);
   ipcMain.handle(TEAM_UPDATE_KANBAN, handleUpdateKanban);
@@ -495,6 +499,7 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_PROVISIONING_STATUS);
   ipcMain.removeHandler(TEAM_CANCEL_PROVISIONING);
   ipcMain.removeHandler(TEAM_SEND_MESSAGE);
+  ipcMain.removeHandler(TEAM_GET_MESSAGES_PAGE);
   ipcMain.removeHandler(TEAM_CREATE_TASK);
   ipcMain.removeHandler(TEAM_REQUEST_REVIEW);
   ipcMain.removeHandler(TEAM_UPDATE_KANBAN);
@@ -632,32 +637,50 @@ async function handleGetData(
   let data: TeamData;
   setCurrentMainOp('team:getData');
   try {
-    try {
+    // Prefer worker thread to keep main event loop responsive
+    const worker = getTeamDataWorkerClient();
+    if (worker.isAvailable()) {
+      try {
+        data = await worker.getTeamData(tn);
+      } catch (workerErr) {
+        logger.warn(
+          `[teams:getData] worker failed, falling back: ${workerErr instanceof Error ? workerErr.message : workerErr}`
+        );
+        data = await getTeamDataService().getTeamData(tn);
+      }
+    } else {
       data = await getTeamDataService().getTeamData(tn);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (
-        message === `Team not found: ${tn}` &&
-        getTeamProvisioningService().hasProvisioningRun(tn)
-      ) {
-        return { success: false, error: 'TEAM_PROVISIONING' };
-      }
-      // Draft team: team.meta.json exists but config.json doesn't (provisioning failed before TeamCreate)
-      if (message === `Team not found: ${tn}`) {
-        const meta = await teamMetaStore.getMeta(tn);
-        if (meta) {
-          return { success: false, error: 'TEAM_DRAFT' };
-        }
-      }
-      logger.error(`[teams:getData] ${message}`);
-      return { success: false, error: message };
     }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      message === `Team not found: ${tn}` &&
+      getTeamProvisioningService().hasProvisioningRun(tn)
+    ) {
+      return { success: false, error: 'TEAM_PROVISIONING' };
+    }
+    // Draft team: team.meta.json exists but config.json doesn't (provisioning failed before TeamCreate)
+    if (message === `Team not found: ${tn}`) {
+      const meta = await teamMetaStore.getMeta(tn);
+      if (meta) {
+        return { success: false, error: 'TEAM_DRAFT' };
+      }
+    }
+    logger.error(`[teams:getData] ${message}`);
+    return { success: false, error: message };
   } finally {
     setCurrentMainOp(null);
   }
   const getDataMs = Date.now() - startedAt;
+
   if (getDataMs >= 1500) {
     logger.warn(`[teams:getData] slow team=${tn} ms=${getDataMs}`);
+  }
+  const teamDataService = getTeamDataService();
+  if (data.processes.some((process) => !process.stoppedAt)) {
+    teamDataService.trackProcessHealthForTeam?.(tn);
+  } else {
+    teamDataService.untrackProcessHealthForTeam?.(tn);
   }
   const provisioning = getTeamProvisioningService();
   const isAlive = provisioning.isTeamAlive(tn);
@@ -1590,6 +1613,29 @@ function buildMessageDeliveryText(
   return [...hiddenBlocks, baseText].join('\n\n');
 }
 
+async function handleGetMessagesPage(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  options: unknown
+): Promise<IpcResult<MessagesPage>> {
+  const vTeam = validateTeamName(teamName);
+  if (!vTeam.valid) {
+    return { success: false, error: vTeam.error ?? 'Invalid teamName' };
+  }
+  const opts = (options && typeof options === 'object' ? options : {}) as {
+    beforeTimestamp?: string;
+    limit?: number;
+  };
+  const limit = Math.min(Math.max(1, opts.limit ?? 50), 200);
+  const beforeTimestamp =
+    typeof opts.beforeTimestamp === 'string' ? opts.beforeTimestamp : undefined;
+
+  return wrapTeamHandler('getMessagesPage', async () => {
+    const service = getTeamDataService();
+    return service.getMessagesPage(vTeam.value!, { beforeTimestamp, limit });
+  });
+}
+
 async function handleSendMessage(
   _event: IpcMainInvokeEvent,
   teamName: unknown,
@@ -2375,6 +2421,20 @@ async function handleGetLogsForTask(
             : undefined,
         }
       : undefined;
+  // Prefer worker thread to keep main event loop responsive.
+  // Call worker directly (not via wrapTeamHandler) so that failures
+  // propagate to the catch block and trigger the main-thread fallback.
+  const worker = getTeamDataWorkerClient();
+  if (worker.isAvailable()) {
+    try {
+      const result = await worker.findLogsForTask(vTeam.value!, vTask.value!, opts);
+      return { success: true, data: result };
+    } catch (workerErr) {
+      logger.warn(
+        `[teams:getLogsForTask] worker failed, falling back: ${workerErr instanceof Error ? workerErr.message : workerErr}`
+      );
+    }
+  }
   return wrapTeamHandler('getLogsForTask', () =>
     getTeamMemberLogsFinder().findLogsForTask(vTeam.value!, vTask.value!, opts)
   );

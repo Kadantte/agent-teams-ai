@@ -5,6 +5,7 @@ import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useUnreadCommentCount } from '@renderer/hooks/useUnreadCommentCount';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { buildMemberColorMap, REVIEW_STATE_DISPLAY } from '@renderer/utils/memberHelpers';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { projectColor } from '@renderer/utils/projectColor';
@@ -78,7 +79,7 @@ export const SidebarTaskItem = ({
   getDisplaySubject,
 }: SidebarTaskItemProps): React.JSX.Element => {
   const openGlobalTaskDetail = useStore((s) => s.openGlobalTaskDetail);
-  const teamMembers = useStore((s) => s.teamByName[task.teamName]?.members);
+  const teamMembers = useStore(useShallow((s) => s.teamByName[task.teamName]?.members));
   const unreadCount = useUnreadCommentCount(task.teamName, task.id, task.comments);
   const { isLight } = useTheme();
 

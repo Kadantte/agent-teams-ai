@@ -6,6 +6,7 @@ import { Button } from '@renderer/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import {
   AlertTriangle,
   ArrowUpAZ,
@@ -94,10 +95,10 @@ export const SkillsPanel = ({
   const fetchSkillDetail = useStore((s) => s.fetchSkillDetail);
   const skillsLoading = useStore((s) => s.skillsCatalogLoadingByProjectPath[catalogKey] ?? false);
   const skillsError = useStore((s) => s.skillsCatalogErrorByProjectPath[catalogKey] ?? null);
-  const detailById = useStore((s) => s.skillsDetailsById);
-  const userSkills = useStore((s) => s.skillsUserCatalog);
-  const projectSkills = useStore((s) =>
-    projectPath ? (s.skillsProjectCatalogByProjectPath[projectPath] ?? []) : []
+  const detailById = useStore(useShallow((s) => s.skillsDetailsById));
+  const userSkills = useStore(useShallow((s) => s.skillsUserCatalog));
+  const projectSkills = useStore(
+    useShallow((s) => (projectPath ? (s.skillsProjectCatalogByProjectPath[projectPath] ?? []) : []))
   );
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);

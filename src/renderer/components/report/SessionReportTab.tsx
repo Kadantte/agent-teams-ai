@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { computeTakeaways } from '@renderer/utils/reportAssessments';
 import { analyzeSession } from '@renderer/utils/sessionAnalyzer';
 
@@ -25,11 +26,13 @@ interface SessionReportTabProps {
 
 export const SessionReportTab = ({ tab }: SessionReportTabProps) => {
   // Find session data from any session tab with matching sessionId
-  const sessionDetail = useStore((s) => {
-    const allTabs = s.paneLayout.panes.flatMap((p) => p.tabs);
-    const sourceTab = allTabs.find((t) => t.type === 'session' && t.sessionId === tab.sessionId);
-    return sourceTab ? s.tabSessionData[sourceTab.id]?.sessionDetail : null;
-  });
+  const sessionDetail = useStore(
+    useShallow((s) => {
+      const allTabs = s.paneLayout.panes.flatMap((p) => p.tabs);
+      const sourceTab = allTabs.find((t) => t.type === 'session' && t.sessionId === tab.sessionId);
+      return sourceTab ? s.tabSessionData[sourceTab.id]?.sessionDetail : null;
+    })
+  );
 
   const report = useMemo(
     () => (sessionDetail ? analyzeSession(sessionDetail) : null),

@@ -171,7 +171,7 @@ const AIChatGroupInner = ({
   );
 
   // Notification color map for tool item dots
-  const notifications = useStore((s) => s.notifications);
+  const notifications = useStore(useShallow((s) => s.notifications));
   const notificationColorMap = useMemo(() => {
     const map = new Map<string, TriggerColor>();
     for (const n of notifications) {

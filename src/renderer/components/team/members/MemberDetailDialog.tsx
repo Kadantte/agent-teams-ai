@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-
 import { Button } from '@renderer/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from '@renderer/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
@@ -68,10 +67,11 @@ export const MemberDetailDialog = ({
     [tasks, member]
   );
 
-  const memberMessages = useMemo(
+  const seedMemberMessages = useMemo(
     () => (member ? messages.filter((m) => m.from === member.name || m.to === member.name) : []),
     [messages, member]
   );
+  const memberMessages = seedMemberMessages;
 
   const inProgressTasks = useMemo(
     () => memberTasks.filter((t) => t.status === 'in_progress').length,
@@ -164,7 +164,11 @@ export const MemberDetailDialog = ({
             <MemberTasksTab tasks={memberTasks} onTaskClick={onTaskClick} />
           </TabsContent>
           <TabsContent value="messages">
-            <MemberMessagesTab messages={memberMessages} teamName={teamName} />
+            <MemberMessagesTab
+              messages={memberMessages}
+              teamName={teamName}
+              memberName={member.name}
+            />
           </TabsContent>
           <TabsContent value="stats">
             <MemberStatsTab

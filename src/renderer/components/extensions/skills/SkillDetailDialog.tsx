@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from '@renderer/components/ui/dialog';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 import { AlertTriangle, ExternalLink, FolderOpen, Pencil, Trash2 } from 'lucide-react';
 
 interface SkillDetailDialogProps {
@@ -44,7 +45,7 @@ export const SkillDetailDialog = ({
 }: SkillDetailDialogProps): React.JSX.Element => {
   const fetchSkillDetail = useStore((s) => s.fetchSkillDetail);
   const deleteSkill = useStore((s) => s.deleteSkill);
-  const detail = useStore((s) => (skillId ? s.skillsDetailsById[skillId] : undefined));
+  const detail = useStore(useShallow((s) => (skillId ? s.skillsDetailsById[skillId] : undefined)));
   const loading = useStore((s) =>
     skillId ? (s.skillsDetailLoadingById[skillId] ?? false) : false
   );

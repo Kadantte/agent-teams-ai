@@ -6,6 +6,7 @@
  */
 
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 
 import type { CliInstallationStatus, CliProviderId } from '@shared/types';
 
@@ -39,23 +40,45 @@ export function useCliInstaller(): {
   installCli: () => void;
   isBusy: boolean;
 } {
-  const cliStatus = useStore((s) => s.cliStatus);
-  const cliStatusLoading = useStore((s) => s.cliStatusLoading);
-  const cliProviderStatusLoading = useStore((s) => s.cliProviderStatusLoading);
-  const cliStatusError = useStore((s) => s.cliStatusError);
-  const installerState = useStore((s) => s.cliInstallerState);
-  const downloadProgress = useStore((s) => s.cliDownloadProgress);
-  const downloadTransferred = useStore((s) => s.cliDownloadTransferred);
-  const downloadTotal = useStore((s) => s.cliDownloadTotal);
-  const installerError = useStore((s) => s.cliInstallerError);
-  const installerDetail = useStore((s) => s.cliInstallerDetail);
-  const installerRawChunks = useStore((s) => s.cliInstallerRawChunks);
-  const completedVersion = useStore((s) => s.cliCompletedVersion);
-  const bootstrapCliStatus = useStore((s) => s.bootstrapCliStatus);
-  const fetchCliStatus = useStore((s) => s.fetchCliStatus);
-  const fetchCliProviderStatus = useStore((s) => s.fetchCliProviderStatus);
-  const invalidateCliStatus = useStore((s) => s.invalidateCliStatus);
-  const installCli = useStore((s) => s.installCli);
+  const {
+    cliStatus,
+    cliStatusLoading,
+    cliProviderStatusLoading,
+    cliStatusError,
+    installerState,
+    downloadProgress,
+    downloadTransferred,
+    downloadTotal,
+    installerError,
+    installerDetail,
+    installerRawChunks,
+    completedVersion,
+    bootstrapCliStatus,
+    fetchCliStatus,
+    fetchCliProviderStatus,
+    invalidateCliStatus,
+    installCli,
+  } = useStore(
+    useShallow((s) => ({
+      cliStatus: s.cliStatus,
+      cliStatusLoading: s.cliStatusLoading,
+      cliProviderStatusLoading: s.cliProviderStatusLoading,
+      cliStatusError: s.cliStatusError,
+      installerState: s.cliInstallerState,
+      downloadProgress: s.cliDownloadProgress,
+      downloadTransferred: s.cliDownloadTransferred,
+      downloadTotal: s.cliDownloadTotal,
+      installerError: s.cliInstallerError,
+      installerDetail: s.cliInstallerDetail,
+      installerRawChunks: s.cliInstallerRawChunks,
+      completedVersion: s.cliCompletedVersion,
+      bootstrapCliStatus: s.bootstrapCliStatus,
+      fetchCliStatus: s.fetchCliStatus,
+      fetchCliProviderStatus: s.fetchCliProviderStatus,
+      invalidateCliStatus: s.invalidateCliStatus,
+      installCli: s.installCli,
+    }))
+  );
 
   const isBusy =
     installerState !== 'idle' && installerState !== 'error' && installerState !== 'completed';

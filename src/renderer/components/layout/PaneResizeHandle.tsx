@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 
 interface PaneResizeHandleProps {
   leftPaneId: string;
@@ -15,7 +16,7 @@ interface PaneResizeHandleProps {
 export const PaneResizeHandle = ({ leftPaneId }: PaneResizeHandleProps): React.JSX.Element => {
   const [isResizing, setIsResizing] = useState(false);
   const resizePanes = useStore((s) => s.resizePanes);
-  const paneLayout = useStore((s) => s.paneLayout);
+  const paneLayout = useStore(useShallow((s) => s.paneLayout));
 
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {

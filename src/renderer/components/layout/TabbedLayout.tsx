@@ -26,6 +26,7 @@ import { useFullScreen } from '@renderer/hooks/useFullScreen';
 import { useKeyboardShortcuts } from '@renderer/hooks/useKeyboardShortcuts';
 import { useZoomFactor } from '@renderer/hooks/useZoomFactor';
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 
 import { CliInstallWarningBanner } from '../common/CliInstallWarningBanner';
 import { UpdateBanner } from '../common/UpdateBanner';
@@ -54,7 +55,7 @@ export const TabbedLayout = (): React.JSX.Element => {
       : getTrafficLightPaddingForZoom(zoomFactor);
 
   // --- DnD state (lifted from PaneContainer) ---
-  const panes = useStore((s) => s.paneLayout.panes);
+  const panes = useStore(useShallow((s) => s.paneLayout.panes));
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
 
   const sensors = useSensors(

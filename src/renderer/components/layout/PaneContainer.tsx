@@ -6,12 +6,13 @@
 import { Fragment } from 'react';
 
 import { useStore } from '@renderer/store';
+import { useShallow } from 'zustand/react/shallow';
 
 import { PaneResizeHandle } from './PaneResizeHandle';
 import { PaneView } from './PaneView';
 
 export const PaneContainer = (): React.JSX.Element => {
-  const panes = useStore((s) => s.paneLayout.panes);
+  const panes = useStore(useShallow((s) => s.paneLayout.panes));
 
   return (
     <div id="pane-container" className="flex flex-1 overflow-hidden">

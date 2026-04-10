@@ -1051,6 +1051,9 @@ export const TeamDetailView = ({
     setMessagesPanelMode,
     setMessagesPanelWidth,
     setSidebarLogsHeight,
+    selectReviewFile,
+    pendingReviewRequest,
+    setPendingReviewRequest,
   } = useStore(
     useShallow((s) => ({
       projects: s.projects,
@@ -1096,6 +1099,9 @@ export const TeamDetailView = ({
       setMessagesPanelMode: s.setMessagesPanelMode,
       setMessagesPanelWidth: s.setMessagesPanelWidth,
       setSidebarLogsHeight: s.setSidebarLogsHeight,
+      selectReviewFile: s.selectReviewFile,
+      pendingReviewRequest: s.pendingReviewRequest,
+      setPendingReviewRequest: s.setPendingReviewRequest,
     }))
   );
 
@@ -1302,17 +1308,69 @@ export const TeamDetailView = ({
     };
   }, [projectId]);
 
-  // Live git branch polling for the team's project path
+  // Live git branch tracking for the lead project and member worktrees
   const teamProjectPath = data?.config.projectPath?.trim() ?? null;
-  const branchSyncPaths = useMemo(
-    () => (teamProjectPath ? [teamProjectPath] : []),
-    [teamProjectPath]
-  );
-  // Live branch sync now uses main-side background tracking instead of renderer polling.
+  const leadProjectPath = useMemo(() => {
+    const explicitLeadPath = data?.members.find((member) => isLeadMember(member))?.cwd?.trim();
+    return explicitLeadPath && explicitLeadPath.length > 0 ? explicitLeadPath : teamProjectPath;
+  }, [data?.members, teamProjectPath]);
+  const branchSyncPaths = useMemo(() => {
+    const uniquePaths = new Map<string, string>();
+    const addPath = (candidate: string | null | undefined): void => {
+      const trimmed = candidate?.trim();
+      if (!trimmed) return;
+      const key = normalizePath(trimmed);
+      if (!key || uniquePaths.has(key)) return;
+      uniquePaths.set(key, trimmed);
+    };
+
+    addPath(leadProjectPath);
+    for (const member of data?.members ?? []) {
+      addPath(member.cwd);
+    }
+
+    return Array.from(uniquePaths.values());
+  }, [data?.members, leadProjectPath]);
   useBranchSync(branchSyncPaths, { live: true });
-  const leadBranch = useStore((s) =>
-    teamProjectPath ? (s.branchByPath[normalizePath(teamProjectPath)] ?? null) : null
+  const trackedBranches = useStore(
+    useShallow((s) =>
+      Object.fromEntries(
+        branchSyncPaths.map((projectPath) => {
+          const normalizedPath = normalizePath(projectPath);
+          return [normalizedPath, s.branchByPath[normalizedPath] ?? null] as const;
+        })
+      )
+    )
   );
+  const leadBranch = leadProjectPath
+    ? (trackedBranches[normalizePath(leadProjectPath)] ?? null)
+    : null;
+  const membersWithLiveBranches = useMemo(() => {
+    if (!data) return [];
+
+    return data.members.map((member) => {
+      const memberPath = member.cwd?.trim();
+      const nextGitBranch =
+        memberPath && !isLeadMember(member) && leadBranch !== null
+          ? (() => {
+              const branch = trackedBranches[normalizePath(memberPath)] ?? null;
+              return branch && branch !== leadBranch ? branch : undefined;
+            })()
+          : undefined;
+
+      if (member.gitBranch === nextGitBranch) {
+        return member;
+      }
+
+      const nextMember: ResolvedTeamMember = { ...member };
+      if (nextGitBranch) {
+        nextMember.gitBranch = nextGitBranch;
+      } else {
+        delete nextMember.gitBranch;
+      }
+      return nextMember;
+    });
+  }, [data, leadBranch, trackedBranches]);
 
   // Filter sessions to team-only using sessionHistory + leadSessionId
   const teamSessionIds = useMemo(() => {
@@ -1383,7 +1441,7 @@ export const TeamDetailView = ({
     return result;
   }, [data, timeWindow, kanbanFilter.selectedOwners]);
 
-  const activeMembers = useStableActiveMembers(data?.members);
+  const activeMembers = useStableActiveMembers(membersWithLiveBranches);
 
   const kanbanDisplayTasks = useMemo(() => {
     const query = kanbanSearch.trim();
@@ -1522,10 +1580,6 @@ export const TeamDetailView = ({
     }
   }, [teamName, refreshTeamData]);
 
-  const selectReviewFile = useStore((s) => s.selectReviewFile);
-  const pendingReviewRequest = useStore((s) => s.pendingReviewRequest);
-  const setPendingReviewRequest = useStore((s) => s.setPendingReviewRequest);
-
   // Pick up pending review request from GlobalTaskDetailDialog
   useEffect(() => {
     if (!pendingReviewRequest) return;
@@ -1546,12 +1600,12 @@ export const TeamDetailView = ({
   const pendingMemberProfile = useStore((s) => s.pendingMemberProfile);
   useEffect(() => {
     if (!pendingMemberProfile || !data) return;
-    const member = data.members.find((m) => m.name === pendingMemberProfile);
+    const member = membersWithLiveBranches.find((m) => m.name === pendingMemberProfile);
     if (member) {
       setSelectedMember(member);
     }
     useStore.getState().closeMemberProfile();
-  }, [pendingMemberProfile, data]);
+  }, [pendingMemberProfile, membersWithLiveBranches]);
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
@@ -2102,7 +2156,7 @@ export const TeamDetailView = ({
             >
               <TeamMemberListBridge
                 teamName={teamName}
-                members={data.members}
+                members={membersWithLiveBranches}
                 memberTaskCounts={memberTaskCounts}
                 taskMap={taskMap}
                 pendingRepliesByMember={pendingRepliesByMember}
@@ -2348,7 +2402,7 @@ export const TeamDetailView = ({
               >
                 <ProcessesSection
                   teamName={teamName}
-                  members={data.members}
+                  members={membersWithLiveBranches}
                   processes={data.processes}
                 />
               </CollapsibleTeamSection>
@@ -2466,7 +2520,7 @@ export const TeamDetailView = ({
               currentName={data.config.name}
               currentDescription={data.config.description ?? ''}
               currentColor={data.config.color ?? ''}
-              currentMembers={data.members.filter((m) => !isLeadMember(m))}
+              currentMembers={membersWithLiveBranches.filter((m) => !isLeadMember(m))}
               isTeamAlive={data.isAlive && !isTeamProvisioning}
               projectPath={data.config.projectPath}
               onClose={() => setEditDialogOpen(false)}
@@ -2476,8 +2530,8 @@ export const TeamDetailView = ({
             <AddMemberDialog
               open={addMemberDialogOpen}
               teamName={teamName}
-              existingNames={data.members.map((m) => m.name)}
-              existingMembers={data.members}
+              existingNames={membersWithLiveBranches.map((m) => m.name)}
+              existingMembers={membersWithLiveBranches}
               projectPath={data.config.projectPath}
               adding={addingMemberLoading}
               onClose={() => setAddMemberDialogOpen(false)}
@@ -2563,7 +2617,7 @@ export const TeamDetailView = ({
               mode="launch"
               open={launchDialogOpen}
               teamName={teamName}
-              members={data?.members ?? []}
+              members={membersWithLiveBranches}
               defaultProjectPath={data.config.projectPath}
               provisioningError={provisioningError}
               clearProvisioningError={clearProvisioningError}
