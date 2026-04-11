@@ -58,7 +58,7 @@ describe('ClaudeBinaryResolver', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    mockBuildMergedCliPath.mockReturnValue('/usr/local/bin:/usr/bin');
+    mockBuildMergedCliPath.mockReturnValue(['/usr/local/bin', '/usr/bin'].join(path.delimiter));
     mockGetShellPreferredHome.mockReturnValue('/Users/tester');
     mockGetClaudeBasePath.mockReturnValue('/Users/tester/.claude');
     mockResolveInteractiveShellEnv.mockResolvedValue({});
