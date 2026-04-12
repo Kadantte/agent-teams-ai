@@ -20,8 +20,9 @@ import {
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { ExternalLink } from 'lucide-react';
 
-import { CurrentTaskIndicator } from './CurrentTaskIndicator';
 import { getLaunchJoinMilestonesFromMembers, getLaunchJoinState } from '../provisioningSteps';
+
+import { CurrentTaskIndicator } from './CurrentTaskIndicator';
 
 import type { LeadActivityState, TeamTaskWithKanban } from '@shared/types';
 

@@ -9,11 +9,10 @@ import { useTeamMessagesExpanded } from '@renderer/hooks/useTeamMessagesExpanded
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { useStore } from '@renderer/store';
 import { mergeTeamMessages } from '@renderer/utils/mergeTeamMessages';
-import { useShallow } from 'zustand/react/shallow';
 import { filterTeamMessages } from '@renderer/utils/teamMessageFiltering';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
-import { createLogger } from '@shared/utils/logger';
 import { shouldExcludeInboxTextFromReplyCandidates } from '@shared/utils/idleNotificationSemantics';
+import { createLogger } from '@shared/utils/logger';
 import {
   CheckCheck,
   ChevronsDownUp,
@@ -24,6 +23,7 @@ import {
   Search,
   X,
 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { ActivityTimeline } from '../activity/ActivityTimeline';
 import { getThoughtGroupKey, groupTimelineItems } from '../activity/LeadThoughtsGroup';

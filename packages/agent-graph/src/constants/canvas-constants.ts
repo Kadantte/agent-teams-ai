@@ -211,6 +211,24 @@ export const PARTICLE_DRAW = {
   lifetime: 2.0,
 } as const;
 
+export const HANDOFF_CARD = {
+  triggerProgress: 0.58,
+  lingerSeconds: 3.2,
+  fadeInSeconds: 0.14,
+  fadeOutSeconds: 0.35,
+  width: 196,
+  maxVisible: 6,
+  maxPerDestination: 2,
+  baseHeight: 42,
+  previewLineHeight: 10,
+  previewMaxLines: 2,
+  previewMaxWidth: 176,
+  badgeGap: 8,
+  stackGap: 10,
+  viewportPadding: 12,
+  anchorGap: 14,
+} as const;
+
 // ─── Hit detection ──────────────────────────────────────────────────────────
 
 export const HIT_DETECTION = {

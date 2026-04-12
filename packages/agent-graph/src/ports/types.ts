@@ -177,6 +177,8 @@ export interface GraphParticle {
   size?: number;
   /** Short label near particle */
   label?: string;
+  /** Longer preview text for transient handoff cards */
+  preview?: string;
   /** If true, particle travels from target → source (reverse direction) */
   reverse?: boolean;
 }

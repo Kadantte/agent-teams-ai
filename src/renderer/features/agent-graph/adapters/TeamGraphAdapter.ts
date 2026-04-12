@@ -661,6 +661,9 @@ export class TeamGraphAdapter {
           kind: 'inbox_message',
           color: '#cc88ff',
           label,
+          preview:
+            getIdleGraphLabel(msg.text ?? '') ??
+            TeamGraphAdapter.#buildParticlePreview(msg.summary ?? cleanText),
           reverse: !isIncoming, // ghost→lead edge: incoming = forward, sent = reverse
         });
         continue;
@@ -690,6 +693,9 @@ export class TeamGraphAdapter {
         kind: 'inbox_message',
         color: msg.color ?? '#66ccff',
         label: particleLabel,
+        preview:
+          getIdleGraphLabel(msgText) ??
+          TeamGraphAdapter.#buildParticlePreview(msg.summary ?? msg.text),
         reverse: isFromTeammate,
       });
     }
@@ -783,6 +789,7 @@ export class TeamGraphAdapter {
               kind: 'task_comment',
               color: memberColors.get(newComment.author) ?? '#cc88ff',
               label: TeamGraphAdapter.#buildParticleLabel(newComment.text, 'comment'),
+              preview: TeamGraphAdapter.#buildParticlePreview(newComment.text),
             });
           }
         }
@@ -978,13 +985,7 @@ export class TeamGraphAdapter {
     kind: 'inbox' | 'comment',
     max = 52
   ): string | undefined {
-    let normalized = text?.replace(/\s+/g, ' ').trim();
-    // Clean up raw task ID hashes like "#363e78de done|sent to review" → "done | sent to review"
-    if (normalized) {
-      normalized = normalized.replace(/#[a-f0-9]{6,}\s*/gi, '').trim();
-      // Clean pipe separators
-      normalized = normalized.replace(/\|/g, ' - ');
-    }
+    const normalized = TeamGraphAdapter.#normalizeParticleText(text);
     const prefix = kind === 'comment' ? '\u{1F4AC}' : '\u{2709}';
     if (!normalized) return prefix;
     const clipped =
@@ -992,6 +993,22 @@ export class TeamGraphAdapter {
         ? `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}\u2026`
         : normalized;
     return `${prefix} ${clipped}`;
+  }
+
+  static #buildParticlePreview(text: string | undefined, max = 180): string | undefined {
+    const normalized = TeamGraphAdapter.#normalizeParticleText(text);
+    if (!normalized) return undefined;
+    return normalized.length > max
+      ? `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}\u2026`
+      : normalized;
+  }
+
+  static #normalizeParticleText(text: string | undefined): string | undefined {
+    let normalized = text?.replace(/\s+/g, ' ').trim();
+    if (!normalized) return normalized;
+    normalized = normalized.replace(/#[a-f0-9]{6,}\s*/gi, '').trim();
+    normalized = normalized.replace(/\|/g, ' - ');
+    return normalized;
   }
 
   static #getMessageParticleKey(msg: InboxMessage): string {

@@ -2,7 +2,6 @@ import { CARD_BG, CARD_BORDER_STYLE, CARD_ICON_MUTED } from '@renderer/constants
 import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
-import { useShallow } from 'zustand/react/shallow';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import {
   agentAvatarUrl,
@@ -14,6 +13,7 @@ import {
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { Loader2, ShieldQuestion, Users } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import type { ResolvedTeamMember } from '@shared/types';
 

@@ -14,7 +14,6 @@ import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { cn } from '@renderer/lib/utils';
 import { useStore } from '@renderer/store';
-import { useShallow } from 'zustand/react/shallow';
 import { isTeamProvisioningActive } from '@renderer/store/slices/teamSlice';
 import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
@@ -28,6 +27,7 @@ import { MAX_TEXT_LENGTH } from '@shared/constants';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { KNOWN_SLASH_COMMANDS, parseStandaloneSlashCommand } from '@shared/utils/slashCommands';
 import { AlertCircle, Check, ChevronDown, Mic, Paperclip, Search, Send } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import type { ActionMode } from '@renderer/components/team/messages/ActionModeSelector';
 import type { MentionSuggestion } from '@renderer/types/mention';

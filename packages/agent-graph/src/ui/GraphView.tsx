@@ -200,6 +200,7 @@ export function GraphView({
 
     // 4. Draw canvas imperatively (NO React re-render)
     canvasHandle.current?.draw({
+      teamName: data.teamName,
       nodes: state.nodes,
       edges: state.edges,
       particles: state.particles,

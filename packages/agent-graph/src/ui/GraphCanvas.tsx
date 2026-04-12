@@ -10,6 +10,7 @@ import { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import type { GraphNode, GraphEdge, GraphParticle } from '../ports/types';
 import { drawBackground, createDepthParticles, updateDepthParticles, type DepthParticle } from '../canvas/background-layer';
 import { drawEdges } from '../canvas/draw-edges';
+import { drawHandoffCards } from '../canvas/draw-handoff-cards';
 import { drawParticles } from '../canvas/draw-particles';
 import { drawAgents, drawCrossTeamNodes } from '../canvas/draw-agents';
 import { drawTasks, drawColumnHeaders } from '../canvas/draw-tasks';
@@ -18,11 +19,17 @@ import { drawEffects, type VisualEffect } from '../canvas/draw-effects';
 import { BloomRenderer } from '../canvas/bloom-renderer';
 import { KanbanLayoutEngine } from '../layout/kanbanLayout';
 import { computeAdaptiveParticleBudget, selectRenderableParticles } from './selectRenderableParticles';
+import {
+  createTransientHandoffState,
+  selectRenderableTransientHandoffCards,
+  updateTransientHandoffState,
+} from './transientHandoffs';
 import type { CameraTransform } from '../hooks/useGraphCamera';
 
 // ─── Draw State (passed by ref, not by props — no React re-renders) ─────────
 
 export interface GraphDrawState {
+  teamName: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
   particles: GraphParticle[];
@@ -123,6 +130,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
   const visibleNodeIdsCache = useRef(new Set<string>());
   const visibleEdgeIdsCache = useRef(new Set<string>());
   const activeParticleEdgesCache = useRef(new Set<string>());
+  const handoffStateRef = useRef(createTransientHandoffState());
+  const lastTeamNameRef = useRef<string | null>(null);
 
   // Imperative draw function — called from RAF, NOT from React render
   useImperativeHandle(ref, () => ({
@@ -139,6 +148,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
       if (w === 0 || h === 0) return;
 
       try {
+      if (lastTeamNameRef.current !== state.teamName) {
+        handoffStateRef.current = createTransientHandoffState();
+        lastTeamNameRef.current = state.teamName;
+      }
 
       const cam = state.camera;
       const zoom = cam.zoom;
@@ -234,6 +247,19 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         focusEdgeIds: prioritizedEdgeIds,
         budget: particleBudget,
       });
+      updateTransientHandoffState(handoffStateRef.current, {
+        particles: state.particles,
+        edgeMap,
+        nodeMap,
+        time: state.time,
+      });
+      const renderableHandoffCards = selectRenderableTransientHandoffCards(
+        handoffStateRef.current,
+        {
+          focusNodeIds: state.focusNodeIds,
+          focusEdgeIds: prioritizedEdgeIds ?? state.focusEdgeIds,
+        }
+      );
       drawParticles(ctx, renderableParticles, edgeMap, nodeMap, state.time, prioritizedEdgeIds);
 
       // 2c. Visible nodes only (back to front: process → task → member/lead)
@@ -280,6 +306,19 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
       // 3. Bloom post-processing — always active for space aesthetic
       if (bloomIntensity > 0) {
         bloomRef.current.apply(canvas, ctx);
+      }
+
+      if (renderableHandoffCards.length > 0) {
+        ctx.save();
+        ctx.scale(dpr, dpr);
+        drawHandoffCards(ctx, {
+          cards: renderableHandoffCards,
+          nodeMap,
+          time: state.time,
+          camera: cam,
+          viewport: { width: w, height: h },
+        });
+        ctx.restore();
       }
 
       // 4. Performance overlay (enabled via ?perf in URL)

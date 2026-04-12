@@ -63,7 +63,6 @@ import { initializeIpcHandlers, removeIpcHandlers } from './ipc/handlers';
 import { setReviewMainWindow } from './ipc/review';
 import {
   ApiKeyService,
-  RUNTIME_MANAGED_API_KEY_ENV_VARS,
   ExtensionFacadeService,
   GlamaMcpEnrichmentService,
   McpCatalogAggregator,
@@ -74,6 +73,7 @@ import {
   PluginCatalogService,
   PluginInstallationStateService,
   PluginInstallService,
+  RUNTIME_MANAGED_API_KEY_ENV_VARS,
   SkillsCatalogService,
   SkillsMutationService,
   SkillsWatcherService,
@@ -103,6 +103,11 @@ import {
 import { syncTelemetryFlag } from './sentry';
 import {
   BranchStatusService,
+  BoardTaskActivityRecordSource,
+  BoardTaskActivityService,
+  BoardTaskExactLogDetailService,
+  BoardTaskExactLogsService,
+  BoardTaskLogStreamService,
   CliInstallerService,
   configManager,
   LocalFileSystemProvider,
@@ -779,6 +784,13 @@ async function initializeServices(): Promise<void> {
   cliInstallerService = new CliInstallerService();
   ptyTerminalService = new PtyTerminalService();
   const teamMemberLogsFinder = new TeamMemberLogsFinder();
+  const boardTaskActivityRecordSource = new BoardTaskActivityRecordSource();
+  const boardTaskActivityService = new BoardTaskActivityService(boardTaskActivityRecordSource);
+  const boardTaskExactLogsService = new BoardTaskExactLogsService(boardTaskActivityRecordSource);
+  const boardTaskExactLogDetailService = new BoardTaskExactLogDetailService(
+    boardTaskActivityRecordSource
+  );
+  const boardTaskLogStreamService = new BoardTaskLogStreamService(boardTaskActivityRecordSource);
   const teamMemberRuntimeAdvisoryService = new TeamMemberRuntimeAdvisoryService(
     teamMemberLogsFinder
   );
@@ -924,6 +936,10 @@ async function initializeServices(): Promise<void> {
     teamProvisioningService,
     teamMemberLogsFinder,
     memberStatsComputer,
+    boardTaskActivityService,
+    boardTaskLogStreamService,
+    boardTaskExactLogsService,
+    boardTaskExactLogDetailService,
     teammateToolTracker ?? undefined,
     branchStatusService ?? undefined,
     {

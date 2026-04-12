@@ -78,6 +78,7 @@ function createSliceStore() {
     },
     openTab: vi.fn(),
     setActiveTab: vi.fn(),
+    updateTabLabel: vi.fn(),
     getAllPaneTabs: vi.fn(() => []),
     warmTaskChangeSummaries: vi.fn(async () => undefined),
     invalidateTaskChangePresence: vi.fn(),
@@ -218,6 +219,35 @@ describe('teamSlice actions', () => {
     await store.getState().selectTeam('my-team');
 
     expect(store.getState().warmTaskChangeSummaries).not.toHaveBeenCalled();
+  });
+
+  it('syncs both team and graph tab labels when the team display name changes', async () => {
+    const store = createSliceStore();
+    const getAllPaneTabs = vi.fn(() => [
+      { id: 'team-tab', type: 'team', teamName: 'my-team', label: 'my-team' },
+      { id: 'graph-tab', type: 'graph', teamName: 'my-team', label: 'my-team Graph' },
+    ]);
+    const updateTabLabel = vi.fn();
+
+    store.setState({
+      getAllPaneTabs,
+      updateTabLabel,
+    });
+
+    hoisted.getData.mockResolvedValue({
+      teamName: 'my-team',
+      config: { name: 'Northstar', members: [], projectPath: '/repo' },
+      tasks: [],
+      members: [],
+      messages: [],
+      kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+      processes: [],
+    });
+
+    await store.getState().selectTeam('my-team');
+
+    expect(updateTabLabel).toHaveBeenCalledWith('team-tab', 'Northstar');
+    expect(updateTabLabel).toHaveBeenCalledWith('graph-tab', 'Northstar Graph');
   });
 
   it('removes non-selected team cache entries on permanent delete', async () => {

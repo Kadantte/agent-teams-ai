@@ -1903,9 +1903,14 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       // Sync tab label with the team's display name from config
       const displayName = data.config.name || teamName;
       const allTabs = get().getAllPaneTabs();
-      const teamTab = allTabs.find((tab) => tab.type === 'team' && tab.teamName === teamName);
-      if (teamTab && teamTab.label !== displayName) {
-        get().updateTabLabel(teamTab.id, displayName);
+      const relatedTabs = allTabs.filter(
+        (tab) => (tab.type === 'team' || tab.type === 'graph') && tab.teamName === teamName
+      );
+      for (const tab of relatedTabs) {
+        const nextLabel = tab.type === 'graph' ? `${displayName} Graph` : displayName;
+        if (tab.label !== nextLabel) {
+          get().updateTabLabel(tab.id, nextLabel);
+        }
       }
 
       if (opts?.skipProjectAutoSelect) {

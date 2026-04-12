@@ -207,7 +207,7 @@ export const ProvisioningProgressBlock = ({
     <div
       className={cn(
         surface === 'flat'
-          ? 'rounded-none border-0 bg-transparent px-0 py-0'
+          ? 'rounded-none border-0 bg-transparent p-0'
           : 'rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-2',
         isError && 'border-red-500/40 bg-red-500/10',
         className

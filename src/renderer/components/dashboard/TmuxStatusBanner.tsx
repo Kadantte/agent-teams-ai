@@ -14,7 +14,7 @@ type BannerState =
 
 const INITIAL_STATE: BannerState = { loading: true, status: null, error: null };
 
-function PlatformInstallMatrix(): React.JSX.Element {
+const PlatformInstallMatrix = (): React.JSX.Element => {
   return (
     <div className="mt-3 grid gap-2 lg:grid-cols-3">
       <div
@@ -74,7 +74,7 @@ function PlatformInstallMatrix(): React.JSX.Element {
       </div>
     </div>
   );
-}
+};
 
 function getPrimaryDetail(status: TmuxStatus): string {
   if (status.platform === 'darwin') {

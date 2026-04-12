@@ -824,9 +824,11 @@ export const TeamDetailView = ({
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.teamName === teamName) {
+        const state = useStore.getState();
+        const displayName = state.teamByName[teamName]?.displayName ?? teamName;
         useStore.getState().openTab({
           type: 'graph',
-          label: `${teamName} Graph`,
+          label: `${displayName} Graph`,
           teamName,
         });
       }

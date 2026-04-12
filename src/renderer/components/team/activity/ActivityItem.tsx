@@ -17,7 +17,6 @@ import {
 import { getTeamColorSet, getThemedBorder } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
-import { useShallow } from 'zustand/react/shallow';
 import {
   getMessageTypeLabel,
   getStructuredMessageSummary,
@@ -70,6 +69,7 @@ import {
   Reply,
   X,
 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { ReplyQuoteBlock } from './ReplyQuoteBlock';
 
@@ -111,7 +111,7 @@ function getCommandOutputSummary(text: string): string {
 
 function parseIdlePeerSummaryRoute(summary: string): { recipient: string | null; body: string } {
   const trimmed = summary.trim();
-  const match = trimmed.match(/^\[to\s+([^\]]+)\]\s*(.*)$/i);
+  const match = /^\[to\s+([^\]]+)\]\s*(.*)$/i.exec(trimmed);
   if (!match) {
     return { recipient: null, body: trimmed };
   }
