@@ -6,8 +6,8 @@ import {
   resolveMessageRenderProps,
 } from '@renderer/components/team/activity/activityMessageContext';
 import { MessageExpandDialog } from '@renderer/components/team/activity/MessageExpandDialog';
-import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { useStableTeamMentionMeta } from '@renderer/hooks/useStableTeamMentionMeta';
+import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { useStore } from '@renderer/store';
 import { selectTeamDataForName } from '@renderer/store/slices/teamSlice';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
@@ -19,8 +19,8 @@ import {
   type InlineActivityEntry,
 } from '../utils/buildInlineActivityEntries';
 
-import type { TimelineItem } from '@renderer/components/team/activity/LeadThoughtsGroup';
 import type { GraphNode } from '@claude-teams/agent-graph';
+import type { TimelineItem } from '@renderer/components/team/activity/LeadThoughtsGroup';
 import type { ResolvedTeamMember } from '@shared/types/team';
 
 interface GraphActivityHudProps {
@@ -35,7 +35,7 @@ interface GraphActivityHudProps {
   onOpenMemberProfile?: (memberName: string) => void;
 }
 
-export function GraphActivityHud({
+export const GraphActivityHud = ({
   teamName,
   nodes,
   getActivityAnchorScreenPlacement,
@@ -43,7 +43,7 @@ export function GraphActivityHud({
   enabled = true,
   onOpenTaskDetail,
   onOpenMemberProfile,
-}: GraphActivityHudProps): React.JSX.Element | null {
+}: GraphActivityHudProps): React.JSX.Element | null => {
   const shellRefs = useRef(new Map<string, HTMLDivElement | null>());
   const [expandedItem, setExpandedItem] = useState<TimelineItem | null>(null);
   const { teamData, teams } = useStore(
@@ -128,7 +128,7 @@ export function GraphActivityHud({
         }
 
         const placement = getActivityAnchorScreenPlacement(lane.node.id);
-        if (!placement || !placement.visible) {
+        if (!placement?.visible) {
           shell.style.opacity = '0';
           continue;
         }
@@ -275,4 +275,4 @@ export function GraphActivityHud({
       />
     </>
   );
-}
+};

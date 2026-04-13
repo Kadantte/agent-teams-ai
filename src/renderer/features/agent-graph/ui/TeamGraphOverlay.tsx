@@ -10,8 +10,8 @@ import { TeamSidebarHost } from '@renderer/components/team/sidebar/TeamSidebarHo
 
 import { useTeamGraphAdapter } from '../adapters/useTeamGraphAdapter';
 
-import { GraphBlockingEdgePopover } from './GraphBlockingEdgePopover';
 import { GraphActivityHud } from './GraphActivityHud';
+import { GraphBlockingEdgePopover } from './GraphBlockingEdgePopover';
 import { GraphNodePopover } from './GraphNodePopover';
 import { GraphProvisioningHud } from './GraphProvisioningHud';
 

@@ -160,8 +160,8 @@ export function buildInlineActivityEntries({
 
 function collectTaskComments(
   tasks: readonly TeamTaskWithKanban[]
-): Array<{ task: TeamTaskWithKanban; comment: TaskComment }> {
-  const items: Array<{ task: TeamTaskWithKanban; comment: TaskComment }> = [];
+): { task: TeamTaskWithKanban; comment: TaskComment }[] {
+  const items: { task: TeamTaskWithKanban; comment: TaskComment }[] = [];
   for (const task of tasks) {
     for (const comment of task.comments ?? []) {
       items.push({ task, comment });

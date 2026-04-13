@@ -71,8 +71,8 @@ import { KanbanSearchInput } from './kanban/KanbanSearchInput';
 import { TrashDialog } from './kanban/TrashDialog';
 import { MemberDetailDialog } from './members/MemberDetailDialog';
 
-import type { TeamMessagesPanelMode } from '@renderer/types/teamMessagesPanelMode';
 import type { AddMemberEntry } from './dialogs/AddMemberDialog';
+import type { TeamMessagesPanelMode } from '@renderer/types/teamMessagesPanelMode';
 import type { ComponentProps } from 'react';
 
 const ProjectEditorOverlay = lazy(() =>
