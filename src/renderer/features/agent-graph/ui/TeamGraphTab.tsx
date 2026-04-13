@@ -16,6 +16,10 @@ import { GraphNodePopover } from './GraphNodePopover';
 import { GraphProvisioningHud } from './GraphProvisioningHud';
 
 import type { GraphDomainRef, GraphEventPort, GraphNode } from '@claude-teams/agent-graph';
+import type {
+  MemberActivityFilter,
+  MemberDetailTab,
+} from '@renderer/components/team/members/memberDetailTypes';
 
 const TeamGraphOverlay = lazy(() =>
   import('./TeamGraphOverlay').then((m) => ({ default: m.TeamGraphOverlay }))
@@ -25,6 +29,11 @@ export interface TeamGraphTabProps {
   teamName: string;
   isActive?: boolean;
   isPaneFocused?: boolean;
+}
+
+interface OpenProfileOptions {
+  initialTab?: MemberDetailTab;
+  initialActivityFilter?: MemberActivityFilter;
 }
 
 export const TeamGraphTab = ({
@@ -53,9 +62,11 @@ export const TeamGraphTab = ({
     [teamName]
   );
   const dispatchOpenProfile = useCallback(
-    (memberName: string) =>
+    (memberName: string, options?: OpenProfileOptions) =>
       window.dispatchEvent(
-        new CustomEvent('graph:open-profile', { detail: { teamName, memberName } })
+        new CustomEvent('graph:open-profile', {
+          detail: { teamName, memberName, ...options },
+        })
       ),
     [teamName]
   );
@@ -105,7 +116,12 @@ export const TeamGraphTab = ({
     ),
     onSendMessage: dispatchSendMessage,
     onOpenTaskDetail: dispatchOpenTask,
-    onOpenMemberProfile: dispatchOpenProfile,
+    onOpenMemberProfile: useCallback(
+      (memberName: string) => {
+        dispatchOpenProfile(memberName);
+      },
+      [dispatchOpenProfile]
+    ),
   };
 
   return (

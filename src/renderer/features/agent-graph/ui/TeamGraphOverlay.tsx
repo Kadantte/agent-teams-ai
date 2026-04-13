@@ -16,6 +16,10 @@ import { GraphNodePopover } from './GraphNodePopover';
 import { GraphProvisioningHud } from './GraphProvisioningHud';
 
 import type { GraphDomainRef, GraphEventPort } from '@claude-teams/agent-graph';
+import type {
+  MemberActivityFilter,
+  MemberDetailTab,
+} from '@renderer/components/team/members/memberDetailTypes';
 
 export interface TeamGraphOverlayProps {
   teamName: string;
@@ -23,7 +27,13 @@ export interface TeamGraphOverlayProps {
   onPinAsTab?: () => void;
   onSendMessage?: (memberName: string) => void;
   onOpenTaskDetail?: (taskId: string) => void;
-  onOpenMemberProfile?: (memberName: string) => void;
+  onOpenMemberProfile?: (
+    memberName: string,
+    options?: {
+      initialTab?: MemberDetailTab;
+      initialActivityFilter?: MemberActivityFilter;
+    }
+  ) => void;
 }
 
 export const TeamGraphOverlay = ({
