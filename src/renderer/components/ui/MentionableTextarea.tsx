@@ -1102,10 +1102,10 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
     const orbitTrackWidth = 1;
     const orbitStrokeWidth = 1.35;
     const orbitGlowWidth = 3;
-    const orbitInset = orbitTrackWidth / 2;
-    const orbitWidth = Math.max(surfaceShellMetrics.width - orbitTrackWidth, 0);
-    const orbitHeight = Math.max(surfaceShellMetrics.height - orbitTrackWidth, 0);
-    const orbitRadius = Math.max(surfaceShellMetrics.borderRadius - orbitInset, 0);
+    const orbitInset = 0;
+    const orbitWidth = Math.max(surfaceShellMetrics.width, 0);
+    const orbitHeight = Math.max(surfaceShellMetrics.height, 0);
+    const orbitRadius = Math.max(surfaceShellMetrics.borderRadius, 0);
     const orbitRight = orbitInset + orbitWidth;
     const orbitBottom = orbitInset + orbitHeight;
     const orbitMidX = orbitInset + orbitWidth / 2;
@@ -1134,7 +1134,7 @@ export const MentionableTextarea = React.forwardRef<HTMLTextAreaElement, Mention
           surfaceShellMetrics.width > 0 &&
           surfaceShellMetrics.height > 0 ? (
             <svg
-              className="message-composer-orbit-svg pointer-events-none absolute inset-0 z-[1] h-full w-full"
+              className="message-composer-orbit-svg pointer-events-none absolute inset-0 z-[16] h-full w-full"
               viewBox={`0 0 ${surfaceShellMetrics.width} ${surfaceShellMetrics.height}`}
               aria-hidden="true"
             >

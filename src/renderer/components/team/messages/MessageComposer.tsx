@@ -465,7 +465,7 @@ export const MessageComposer = ({
 
   return (
     <div
-      className={cn('relative', isCompactLayout ? 'pb-1' : 'mb-3 pb-3')}
+      className={cn('relative', isCompactLayout ? 'pb-1' : 'mb-1.5 pb-1.5')}
       role="group"
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}

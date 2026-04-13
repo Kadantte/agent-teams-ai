@@ -84,7 +84,7 @@ export const TeamGraphOverlay = ({
         events={events}
         onRequestClose={onClose}
         onRequestPinAsTab={onPinAsTab}
-        className="min-w-0 flex-1"
+        className="team-graph-view min-w-0 flex-1"
         renderEdgeOverlay={({ edge, sourceNode, targetNode, onClose: closeEdge, onSelectNode }) => (
           <GraphBlockingEdgePopover
             teamName={teamName}

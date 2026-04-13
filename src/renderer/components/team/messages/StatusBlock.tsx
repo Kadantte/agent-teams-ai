@@ -44,15 +44,13 @@ export const StatusBlock = ({
     () => computePendingCrossTeamReplies(messages, nowMs),
     [messages, nowMs]
   );
-
-  /** Whether the Status block has any visible items. */
-  const hasItems = useMemo(() => {
-    const hasPendingReplies = Object.keys(pendingRepliesByMember).some((name) =>
+  const hasPendingReplies = useMemo(() => {
+    const hasMemberPendingReplies = Object.keys(pendingRepliesByMember).some((name) =>
       members.some((m) => m.name === name)
     );
-    if (hasPendingReplies) return true;
-    if (pendingCrossTeamReplies.length > 0) return true;
-
+    return hasMemberPendingReplies || pendingCrossTeamReplies.length > 0;
+  }, [members, pendingRepliesByMember, pendingCrossTeamReplies.length]);
+  const hasActiveTasks = useMemo(() => {
     const tMap = new Map(tasks.map((t) => [t.id, t]));
     return members.some((m) => {
       if (!m.currentTaskId) return false;
@@ -60,7 +58,13 @@ export const StatusBlock = ({
       if (task && (task.reviewState === 'approved' || task.status === 'completed')) return false;
       return true;
     });
-  }, [members, tasks, pendingRepliesByMember, pendingCrossTeamReplies.length]);
+  }, [members, tasks]);
+
+  /** Whether the Status block has any visible items. */
+  const hasItems = useMemo(() => {
+    if (hasPendingReplies) return true;
+    return hasActiveTasks;
+  }, [hasActiveTasks, hasPendingReplies]);
 
   // Only run the 1-second timer when the block actually has content to show.
   useEffect(() => {
@@ -85,6 +89,7 @@ export const StatusBlock = ({
       Status
     </button>
   );
+  const flowInlineToggle = layout === 'flow' && !collapsed ? toggleButton : null;
 
   return (
     <>
@@ -92,21 +97,25 @@ export const StatusBlock = ({
         <div className="relative h-0">
           <div className="absolute -top-[19px] right-0 z-10">{toggleButton}</div>
         </div>
-      ) : (
+      ) : collapsed ? (
         <div className="mb-2 flex justify-end">{toggleButton}</div>
-      )}
+      ) : null}
       {!collapsed && (
         <div className={layout === 'overlay' ? 'mt-5' : ''}>
-          <PendingRepliesBlock
-            members={members}
-            pendingRepliesByMember={pendingRepliesByMember}
-            pendingCrossTeamReplies={pendingCrossTeamReplies}
-            onMemberClick={onMemberClick}
-          />
+          {hasPendingReplies ? (
+            <PendingRepliesBlock
+              members={members}
+              pendingRepliesByMember={pendingRepliesByMember}
+              pendingCrossTeamReplies={pendingCrossTeamReplies}
+              headerRight={flowInlineToggle}
+              onMemberClick={onMemberClick}
+            />
+          ) : null}
           <ActiveTasksBlock
             members={members}
             tasks={tasks}
             defaultCollapsed={position === 'sidebar'}
+            headerRight={!hasPendingReplies ? flowInlineToggle : undefined}
             onMemberClick={onMemberClick}
             onTaskClick={onTaskClick}
           />

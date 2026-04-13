@@ -114,7 +114,7 @@ export const TeamGraphTab = ({
         <GraphView
           data={graphData}
           events={events}
-          className="size-full"
+          className="team-graph-view size-full"
           suspendAnimation={!isActive}
           onRequestFullscreen={() => setFullscreen(true)}
           renderEdgeOverlay={({ edge, sourceNode, targetNode, onClose, onSelectNode }) => (
