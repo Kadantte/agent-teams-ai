@@ -7,6 +7,7 @@ import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 
 import { GraphView } from '@claude-teams/agent-graph';
 import { TeamSidebarHost } from '@renderer/components/team/sidebar/TeamSidebarHost';
+import { useStore } from '@renderer/store';
 import type {
   MemberActivityFilter,
   MemberDetailTab,
@@ -75,6 +76,15 @@ export const TeamGraphTab = ({
       window.dispatchEvent(new CustomEvent('graph:create-task', { detail: { teamName, owner } })),
     [teamName]
   );
+  const openTeamPage = useCallback(() => {
+    useStore.getState().openTeamTab(teamName);
+  }, [teamName]);
+  const openCreateTask = useCallback(() => {
+    useStore.getState().openTeamTab(teamName);
+    window.setTimeout(() => {
+      dispatchCreateTask('');
+    }, 0);
+  }, [dispatchCreateTask, teamName]);
 
   // Task action dispatchers
   const dispatchTaskAction = useCallback(
@@ -139,9 +149,12 @@ export const TeamGraphTab = ({
           className="team-graph-view size-full"
           suspendAnimation={!isActive}
           onRequestFullscreen={() => setFullscreen(true)}
+          onOpenTeamPage={openTeamPage}
+          onCreateTask={openCreateTask}
           renderHud={({
             getLaunchAnchorScreenPlacement,
             getActivityAnchorScreenPlacement,
+            getNodeScreenPosition,
             focusNodeIds,
           }) => (
             <>
@@ -149,6 +162,7 @@ export const TeamGraphTab = ({
                 teamName={teamName}
                 nodes={graphData.nodes}
                 getActivityAnchorScreenPlacement={getActivityAnchorScreenPlacement}
+                getNodeScreenPosition={getNodeScreenPosition}
                 focusNodeIds={focusNodeIds}
                 enabled={isActive}
                 onOpenTaskDetail={dispatchOpenTask}

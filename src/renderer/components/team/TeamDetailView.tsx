@@ -74,7 +74,7 @@ import { type MemberActivityFilter, type MemberDetailTab } from './members/membe
 
 import type { TeamMessagesPanelMode } from '@renderer/types/teamMessagesPanelMode';
 import type { AddMemberEntry } from './dialogs/AddMemberDialog';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, CSSProperties } from 'react';
 
 const ProjectEditorOverlay = lazy(() =>
   import('./editor/ProjectEditorOverlay').then((m) => ({ default: m.ProjectEditorOverlay }))
@@ -822,6 +822,34 @@ export const TeamDetailView = ({
   const provisioningBannerRef = useRef<HTMLDivElement>(null);
   const wasProvisioningRef = useRef(false);
   const pendingReplyRefreshTimerRef = useRef<number | null>(null);
+  const handleOpenGraphTab = useCallback(() => {
+    const state = useStore.getState();
+    const displayName = state.teamByName[teamName]?.displayName ?? teamName;
+    state.openTab({
+      type: 'graph',
+      label: `${displayName} Graph`,
+      teamName,
+    });
+  }, [teamName]);
+  const visualizeButtonStyle = useMemo<CSSProperties>(
+    () =>
+      isLight
+        ? {
+            background:
+              'linear-gradient(135deg, rgba(59,130,246,0.14) 0%, rgba(34,197,94,0.16) 100%)',
+            borderColor: 'rgba(59,130,246,0.30)',
+            color: '#0f172a',
+            boxShadow: '0 10px 24px rgba(59,130,246,0.12)',
+          }
+        : {
+            background:
+              'linear-gradient(135deg, rgba(56,189,248,0.18) 0%, rgba(16,185,129,0.16) 100%)',
+            borderColor: 'rgba(56,189,248,0.34)',
+            color: 'rgba(236,253,255,0.96)',
+            boxShadow: '0 12px 28px rgba(8,145,178,0.22)',
+          },
+    [isLight]
+  );
 
   // Set inert on background content when editor/graph overlay is open (a11y focus trap)
   useEffect(() => {
@@ -839,18 +867,12 @@ export const TeamDetailView = ({
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.teamName === teamName) {
-        const state = useStore.getState();
-        const displayName = state.teamByName[teamName]?.displayName ?? teamName;
-        useStore.getState().openTab({
-          type: 'graph',
-          label: `${displayName} Graph`,
-          teamName,
-        });
+        handleOpenGraphTab();
       }
     };
     window.addEventListener('toggle-team-graph', handler);
     return () => window.removeEventListener('toggle-team-graph', handler);
-  }, [teamName]);
+  }, [handleOpenGraphTab, teamName]);
 
   // Listen for graph tab actions (open task, send message)
   useEffect(() => {
@@ -2059,13 +2081,13 @@ export const TeamDetailView = ({
                     {data.config.description}
                   </p>
                 )}
-                {(data.config.projectPath || leadBranch) && (
-                  <div
-                    className={cn(
-                      'mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5',
-                      headerColorSet && 'relative z-10'
-                    )}
-                  >
+                <div
+                  className={cn(
+                    'mt-1 flex items-start justify-between gap-3',
+                    headerColorSet && 'relative z-10'
+                  )}
+                >
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-0.5">
                     {data.config.projectPath && (
                       <span className="flex items-center gap-1 text-[11px] text-[var(--color-text-secondary)]">
                         <FolderOpen size={11} className="shrink-0 text-[var(--color-text-muted)]" />
@@ -2108,7 +2130,28 @@ export const TeamDetailView = ({
                       </span>
                     )}
                   </div>
-                )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          '-mt-2 h-8 shrink-0 self-start rounded-full border px-3.5 text-xs font-semibold tracking-[0.02em] transition-all',
+                          'hover:-translate-y-0.5 hover:brightness-[1.03] active:translate-y-0 active:brightness-[0.98]',
+                          isLight
+                            ? 'hover:border-sky-400/50'
+                            : 'hover:border-cyan-300/50 hover:shadow-[0_14px_32px_rgba(8,145,178,0.28)]'
+                        )}
+                        style={visualizeButtonStyle}
+                        onClick={handleOpenGraphTab}
+                      >
+                        <Network size={13} className="shrink-0" />
+                        Visualize
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Open team graph</TooltipContent>
+                  </Tooltip>
+                </div>
                 {(() => {
                   const currentPath = data.config.projectPath;
                   const history = data.config.projectPathHistory?.filter((p) => p !== currentPath);
@@ -2159,27 +2202,6 @@ export const TeamDetailView = ({
                 defaultOpen
                 action={
                   <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 gap-1 px-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        useStore.getState().openTab({
-                          type: 'graph',
-                          label: `${data.config.name} Graph`,
-                          teamName,
-                        });
-                      }}
-                    >
-                      <span className="relative">
-                        <Network size={12} />
-                        <span className="absolute -right-3.5 -top-2.5 rounded-sm bg-emerald-500/20 px-0.5 py-px text-[7px] font-bold leading-none text-emerald-400">
-                          NEW
-                        </span>
-                      </span>
-                      Graph
-                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"

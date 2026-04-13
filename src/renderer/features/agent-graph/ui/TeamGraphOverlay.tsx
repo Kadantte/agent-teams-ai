@@ -7,6 +7,7 @@ import { useCallback, useMemo } from 'react';
 
 import { GraphView } from '@claude-teams/agent-graph';
 import { TeamSidebarHost } from '@renderer/components/team/sidebar/TeamSidebarHost';
+import { useStore } from '@renderer/store';
 import type {
   MemberActivityFilter,
   MemberDetailTab,
@@ -69,6 +70,13 @@ export const TeamGraphOverlay = ({
     }),
     [dispatchTaskAction]
   );
+  const openTeamPage = useCallback(() => {
+    useStore.getState().openTeamTab(teamName);
+    onClose();
+  }, [onClose, teamName]);
+  const openCreateTask = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('graph:create-task', { detail: { teamName, owner: '' } }));
+  }, [teamName]);
 
   const events: GraphEventPort = {
     onNodeDoubleClick: useCallback(
@@ -100,10 +108,13 @@ export const TeamGraphOverlay = ({
         events={events}
         onRequestClose={onClose}
         onRequestPinAsTab={onPinAsTab}
+        onOpenTeamPage={openTeamPage}
+        onCreateTask={openCreateTask}
         className="team-graph-view min-w-0 flex-1"
         renderHud={({
           getLaunchAnchorScreenPlacement,
           getActivityAnchorScreenPlacement,
+          getNodeScreenPosition,
           focusNodeIds,
         }) => (
           <>
@@ -111,6 +122,7 @@ export const TeamGraphOverlay = ({
               teamName={teamName}
               nodes={graphData.nodes}
               getActivityAnchorScreenPlacement={getActivityAnchorScreenPlacement}
+              getNodeScreenPosition={getNodeScreenPosition}
               focusNodeIds={focusNodeIds}
               onOpenTaskDetail={onOpenTaskDetail}
               onOpenMemberProfile={onOpenMemberProfile}

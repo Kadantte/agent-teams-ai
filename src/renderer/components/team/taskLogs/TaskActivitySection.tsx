@@ -13,6 +13,31 @@ interface TaskActivitySectionProps {
   taskId: string;
 }
 
+function isHighSignalTaskActivityEntry(entry: BoardTaskActivityEntry): boolean {
+  return entry.linkKind !== 'execution';
+}
+
+function compareTaskActivityEntriesDesc(
+  left: BoardTaskActivityEntry,
+  right: BoardTaskActivityEntry
+): number {
+  const leftTs = Date.parse(left.timestamp);
+  const rightTs = Date.parse(right.timestamp);
+  if (Number.isFinite(leftTs) && Number.isFinite(rightTs) && leftTs !== rightTs) {
+    return rightTs - leftTs;
+  }
+
+  if (left.source.filePath !== right.source.filePath) {
+    return right.source.filePath.localeCompare(left.source.filePath);
+  }
+
+  if (left.source.sourceOrder !== right.source.sourceOrder) {
+    return right.source.sourceOrder - left.source.sourceOrder;
+  }
+
+  return right.id.localeCompare(left.id);
+}
+
 function formatEntryTime(timestamp: string): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) {
@@ -158,6 +183,15 @@ export function TaskActivitySection({
     };
   }, [entries.length, teamName, taskId]);
 
+  const visibleEntries = useMemo(
+    () =>
+      entries
+        .filter((entry) => isHighSignalTaskActivityEntry(entry))
+        .sort(compareTaskActivityEntriesDesc),
+    [entries]
+  );
+  const hasOnlyLowSignalExecution = entries.length > 0 && visibleEntries.length === 0;
+
   const content = useMemo(() => {
     if (loading) {
       return (
@@ -177,23 +211,24 @@ export function TaskActivitySection({
       );
     }
 
-    if (entries.length === 0) {
+    if (visibleEntries.length === 0) {
       return (
         <p className="text-xs text-[var(--color-text-muted)]">
-          No explicit task activity was found in the available transcripts yet. Older or heuristic
-          session logs may still be available below in Execution Sessions.
+          {hasOnlyLowSignalExecution
+            ? 'No key task activity was found yet. Low-level execution details are available below in Task Log Stream.'
+            : 'No explicit task activity was found in the available transcripts yet. Older or heuristic session logs may still be available below in Execution Sessions.'}
         </p>
       );
     }
 
     return (
       <div className="space-y-2">
-        {entries.map((entry) => (
+        {visibleEntries.map((entry) => (
           <Row key={entry.id} entry={entry} />
         ))}
       </div>
     );
-  }, [entries, error, loading]);
+  }, [error, hasOnlyLowSignalExecution, loading, visibleEntries]);
 
   return (
     <div className="space-y-2">
@@ -203,7 +238,7 @@ export function TaskActivitySection({
         </h4>
       </div>
       <p className="text-xs text-[var(--color-text-muted)]">
-        Explicit runtime activity linked to this task from transcript metadata.
+        Key explicit runtime activity linked to this task from transcript metadata.
       </p>
       {content}
     </div>

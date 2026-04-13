@@ -6,6 +6,15 @@ import { AlertTriangle, ExternalLink, RefreshCw, Wrench } from 'lucide-react';
 import type { TmuxStatus } from '@shared/types';
 
 const OFFICIAL_TMUX_INSTALL_URL = 'https://github.com/tmux/tmux/wiki/Installing';
+const TMUX_README_URL = 'https://github.com/tmux/tmux/blob/master/README';
+const HOMEBREW_TMUX_URL = 'https://formulae.brew.sh/formula/tmux';
+const MACPORTS_TMUX_URL = 'https://ports.macports.org/port/tmux/';
+const MICROSOFT_WSL_INSTALL_URL = 'https://learn.microsoft.com/en-us/windows/wsl/install';
+
+interface SourceLink {
+  label: string;
+  url: string;
+}
 
 type BannerState =
   | { loading: true; status: null; error: null }
@@ -13,6 +22,33 @@ type BannerState =
   | { loading: false; status: null; error: string };
 
 const INITIAL_STATE: BannerState = { loading: true, status: null, error: null };
+
+const SourceLinks = ({ links }: { links: SourceLink[] }): React.JSX.Element => {
+  return (
+    <div className="pt-1">
+      <div
+        className="text-[10px] uppercase tracking-wide"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        Sources
+      </div>
+      <div className="mt-1 flex flex-wrap gap-1.5">
+        {links.map((link) => (
+          <button
+            key={link.url}
+            type="button"
+            onClick={() => void api.openExternal(link.url)}
+            className="inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] transition-colors hover:bg-white/5"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+          >
+            {link.label}
+            <ExternalLink className="size-3" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 const PlatformInstallMatrix = (): React.JSX.Element => {
   return (
@@ -28,10 +64,19 @@ const PlatformInstallMatrix = (): React.JSX.Element => {
           macOS
         </div>
         <div className="space-y-1 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-          <div>Homebrew</div>
+          <div>Recommended: Homebrew</div>
           <code className="block rounded bg-black/20 px-2 py-1 font-mono">brew install tmux</code>
-          <div>MacPorts</div>
-          <code className="block rounded bg-black/20 px-2 py-1 font-mono">port install tmux</code>
+          <div>Alternative: MacPorts</div>
+          <code className="block rounded bg-black/20 px-2 py-1 font-mono">
+            sudo port install tmux
+          </code>
+          <SourceLinks
+            links={[
+              { label: 'tmux guide', url: OFFICIAL_TMUX_INSTALL_URL },
+              { label: 'Homebrew', url: HOMEBREW_TMUX_URL },
+              { label: 'MacPorts', url: MACPORTS_TMUX_URL },
+            ]}
+          />
         </div>
       </div>
 
@@ -46,11 +91,21 @@ const PlatformInstallMatrix = (): React.JSX.Element => {
           Linux
         </div>
         <div className="space-y-1 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-          <code className="block rounded bg-black/20 px-2 py-1 font-mono">apt install tmux</code>
-          <code className="block rounded bg-black/20 px-2 py-1 font-mono">dnf install tmux</code>
-          <code className="block rounded bg-black/20 px-2 py-1 font-mono">yum install tmux</code>
-          <code className="block rounded bg-black/20 px-2 py-1 font-mono">zypper install tmux</code>
-          <code className="block rounded bg-black/20 px-2 py-1 font-mono">pacman -S tmux</code>
+          <div>Use your distro package manager:</div>
+          <code className="block rounded bg-black/20 px-2 py-1 font-mono">
+            sudo apt install tmux
+          </code>
+          <code className="block rounded bg-black/20 px-2 py-1 font-mono">
+            sudo dnf install tmux
+          </code>
+          <code className="block rounded bg-black/20 px-2 py-1 font-mono">
+            sudo yum install tmux
+          </code>
+          <code className="block rounded bg-black/20 px-2 py-1 font-mono">
+            sudo zypper install tmux
+          </code>
+          <code className="block rounded bg-black/20 px-2 py-1 font-mono">sudo pacman -S tmux</code>
+          <SourceLinks links={[{ label: 'tmux guide', url: OFFICIAL_TMUX_INSTALL_URL }]} />
         </div>
       </div>
 
@@ -65,11 +120,20 @@ const PlatformInstallMatrix = (): React.JSX.Element => {
           Windows
         </div>
         <div className="space-y-1 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-          <p>В official tmux wiki нет native Windows install command.</p>
-          <p>
-            Рекомендуемый путь: WSL, затем внутри Linux-дистрибутива использовать одну из Linux
-            команд выше, например <code className="font-mono">apt install tmux</code>.
-          </p>
+          <p>The tmux docs do not provide an official native Windows install command.</p>
+          <div>1. Install WSL</div>
+          <code className="block rounded bg-black/20 px-2 py-1 font-mono">wsl --install</code>
+          <div>2. Inside Ubuntu or another distro</div>
+          <code className="block rounded bg-black/20 px-2 py-1 font-mono">
+            sudo apt install tmux
+          </code>
+          <SourceLinks
+            links={[
+              { label: 'tmux README', url: TMUX_README_URL },
+              { label: 'tmux guide', url: OFFICIAL_TMUX_INSTALL_URL },
+              { label: 'Microsoft WSL', url: MICROSOFT_WSL_INSTALL_URL },
+            ]}
+          />
         </div>
       </div>
     </div>
@@ -78,20 +142,24 @@ const PlatformInstallMatrix = (): React.JSX.Element => {
 
 function getPrimaryDetail(status: TmuxStatus): string {
   if (status.platform === 'darwin') {
-    return 'На macOS проще всего поставить tmux через Homebrew или MacPorts.';
+    return 'On macOS, the simplest options are Homebrew or MacPorts.';
   }
   if (status.platform === 'linux') {
-    return 'На Linux команда зависит от дистрибутива: apt, dnf, yum, zypper или pacman.';
+    return 'On Linux, install tmux with your distro package manager.';
   }
   if (status.platform === 'win32') {
-    return 'На Windows у official tmux wiki нет native installer; safest путь — WSL и установка tmux внутри Linux-дистрибутива.';
+    return 'On Windows, the clearest path is WSL, then installing tmux inside your Linux distro.';
   }
-  return 'Поставь tmux через пакетный менеджер своей ОС.';
+  return 'Install tmux with your operating system package manager.';
 }
 
 export const TmuxStatusBanner = (): React.JSX.Element | null => {
   const isElectron = useMemo(() => isElectronMode(), []);
   const [state, setState] = useState<BannerState>(INITIAL_STATE);
+
+  const loadStatus = useCallback(async () => {
+    return api.tmux.getStatus();
+  }, []);
 
   const fetchStatus = useCallback(async () => {
     setState(
@@ -104,7 +172,7 @@ export const TmuxStatusBanner = (): React.JSX.Element | null => {
     );
 
     try {
-      const status = await api.tmux.getStatus();
+      const status = await loadStatus();
       setState({ loading: false, status, error: null });
     } catch (error) {
       setState({
@@ -113,14 +181,38 @@ export const TmuxStatusBanner = (): React.JSX.Element | null => {
         error: error instanceof Error ? error.message : 'Failed to check tmux status',
       });
     }
-  }, []);
+  }, [loadStatus]);
 
   useEffect(() => {
     if (!isElectron) {
       return;
     }
-    void fetchStatus();
-  }, [fetchStatus, isElectron]);
+
+    let cancelled = false;
+
+    const loadInitialStatus = async (): Promise<void> => {
+      try {
+        const status = await loadStatus();
+        if (!cancelled) {
+          setState({ loading: false, status, error: null });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setState({
+            loading: false,
+            status: null,
+            error: error instanceof Error ? error.message : 'Failed to check tmux status',
+          });
+        }
+      }
+    };
+
+    void loadInitialStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isElectron, loadStatus]);
 
   if (!isElectron) return null;
   if (state.loading && !state.status) return null;
@@ -182,8 +274,8 @@ export const TmuxStatusBanner = (): React.JSX.Element | null => {
               className="mt-1 text-xs leading-relaxed"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Persistent team agents работают стабильнее в process/tmux path. Без tmux app остаётся
-              на более тяжёлом in-process пути. {getPrimaryDetail(state.status)}
+              Persistent team agents are more reliable on the process/tmux path. Without tmux, the
+              app falls back to the heavier in-process path. {getPrimaryDetail(state.status)}
             </p>
             {state.status.error && (
               <p className="mt-1 text-xs" style={{ color: '#fbbf24' }}>
@@ -208,7 +300,7 @@ export const TmuxStatusBanner = (): React.JSX.Element | null => {
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
             <ExternalLink className="size-3.5" />
-            Open guide
+            Official guide
           </button>
         </div>
       </div>

@@ -7,6 +7,7 @@ import { useCallback, useState } from 'react';
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import {
   getTeamColorSet,
   getThemedBadge,
@@ -211,18 +212,23 @@ export const SortableTab = ({
           }}
         />
       )}
-      <button
-        className="flex size-4 shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100"
-        style={{ backgroundColor: 'transparent' }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose(tab.id);
-        }}
-        onPointerDown={(e) => e.stopPropagation()}
-        title="Close tab"
-      >
-        <X className="size-3" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className="flex size-4 shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100"
+            style={{ backgroundColor: 'transparent' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose(tab.id);
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label="Close tab"
+          >
+            <X className="size-3" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Close tab</TooltipContent>
+      </Tooltip>
     </div>
   );
 };

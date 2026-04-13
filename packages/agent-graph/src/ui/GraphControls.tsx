@@ -14,7 +14,9 @@ import {
   Pause,
   Pin,
   Play,
+  Plus,
   Server,
+  Users,
   X,
   ZoomIn,
   ZoomOut,
@@ -36,10 +38,11 @@ export interface GraphControlsProps {
   onRequestClose?: () => void;
   onRequestPinAsTab?: () => void;
   onRequestFullscreen?: () => void;
+  onOpenTeamPage?: () => void;
+  onCreateTask?: () => void;
   teamName: string;
   teamColor?: string;
   isAlive?: boolean;
-  showBlockingHint?: boolean;
 }
 
 export function GraphControls({
@@ -51,10 +54,11 @@ export function GraphControls({
   onRequestClose,
   onRequestPinAsTab,
   onRequestFullscreen,
+  onOpenTeamPage,
+  onCreateTask,
   teamName,
   teamColor,
   isAlive,
-  showBlockingHint = false,
 }: GraphControlsProps): React.JSX.Element {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -93,7 +97,21 @@ export function GraphControls({
 
   return (
     <>
-      <div className="absolute left-20 top-3 z-20 flex items-center gap-3 pointer-events-none">
+      <div className="absolute left-20 top-3 z-20 flex items-center gap-1.5 pointer-events-none">
+        {onOpenTeamPage ? (
+          <div
+            className="pointer-events-auto flex items-center gap-0.5 rounded-md px-px py-px backdrop-blur-sm"
+            style={{
+              background: 'rgba(8, 12, 24, 0.8)',
+              border: `1px solid ${nameColor}25`,
+            }}
+          >
+            <ToolbarButton onClick={onOpenTeamPage} icon={<Users size={9} />} mini title="Team page" />
+            {onCreateTask ? (
+              <ToolbarButton onClick={onCreateTask} icon={<Plus size={9} />} mini title="Create task" />
+            ) : null}
+          </div>
+        ) : null}
         <div
           className="pointer-events-auto flex items-center gap-2 rounded-lg px-3 py-1.5 backdrop-blur-sm"
           style={{
@@ -110,9 +128,9 @@ export function GraphControls({
         </div>
       </div>
 
-      <div className="absolute right-3 top-3 z-20 flex items-center gap-2 pointer-events-none">
+      <div className="absolute right-3 top-3 z-20 flex items-center gap-0.5 pointer-events-none">
         <div
-          className="pointer-events-auto flex items-center rounded-lg px-1 py-0.5 backdrop-blur-sm"
+          className="pointer-events-auto flex items-center rounded-md px-px py-px backdrop-blur-sm"
           style={{
             background: 'rgba(8, 12, 24, 0.8)',
             border: '1px solid rgba(100, 200, 255, 0.08)',
@@ -120,13 +138,14 @@ export function GraphControls({
         >
           <ToolbarButton
             onClick={() => toggle('paused')}
-            icon={filters.paused ? <Play size={14} /> : <Pause size={14} />}
+            icon={filters.paused ? <Play size={9} /> : <Pause size={9} />}
+            mini
           />
         </div>
 
         <div ref={settingsRef} className="relative pointer-events-auto">
           <div
-            className="flex items-center gap-0.5 rounded-lg px-1 py-0.5 backdrop-blur-sm"
+            className="flex items-center gap-0.5 rounded-md px-px py-px backdrop-blur-sm"
             style={{
               background: 'rgba(8, 12, 24, 0.8)',
               border: '1px solid rgba(100, 200, 255, 0.08)',
@@ -134,9 +153,9 @@ export function GraphControls({
           >
             <ToolbarButton
               onClick={() => setIsSettingsOpen((value) => !value)}
-              icon={<Settings2 size={14} />}
-              label="View"
+              icon={<Settings2 size={9} />}
               active={isSettingsOpen}
+              mini
             />
           </div>
 
@@ -174,52 +193,39 @@ export function GraphControls({
         </div>
 
         <div
-          className="pointer-events-auto flex items-center gap-2 rounded-lg px-3 py-1.5 backdrop-blur-sm"
+          className="pointer-events-auto flex items-center gap-0.5 rounded-md px-px py-px backdrop-blur-sm"
           style={{
             background: 'rgba(8, 12, 24, 0.8)',
             border: '1px solid rgba(100, 200, 255, 0.08)',
           }}
         >
-          {onRequestPinAsTab && <ToolbarButton onClick={onRequestPinAsTab} icon={<Pin size={13} />} />}
+          {onRequestPinAsTab && (
+            <ToolbarButton onClick={onRequestPinAsTab} icon={<Pin size={9} />} mini />
+          )}
           {onRequestFullscreen && (
             <ToolbarButton
               onClick={onRequestFullscreen}
-              icon={<Expand size={13} />}
-              label="Fullscreen"
+              icon={<Expand size={9} />}
+              mini
             />
           )}
-          {onRequestClose && <ToolbarButton onClick={onRequestClose} icon={<X size={13} />} />}
+          {onRequestClose && <ToolbarButton onClick={onRequestClose} icon={<X size={9} />} mini />}
         </div>
       </div>
 
       <div className="absolute bottom-3 right-3 z-20 pointer-events-none">
         <div
-          className="pointer-events-auto flex items-center gap-0.5 rounded-lg px-1 py-0.5 backdrop-blur-sm"
+          className="pointer-events-auto flex items-center gap-0.5 rounded-lg px-0.5 py-[2px] backdrop-blur-sm"
           style={{
             background: 'rgba(8, 12, 24, 0.86)',
             border: '1px solid rgba(100, 200, 255, 0.1)',
           }}
         >
-          <ToolbarButton onClick={onZoomOut} icon={<ZoomOut size={14} />} />
-          <ToolbarButton onClick={onZoomToFit} icon={<Maximize2 size={14} />} label="Fit" />
-          <ToolbarButton onClick={onZoomIn} icon={<ZoomIn size={14} />} />
+          <ToolbarButton onClick={onZoomOut} icon={<ZoomOut size={11} />} compact />
+          <ToolbarButton onClick={onZoomToFit} icon={<Maximize2 size={11} />} label="Fit" compact />
+          <ToolbarButton onClick={onZoomIn} icon={<ZoomIn size={11} />} compact />
         </div>
       </div>
-
-      {showBlockingHint && (
-        <div className="absolute bottom-3 left-3 z-20 pointer-events-none">
-          <div
-            className="pointer-events-auto rounded-lg px-2.5 py-1 text-[10px] font-mono backdrop-blur-sm"
-            style={{
-              background: 'rgba(40, 10, 18, 0.78)',
-              border: '1px solid rgba(239, 68, 68, 0.18)',
-              color: 'rgba(254, 202, 202, 0.95)',
-            }}
-          >
-            Red lines - blockers, click to inspect
-          </div>
-        </div>
-      )}
     </>
   );
 }
@@ -231,16 +237,29 @@ function ToolbarButton({
   icon,
   label,
   active = false,
+  compact = false,
+  mini = false,
+  title,
 }: {
   onClick?: () => void;
   icon: React.ReactNode;
   label?: string;
   active?: boolean;
+  compact?: boolean;
+  mini?: boolean;
+  title?: string;
 }): React.JSX.Element {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-mono transition-colors cursor-pointer ${
+      title={title}
+      className={`flex items-center rounded-md font-mono transition-colors cursor-pointer ${
+        mini
+          ? 'size-5 justify-center p-0 text-[0]'
+          : compact
+            ? 'gap-0.5 px-1 py-0.5 text-[9px]'
+            : 'gap-1 px-2 py-1 text-[11px]'
+      } ${
         active
           ? 'text-[#aaeeff] bg-[rgba(100,200,255,0.14)]'
           : 'text-[#66ccff90] hover:text-[#aaeeff] hover:bg-[rgba(100,200,255,0.1)]'

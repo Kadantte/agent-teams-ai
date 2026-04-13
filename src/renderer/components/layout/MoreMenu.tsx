@@ -7,6 +7,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useStore } from '@renderer/store';
 import { triggerDownload } from '@renderer/utils/sessionExporter';
 import { formatShortcut } from '@renderer/utils/stringUtils';
@@ -22,6 +23,7 @@ import {
   Type,
   Users,
 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 import type { SessionDetail } from '@renderer/types/data';
 import type { Tab } from '@renderer/types/tabs';
@@ -51,12 +53,23 @@ export const MoreMenu = ({
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const openCommandPalette = useStore((s) => s.openCommandPalette);
-  const openExtensionsTab = useStore((s) => s.openExtensionsTab);
-  const openSessionReport = useStore((s) => s.openSessionReport);
-  const openSchedulesTab = useStore((s) => s.openSchedulesTab);
-  const openSettingsTab = useStore((s) => s.openSettingsTab);
-  const openTeamsTab = useStore((s) => s.openTeamsTab);
+  const {
+    openCommandPalette,
+    openExtensionsTab,
+    openSessionReport,
+    openSchedulesTab,
+    openSettingsTab,
+    openTeamsTab,
+  } = useStore(
+    useShallow((s) => ({
+      openCommandPalette: () => s.openCommandPalette(),
+      openExtensionsTab: () => s.openExtensionsTab(),
+      openSessionReport: (tabId: string) => s.openSessionReport(tabId),
+      openSchedulesTab: () => s.openSchedulesTab(),
+      openSettingsTab: () => s.openSettingsTab(),
+      openTeamsTab: () => s.openTeamsTab(),
+    }))
+  );
 
   // Close on outside click
   useEffect(() => {
@@ -212,19 +225,25 @@ export const MoreMenu = ({
   return (
     <div ref={containerRef} className="relative">
       {/* Trigger button */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        onMouseEnter={() => setButtonHover(true)}
-        onMouseLeave={() => setButtonHover(false)}
-        className="rounded-md p-2 transition-colors"
-        style={{
-          color: buttonHover || isOpen ? 'var(--color-text)' : 'var(--color-text-muted)',
-          backgroundColor: buttonHover || isOpen ? 'var(--color-surface-raised)' : 'transparent',
-        }}
-        title="More actions"
-      >
-        <MoreHorizontal className="size-4" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            onMouseEnter={() => setButtonHover(true)}
+            onMouseLeave={() => setButtonHover(false)}
+            className="rounded-md p-2 transition-colors"
+            style={{
+              color: buttonHover || isOpen ? 'var(--color-text)' : 'var(--color-text-muted)',
+              backgroundColor:
+                buttonHover || isOpen ? 'var(--color-surface-raised)' : 'transparent',
+            }}
+            aria-label="More actions"
+          >
+            <MoreHorizontal className="size-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">More actions</TooltipContent>
+      </Tooltip>
 
       {/* Dropdown menu */}
       {isOpen && (

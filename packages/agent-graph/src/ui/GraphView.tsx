@@ -43,6 +43,8 @@ export interface GraphViewProps {
   onRequestClose?: () => void;
   onRequestPinAsTab?: () => void;
   onRequestFullscreen?: () => void;
+  onOpenTeamPage?: () => void;
+  onCreateTask?: () => void;
   /** Custom overlay renderer — replaces built-in GraphOverlay. Allows host app to reuse its own components. */
   renderOverlay?: (props: {
     node: GraphNode;
@@ -63,6 +65,9 @@ export interface GraphViewProps {
     getActivityAnchorScreenPlacement: (
       ownerNodeId: string,
     ) => { x: number; y: number; scale: number; visible: boolean } | null;
+    getNodeScreenPosition: (
+      nodeId: string,
+    ) => { x: number; y: number; visible: boolean } | null;
     focusNodeIds: ReadonlySet<string> | null;
   }) => React.ReactNode;
 }
@@ -76,6 +81,8 @@ export function GraphView({
   onRequestClose,
   onRequestPinAsTab,
   onRequestFullscreen,
+  onOpenTeamPage,
+  onCreateTask,
   renderOverlay,
   renderEdgeOverlay,
   renderHud,
@@ -221,6 +228,24 @@ export function GraphView({
       viewportWidth: viewport.width,
       viewportHeight: viewport.height,
     });
+  }, [getViewportSize]);
+  const getNodeScreenPosition = useCallback((nodeId: string) => {
+    const viewport = getViewportSize();
+    if (viewport.width <= 0 || viewport.height <= 0) {
+      return null;
+    }
+    const node = simulationRef.current.stateRef.current.nodes.find((candidate) => candidate.id === nodeId);
+    if (!node || node.x == null || node.y == null) {
+      return null;
+    }
+    const transform = cameraRef.current.transformRef.current;
+    const x = node.x * transform.zoom + transform.x;
+    const y = node.y * transform.zoom + transform.y;
+    return {
+      x,
+      y,
+      visible: x > -80 && x < viewport.width + 80 && y > -80 && y < viewport.height + 80,
+    };
   }, [getViewportSize]);
 
   const animate = useCallback(() => {
@@ -673,10 +698,11 @@ export function GraphView({
         onRequestClose={onRequestClose}
         onRequestPinAsTab={onRequestPinAsTab}
         onRequestFullscreen={onRequestFullscreen}
+        onOpenTeamPage={onOpenTeamPage}
+        onCreateTask={onCreateTask}
         teamName={data.teamName}
         teamColor={data.teamColor}
         isAlive={data.isAlive}
-        showBlockingHint={filters.showEdges && hasBlockingEdges && !selectedNode && !selectedEdge}
       />
 
       {renderHud ? (
@@ -684,6 +710,7 @@ export function GraphView({
           {renderHud({
             getLaunchAnchorScreenPlacement,
             getActivityAnchorScreenPlacement,
+            getNodeScreenPosition,
             focusNodeIds: focusState.focusNodeIds,
           })}
         </div>
