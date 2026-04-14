@@ -19,6 +19,7 @@ import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { nameColorSet } from '@renderer/utils/projectColor';
+import { buildSlashCommandSuggestions } from '@renderer/utils/skillCommandSuggestions';
 import {
   extractTaskRefsFromText,
   stripEncodedTaskReferenceMetadata,
@@ -208,17 +209,21 @@ export const MessageComposer = ({
 
   const { suggestions: teamMentionSuggestions } = useTeamSuggestions(teamName);
   const { suggestions: taskSuggestions } = useTaskSuggestions(teamName);
+  // Project skills as slash command suggestions
+  const projectSkills = useStore(
+    useShallow((s) => (projectPath ? (s.skillsProjectCatalogByProjectPath[projectPath] ?? []) : []))
+  );
+  const userSkills = useStore(useShallow((s) => s.skillsUserCatalog));
+  const fetchSkillsCatalog = useStore((s) => s.fetchSkillsCatalog);
+
+  // Fetch skills catalog for the team's project on mount / project change
+  useEffect(() => {
+    void fetchSkillsCatalog(projectPath ?? undefined);
+  }, [fetchSkillsCatalog, projectPath]);
+
   const slashCommandSuggestions = useMemo<MentionSuggestion[]>(
-    () =>
-      KNOWN_SLASH_COMMANDS.map((command) => ({
-        id: `command:${command.name}`,
-        name: command.name,
-        command: command.command,
-        description: command.description,
-        subtitle: command.description,
-        type: 'command',
-      })),
-    []
+    () => buildSlashCommandSuggestions(KNOWN_SLASH_COMMANDS, projectSkills, userSkills),
+    [projectSkills, userSkills]
   );
 
   const trimmed = stripEncodedTaskReferenceMetadata(draft.text).trim();
