@@ -29,6 +29,7 @@ export interface ListDashboardRecentProjectsDeps<TViewModel> {
 export class ListDashboardRecentProjectsUseCase<TViewModel> {
   readonly #cacheTtlMs: number;
   readonly #degradedCacheTtlMs: number;
+  readonly #inFlightByCacheKey = new Map<string, Promise<TViewModel>>();
 
   constructor(private readonly deps: ListDashboardRecentProjectsDeps<TViewModel>) {
     this.#cacheTtlMs = deps.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
@@ -41,6 +42,20 @@ export class ListDashboardRecentProjectsUseCase<TViewModel> {
       return cached;
     }
 
+    const inFlight = this.#inFlightByCacheKey.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const execution = this.#executeUncached(cacheKey).finally(() => {
+      this.#inFlightByCacheKey.delete(cacheKey);
+    });
+
+    this.#inFlightByCacheKey.set(cacheKey, execution);
+    return execution;
+  }
+
+  async #executeUncached(cacheKey: string): Promise<TViewModel> {
     const startedAt = this.deps.clock.now();
     const results = await Promise.all(
       this.deps.sources.map((source, index) => this.#loadSource(source, index))

@@ -12,10 +12,10 @@ import type { RecentProjectIdentityResolver } from '@features/recent-projects/ma
 import type { ServiceContext } from '@main/services';
 
 const CODEX_THREAD_LIMIT = 40;
-const CODEX_LIVE_FETCH_TIMEOUT_MS = 1_200;
-const CODEX_ARCHIVED_FETCH_TIMEOUT_MS = 1_800;
-const CODEX_REQUEST_TIMEOUT_MS = 1_800;
-const CODEX_SOURCE_TIMEOUT_MS = 1_500;
+const CODEX_LIVE_FETCH_TIMEOUT_MS = 4_500;
+const CODEX_ARCHIVED_FETCH_TIMEOUT_MS = 2_500;
+const CODEX_REQUEST_TIMEOUT_MS = 4_500;
+const CODEX_SOURCE_TIMEOUT_MS = 5_200;
 const FAST_ARCHIVED_MERGE_TIMEOUT_MS = 150;
 
 function isInteractiveSource(source: unknown): boolean {

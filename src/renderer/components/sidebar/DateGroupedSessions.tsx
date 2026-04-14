@@ -325,7 +325,28 @@ export const DateGroupedSessions = (): React.JSX.Element => {
     });
   }, [viewMode, repositoryGroups, projects]);
 
-  const activeProjectValue = viewMode === 'grouped' ? selectedRepositoryId : activeProjectId;
+  const effectiveSelectedWorktreeId =
+    selectedWorktreeId ?? activeProjectId ?? selectedProjectId ?? null;
+  const effectiveSelectedRepositoryId = useMemo(() => {
+    if (selectedRepositoryId) {
+      return selectedRepositoryId;
+    }
+
+    if (!effectiveSelectedWorktreeId) {
+      return null;
+    }
+
+    return (
+      repositoryGroups.find((repo) =>
+        repo.worktrees.some((worktree) => worktree.id === effectiveSelectedWorktreeId)
+      )?.id ?? null
+    );
+  }, [effectiveSelectedWorktreeId, repositoryGroups, selectedRepositoryId]);
+
+  const activeProjectValue =
+    viewMode === 'grouped'
+      ? effectiveSelectedRepositoryId
+      : (activeProjectId ?? selectedProjectId ?? null);
 
   const handleProjectValueChange = (id: string): void => {
     if (viewMode === 'grouped') selectRepository(id);
@@ -333,8 +354,8 @@ export const DateGroupedSessions = (): React.JSX.Element => {
   };
 
   // Worktree state
-  const activeRepo = repositoryGroups.find((r) => r.id === selectedRepositoryId);
-  const activeWorktree = activeRepo?.worktrees.find((w) => w.id === selectedWorktreeId);
+  const activeRepo = repositoryGroups.find((r) => r.id === effectiveSelectedRepositoryId);
+  const activeWorktree = activeRepo?.worktrees.find((w) => w.id === effectiveSelectedWorktreeId);
   const worktrees = (activeRepo?.worktrees ?? []).filter(
     (w) => (w.totalSessions ?? w.sessions.length) > 0
   );
@@ -684,7 +705,7 @@ export const DateGroupedSessions = (): React.JSX.Element => {
                 {mainWorktree && (
                   <WorktreeItem
                     worktree={mainWorktree}
-                    isSelected={mainWorktree.id === selectedWorktreeId}
+                    isSelected={mainWorktree.id === effectiveSelectedWorktreeId}
                     onSelect={() => handleSelectWorktree(mainWorktree)}
                   />
                 )}
@@ -705,7 +726,7 @@ export const DateGroupedSessions = (): React.JSX.Element => {
                       <WorktreeItem
                         key={worktree.id}
                         worktree={worktree}
-                        isSelected={worktree.id === selectedWorktreeId}
+                        isSelected={worktree.id === effectiveSelectedWorktreeId}
                         onSelect={() => handleSelectWorktree(worktree)}
                       />
                     ))}
