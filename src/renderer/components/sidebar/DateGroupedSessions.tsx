@@ -38,6 +38,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { WorktreeBadge } from '../common/WorktreeBadge';
 import { Combobox, type ComboboxOption } from '../ui/combobox';
 
+import { resolveEffectiveSelectedRepositoryId } from './dateGroupedSessionsSelection';
 import { SESSION_PROVIDER_IDS, SessionFiltersPopover } from './SessionFiltersPopover';
 import { SessionItem } from './SessionItem';
 
@@ -327,21 +328,15 @@ export const DateGroupedSessions = (): React.JSX.Element => {
 
   const effectiveSelectedWorktreeId =
     selectedWorktreeId ?? activeProjectId ?? selectedProjectId ?? null;
-  const effectiveSelectedRepositoryId = useMemo(() => {
-    if (selectedRepositoryId) {
-      return selectedRepositoryId;
-    }
-
-    if (!effectiveSelectedWorktreeId) {
-      return null;
-    }
-
-    return (
-      repositoryGroups.find((repo) =>
-        repo.worktrees.some((worktree) => worktree.id === effectiveSelectedWorktreeId)
-      )?.id ?? null
-    );
-  }, [effectiveSelectedWorktreeId, repositoryGroups, selectedRepositoryId]);
+  const effectiveSelectedRepositoryId = useMemo(
+    () =>
+      resolveEffectiveSelectedRepositoryId({
+        repositoryGroups,
+        selectedRepositoryId,
+        effectiveSelectedWorktreeId,
+      }),
+    [effectiveSelectedWorktreeId, repositoryGroups, selectedRepositoryId]
+  );
 
   const activeProjectValue =
     viewMode === 'grouped'
