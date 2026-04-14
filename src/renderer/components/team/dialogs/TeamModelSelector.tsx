@@ -16,6 +16,7 @@ import {
   GEMINI_UI_DISABLED_REASON,
   isGeminiUiFrozen,
 } from '@renderer/utils/geminiUiFreeze';
+import { stripTrailingOneMillionSuffixes } from '@renderer/utils/teamModelContext';
 import {
   doesTeamModelCarryProviderBrand,
   getProviderScopedTeamModelLabel,
@@ -99,7 +100,7 @@ export function computeEffectiveTeamModel(
   limitContext: boolean,
   providerId: 'anthropic' | 'codex' | 'gemini' = 'anthropic'
 ): string | undefined {
-  const base = selectedModel || undefined;
+  const base = stripTrailingOneMillionSuffixes(selectedModel);
   if (providerId !== 'anthropic') return base;
   if (limitContext) return base;
   if (base === 'haiku') return base;
