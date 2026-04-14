@@ -78,7 +78,7 @@ export default defineConfig([
   // Import plugin configuration - Renderer (uses tsconfig.json)
   {
     name: 'import-plugin-renderer',
-    files: ['src/renderer/**/*.{ts,tsx}'],
+    files: ['src/renderer/**/*.{ts,tsx}', 'src/features/**/*.{ts,tsx}'],
     plugins: {
       import: importPlugin,
     },
@@ -94,6 +94,137 @@ export default defineConfig([
       'import/no-cycle': ['error', { maxDepth: 3, ignoreExternal: true }],
       'import/no-unresolved': 'error',
       'import/no-default-export': 'warn',
+    },
+  },
+
+  // Feature-specific architecture guard rails - recent-projects
+  {
+    name: 'feature-recent-projects-public-entrypoints',
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/features/recent-projects/**/*'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@features/recent-projects/contracts/**',
+                '@features/recent-projects/core/**',
+                '@features/recent-projects/main/**',
+                '@features/recent-projects/preload/**',
+                '@features/recent-projects/renderer/**',
+              ],
+              message:
+                'Import recent-projects only through its public entrypoints: @features/recent-projects/contracts, @features/recent-projects/main, @features/recent-projects/preload, or @features/recent-projects/renderer.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'feature-recent-projects-core-domain-guards',
+    files: ['src/features/recent-projects/core/domain/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@features/recent-projects/core/application/**',
+                '@features/recent-projects/main/**',
+                '@features/recent-projects/preload/**',
+                '@features/recent-projects/renderer/**',
+                '@main/**',
+                '@renderer/**',
+                '@preload/**',
+                'electron',
+                'fastify',
+                'child_process',
+                'node:child_process',
+              ],
+              message:
+                'recent-projects core/domain must stay side-effect free and cannot depend on application, adapters, infrastructure, or platform code.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'feature-recent-projects-core-application-guards',
+    files: ['src/features/recent-projects/core/application/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@features/recent-projects/main/**',
+                '@features/recent-projects/preload/**',
+                '@features/recent-projects/renderer/**',
+                '@renderer/**',
+                'electron',
+                'fastify',
+                'child_process',
+                'node:child_process',
+              ],
+              message:
+                'recent-projects core/application may depend only on domain, contracts, and application ports - not on adapters or runtime frameworks.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'feature-recent-projects-preload-guards',
+    files: ['src/features/recent-projects/preload/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@features/recent-projects/main/**',
+                '@main/**',
+                '@renderer/**',
+              ],
+              message:
+                'recent-projects preload may depend only on contracts and preload-local bridge helpers.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'feature-recent-projects-renderer-ui-guards',
+    files: ['src/features/recent-projects/renderer/ui/**/*.tsx'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@renderer/api',
+                '@renderer/api/**',
+                '@renderer/store',
+                '@renderer/store/**',
+                '@main/**',
+                'electron',
+              ],
+              message:
+                'recent-projects renderer/ui must stay presentational. Move transport, store access, and navigation logic into hooks or adapters.',
+            },
+          ],
+        },
+      ],
     },
   },
 
@@ -548,7 +679,7 @@ export default defineConfig([
 
       // === Import Restrictions ===
       // Note: boundaries/element-types handles main/renderer separation
-      'no-restricted-imports': 'warn',
+      'no-restricted-imports': 'off',
 
       // === Mutation Prevention ===
       'no-param-reassign': 'warn',

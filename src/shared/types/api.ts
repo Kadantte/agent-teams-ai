@@ -39,8 +39,8 @@ import type {
 import type {
   AddMemberRequest,
   AddTaskCommentRequest,
-  BoardTaskActivityDetailResult,
   AttachmentFileData,
+  BoardTaskActivityDetailResult,
   BoardTaskActivityEntry,
   BoardTaskExactLogDetailResult,
   BoardTaskExactLogSummariesResponse,
@@ -89,6 +89,7 @@ import type {
 import type { TerminalAPI } from './terminal';
 import type { TmuxAPI } from './tmux';
 import type { WaterfallData } from './visualization';
+import type { RecentProjectsElectronApi } from '@features/recent-projects/contracts';
 import type {
   ConversationGroup,
   FileChangeEvent,
@@ -721,7 +722,7 @@ export interface ReviewAPI {
 /**
  * Complete Electron API exposed to the renderer process via preload script.
  */
-export interface ElectronAPI {
+export interface ElectronAPI extends RecentProjectsElectronApi {
   getAppVersion: () => Promise<string>;
   getProjects: () => Promise<Project[]>;
   getSessions: (projectId: string) => Promise<Session[]>;

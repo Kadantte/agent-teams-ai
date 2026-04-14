@@ -1,3 +1,4 @@
+import { createRecentProjectsBridge } from '@features/recent-projects/preload';
 import { WINDOW_ZOOM_FACTOR_CHANGED_CHANNEL } from '@shared/constants';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
@@ -243,6 +244,7 @@ import type {
   ClaudeRootInfo,
   CliInstallationStatus,
   CliInstallerProgress,
+  CliProviderId,
   ConflictCheckResult,
   ContextInfo,
   CreateScheduleInput,
@@ -448,6 +450,7 @@ ipcRenderer.on(
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 const electronAPI: ElectronAPI = {
+  ...createRecentProjectsBridge(),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getProjects: () => ipcRenderer.invoke('get-projects'),
   getSessions: (projectId: string) => ipcRenderer.invoke('get-sessions', projectId),
@@ -1408,7 +1411,7 @@ const electronAPI: ElectronAPI = {
     getStatus: async (): Promise<CliInstallationStatus> => {
       return invokeIpcWithResult<CliInstallationStatus>(CLI_INSTALLER_GET_STATUS);
     },
-    getProviderStatus: async (providerId: import('@shared/types').CliProviderId) => {
+    getProviderStatus: async (providerId: CliProviderId) => {
       return invokeIpcWithResult(CLI_INSTALLER_GET_PROVIDER_STATUS, providerId);
     },
     install: async (): Promise<void> => {

@@ -6,6 +6,7 @@
  * to run in a regular browser connected to an HTTP server.
  */
 
+import type { DashboardRecentProject } from '@features/recent-projects/contracts';
 import type {
   AppConfig,
   AttachmentFileData,
@@ -213,6 +214,9 @@ export class HttpAPIClient implements ElectronAPI {
   // ---------------------------------------------------------------------------
 
   getAppVersion = (): Promise<string> => this.get<string>('/api/version');
+
+  getDashboardRecentProjects = (): Promise<DashboardRecentProject[]> =>
+    this.get<DashboardRecentProject[]>('/api/dashboard/recent-projects');
 
   getProjects = (): Promise<Project[]> => this.get<Project[]>('/api/projects');
 
@@ -1218,7 +1222,7 @@ export class HttpAPIClient implements ElectronAPI {
     },
   };
 
-  schedules = {
+  schedules: ElectronAPI['schedules'] = {
     list: async () => {
       console.warn('Schedules not available in browser mode');
       return [] as Schedule[];
