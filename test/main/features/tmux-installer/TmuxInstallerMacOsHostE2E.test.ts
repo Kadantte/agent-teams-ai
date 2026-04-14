@@ -11,12 +11,22 @@ import { isTmuxRuntimeReadyForCurrentPlatform } from '@features/tmux-installer/m
 import { TmuxInstallStrategyResolver } from '@features/tmux-installer/main/infrastructure/installer/TmuxInstallStrategyResolver';
 import { TmuxPackageManagerResolver } from '@features/tmux-installer/main/infrastructure/platform/TmuxPackageManagerResolver';
 import { TmuxPlatformResolver } from '@features/tmux-installer/main/infrastructure/platform/TmuxPlatformResolver';
+import { TmuxPlatformCommandExecutor } from '@features/tmux-installer/main/infrastructure/runtime/TmuxPlatformCommandExecutor';
 import { buildEnrichedEnv } from '@main/utils/cliEnv';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 
 const isDarwin = process.platform === 'darwin';
 const tmuxPath = isDarwin ? tryResolveBinary('tmux') : null;
 const brewPath = isDarwin ? tryResolveBinary('brew') : null;
+
+function createIsolatedTmuxNames(): { socketName: string; sessionName: string; marker: string } {
+  const suffix = `${process.pid}-${Date.now()}`;
+  return {
+    socketName: `codex-e2e-${suffix}`,
+    sessionName: `codex_e2e_${suffix.replace(/-/g, '_')}`,
+    marker: `codex-macos-runtime-${suffix}`,
+  };
+}
 
 function tryResolveBinary(command: string): string | null {
   try {
@@ -75,5 +85,43 @@ describe.runIf(isDarwin)('tmux installer macOS host e2e', () => {
 
   it.skipIf(!tmuxPath)('keeps the current platform on the tmux runtime path', async () => {
     await expect(isTmuxRuntimeReadyForCurrentPlatform()).resolves.toBe(true);
+  });
+
+  it.skipIf(!tmuxPath)('runs a real isolated tmux session on macOS and executes a shell command in it', async () => {
+    const executor = new TmuxPlatformCommandExecutor();
+    const { socketName, sessionName, marker } = createIsolatedTmuxNames();
+
+    try {
+      const createSession = await executor.execTmux(
+        ['-L', socketName, 'new-session', '-d', '-s', sessionName, '/bin/sh'],
+        5_000
+      );
+      expect(createSession.exitCode).toBe(0);
+
+      const listPanes = await executor.execTmux(
+        ['-L', socketName, 'list-panes', '-t', sessionName, '-F', '#{pane_id}'],
+        5_000
+      );
+      expect(listPanes.exitCode).toBe(0);
+      const paneId = listPanes.stdout.trim();
+      expect(paneId).toMatch(/^%/);
+
+      const sendKeys = await executor.execTmux(
+        ['-L', socketName, 'send-keys', '-t', paneId, `printf '${marker}'`, 'Enter'],
+        5_000
+      );
+      expect(sendKeys.exitCode).toBe(0);
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const capturePane = await executor.execTmux(
+        ['-L', socketName, 'capture-pane', '-p', '-t', paneId],
+        5_000
+      );
+      expect(capturePane.exitCode).toBe(0);
+      expect(capturePane.stdout).toContain(marker);
+    } finally {
+      await executor.execTmux(['-L', socketName, 'kill-session', '-t', sessionName], 3_000);
+    }
   });
 });
