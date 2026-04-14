@@ -301,12 +301,36 @@ export const DateGroupedSessions = (): React.JSX.Element => {
     fetchProjects,
   ]);
 
+  const effectiveSelectedWorktreeId =
+    selectedWorktreeId ?? activeProjectId ?? selectedProjectId ?? null;
+  const effectiveSelectedRepositoryId = useMemo(
+    () =>
+      resolveEffectiveSelectedRepositoryId({
+        repositoryGroups,
+        selectedRepositoryId,
+        effectiveSelectedWorktreeId,
+      }),
+    [effectiveSelectedWorktreeId, repositoryGroups, selectedRepositoryId]
+  );
+
+  const activeProjectValue =
+    viewMode === 'grouped'
+      ? effectiveSelectedRepositoryId
+      : (activeProjectId ?? selectedProjectId ?? null);
+
   // Project combobox options
   const projectComboboxOptions = useMemo((): ComboboxOption[] => {
     const items =
       viewMode === 'grouped'
-        ? repositoryGroups.filter((r) => r.totalSessions > 0)
-        : projects.filter((p) => (p.totalSessions ?? p.sessions.length) > 0);
+        ? repositoryGroups.filter(
+            (repo) => repo.totalSessions > 0 || repo.id === effectiveSelectedRepositoryId
+          )
+        : projects.filter(
+            (project) =>
+              (project.totalSessions ?? project.sessions.length) > 0 ||
+              project.id === activeProjectValue
+          );
+
     return items.map((item) => {
       const sessionCount =
         viewMode === 'grouped'
@@ -324,24 +348,7 @@ export const DateGroupedSessions = (): React.JSX.Element => {
         meta: { sessionCount, path },
       };
     });
-  }, [viewMode, repositoryGroups, projects]);
-
-  const effectiveSelectedWorktreeId =
-    selectedWorktreeId ?? activeProjectId ?? selectedProjectId ?? null;
-  const effectiveSelectedRepositoryId = useMemo(
-    () =>
-      resolveEffectiveSelectedRepositoryId({
-        repositoryGroups,
-        selectedRepositoryId,
-        effectiveSelectedWorktreeId,
-      }),
-    [effectiveSelectedWorktreeId, repositoryGroups, selectedRepositoryId]
-  );
-
-  const activeProjectValue =
-    viewMode === 'grouped'
-      ? effectiveSelectedRepositoryId
-      : (activeProjectId ?? selectedProjectId ?? null);
+  }, [activeProjectValue, effectiveSelectedRepositoryId, projects, repositoryGroups, viewMode]);
 
   const handleProjectValueChange = (id: string): void => {
     if (viewMode === 'grouped') selectRepository(id);
