@@ -7,6 +7,10 @@ import { buildTaskCountsByProject, normalizePath } from '@renderer/utils/pathNor
 import { useShallow } from 'zustand/react/shallow';
 
 import { adaptRecentProjectsSection } from '../adapters/RecentProjectsSectionAdapter';
+import {
+  getRecentProjectsClientSnapshot,
+  loadRecentProjectsWithClientCache,
+} from '../utils/recentProjectsClientCache';
 
 import { useOpenRecentProject } from './useOpenRecentProject';
 
@@ -51,27 +55,45 @@ export function useRecentProjectsSection(
   openProjectPath: (projectPath: string) => Promise<void>;
   selectProjectFolder: () => Promise<void>;
 } {
-  const { globalTasks, globalTasksLoading, fetchAllTasks, teams } = useStore(
-    useShallow((state) => ({
-      globalTasks: state.globalTasks,
-      globalTasksLoading: state.globalTasksLoading,
-      fetchAllTasks: state.fetchAllTasks,
-      teams: state.teams,
-    }))
-  );
+  const { globalTasks, globalTasksInitialized, globalTasksLoading, fetchAllTasks, teams } =
+    useStore(
+      useShallow((state) => ({
+        globalTasks: state.globalTasks,
+        globalTasksInitialized: state.globalTasksInitialized,
+        globalTasksLoading: state.globalTasksLoading,
+        fetchAllTasks: state.fetchAllTasks,
+        teams: state.teams,
+      }))
+    );
+  const initialSnapshot = useMemo(() => getRecentProjectsClientSnapshot(), []);
   const { openRecentProject, openProjectPath, selectProjectFolder } = useOpenRecentProject();
-  const [recentProjects, setRecentProjects] = useState<DashboardRecentProject[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [recentProjects, setRecentProjects] = useState<DashboardRecentProject[]>(
+    initialSnapshot?.projects ?? []
+  );
+  const [loading, setLoading] = useState(initialSnapshot == null);
   const [error, setError] = useState<string | null>(null);
   const [visibleProjects, setVisibleProjects] = useState(maxProjects);
   const [aliveTeams, setAliveTeams] = useState<string[]>([]);
-  const hasFetchedTasksRef = useRef(false);
+  const hasFetchedTasksRef = useRef(globalTasksInitialized);
+  const recentProjectsRef = useRef<DashboardRecentProject[]>(initialSnapshot?.projects ?? []);
 
-  const reload = useCallback(async (): Promise<void> => {
-    setLoading(true);
+  useEffect(() => {
+    recentProjectsRef.current = recentProjects;
+  }, [recentProjects]);
+
+  const reload = useCallback(async (options?: { force?: boolean }): Promise<void> => {
+    const hasVisibleProjects =
+      recentProjectsRef.current.length > 0 || getRecentProjectsClientSnapshot() != null;
+
+    if (!hasVisibleProjects) {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const projects = await api.getDashboardRecentProjects();
+      const projects = await loadRecentProjectsWithClientCache(
+        () => api.getDashboardRecentProjects(),
+        options
+      );
       setRecentProjects(projects);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to load recent projects');
@@ -81,17 +103,23 @@ export function useRecentProjectsSection(
   }, []);
 
   useEffect(() => {
-    void reload();
+    const snapshot = getRecentProjectsClientSnapshot();
+    if (snapshot && !snapshot.isStale) {
+      return;
+    }
+
+    void reload({ force: snapshot != null });
   }, [reload]);
 
   useEffect(() => {
-    if (recentProjects.length === 0 || hasFetchedTasksRef.current) {
+    if (recentProjects.length === 0 || hasFetchedTasksRef.current || globalTasksInitialized) {
+      hasFetchedTasksRef.current = hasFetchedTasksRef.current || globalTasksInitialized;
       return;
     }
 
     hasFetchedTasksRef.current = true;
     void fetchAllTasks();
-  }, [fetchAllTasks, recentProjects.length]);
+  }, [fetchAllTasks, globalTasksInitialized, recentProjects.length]);
 
   useEffect(() => {
     let cancelled = false;
