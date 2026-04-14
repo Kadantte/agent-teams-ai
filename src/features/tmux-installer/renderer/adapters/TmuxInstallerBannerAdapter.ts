@@ -26,6 +26,7 @@ export interface TmuxInstallerBannerViewModel {
   progressPercent: number | null;
   logs: string[];
   manualHints: TmuxInstallHint[];
+  manualHintsCollapsible: boolean;
   primaryGuideUrl: string | null;
   installSupported: boolean;
   installDisabled: boolean;
@@ -79,6 +80,8 @@ export class TmuxInstallerBannerAdapter {
       : null;
     const versionLabel =
       status?.effective.version ?? status?.host.version ?? status?.wsl?.tmuxVersion ?? null;
+    const manualHints = status?.autoInstall.manualHints ?? [];
+    const manualHintsCollapsible = status?.platform === 'win32' && manualHints.length > 0;
     const installLabel =
       snapshot.phase === 'idle' &&
       status?.platform === 'win32' &&
@@ -104,7 +107,8 @@ export class TmuxInstallerBannerAdapter {
       phase: snapshot.phase,
       progressPercent: formatTmuxInstallerProgress(snapshot.phase),
       logs: snapshot.logs,
-      manualHints: status?.autoInstall.manualHints ?? [],
+      manualHints,
+      manualHintsCollapsible,
       primaryGuideUrl,
       installSupported: status?.autoInstall.supported ?? false,
       installDisabled:

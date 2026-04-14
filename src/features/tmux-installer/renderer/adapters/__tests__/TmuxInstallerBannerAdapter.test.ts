@@ -71,6 +71,7 @@ describe('TmuxInstallerBannerAdapter', () => {
     expect(result.primaryGuideUrl).toBeNull();
     expect(result.progressPercent).toBeNull();
     expect(result.manualHints).toHaveLength(1);
+    expect(result.manualHintsCollapsible).toBe(false);
     expect(result.body).toContain('persistent teammate reliability');
   });
 
@@ -143,6 +144,7 @@ describe('TmuxInstallerBannerAdapter', () => {
     expect(result.platformLabel).toBe('Windows');
     expect(result.primaryGuideUrl).toBe('https://learn.microsoft.com/en-us/windows/wsl/install');
     expect(result.progressPercent).toBe(100);
+    expect(result.manualHintsCollapsible).toBe(true);
   });
 
   it('keeps the banner visible when tmux is installed but runtime is not ready yet', () => {

@@ -1,6 +1,14 @@
 import React from 'react';
 
-import { AlertTriangle, ExternalLink, RefreshCw, Wrench, XCircle } from 'lucide-react';
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  RefreshCw,
+  Wrench,
+  XCircle,
+} from 'lucide-react';
 
 import { useTmuxInstallerBanner } from '../hooks/useTmuxInstallerBanner';
 
@@ -28,6 +36,7 @@ export function TmuxInstallerBannerView(): React.JSX.Element | null {
   const { viewModel, install, cancel, submitInput, refresh, toggleDetails, openExternal } =
     useTmuxInstallerBanner();
   const [inputValue, setInputValue] = React.useState('');
+  const [manualHintsExpanded, setManualHintsExpanded] = React.useState(false);
 
   React.useEffect(() => {
     if (!viewModel.acceptsInput) {
@@ -35,9 +44,18 @@ export function TmuxInstallerBannerView(): React.JSX.Element | null {
     }
   }, [viewModel.acceptsInput]);
 
+  React.useEffect(() => {
+    if (!viewModel.manualHintsCollapsible) {
+      setManualHintsExpanded(false);
+    }
+  }, [viewModel.manualHintsCollapsible]);
+
   if (!viewModel.visible) {
     return null;
   }
+
+  const manualHintsVisible =
+    viewModel.manualHints.length > 0 && (!viewModel.manualHintsCollapsible || manualHintsExpanded);
 
   return (
     <div
@@ -112,6 +130,23 @@ export function TmuxInstallerBannerView(): React.JSX.Element | null {
             >
               <ExternalLink className="size-4" />
               Manual guide
+            </button>
+          )}
+          {viewModel.manualHintsCollapsible && (
+            <button
+              type="button"
+              onClick={() => setManualHintsExpanded((current) => !current)}
+              className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-white/5"
+              style={{ borderColor: 'var(--color-border)' }}
+            >
+              {manualHintsExpanded ? (
+                <ChevronUp className="size-4" />
+              ) : (
+                <ChevronDown className="size-4" />
+              )}
+              {manualHintsExpanded
+                ? 'Hide setup steps'
+                : `Show setup steps (${viewModel.manualHints.length})`}
             </button>
           )}
           <button
@@ -193,7 +228,7 @@ export function TmuxInstallerBannerView(): React.JSX.Element | null {
         </div>
       )}
 
-      {viewModel.manualHints.length > 0 && (
+      {manualHintsVisible && (
         <div className="mt-3 grid gap-2 lg:grid-cols-2">
           {viewModel.manualHints.map((hint) => (
             <div
