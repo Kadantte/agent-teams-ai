@@ -1,5 +1,6 @@
 import { normalizeCreateLaunchProviderForUi } from '@renderer/utils/geminiUiFreeze';
 import { normalizeTeamModelForUi } from '@renderer/utils/teamModelAvailability';
+import { extractProviderScopedBaseModel } from '@renderer/utils/teamModelContext';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 
@@ -27,12 +28,15 @@ interface LaunchDialogPrefillResult {
   effort: string;
 }
 
-function normalizeModelCandidate(model: string | undefined): string {
+function normalizeModelCandidate(
+  model: string | undefined,
+  providerId: TeamProviderId | undefined
+): string {
   const trimmed = model?.trim() ?? '';
   if (!trimmed || trimmed === 'default' || trimmed === '__default__') {
     return '';
   }
-  return trimmed;
+  return extractProviderScopedBaseModel(trimmed, providerId) ?? '';
 }
 
 function canReuseModelForSelectedProvider(
@@ -69,15 +73,15 @@ export function resolveLaunchDialogPrefill({
   const modelCandidates = [
     {
       providerId: currentLeadProviderId,
-      model: normalizeModelCandidate(currentLead?.model),
+      model: normalizeModelCandidate(currentLead?.model, currentLeadProviderId),
     },
     {
       providerId: savedRequestProviderId,
-      model: normalizeModelCandidate(savedRequest?.model),
+      model: normalizeModelCandidate(savedRequest?.model, savedRequestProviderId),
     },
     {
       providerId: previousLaunchProviderId,
-      model: normalizeModelCandidate(previousLaunchParams?.model),
+      model: normalizeModelCandidate(previousLaunchParams?.model, previousLaunchProviderId),
     },
   ];
 
