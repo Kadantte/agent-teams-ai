@@ -27,7 +27,7 @@ import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { buildTaskCountsByTeam, normalizePath } from '@renderer/utils/pathNormalize';
 import { getBaseName } from '@renderer/utils/pathUtils';
 import { nameColorSet } from '@renderer/utils/projectColor';
-import { isLeadAgentType, isLeadMember } from '@shared/utils/leadDetection';
+import { isLeadMember } from '@shared/utils/leadDetection';
 import {
   CheckCircle,
   Clock,
@@ -455,8 +455,7 @@ export const TeamListView = (): React.JSX.Element => {
     currentProjectPath,
     aliveTeams,
     filter,
-    currentProvisioningRunIdByTeam,
-    provisioningRuns,
+    provisioningState,
     leadActivityByTeam,
   ]);
 
