@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { TmuxInstallerRunnerAdapter } from '../TmuxInstallerRunnerAdapter';
@@ -556,7 +558,7 @@ describe('TmuxInstallerRunnerAdapter', () => {
               restartRequired: 'Possible',
             },
           ],
-          resultFilePath: 'C:\\temp\\result.json',
+          resultFilePath: path.join(process.cwd(), 'tmp', 'result.json'),
         })),
       } as never
     );

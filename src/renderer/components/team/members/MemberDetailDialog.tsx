@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { buildGraphMemberNodeIdForMember } from '@features/agent-graph/core/domain/graphOwnerIdentity';
-import { buildInlineActivityEntries } from '@features/agent-graph/renderer';
+import {
+  buildGraphMemberNodeIdForMember,
+  buildInlineActivityEntries,
+} from '@features/agent-graph/renderer';
 import { Button } from '@renderer/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from '@renderer/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';

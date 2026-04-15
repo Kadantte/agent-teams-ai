@@ -3,9 +3,9 @@ import * as fsp from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { decodeInstallerProcessOutput } from '../runtime/decodeInstallerProcessOutput';
-
 import { createLogger } from '@shared/utils/logger';
+
+import { decodeInstallerProcessOutput } from '../runtime/decodeInstallerProcessOutput';
 
 const logger = createLogger('Feature:tmux-installer:windows-elevation');
 

@@ -122,8 +122,8 @@ import {
 } from './guards';
 
 import type {
-  BoardTaskActivityService,
   BoardTaskActivityDetailService,
+  BoardTaskActivityService,
   BoardTaskExactLogDetailService,
   BoardTaskExactLogsService,
   BoardTaskLogStreamService,
@@ -141,8 +141,8 @@ import type {
   AttachmentFileData,
   AttachmentMeta,
   AttachmentPayload,
-  BoardTaskActivityEntry,
   BoardTaskActivityDetailResult,
+  BoardTaskActivityEntry,
   BoardTaskExactLogDetailResult,
   BoardTaskExactLogSummariesResponse,
   BoardTaskLogStreamResponse,

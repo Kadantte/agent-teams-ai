@@ -6,17 +6,13 @@
 
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
-import { useStore } from '@renderer/store';
-import {
-  getCurrentProvisioningProgressForTeam,
-  selectTeamDataForName,
-} from '@renderer/store/slices/teamSlice';
 import { agentAvatarUrl, buildMemberLaunchPresentation } from '@renderer/utils/memberHelpers';
 import { buildTeamProvisioningPresentation } from '@renderer/utils/teamProvisioningPresentation';
 import { ExternalLink, Loader2, MessageSquare, Plus, User } from 'lucide-react';
-import { useShallow } from 'zustand/react/shallow';
 
 import { isTaskInReviewCycle, resolveTaskReviewer } from '../../core/domain/taskGraphSemantics';
+import { useGraphActivityContext } from '../hooks/useGraphActivityContext';
+import { useGraphMemberPopoverContext } from '../hooks/useGraphMemberPopoverContext';
 
 import { GraphTaskCard } from './GraphTaskCard';
 
@@ -213,7 +209,7 @@ const OverflowPopoverContent = ({
   onClose: () => void;
   onOpenTaskDetail?: (taskId: string) => void;
 }): React.JSX.Element => {
-  const teamData = useStore((state) => selectTeamDataForName(state, teamName));
+  const { teamData } = useGraphActivityContext(teamName);
   const tasksById = new Map((teamData?.tasks ?? []).map((task) => [task.id, task]));
   const hiddenTasks = (node.overflowTaskIds ?? [])
     .map((taskId) => tasksById.get(taskId) ?? null)
@@ -297,16 +293,7 @@ const MemberPopoverContent = ({
       : '';
   const avatarSrc = node.avatarUrl ?? agentAvatarUrl(memberName, 64);
   const { teamData, spawnEntry, leadActivity, progress, memberSpawnSnapshot, memberSpawnStatuses } =
-    useStore(
-      useShallow((state) => ({
-        teamData: teamName ? selectTeamDataForName(state, teamName) : null,
-        spawnEntry: teamName ? state.memberSpawnStatusesByTeam[teamName]?.[memberName] : undefined,
-        leadActivity: teamName ? state.leadActivityByTeam[teamName] : undefined,
-        progress: teamName ? getCurrentProvisioningProgressForTeam(state, teamName) : null,
-        memberSpawnSnapshot: teamName ? state.memberSpawnSnapshotsByTeam[teamName] : undefined,
-        memberSpawnStatuses: teamName ? state.memberSpawnStatusesByTeam[teamName] : undefined,
-      }))
-    );
+    useGraphMemberPopoverContext(teamName, memberName);
   const member = teamData?.members.find((candidate) => candidate.name === memberName) ?? null;
   const provisioningPresentation =
     teamData && teamName

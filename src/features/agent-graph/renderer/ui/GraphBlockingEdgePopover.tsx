@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
-import { useStore } from '@renderer/store';
-import { selectTeamDataForName } from '@renderer/store/slices/teamSlice';
+
+import { useGraphActivityContext } from '../hooks/useGraphActivityContext';
 
 import type { GraphEdge, GraphNode } from '@claude-teams/agent-graph';
 import type { TeamTaskWithKanban } from '@shared/types';
@@ -63,7 +63,7 @@ export const GraphBlockingEdgePopover = ({
   onSelectNode,
   onOpenTaskDetail,
 }: GraphBlockingEdgePopoverProps): React.JSX.Element => {
-  const teamData = useStore((state) => selectTeamDataForName(state, teamName));
+  const { teamData } = useGraphActivityContext(teamName);
   const tasksById = useMemo(
     () => new Map((teamData?.tasks ?? []).map((task) => [task.id, task] as const)),
     [teamData?.tasks]

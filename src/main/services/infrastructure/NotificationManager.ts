@@ -21,8 +21,8 @@ import { safeSendToRenderer } from '@main/utils/safeWebContentsSend';
 import { stripMarkdown } from '@main/utils/textFormatting';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { createLogger } from '@shared/utils/logger';
-import { EventEmitter } from 'events';
 import { Notification as ElectronNotification } from 'electron';
+import { EventEmitter } from 'events';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 

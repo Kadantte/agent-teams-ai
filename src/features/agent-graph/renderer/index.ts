@@ -6,6 +6,7 @@
  */
 
 export { buildInlineActivityEntries } from '../core/domain/buildInlineActivityEntries';
+export { buildGraphMemberNodeIdForMember } from '../core/domain/graphOwnerIdentity';
 export { TeamGraphAdapter } from './adapters/TeamGraphAdapter';
 export type { TeamGraphOverlayProps } from './ui/TeamGraphOverlay';
 export { TeamGraphOverlay } from './ui/TeamGraphOverlay';

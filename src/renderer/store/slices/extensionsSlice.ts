@@ -6,8 +6,9 @@
 import { api } from '@renderer/api';
 import { CLI_NOT_FOUND_MESSAGE } from '@shared/constants/cli';
 
-import type { AppState } from '../types';
 import { findPaneByTabId, updatePane } from '../utils/paneHelpers';
+
+import type { AppState } from '../types';
 import type {
   ApiKeyEntry,
   ApiKeySaveRequest,

@@ -7,11 +7,9 @@
 import { useMemo } from 'react';
 
 import { KanbanTaskCard } from '@renderer/components/team/kanban/KanbanTaskCard';
-import { useStore } from '@renderer/store';
-import { selectTeamDataForName } from '@renderer/store/slices/teamSlice';
-import { useShallow } from 'zustand/react/shallow';
 
 import { isTaskBlocked, resolveTaskGraphColumn } from '../../core/domain/taskGraphSemantics';
+import { useGraphActivityContext } from '../hooks/useGraphActivityContext';
 
 import type { GraphNode } from '@claude-teams/agent-graph';
 import type { KanbanColumnId, TeamTask } from '@shared/types';
@@ -84,14 +82,10 @@ export const GraphTaskCard = ({
   onDeleteTask,
 }: GraphTaskCardProps): React.JSX.Element => {
   const taskId = node.domainRef.kind === 'task' ? node.domainRef.taskId : '';
-
-  const { task, tasks, members } = useStore(
-    useShallow((s) => ({
-      tasks: selectTeamDataForName(s, teamName)?.tasks ?? [],
-      members: selectTeamDataForName(s, teamName)?.members ?? [],
-      task: selectTeamDataForName(s, teamName)?.tasks.find((t) => t.id === taskId),
-    }))
-  );
+  const { teamData } = useGraphActivityContext(teamName);
+  const tasks = teamData?.tasks ?? [];
+  const members = teamData?.members ?? [];
+  const task = tasks.find((candidate) => candidate.id === taskId);
 
   const taskMap = useMemo(() => {
     const map = new Map<string, TeamTask>();

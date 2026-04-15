@@ -70,9 +70,9 @@ import type {
   TmuxAPI,
   TmuxStatus,
   TriggerTestResult,
-  UpdateSchedulePatch,
   UpdateKanbanPatch,
   UpdaterAPI,
+  UpdateSchedulePatch,
   WaterfallData,
   WslClaudeRootCandidate,
 } from '@shared/types';
