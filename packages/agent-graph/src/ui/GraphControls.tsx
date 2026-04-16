@@ -107,8 +107,8 @@ export function GraphControls({
 
   return (
     <>
-      <div className="absolute inset-x-3 top-3 z-20 flex items-start gap-2 pointer-events-none">
-        <div className="flex shrink-0 items-center gap-0.5">
+      <div className="pointer-events-none absolute inset-x-3 top-3 z-20 h-8">
+        <div className="absolute left-0 top-0 flex shrink-0 items-center gap-0.5">
           {onToggleSidebar ? (
             <div
               className="pointer-events-auto flex items-center rounded-md p-0 backdrop-blur-sm"
@@ -165,15 +165,15 @@ export function GraphControls({
           ) : null}
         </div>
 
-        <div className="flex min-w-0 flex-1 justify-end px-2">
+        <div className="absolute left-1/2 top-0 w-[min(360px,38vw)] -translate-x-1/2 px-2">
           {topToolbarContent ? (
-            <div className="pointer-events-auto min-w-0 max-w-[min(360px,42vw)]">
+            <div className="pointer-events-auto min-w-0">
               {topToolbarContent}
             </div>
           ) : null}
         </div>
 
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="absolute right-0 top-0 flex shrink-0 items-center gap-0.5">
           <div
             className="pointer-events-auto flex items-center rounded-md p-0 backdrop-blur-sm"
             style={{

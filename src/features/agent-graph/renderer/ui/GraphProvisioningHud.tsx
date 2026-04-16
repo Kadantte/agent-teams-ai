@@ -4,7 +4,6 @@ import { DISPLAY_STEPS } from '@renderer/components/team/provisioningSteps';
 import { StepProgressBar } from '@renderer/components/team/StepProgressBar';
 import { TeamProvisioningPanel } from '@renderer/components/team/TeamProvisioningPanel';
 import { useTeamProvisioningPresentation } from '@renderer/components/team/useTeamProvisioningPresentation';
-import { Badge } from '@renderer/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +12,6 @@ import {
   DialogTitle,
 } from '@renderer/components/ui/dialog';
 import { cn } from '@renderer/lib/utils';
-import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
 import type { TeamProvisioningPresentation } from '@renderer/utils/teamProvisioningPresentation';
 import type { CSSProperties } from 'react';
@@ -42,38 +40,23 @@ function shouldRenderLaunchHud(presentation: TeamProvisioningPresentation | null
 
 function getToneClasses(tone: TeamProvisioningPresentation['compactTone']): {
   border: string;
-  badge: string;
-  icon: React.ReactNode;
-  iconClassName: string;
 } {
   switch (tone) {
     case 'error':
       return {
-        border: 'border-red-400/35 bg-[rgba(26,10,16,0.92)]',
-        badge: 'border-red-500/30 text-red-300',
-        icon: <AlertTriangle size={12} />,
-        iconClassName: 'text-red-400',
+        border: 'border-red-400/35 bg-[rgba(26,10,16,0.9)]',
       };
     case 'warning':
       return {
-        border: 'border-amber-400/35 bg-[rgba(31,18,8,0.92)]',
-        badge: 'border-amber-500/30 text-amber-200',
-        icon: <AlertTriangle size={12} />,
-        iconClassName: 'text-amber-400',
+        border: 'border-amber-400/35 bg-[rgba(31,18,8,0.9)]',
       };
     case 'success':
       return {
-        border: 'border-emerald-400/35 bg-[rgba(8,24,18,0.92)]',
-        badge: 'border-emerald-500/30 text-emerald-200',
-        icon: <CheckCircle2 size={12} />,
-        iconClassName: 'text-emerald-400',
+        border: 'border-emerald-400/35 bg-[rgba(8,24,18,0.9)]',
       };
     default:
       return {
-        border: 'border-cyan-400/25 bg-[rgba(8,14,26,0.92)]',
-        badge: 'border-cyan-500/20 text-cyan-200',
-        icon: <Loader2 size={12} className="animate-spin" />,
-        iconClassName: 'text-cyan-300',
+        border: 'border-cyan-400/25 bg-[rgba(8,14,26,0.9)]',
       };
   }
 }
@@ -109,14 +92,10 @@ export const GraphProvisioningHud = ({
     }
   }, [presentation]);
 
-  const compactLabel = useMemo(() => {
-    if (!presentation?.compactDetail) {
-      return null;
-    }
-    return presentation.compactDetail.length > 54
-      ? `${presentation.compactDetail.slice(0, 54)}...`
-      : presentation.compactDetail;
-  }, [presentation?.compactDetail]);
+  const ariaLabel = useMemo(() => {
+    const parts = [presentation?.compactTitle, presentation?.compactDetail].filter(Boolean);
+    return parts.join(' - ') || 'Open launch details';
+  }, [presentation?.compactDetail, presentation?.compactTitle]);
 
   if (!shouldRender || !presentation || !tone) {
     return null;
@@ -131,44 +110,20 @@ export const GraphProvisioningHud = ({
           tone.border
         )}
         onClick={() => setDetailsOpen(true)}
-        aria-label="Open launch details"
+        aria-label={ariaLabel}
       >
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={cn('shrink-0', tone.iconClassName)}>{tone.icon}</span>
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="truncate text-[11px] font-semibold text-slate-50">
-                {presentation.compactTitle}
-              </div>
-              <Badge variant="outline" className={cn('px-1.5 py-0 text-[10px]', tone.badge)}>
-                {presentation.isFailed
-                  ? 'Issue'
-                  : presentation.hasMembersStillJoining
-                    ? 'Joining'
-                    : presentation.isActive
-                      ? 'Live'
-                      : 'Ready'}
-              </Badge>
-            </div>
-            {compactLabel ? (
-              <div className="mt-0.5 truncate text-[10px] leading-4 text-slate-300">
-                {compactLabel}
-              </div>
-            ) : null}
-          </div>
-        </div>
-
         <div
-          className="border-cyan-300/12 mt-2 overflow-hidden rounded-lg border bg-[rgba(4,10,20,0.58)] px-2 py-1.5"
+          className="overflow-hidden rounded-lg border border-white/10 bg-[rgba(4,10,20,0.54)] px-2.5 py-1.5"
           style={HUD_STEPPER_STYLE}
         >
           <StepProgressBar
             steps={MINI_STEPS}
             currentIndex={presentation.currentStepIndex}
             errorIndex={errorStepIndex}
-            className="w-full"
+            className="w-full origin-top scale-[0.9]"
           />
         </div>
+        <span className="sr-only">{ariaLabel}</span>
       </button>
 
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>

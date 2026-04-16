@@ -118,7 +118,7 @@ describe('GraphProvisioningHud', () => {
       await Promise.resolve();
     });
 
-    const openButton = host.querySelector('button[aria-label="Open launch details"]');
+    const openButton = host.querySelector('button[aria-label]');
     expect(openButton).not.toBeNull();
 
     await act(async () => {
