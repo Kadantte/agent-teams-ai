@@ -116,6 +116,23 @@ const makeSkillDetail = (overrides: Partial<SkillDetail> = {}): SkillDetail => (
   ...overrides,
 });
 
+const makeReadyCliStatus = () => ({
+  flavor: 'claude' as const,
+  displayName: 'Claude',
+  supportsSelfUpdate: true,
+  showVersionDetails: true,
+  showBinaryPath: true,
+  installed: true,
+  installedVersion: '1.0.0',
+  binaryPath: '/usr/local/bin/claude',
+  latestVersion: '1.0.0',
+  updateAvailable: false,
+  authLoggedIn: true,
+  authStatusChecking: false,
+  authMethod: 'oauth_token' as const,
+  providers: [],
+});
+
 describe('extensionsSlice', () => {
   let store: TestStore;
 
@@ -125,6 +142,7 @@ describe('extensionsSlice', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -149,6 +167,121 @@ describe('extensionsSlice', () => {
       expect(store.getState().pluginCatalogError).toBe('boom');
       expect(store.getState().pluginCatalogLoading).toBe(false);
     });
+
+    it('clears stale catalog when a different project fetch fails', async () => {
+      store.setState({
+        pluginCatalog: [makePlugin({ pluginId: 'project-a@m' })],
+        pluginCatalogProjectPath: '/tmp/project-a',
+      });
+      (api.plugins!.getAll as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
+
+      await store.getState().fetchPluginCatalog('/tmp/project-b');
+
+      expect(store.getState().pluginCatalog).toEqual([]);
+      expect(store.getState().pluginCatalogProjectPath).toBe('/tmp/project-b');
+      expect(store.getState().pluginCatalogError).toBe('boom');
+    });
+
+    it('clears plugin operation state when switching project context', async () => {
+      store.setState({
+        pluginCatalog: [makePlugin({ pluginId: 'project-a@m' })],
+        pluginCatalogProjectPath: '/tmp/project-a',
+        pluginInstallProgress: {
+          'project-a@m': 'error',
+        },
+        installErrors: {
+          'project-a@m': 'Install failed',
+          'mcp-server': 'Keep me',
+        },
+      });
+      (api.plugins!.getAll as ReturnType<typeof vi.fn>).mockResolvedValue([
+        makePlugin({ pluginId: 'project-b@m' }),
+      ]);
+
+      await store.getState().fetchPluginCatalog('/tmp/project-b');
+
+      expect(store.getState().pluginCatalogProjectPath).toBe('/tmp/project-b');
+      expect(store.getState().pluginInstallProgress['project-a@m']).toBeUndefined();
+      expect(store.getState().installErrors['project-a@m']).toBeUndefined();
+      expect(store.getState().installErrors['mcp-server']).toBe('Keep me');
+    });
+
+    it('dedups concurrent requests for the same project key', async () => {
+      let resolveFetch!: (plugins: EnrichedPlugin[]) => void;
+      const inFlight = new Promise<EnrichedPlugin[]>((resolve) => {
+        resolveFetch = resolve;
+      });
+      (api.plugins!.getAll as ReturnType<typeof vi.fn>).mockImplementation(() => inFlight);
+
+      const firstFetch = store.getState().fetchPluginCatalog('/tmp/project-a');
+      const secondFetch = store.getState().fetchPluginCatalog('/tmp/project-a');
+
+      expect(api.plugins!.getAll).toHaveBeenCalledTimes(1);
+
+      resolveFetch([makePlugin({ pluginId: 'same@m' })]);
+      await Promise.all([firstFetch, secondFetch]);
+
+      expect(store.getState().pluginCatalogProjectPath).toBe('/tmp/project-a');
+      expect(store.getState().pluginCatalog.map((plugin) => plugin.pluginId)).toEqual(['same@m']);
+    });
+
+    it('keeps the newest project catalog when project changes mid-flight', async () => {
+      let resolveProjectA!: (plugins: EnrichedPlugin[]) => void;
+      let resolveProjectB!: (plugins: EnrichedPlugin[]) => void;
+      const projectAFetch = new Promise<EnrichedPlugin[]>((resolve) => {
+        resolveProjectA = resolve;
+      });
+      const projectBFetch = new Promise<EnrichedPlugin[]>((resolve) => {
+        resolveProjectB = resolve;
+      });
+
+      (api.plugins!.getAll as ReturnType<typeof vi.fn>)
+        .mockImplementationOnce(() => projectAFetch)
+        .mockImplementationOnce(() => projectBFetch);
+
+      const firstFetch = store.getState().fetchPluginCatalog('/tmp/project-a');
+      const secondFetch = store.getState().fetchPluginCatalog('/tmp/project-b');
+
+      expect(api.plugins!.getAll).toHaveBeenCalledTimes(2);
+
+      resolveProjectB([makePlugin({ pluginId: 'project-b@m' })]);
+      await secondFetch;
+
+      expect(store.getState().pluginCatalogProjectPath).toBe('/tmp/project-b');
+      expect(store.getState().pluginCatalog.map((plugin) => plugin.pluginId)).toEqual([
+        'project-b@m',
+      ]);
+
+      resolveProjectA([makePlugin({ pluginId: 'project-a@m' })]);
+      await firstFetch;
+
+      expect(store.getState().pluginCatalogProjectPath).toBe('/tmp/project-b');
+      expect(store.getState().pluginCatalog.map((plugin) => plugin.pluginId)).toEqual([
+        'project-b@m',
+      ]);
+    });
+
+    it('clears plugin operation state when a different project fetch fails', async () => {
+      store.setState({
+        pluginCatalog: [makePlugin({ pluginId: 'project-a@m' })],
+        pluginCatalogProjectPath: '/tmp/project-a',
+        pluginInstallProgress: {
+          'project-a@m': 'error',
+        },
+        installErrors: {
+          'project-a@m': 'Install failed',
+          'mcp-server': 'Keep me',
+        },
+      });
+      (api.plugins!.getAll as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
+
+      await store.getState().fetchPluginCatalog('/tmp/project-b');
+
+      expect(store.getState().pluginCatalog).toEqual([]);
+      expect(store.getState().pluginInstallProgress['project-a@m']).toBeUndefined();
+      expect(store.getState().installErrors['project-a@m']).toBeUndefined();
+      expect(store.getState().installErrors['mcp-server']).toBe('Keep me');
+    });
   });
 
   describe('fetchPluginReadme', () => {
@@ -170,6 +303,15 @@ describe('extensionsSlice', () => {
       store.getState().fetchPluginReadme('test@m');
 
       expect(api.plugins!.getReadme).not.toHaveBeenCalled();
+    });
+
+    it('retries README fetch when the cached value is null', () => {
+      store.setState({ pluginReadmes: { 'test@m': null } });
+      (api.plugins!.getReadme as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      store.getState().fetchPluginReadme('test@m');
+
+      expect(api.plugins!.getReadme).toHaveBeenCalledWith('test@m');
     });
   });
 
@@ -298,24 +440,7 @@ describe('extensionsSlice', () => {
 
   describe('installPlugin', () => {
     it('sets progress to pending then success', async () => {
-      store.setState({
-        cliStatus: {
-          flavor: 'claude',
-          displayName: 'Claude',
-          supportsSelfUpdate: true,
-          showVersionDetails: true,
-          showBinaryPath: true,
-          installed: true,
-          installedVersion: '1.0.0',
-          binaryPath: '/usr/local/bin/claude',
-          latestVersion: '1.0.0',
-          updateAvailable: false,
-          authLoggedIn: true,
-          authStatusChecking: false,
-          authMethod: 'oauth_token',
-          providers: [],
-        },
-      });
+      store.setState({ cliStatus: makeReadyCliStatus() });
       const plugins = [makePlugin({ pluginId: 'a@m' })];
       (api.plugins!.getAll as ReturnType<typeof vi.fn>).mockResolvedValue(plugins);
       (api.plugins!.install as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'success' });
@@ -330,24 +455,7 @@ describe('extensionsSlice', () => {
     });
 
     it('sets progress to error on failure', async () => {
-      store.setState({
-        cliStatus: {
-          flavor: 'claude',
-          displayName: 'Claude',
-          supportsSelfUpdate: true,
-          showVersionDetails: true,
-          showBinaryPath: true,
-          installed: true,
-          installedVersion: '1.0.0',
-          binaryPath: '/usr/local/bin/claude',
-          latestVersion: '1.0.0',
-          updateAvailable: false,
-          authLoggedIn: true,
-          authStatusChecking: false,
-          authMethod: 'oauth_token',
-          providers: [],
-        },
-      });
+      store.setState({ cliStatus: makeReadyCliStatus() });
       (api.plugins!.install as ReturnType<typeof vi.fn>).mockResolvedValue({
         state: 'error',
         error: 'Not found',
@@ -356,6 +464,77 @@ describe('extensionsSlice', () => {
       await store.getState().installPlugin({ pluginId: 'fail@m', scope: 'user' });
 
       expect(store.getState().pluginInstallProgress['fail@m']).toBe('error');
+    });
+
+    it('fills missing projectPath from the active Extensions project context', async () => {
+      store.setState({
+        cliStatus: makeReadyCliStatus(),
+        pluginCatalogProjectPath: '/tmp/project-a',
+      });
+      (api.plugins!.install as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'success' });
+
+      await store.getState().installPlugin({ pluginId: 'project@m', scope: 'project' });
+
+      expect(api.plugins!.install).toHaveBeenCalledWith({
+        pluginId: 'project@m',
+        scope: 'project',
+        projectPath: '/tmp/project-a',
+      });
+    });
+
+    it('fails fast for project scope when there is no active project path', async () => {
+      store.setState({ cliStatus: makeReadyCliStatus(), pluginCatalogProjectPath: null });
+
+      await store.getState().installPlugin({ pluginId: 'project@m', scope: 'project' });
+
+      expect(api.plugins!.install).not.toHaveBeenCalled();
+      expect(store.getState().pluginInstallProgress['project@m']).toBe('error');
+      expect(store.getState().installErrors['project@m']).toContain('active project');
+    });
+
+    it('fills missing projectPath for local scope from the active Extensions project context', async () => {
+      store.setState({
+        cliStatus: makeReadyCliStatus(),
+        pluginCatalogProjectPath: '/tmp/project-a',
+      });
+      (api.plugins!.install as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'success' });
+
+      await store.getState().installPlugin({ pluginId: 'local@m', scope: 'local' });
+
+      expect(api.plugins!.install).toHaveBeenCalledWith({
+        pluginId: 'local@m',
+        scope: 'local',
+        projectPath: '/tmp/project-a',
+      });
+    });
+
+    it('fails fast for local scope when there is no active project path', async () => {
+      store.setState({ cliStatus: makeReadyCliStatus(), pluginCatalogProjectPath: null });
+
+      await store.getState().installPlugin({ pluginId: 'local@m', scope: 'local' });
+
+      expect(api.plugins!.install).not.toHaveBeenCalled();
+      expect(store.getState().pluginInstallProgress['local@m']).toBe('error');
+      expect(store.getState().installErrors['local@m']).toContain('active project');
+    });
+
+    it('clears older success reset timers before a new operation on the same plugin', async () => {
+      vi.useFakeTimers();
+      store.setState({ cliStatus: makeReadyCliStatus() });
+      (api.plugins!.getAll as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (api.plugins!.install as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ state: 'success' })
+        .mockResolvedValueOnce({ state: 'error', error: 'second failure' });
+
+      await store.getState().installPlugin({ pluginId: 'test@m', scope: 'user' });
+      expect(store.getState().pluginInstallProgress['test@m']).toBe('success');
+
+      await store.getState().installPlugin({ pluginId: 'test@m', scope: 'user' });
+      expect(store.getState().pluginInstallProgress['test@m']).toBe('error');
+
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(store.getState().pluginInstallProgress['test@m']).toBe('error');
     });
   });
 
@@ -371,6 +550,66 @@ describe('extensionsSlice', () => {
 
       await promise;
       expect(store.getState().pluginInstallProgress['test@m']).toBe('success');
+    });
+
+    it('fills missing projectPath from the active Extensions project context', async () => {
+      store.setState({ pluginCatalogProjectPath: '/tmp/project-a' });
+      (api.plugins!.uninstall as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'success' });
+
+      await store.getState().uninstallPlugin('project@m', 'project');
+
+      expect(api.plugins!.uninstall).toHaveBeenCalledWith('project@m', 'project', '/tmp/project-a');
+    });
+
+    it('fails fast for project uninstall when there is no active project path', async () => {
+      store.setState({ pluginCatalogProjectPath: null });
+
+      await store.getState().uninstallPlugin('project@m', 'project');
+
+      expect(api.plugins!.uninstall).not.toHaveBeenCalled();
+      expect(store.getState().pluginInstallProgress['project@m']).toBe('error');
+      expect(store.getState().installErrors['project@m']).toContain('active project');
+    });
+
+    it('fills missing projectPath for local uninstall from the active Extensions project context', async () => {
+      store.setState({ pluginCatalogProjectPath: '/tmp/project-a' });
+      (api.plugins!.uninstall as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'success' });
+
+      await store.getState().uninstallPlugin('local@m', 'local');
+
+      expect(api.plugins!.uninstall).toHaveBeenCalledWith('local@m', 'local', '/tmp/project-a');
+    });
+
+    it('fails fast for local uninstall when there is no active project path', async () => {
+      store.setState({ pluginCatalogProjectPath: null });
+
+      await store.getState().uninstallPlugin('local@m', 'local');
+
+      expect(api.plugins!.uninstall).not.toHaveBeenCalled();
+      expect(store.getState().pluginInstallProgress['local@m']).toBe('error');
+      expect(store.getState().installErrors['local@m']).toContain('active project');
+    });
+
+    it('does not restore idle state after project switch clears a pending success timer', async () => {
+      vi.useFakeTimers();
+      store.setState({
+        pluginCatalogProjectPath: '/tmp/project-a',
+        pluginCatalog: [makePlugin({ pluginId: 'test@m' })],
+      });
+      (api.plugins!.getAll as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce([makePlugin({ pluginId: 'test@m' })])
+        .mockResolvedValueOnce([makePlugin({ pluginId: 'other@m' })]);
+      (api.plugins!.uninstall as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'success' });
+
+      await store.getState().uninstallPlugin('test@m', 'user');
+      expect(store.getState().pluginInstallProgress['test@m']).toBe('success');
+
+      await store.getState().fetchPluginCatalog('/tmp/project-b');
+      expect(store.getState().pluginInstallProgress['test@m']).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(store.getState().pluginInstallProgress['test@m']).toBeUndefined();
     });
   });
 

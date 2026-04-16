@@ -25,7 +25,9 @@ import {
 } from '@renderer/components/ui/select';
 import { useStore } from '@renderer/store';
 import {
+  getInstallationSummaryLabel,
   getCapabilityLabel,
+  hasInstallationInScope,
   inferCapabilities,
   normalizeCategory,
 } from '@shared/utils/extensionNormalizers';
@@ -46,7 +48,8 @@ interface PluginDetailDialogProps {
 
 const SCOPE_OPTIONS: { value: InstallScope; label: string }[] = [
   { value: 'user', label: 'User (global)' },
-  { value: 'project', label: 'Project' },
+  { value: 'project', label: 'Project (shared)' },
+  { value: 'local', label: 'Local (gitignored)' },
 ];
 
 export const PluginDetailDialog = ({
@@ -54,13 +57,21 @@ export const PluginDetailDialog = ({
   open,
   onClose,
 }: PluginDetailDialogProps): React.JSX.Element => {
-  const { fetchPluginReadme, readmes, readmeLoading, installPlugin, uninstallPlugin } = useStore(
+  const {
+    fetchPluginReadme,
+    readmes,
+    readmeLoading,
+    installPlugin,
+    uninstallPlugin,
+    pluginCatalogProjectPath,
+  } = useStore(
     useShallow((s) => ({
       fetchPluginReadme: s.fetchPluginReadme,
       readmes: s.pluginReadmes,
       readmeLoading: s.pluginReadmeLoading,
       installPlugin: s.installPlugin,
       uninstallPlugin: s.uninstallPlugin,
+      pluginCatalogProjectPath: s.pluginCatalogProjectPath,
     }))
   );
   const installProgress = useStore(
@@ -69,6 +80,7 @@ export const PluginDetailDialog = ({
   const installError = useStore((s) => (plugin ? s.installErrors[plugin.pluginId] : undefined));
 
   const [scope, setScope] = useState<InstallScope>('user');
+  const projectScopeAvailable = Boolean(pluginCatalogProjectPath);
 
   useEffect(() => {
     if (plugin && open) {
@@ -76,12 +88,26 @@ export const PluginDetailDialog = ({
     }
   }, [plugin, open, fetchPluginReadme]);
 
+  useEffect(() => {
+    if (open) {
+      setScope('user');
+    }
+  }, [open, plugin?.pluginId]);
+
+  useEffect(() => {
+    if (scope !== 'user' && !projectScopeAvailable) {
+      setScope('user');
+    }
+  }, [projectScopeAvailable, scope]);
+
   if (!plugin) return <></>;
 
   const capabilities = inferCapabilities(plugin);
   const category = normalizeCategory(plugin.category);
   const readme = readmes[plugin.pluginId];
   const isReadmeLoading = readmeLoading[plugin.pluginId] ?? false;
+  const isInstalledForScope = hasInstallationInScope(plugin.installations, scope);
+  const installSummaryLabel = getInstallationSummaryLabel(plugin.installations);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -93,12 +119,12 @@ export const PluginDetailDialog = ({
               <DialogDescription className="mt-1">{plugin.description}</DialogDescription>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              {plugin.isInstalled && (
+              {installSummaryLabel && (
                 <Badge
                   className="shrink-0 border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
                   variant="outline"
                 >
-                  Installed
+                  {installSummaryLabel}
                 </Badge>
               )}
               <SourceBadge source={plugin.source} />
@@ -158,7 +184,11 @@ export const PluginDetailDialog = ({
               </SelectTrigger>
               <SelectContent>
                 {SCOPE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
+                  <SelectItem
+                    key={opt.value}
+                    value={opt.value}
+                    disabled={opt.value !== 'user' && !projectScopeAvailable}
+                  >
                     {opt.label}
                   </SelectItem>
                 ))}
@@ -167,9 +197,23 @@ export const PluginDetailDialog = ({
           </div>
           <InstallButton
             state={installProgress}
-            isInstalled={plugin.isInstalled}
-            onInstall={() => installPlugin({ pluginId: plugin.pluginId, scope })}
-            onUninstall={() => uninstallPlugin(plugin.pluginId, scope)}
+            isInstalled={isInstalledForScope}
+            onInstall={() =>
+              installPlugin({
+                pluginId: plugin.pluginId,
+                scope,
+                ...(scope !== 'user' && pluginCatalogProjectPath
+                  ? { projectPath: pluginCatalogProjectPath }
+                  : {}),
+              })
+            }
+            onUninstall={() =>
+              uninstallPlugin(
+                plugin.pluginId,
+                scope,
+                scope !== 'user' ? (pluginCatalogProjectPath ?? undefined) : undefined
+              )
+            }
             size="default"
             errorMessage={installError}
           />

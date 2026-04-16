@@ -5,7 +5,9 @@
 import { Badge } from '@renderer/components/ui/badge';
 import { useStore } from '@renderer/store';
 import {
+  getInstallationSummaryLabel,
   getCapabilityLabel,
+  hasInstallationInScope,
   inferCapabilities,
   normalizeCategory,
 } from '@shared/utils/extensionNormalizers';
@@ -29,6 +31,8 @@ export const PluginCard = ({ plugin, index, onClick }: PluginCardProps): React.J
   const installPlugin = useStore((s) => s.installPlugin);
   const uninstallPlugin = useStore((s) => s.uninstallPlugin);
   const installError = useStore((s) => s.installErrors[plugin.pluginId]);
+  const isUserInstalled = hasInstallationInScope(plugin.installations, 'user');
+  const installSummaryLabel = getInstallationSummaryLabel(plugin.installations);
   const baseStriped = index % 2 === 0;
   const smStriped = Math.floor(index / 2) % 2 === 0;
   const xlStriped = Math.floor(index / 3) % 2 === 0;
@@ -81,12 +85,12 @@ export const PluginCard = ({ plugin, index, onClick }: PluginCardProps): React.J
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <InstallCountBadge count={plugin.installCount} />
-          {plugin.isInstalled && (
+          {installSummaryLabel && (
             <Badge
               className="shrink-0 border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
               variant="outline"
             >
-              Installed
+              {installSummaryLabel}
             </Badge>
           )}
         </div>
@@ -112,9 +116,9 @@ export const PluginCard = ({ plugin, index, onClick }: PluginCardProps): React.J
         <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
           <InstallButton
             state={installProgress}
-            isInstalled={plugin.isInstalled}
+            isInstalled={isUserInstalled}
             onInstall={() => installPlugin({ pluginId: plugin.pluginId, scope: 'user' })}
-            onUninstall={() => uninstallPlugin(plugin.pluginId)}
+            onUninstall={() => uninstallPlugin(plugin.pluginId, 'user')}
             size="sm"
             errorMessage={installError}
           />

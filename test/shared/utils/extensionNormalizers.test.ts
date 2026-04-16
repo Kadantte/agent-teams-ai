@@ -5,8 +5,11 @@ import type { PluginCatalogItem } from '@shared/types/extensions';
 import {
   buildPluginId,
   formatInstallCount,
+  getExtensionActionDisableReason,
   getCapabilityLabel,
+  getInstallationSummaryLabel,
   getPrimaryCapabilityLabel,
+  hasInstallationInScope,
   inferCapabilities,
   normalizeCategory,
   normalizeRepoUrl,
@@ -146,6 +149,79 @@ describe('buildPluginId', () => {
     expect(buildPluginId('context7', 'claude-plugins-official')).toBe(
       'context7@claude-plugins-official',
     );
+  });
+});
+
+describe('hasInstallationInScope', () => {
+  it('returns true when the selected scope exists', () => {
+    expect(
+      hasInstallationInScope(
+        [
+          { scope: 'user' },
+          { scope: 'project' },
+        ],
+        'project',
+      ),
+    ).toBe(true);
+  });
+
+  it('returns false when the selected scope is missing', () => {
+    expect(hasInstallationInScope([{ scope: 'user' }], 'project')).toBe(false);
+  });
+});
+
+describe('getInstallationSummaryLabel', () => {
+  it('returns null when there are no installations', () => {
+    expect(getInstallationSummaryLabel([])).toBeNull();
+  });
+
+  it('describes a single global installation', () => {
+    expect(getInstallationSummaryLabel([{ scope: 'user' }])).toBe('Installed globally');
+  });
+
+  it('describes a single project installation', () => {
+    expect(getInstallationSummaryLabel([{ scope: 'project' }])).toBe('Installed in project');
+  });
+
+  it('summarizes multiple scopes without pretending they are global', () => {
+    expect(
+      getInstallationSummaryLabel([
+        { scope: 'project' },
+        { scope: 'user' },
+      ]),
+    ).toBe('Installed in 2 scopes');
+  });
+});
+
+describe('getExtensionActionDisableReason', () => {
+  it('requires auth only for install actions', () => {
+    expect(
+      getExtensionActionDisableReason({
+        isInstalled: false,
+        cliStatus: { installed: true, authLoggedIn: false },
+        cliStatusLoading: false,
+      }),
+    ).toContain('not signed in');
+  });
+
+  it('allows uninstall when CLI is present but auth is missing', () => {
+    expect(
+      getExtensionActionDisableReason({
+        isInstalled: true,
+        cliStatus: { installed: true, authLoggedIn: false },
+        cliStatusLoading: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('still blocks actions when the CLI is missing', () => {
+    expect(
+      getExtensionActionDisableReason({
+        isInstalled: true,
+        cliStatus: { installed: false, authLoggedIn: false },
+        cliStatusLoading: false,
+      }),
+    ).toContain('Claude CLI required');
   });
 });
 
