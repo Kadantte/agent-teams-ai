@@ -3,17 +3,16 @@
  * Thin wrapper — instantiates the class adapter and calls adapt() with store data.
  */
 
-import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 
 import { getSnapshot, subscribe } from '@renderer/services/commentReadStorage';
 import { useStore } from '@renderer/store';
 import {
-  getDefaultTeamGraphSlotAssignmentsForMembers,
   getCurrentProvisioningProgressForTeam,
-  hasAppliedDefaultTeamGraphSlotAssignments,
   isTeamGraphSlotPersistenceDisabled,
   selectTeamDataForName,
 } from '@renderer/store/slices/teamSlice';
+import { buildTeamGraphDefaultLayoutSeed } from '@shared/utils/teamGraphDefaultLayout';
 import { useShallow } from 'zustand/react/shallow';
 
 import { TeamGraphAdapter } from '../adapters/TeamGraphAdapter';
@@ -35,6 +34,7 @@ export function useTeamGraphAdapter(teamName: string): GraphDataPort {
     provisioningProgress,
     memberSpawnSnapshot,
     slotAssignments,
+    graphLayoutSession,
     ensureTeamGraphSlotAssignments,
   } = useStore(
     useShallow((s) => ({
@@ -49,6 +49,7 @@ export function useTeamGraphAdapter(teamName: string): GraphDataPort {
       provisioningProgress: teamName ? getCurrentProvisioningProgressForTeam(s, teamName) : null,
       memberSpawnSnapshot: teamName ? s.memberSpawnSnapshotsByTeam[teamName] : undefined,
       slotAssignments: teamName ? s.slotAssignmentsByTeam[teamName] : undefined,
+      graphLayoutSession: teamName ? s.graphLayoutSessionByTeam[teamName] : undefined,
       ensureTeamGraphSlotAssignments: s.ensureTeamGraphSlotAssignments,
     }))
   );
@@ -72,18 +73,44 @@ export function useTeamGraphAdapter(teamName: string): GraphDataPort {
     if (!isTeamGraphSlotPersistenceDisabled()) {
       return slotAssignments;
     }
-    if (hasAppliedDefaultTeamGraphSlotAssignments(teamName)) {
+    if (graphLayoutSession?.mode === 'manual') {
       return slotAssignments;
     }
-    const defaults = getDefaultTeamGraphSlotAssignmentsForMembers(teamData.members);
-    return Object.keys(defaults).length === 0 ? undefined : defaults;
-  }, [slotAssignments, teamData, teamName]);
+    const defaultSeed = buildTeamGraphDefaultLayoutSeed(
+      teamData.members,
+      teamData.config.members ?? []
+    );
+    const defaultAssignments =
+      Object.keys(defaultSeed.assignments).length === 0 ? undefined : defaultSeed.assignments;
+    if (!slotAssignments) {
+      return defaultAssignments;
+    }
+    if (graphLayoutSession?.signature !== defaultSeed.signature) {
+      return defaultAssignments;
+    }
+    const visibleAssignmentKeys = defaultSeed.orderedVisibleOwnerIds.filter(
+      (stableOwnerId) => slotAssignments[stableOwnerId]
+    );
+    const hasExactVisibleDefaults =
+      visibleAssignmentKeys.length === Object.keys(defaultSeed.assignments).length &&
+      visibleAssignmentKeys.every((stableOwnerId) => {
+        const currentAssignment = slotAssignments[stableOwnerId];
+        const defaultAssignment = defaultSeed.assignments[stableOwnerId];
+        return (
+          currentAssignment &&
+          defaultAssignment &&
+          currentAssignment.ringIndex === defaultAssignment.ringIndex &&
+          currentAssignment.sectorIndex === defaultAssignment.sectorIndex
+        );
+      });
+    return hasExactVisibleDefaults ? slotAssignments : defaultAssignments;
+  }, [graphLayoutSession, slotAssignments, teamData]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!teamName || !teamData) {
       return;
     }
-    ensureTeamGraphSlotAssignments(teamName, teamData.members);
+    ensureTeamGraphSlotAssignments(teamName, teamData.members, teamData.config.members ?? []);
   }, [ensureTeamGraphSlotAssignments, teamData, teamName]);
 
   return useMemo(

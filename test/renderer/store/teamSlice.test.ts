@@ -236,6 +236,10 @@ describe('teamSlice actions', () => {
       'agent-alice': { ringIndex: 0, sectorIndex: 2 },
       'agent-bob': { ringIndex: 0, sectorIndex: 1 },
     });
+    expect(store.getState().graphLayoutSessionByTeam['my-team']).toEqual({
+      mode: 'manual',
+      signature: null,
+    });
   });
 
   it('replaces persisted slot assignments with defaults while persistence is disabled', () => {
@@ -273,6 +277,33 @@ describe('teamSlice actions', () => {
     expect(store.getState().slotAssignmentsByTeam['my-team']).toEqual({
       'agent-alice': { ringIndex: 0, sectorIndex: 0 },
       'agent-bob': { ringIndex: 0, sectorIndex: 1 },
+      'agent-jack': { ringIndex: 0, sectorIndex: 2 },
+      'agent-tom': { ringIndex: 0, sectorIndex: 3 },
+    });
+  });
+
+  it('uses config member order instead of transient visible member array order for defaults', () => {
+    const store = createSliceStore();
+
+    store.getState().ensureTeamGraphSlotAssignments(
+      'my-team',
+      [
+        { name: 'jack', agentId: 'agent-jack' },
+        { name: 'tom', agentId: 'agent-tom' },
+        { name: 'alice', agentId: 'agent-alice' },
+        { name: 'bob', agentId: 'agent-bob' },
+      ],
+      [
+        { name: 'alice', agentId: 'agent-alice' },
+        { name: 'bob', agentId: 'agent-bob' },
+        { name: 'tom', agentId: 'agent-tom' },
+        { name: 'jack', agentId: 'agent-jack' },
+      ]
+    );
+
+    expect(store.getState().slotAssignmentsByTeam['my-team']).toEqual({
+      'agent-alice': { ringIndex: 0, sectorIndex: 0 },
+      'agent-bob': { ringIndex: 0, sectorIndex: 1 },
       'agent-tom': { ringIndex: 0, sectorIndex: 2 },
       'agent-jack': { ringIndex: 0, sectorIndex: 3 },
     });
@@ -292,8 +323,8 @@ describe('teamSlice actions', () => {
     expect(store.getState().slotAssignmentsByTeam['my-team']).toEqual({
       'agent-alice': { ringIndex: 0, sectorIndex: 0 },
       'agent-bob': { ringIndex: 0, sectorIndex: 1 },
-      'agent-tom': { ringIndex: 0, sectorIndex: 2 },
-      'agent-jack': { ringIndex: 0, sectorIndex: 3 },
+      'agent-jack': { ringIndex: 0, sectorIndex: 2 },
+      'agent-tom': { ringIndex: 0, sectorIndex: 3 },
     });
   });
 
@@ -367,7 +398,34 @@ describe('teamSlice actions', () => {
     });
   });
 
-  it('does not reseed a team again after defaults were applied once in the session', () => {
+  it('reseeds defaults again while the team remains in default mode and visible owners change', () => {
+    const store = createSliceStore();
+
+    store.getState().ensureTeamGraphSlotAssignments('my-team', [
+      { name: 'alice', agentId: 'agent-alice' },
+      { name: 'bob', agentId: 'agent-bob' },
+    ]);
+
+    store.getState().ensureTeamGraphSlotAssignments('my-team', [
+      { name: 'alice', agentId: 'agent-alice' },
+      { name: 'bob', agentId: 'agent-bob' },
+      { name: 'tom', agentId: 'agent-tom' },
+      { name: 'jack', agentId: 'agent-jack' },
+    ]);
+
+    expect(store.getState().slotAssignmentsByTeam['my-team']).toEqual({
+      'agent-alice': { ringIndex: 0, sectorIndex: 0 },
+      'agent-bob': { ringIndex: 0, sectorIndex: 1 },
+      'agent-jack': { ringIndex: 0, sectorIndex: 2 },
+      'agent-tom': { ringIndex: 0, sectorIndex: 3 },
+    });
+    expect(store.getState().graphLayoutSessionByTeam['my-team']).toEqual({
+      mode: 'default',
+      signature: 'agent-alice|agent-bob|agent-jack|agent-tom',
+    });
+  });
+
+  it('does not reshuffle existing owners after the team enters manual mode', () => {
     const store = createSliceStore();
 
     store.getState().ensureTeamGraphSlotAssignments('my-team', [
@@ -383,11 +441,17 @@ describe('teamSlice actions', () => {
     store.getState().ensureTeamGraphSlotAssignments('my-team', [
       { name: 'alice', agentId: 'agent-alice' },
       { name: 'bob', agentId: 'agent-bob' },
+      { name: 'tom', agentId: 'agent-tom' },
+      { name: 'jack', agentId: 'agent-jack' },
     ]);
 
     expect(store.getState().slotAssignmentsByTeam['my-team']).toEqual({
       'agent-alice': { ringIndex: 1, sectorIndex: 4 },
       'agent-bob': { ringIndex: 0, sectorIndex: 1 },
+    });
+    expect(store.getState().graphLayoutSessionByTeam['my-team']).toEqual({
+      mode: 'manual',
+      signature: 'agent-alice|agent-bob',
     });
   });
 
@@ -423,7 +487,7 @@ describe('teamSlice actions', () => {
       'my-team',
       'agent-alice',
       { ringIndex: 0, sectorIndex: 2 },
-      'agent-tom',
+      'agent-jack',
       { ringIndex: 0, sectorIndex: 0 }
     );
 
@@ -432,8 +496,12 @@ describe('teamSlice actions', () => {
     expect(store.getState().slotAssignmentsByTeam['my-team']).toEqual({
       'agent-alice': { ringIndex: 0, sectorIndex: 0 },
       'agent-bob': { ringIndex: 0, sectorIndex: 1 },
-      'agent-tom': { ringIndex: 0, sectorIndex: 2 },
-      'agent-jack': { ringIndex: 0, sectorIndex: 3 },
+      'agent-jack': { ringIndex: 0, sectorIndex: 2 },
+      'agent-tom': { ringIndex: 0, sectorIndex: 3 },
+    });
+    expect(store.getState().graphLayoutSessionByTeam['my-team']).toEqual({
+      mode: 'default',
+      signature: 'agent-alice|agent-bob|agent-jack|agent-tom',
     });
   });
 

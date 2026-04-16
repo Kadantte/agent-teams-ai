@@ -11,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@renderer/components/ui/dialog';
-import { cn } from '@renderer/lib/utils';
 
 import type { TeamProvisioningPresentation } from '@renderer/utils/teamProvisioningPresentation';
 import type { CSSProperties } from 'react';
@@ -38,29 +37,6 @@ function shouldRenderLaunchHud(presentation: TeamProvisioningPresentation | null
   return presentation != null;
 }
 
-function getToneClasses(tone: TeamProvisioningPresentation['compactTone']): {
-  border: string;
-} {
-  switch (tone) {
-    case 'error':
-      return {
-        border: 'border-red-400/35 bg-[rgba(26,10,16,0.9)]',
-      };
-    case 'warning':
-      return {
-        border: 'border-amber-400/35 bg-[rgba(31,18,8,0.9)]',
-      };
-    case 'success':
-      return {
-        border: 'border-emerald-400/35 bg-[rgba(8,24,18,0.9)]',
-      };
-    default:
-      return {
-        border: 'border-cyan-400/25 bg-[rgba(8,14,26,0.9)]',
-      };
-  }
-}
-
 export interface GraphProvisioningHudProps {
   teamName: string;
   enabled?: boolean;
@@ -74,7 +50,6 @@ export const GraphProvisioningHud = ({
   const lastActiveStepRef = useRef(-1);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const shouldRender = enabled && shouldRenderLaunchHud(presentation);
-  const tone = presentation ? getToneClasses(presentation.compactTone) : null;
   const errorStepIndex = presentation?.isFailed
     ? lastActiveStepRef.current >= 0
       ? lastActiveStepRef.current
@@ -97,7 +72,7 @@ export const GraphProvisioningHud = ({
     return parts.join(' - ') || 'Open launch details';
   }, [presentation?.compactDetail, presentation?.compactTitle]);
 
-  if (!shouldRender || !presentation || !tone) {
+  if (!shouldRender || !presentation) {
     return null;
   }
 
@@ -105,22 +80,16 @@ export const GraphProvisioningHud = ({
     <>
       <button
         type="button"
-        className={cn(
-          'w-full rounded-xl border px-3 py-2 text-left text-slate-100 shadow-[0_14px_34px_rgba(5,5,16,0.24)] backdrop-blur-xl transition-colors hover:bg-[rgba(12,18,32,0.96)]',
-          tone.border
-        )}
+        className="focus-visible:ring-white/18 w-full rounded-xl bg-transparent px-1 py-0.5 text-left text-slate-100 transition-opacity hover:opacity-95 focus-visible:outline-none focus-visible:ring-1"
         onClick={() => setDetailsOpen(true)}
         aria-label={ariaLabel}
       >
-        <div
-          className="overflow-hidden rounded-lg border border-white/10 bg-[rgba(4,10,20,0.54)] px-2.5 py-1.5"
-          style={HUD_STEPPER_STYLE}
-        >
+        <div className="px-1 py-0.5" style={HUD_STEPPER_STYLE}>
           <StepProgressBar
             steps={MINI_STEPS}
             currentIndex={presentation.currentStepIndex}
             errorIndex={errorStepIndex}
-            className="w-full origin-top scale-[0.9]"
+            className="w-full origin-top scale-[0.88]"
           />
         </div>
         <span className="sr-only">{ariaLabel}</span>

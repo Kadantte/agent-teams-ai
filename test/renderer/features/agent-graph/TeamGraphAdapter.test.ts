@@ -68,6 +68,65 @@ describe('TeamGraphAdapter particles', () => {
     vi.useRealTimers();
   });
 
+  it('builds ownerOrder from config member order instead of transient member array order', () => {
+    const adapter = TeamGraphAdapter.create();
+    const graph = adapter.adapt(
+      createBaseTeamData({
+        config: {
+          name: 'My Team',
+          members: [{ name: 'team-lead' }, { name: 'alice' }, { name: 'bob' }, { name: 'tom' }],
+          projectPath: '/repo',
+        },
+        members: [
+          {
+            name: 'team-lead',
+            status: 'active',
+            currentTaskId: null,
+            taskCount: 0,
+            lastActiveAt: null,
+            messageCount: 0,
+            agentType: 'team-lead',
+          },
+          {
+            name: 'tom',
+            status: 'active',
+            currentTaskId: null,
+            taskCount: 0,
+            lastActiveAt: null,
+            messageCount: 0,
+          },
+          {
+            name: 'bob',
+            status: 'active',
+            currentTaskId: null,
+            taskCount: 0,
+            lastActiveAt: null,
+            messageCount: 0,
+          },
+          {
+            name: 'alice',
+            status: 'active',
+            currentTaskId: null,
+            taskCount: 0,
+            lastActiveAt: null,
+            messageCount: 0,
+          },
+        ],
+      }),
+      'my-team',
+      undefined,
+      undefined,
+      undefined,
+      new Set()
+    );
+
+    expect(graph.layout?.ownerOrder).toEqual([
+      'member:my-team:alice',
+      'member:my-team:bob',
+      'member:my-team:tom',
+    ]);
+  });
+
   it('creates a message particle for a new incoming message from the newest message set', () => {
     const adapter = TeamGraphAdapter.create();
     const baseline = createBaseTeamData();

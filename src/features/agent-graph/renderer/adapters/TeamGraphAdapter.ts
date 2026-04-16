@@ -23,6 +23,7 @@ import {
 } from '@shared/utils/idleNotificationSemantics';
 import { isInboxNoiseMessage } from '@shared/utils/inboxNoise';
 import { isLeadMember } from '@shared/utils/leadDetection';
+import { buildOrderedVisibleTeamGraphOwnerIds } from '@shared/utils/teamGraphDefaultLayout';
 
 import {
   buildInlineActivityEntries,
@@ -247,10 +248,11 @@ export class TeamGraphAdapter {
     const visibleMemberByStableOwnerId = new Map(
       visibleMembers.map((member) => [getGraphStableOwnerId(member), member] as const)
     );
-    const assignedStableOwnerIds = new Set(Object.keys(slotAssignments ?? {}));
-    const configStableOwnerIds = new Set(
-      (data.config.members ?? []).map((member) => getGraphStableOwnerId(member))
+    const canonicalVisibleOwnerIds = buildOrderedVisibleTeamGraphOwnerIds(
+      data.members,
+      data.config.members ?? []
     );
+    const assignedStableOwnerIds = new Set(Object.keys(slotAssignments ?? {}));
 
     const pushMember = (member: TeamData['members'][number] | undefined): void => {
       if (!member) {
@@ -264,44 +266,26 @@ export class TeamGraphAdapter {
       ownerOrder.push(nodeId);
     };
 
-    const assignedVisibleMembersOutsideConfig = visibleMembers
-      .filter((member) => {
-        const stableOwnerId = getGraphStableOwnerId(member);
-        return (
-          assignedStableOwnerIds.has(stableOwnerId) && !configStableOwnerIds.has(stableOwnerId)
-        );
-      })
-      .toSorted((left, right) =>
-        getGraphStableOwnerId(left).localeCompare(getGraphStableOwnerId(right))
-      );
-
-    for (const configMember of data.config.members ?? []) {
-      const stableOwnerId = getGraphStableOwnerId(configMember);
+    for (const stableOwnerId of canonicalVisibleOwnerIds) {
+      const visibleMember = visibleMemberByStableOwnerId.get(stableOwnerId);
+      if (!visibleMember) {
+        continue;
+      }
       if (!assignedStableOwnerIds.has(stableOwnerId)) {
         continue;
       }
-      pushMember(visibleMemberByStableOwnerId.get(stableOwnerId));
-    }
-
-    for (const member of assignedVisibleMembersOutsideConfig) {
-      pushMember(member);
-    }
-
-    for (const configMember of data.config.members ?? []) {
-      const stableOwnerId = getGraphStableOwnerId(configMember);
-      if (assignedStableOwnerIds.has(stableOwnerId)) {
-        continue;
-      }
-      const visibleMember = visibleMemberByStableOwnerId.get(stableOwnerId);
       pushMember(visibleMember);
     }
 
-    const remainingMembers = visibleMembers.toSorted((left, right) =>
-      getGraphStableOwnerId(left).localeCompare(getGraphStableOwnerId(right))
-    );
-
-    for (const member of remainingMembers) {
-      pushMember(member);
+    for (const stableOwnerId of canonicalVisibleOwnerIds) {
+      const visibleMember = visibleMemberByStableOwnerId.get(stableOwnerId);
+      if (!visibleMember) {
+        continue;
+      }
+      if (assignedStableOwnerIds.has(stableOwnerId)) {
+        continue;
+      }
+      pushMember(visibleMember);
     }
 
     const normalizedAssignments: Record<string, GraphOwnerSlotAssignment> = {};
