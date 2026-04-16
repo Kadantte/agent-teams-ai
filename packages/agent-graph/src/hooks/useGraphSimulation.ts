@@ -251,14 +251,15 @@ function applySnapshotToNodes(
   const translatedFrameByOwnerId = new Map(
     translatedFrames.map((frame) => [frame.ownerId, frame] as const)
   );
+  const leadFrame = snapshot.leadSlotFrame;
   const leadId = snapshot.leadNodeId;
 
   for (const node of nodes) {
     if (node.kind === 'lead' && node.id === leadId) {
-      node.x = 0;
-      node.y = 0;
-      node.fx = 0;
-      node.fy = 0;
+      node.x = leadFrame.ownerX;
+      node.y = leadFrame.ownerY;
+      node.fx = leadFrame.ownerX;
+      node.fy = leadFrame.ownerY;
       node.vx = 0;
       node.vy = 0;
       continue;
@@ -278,9 +279,10 @@ function applySnapshotToNodes(
     }
   }
 
-  positionProcessNodes(nodes, translatedFrames);
+  positionProcessNodes(nodes, [snapshot.leadSlotFrame, ...translatedFrames]);
   KanbanLayoutEngine.layout(nodes, {
     memberSlotFrames: translatedFrames,
+    leadSlotFrame: snapshot.leadSlotFrame,
     unassignedTaskRect: snapshot.unassignedTaskRect,
   });
   positionCrossTeamNodes(nodes, snapshot.fitBounds);
@@ -322,16 +324,15 @@ function commitSnapshotGeometry(args: {
   activityRectByNodeIdRef.current.clear();
   extraWorldBoundsRef.current = snapshotToWorldBounds(snapshot);
 
-  if (snapshot.leadNodeId && snapshot.launchAnchor) {
-    launchAnchorPositionsRef.current.set(snapshot.leadNodeId, snapshot.launchAnchor);
-  }
-
   for (const frame of getTranslatedMemberFrames(snapshot, dragOwnerPositionsRef.current)) {
     activityRectByNodeIdRef.current.set(frame.ownerId, frame.activityColumnRect);
   }
 
   if (snapshot.leadNodeId) {
-    activityRectByNodeIdRef.current.set(snapshot.leadNodeId, snapshot.leadActivityRect);
+    activityRectByNodeIdRef.current.set(
+      snapshot.leadNodeId,
+      snapshot.leadSlotFrame.activityColumnRect
+    );
   }
 }
 

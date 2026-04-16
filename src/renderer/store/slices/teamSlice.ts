@@ -86,6 +86,27 @@ interface RefreshTeamDataOptions {
 }
 
 type TeamGraphSlotAssignments = Record<string, GraphOwnerSlotAssignment>;
+type TeamGraphMemberSeedInput = Pick<TeamData['members'][number], 'name' | 'agentId' | 'removedAt'>;
+
+const SMALL_TEAM_CARDINAL_SLOT_PRESETS: ReadonlyArray<ReadonlyArray<GraphOwnerSlotAssignment>> = [
+  [],
+  [{ ringIndex: 0, sectorIndex: 0 }],
+  [
+    { ringIndex: 0, sectorIndex: 5 },
+    { ringIndex: 0, sectorIndex: 1 },
+  ],
+  [
+    { ringIndex: 0, sectorIndex: 5 },
+    { ringIndex: 0, sectorIndex: 1 },
+    { ringIndex: 0, sectorIndex: 3 },
+  ],
+  [
+    { ringIndex: 0, sectorIndex: 5 },
+    { ringIndex: 0, sectorIndex: 1 },
+    { ringIndex: 0, sectorIndex: 4 },
+    { ringIndex: 0, sectorIndex: 2 },
+  ],
+];
 
 export function isTeamDataRefreshPending(teamName: string): boolean {
   return (
@@ -943,7 +964,7 @@ export function selectTeamDataForName(
 
 function migrateStableSlotAssignmentsForMembers(
   assignments: TeamGraphSlotAssignments | undefined,
-  members: readonly Pick<TeamData['members'][number], 'name' | 'agentId'>[]
+  members: readonly TeamGraphMemberSeedInput[]
 ): { assignments: TeamGraphSlotAssignments; changed: boolean } {
   const nextAssignments: TeamGraphSlotAssignments = { ...(assignments ?? {}) };
   let changed = false;
@@ -968,6 +989,36 @@ function migrateStableSlotAssignmentsForMembers(
   }
 
   return { assignments: nextAssignments, changed };
+}
+
+function seedStableSlotAssignmentsForMembers(
+  assignments: TeamGraphSlotAssignments,
+  members: readonly TeamGraphMemberSeedInput[]
+): { assignments: TeamGraphSlotAssignments; changed: boolean } {
+  const visibleMembers = members.filter((member) => !member.removedAt);
+  if (visibleMembers.length === 0 || visibleMembers.length > 4) {
+    return { assignments, changed: false };
+  }
+
+  const visibleStableOwnerIds = visibleMembers.map((member) => getStableTeamOwnerId(member));
+  const hasAnyVisibleAssignments = visibleStableOwnerIds.some(
+    (stableOwnerId) => assignments[stableOwnerId] != null
+  );
+  if (hasAnyVisibleAssignments) {
+    return { assignments, changed: false };
+  }
+
+  const preset = SMALL_TEAM_CARDINAL_SLOT_PRESETS[visibleMembers.length];
+  if (!preset || preset.length !== visibleMembers.length) {
+    return { assignments, changed: false };
+  }
+
+  const nextAssignments: TeamGraphSlotAssignments = { ...assignments };
+  visibleMembers.forEach((member, index) => {
+    nextAssignments[getStableTeamOwnerId(member)] = preset[index]!;
+  });
+
+  return { assignments: nextAssignments, changed: true };
 }
 
 function isVisibleInActiveTeamSurface(
@@ -1077,7 +1128,7 @@ export interface TeamSlice {
   clearKanbanFilter: () => void;
   ensureTeamGraphSlotAssignments: (
     teamName: string,
-    members: readonly Pick<TeamData['members'][number], 'name' | 'agentId'>[]
+    members: readonly TeamGraphMemberSeedInput[]
   ) => void;
   setTeamGraphOwnerSlotAssignment: (
     teamName: string,
@@ -1783,10 +1834,11 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
       const currentAssignments = nextSlotAssignmentsByTeam[teamName];
       const migrated = migrateStableSlotAssignmentsForMembers(currentAssignments, members);
-      if (migrated.changed) {
+      const seeded = seedStableSlotAssignmentsForMembers(migrated.assignments, members);
+      if (migrated.changed || seeded.changed) {
         nextSlotAssignmentsByTeam = {
           ...nextSlotAssignmentsByTeam,
-          [teamName]: migrated.assignments,
+          [teamName]: seeded.assignments,
         };
         changed = true;
       }

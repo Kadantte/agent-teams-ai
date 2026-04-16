@@ -1,7 +1,7 @@
 import { KANBAN_ZONE, TASK_PILL } from '../constants/canvas-constants';
 import type { GraphLayoutPort, GraphNode, GraphOwnerSlotAssignment } from '../ports/types';
 import { ACTIVITY_LANE } from './activityLane';
-import { LAUNCH_ANCHOR_LAYOUT, type WorldBounds } from './launchAnchor';
+import type { WorldBounds } from './launchAnchor';
 import {
   STABLE_SLOT_GEOMETRY,
   STABLE_SLOT_SECTOR_VECTORS,
@@ -55,6 +55,7 @@ export interface StableSlotLayoutSnapshot {
   teamName: string;
   leadNodeId: string | null;
   leadCoreRect: StableRect;
+  leadSlotFrame: SlotFrame;
   leadActivityRect: StableRect;
   launchHudRect: StableRect;
   launchAnchor: { x: number; y: number } | null;
@@ -128,27 +129,21 @@ export function buildStableSlotLayoutSnapshot({
     return null;
   }
 
-  const leadCoreRect = createCenteredRect(0, 0, 200, 168);
-  const leadActivityRect = createRect(
-    leadCoreRect.left - SLOT_GEOMETRY.centralBlockGap - ACTIVITY_LANE.width,
-    -SLOT_GEOMETRY.activityColumnHeight / 2,
-    ACTIVITY_LANE.width,
-    SLOT_GEOMETRY.activityColumnHeight
+  const leadCoreRect = createCenteredRect(0, 0, 200, 96);
+  const leadFootprint = computeOwnerFootprintForOwnerId(nodes, leadNode.id);
+  const leadSlotFrame = buildSlotFrameAtRadius(
+    leadFootprint,
+    { ringIndex: 0, sectorIndex: 0 },
+    0
   );
-  const launchHudRect = createRect(
-    leadCoreRect.right + SLOT_GEOMETRY.centralBlockGap,
-    -LAUNCH_ANCHOR_LAYOUT.compactHeight / 2,
-    LAUNCH_ANCHOR_LAYOUT.compactWidth,
-    LAUNCH_ANCHOR_LAYOUT.compactHeight
-  );
-  const leadCentralReservedBlock = unionRects([leadCoreRect, leadActivityRect, launchHudRect]);
+  const leadActivityRect = leadSlotFrame.activityColumnRect;
+  const launchHudRect = createRect(leadCoreRect.right, leadCoreRect.top, 0, 0);
+  const leadCentralReservedBlock = leadSlotFrame.bounds;
 
   const ownerFootprints = computeOwnerFootprints(nodes, layout);
   const unassignedTaskRect = buildUnassignedTaskRect(nodes, leadCentralReservedBlock);
   const centralCollisionRects = buildCentralCollisionRects({
-    leadCoreRect,
-    leadActivityRect,
-    launchHudRect,
+    leadCentralReservedBlock,
     unassignedTaskRect,
   });
   const runtimeCentralExclusion = padRect(
@@ -177,12 +172,10 @@ export function buildStableSlotLayoutSnapshot({
     teamName,
     leadNodeId: leadNode.id,
     leadCoreRect,
+    leadSlotFrame,
     leadActivityRect,
     launchHudRect,
-    launchAnchor: {
-      x: launchHudRect.left + launchHudRect.width / 2,
-      y: launchHudRect.top + launchHudRect.height / 2,
-    },
+    launchAnchor: null,
     leadCentralReservedBlock,
     runtimeCentralExclusion,
     centralCollisionRects,
@@ -194,12 +187,10 @@ export function buildStableSlotLayoutSnapshot({
 }
 
 function buildCentralCollisionRects(args: {
-  leadCoreRect: StableRect;
-  leadActivityRect: StableRect;
-  launchHudRect: StableRect;
+  leadCentralReservedBlock: StableRect;
   unassignedTaskRect: StableRect | null;
 }): StableRect[] {
-  const rects = [args.leadCoreRect, args.leadActivityRect, args.launchHudRect];
+  const rects = [args.leadCentralReservedBlock];
   if (args.unassignedTaskRect) {
     rects.push(args.unassignedTaskRect);
   }
@@ -253,64 +244,96 @@ export function computeOwnerFootprints(
       return [];
     }
 
-    const taskColumnCount = taskColumnsByOwnerId.get(ownerId)?.size ?? 0;
-    const kanbanBandWidth =
-      taskColumnCount <= 1
-        ? TASK_PILL.width
-        : TASK_PILL.width + (taskColumnCount - 1) * KANBAN_ZONE.columnWidth;
-    const processCount = processCountByOwnerId.get(ownerId) ?? 0;
-    const processBandWidth = computeProcessBandWidth(processCount);
-    const boardBandWidth =
-      SLOT_GEOMETRY.activityColumnWidth +
-      SLOT_GEOMETRY.boardColumnGap +
-      kanbanBandWidth;
-    const boardBandHeight = Math.max(
-      SLOT_GEOMETRY.activityColumnHeight,
-      SLOT_GEOMETRY.kanbanBandHeight
-    );
-    const innerContentWidth = Math.max(
-      SLOT_GEOMETRY.ownerMinWidth,
-      processBandWidth,
-      boardBandWidth
-    );
-    const slotWidth = innerContentWidth + SLOT_GEOMETRY.memberSlotInnerPadding * 2;
-    const slotHeight =
-      SLOT_GEOMETRY.memberSlotInnerPadding * 2 +
-      SLOT_GEOMETRY.ownerBandHeight +
+    return [
+      buildOwnerFootprint({
+        ownerId,
+        taskColumnCount: taskColumnsByOwnerId.get(ownerId)?.size ?? 0,
+        processCount: processCountByOwnerId.get(ownerId) ?? 0,
+      }),
+    ];
+  });
+}
+
+function computeOwnerFootprintForOwnerId(
+  nodes: readonly GraphNode[],
+  ownerId: string
+): OwnerFootprint {
+  const taskColumns = new Set<string>();
+  let processCount = 0;
+
+  for (const node of nodes) {
+    if (node.kind === 'task' && node.ownerId === ownerId) {
+      taskColumns.add(resolveTaskColumnKey(node));
+    }
+    if (node.kind === 'process' && node.ownerId === ownerId) {
+      processCount += 1;
+    }
+  }
+
+  return buildOwnerFootprint({
+    ownerId,
+    taskColumnCount: taskColumns.size,
+    processCount,
+  });
+}
+
+function buildOwnerFootprint(args: {
+  ownerId: string;
+  taskColumnCount: number;
+  processCount: number;
+}): OwnerFootprint {
+  const kanbanBandWidth =
+    args.taskColumnCount <= 1
+      ? TASK_PILL.width
+      : TASK_PILL.width + (args.taskColumnCount - 1) * KANBAN_ZONE.columnWidth;
+  const processBandWidth = computeProcessBandWidth(args.processCount);
+  const boardBandWidth =
+    SLOT_GEOMETRY.activityColumnWidth +
+    SLOT_GEOMETRY.boardColumnGap +
+    kanbanBandWidth;
+  const boardBandHeight = Math.max(
+    SLOT_GEOMETRY.activityColumnHeight,
+    SLOT_GEOMETRY.kanbanBandHeight
+  );
+  const innerContentWidth = Math.max(
+    SLOT_GEOMETRY.ownerMinWidth,
+    processBandWidth,
+    boardBandWidth
+  );
+  const slotWidth = innerContentWidth + SLOT_GEOMETRY.memberSlotInnerPadding * 2;
+  const slotHeight =
+    SLOT_GEOMETRY.memberSlotInnerPadding * 2 +
+    SLOT_GEOMETRY.ownerBandHeight +
+    SLOT_GEOMETRY.ownerToProcessGap +
+    SLOT_GEOMETRY.processBandHeight +
+    SLOT_GEOMETRY.processToBoardGap +
+    boardBandHeight;
+  const radialDepth = Math.max(
+    SLOT_GEOMETRY.memberSlotInnerPadding + SLOT_GEOMETRY.ownerBandHeight / 2,
+    SLOT_GEOMETRY.memberSlotInnerPadding +
+      SLOT_GEOMETRY.ownerBandHeight / 2 +
       SLOT_GEOMETRY.ownerToProcessGap +
       SLOT_GEOMETRY.processBandHeight +
       SLOT_GEOMETRY.processToBoardGap +
-      boardBandHeight;
-    const radialDepth = Math.max(
-      SLOT_GEOMETRY.memberSlotInnerPadding +
-        SLOT_GEOMETRY.ownerBandHeight / 2,
-      SLOT_GEOMETRY.memberSlotInnerPadding +
-        SLOT_GEOMETRY.ownerBandHeight / 2 +
-        SLOT_GEOMETRY.ownerToProcessGap +
-        SLOT_GEOMETRY.processBandHeight +
-        SLOT_GEOMETRY.processToBoardGap +
-        boardBandHeight
-    );
+      boardBandHeight
+  );
 
-    return [
-      {
-        ownerId,
-        slotWidth,
-        slotHeight,
-        widthBucket: classifyWidthBucket(slotWidth),
-        radialDepth,
-        activityColumnWidth: SLOT_GEOMETRY.activityColumnWidth,
-        activityColumnHeight: SLOT_GEOMETRY.activityColumnHeight,
-        processBandWidth,
-        kanbanBandWidth,
-        kanbanBandHeight: SLOT_GEOMETRY.kanbanBandHeight,
-        boardBandWidth,
-        boardBandHeight,
-        taskColumnCount,
-        processCount,
-      } satisfies OwnerFootprint,
-    ];
-  });
+  return {
+    ownerId: args.ownerId,
+    slotWidth,
+    slotHeight,
+    widthBucket: classifyWidthBucket(slotWidth),
+    radialDepth,
+    activityColumnWidth: SLOT_GEOMETRY.activityColumnWidth,
+    activityColumnHeight: SLOT_GEOMETRY.activityColumnHeight,
+    processBandWidth,
+    kanbanBandWidth,
+    kanbanBandHeight: SLOT_GEOMETRY.kanbanBandHeight,
+    boardBandWidth,
+    boardBandHeight,
+    taskColumnCount: args.taskColumnCount,
+    processCount: args.processCount,
+  } satisfies OwnerFootprint;
 }
 
 export function classifyWidthBucket(width: number): StableSlotWidthBucket {
@@ -447,6 +470,11 @@ function validateStaticSnapshotRects(
 ): StableSlotLayoutValidationResult | null {
   const staticRects: [string, StableRect][] = [
     ['leadCoreRect', snapshot.leadCoreRect],
+    ['leadSlotFrame.bounds', snapshot.leadSlotFrame.bounds],
+    ['leadSlotFrame.boardBandRect', snapshot.leadSlotFrame.boardBandRect],
+    ['leadSlotFrame.activityColumnRect', snapshot.leadSlotFrame.activityColumnRect],
+    ['leadSlotFrame.processBandRect', snapshot.leadSlotFrame.processBandRect],
+    ['leadSlotFrame.kanbanBandRect', snapshot.leadSlotFrame.kanbanBandRect],
     ['leadActivityRect', snapshot.leadActivityRect],
     ['launchHudRect', snapshot.launchHudRect],
     ['leadCentralReservedBlock', snapshot.leadCentralReservedBlock],
@@ -477,14 +505,34 @@ function validateStaticSnapshotRects(
 function validateLeadSnapshotRects(
   snapshot: StableSlotLayoutSnapshot
 ): StableSlotLayoutValidationResult | null {
+  const leadFrameValidation = validateSlotFrameGeometry(
+    snapshot.leadSlotFrame,
+    snapshot.fitBounds,
+    `leadSlotFrame(${snapshot.leadSlotFrame.ownerId})`
+  );
+  if (leadFrameValidation) {
+    return leadFrameValidation;
+  }
   if (!rectContainsRect(snapshot.leadCentralReservedBlock, snapshot.leadCoreRect)) {
     return { valid: false, reason: 'leadCoreRect must fit inside leadCentralReservedBlock' };
   }
   if (!rectContainsRect(snapshot.leadCentralReservedBlock, snapshot.leadActivityRect)) {
     return { valid: false, reason: 'leadActivityRect must fit inside leadCentralReservedBlock' };
   }
-  if (!rectContainsRect(snapshot.leadCentralReservedBlock, snapshot.launchHudRect)) {
-    return { valid: false, reason: 'launchHudRect must fit inside leadCentralReservedBlock' };
+  if (snapshot.leadActivityRect.left !== snapshot.leadSlotFrame.activityColumnRect.left) {
+    return {
+      valid: false,
+      reason: 'leadActivityRect must mirror leadSlotFrame.activityColumnRect',
+    };
+  }
+  if (snapshot.leadActivityRect.top !== snapshot.leadSlotFrame.activityColumnRect.top) {
+    return {
+      valid: false,
+      reason: 'leadActivityRect must mirror leadSlotFrame.activityColumnRect',
+    };
+  }
+  if (!rectContainsRect(snapshot.leadCentralReservedBlock, snapshot.leadSlotFrame.bounds)) {
+    return { valid: false, reason: 'leadSlotFrame must fit inside leadCentralReservedBlock' };
   }
   if (!rectContainsRect(snapshot.runtimeCentralExclusion, snapshot.leadCentralReservedBlock)) {
     return { valid: false, reason: 'runtimeCentralExclusion must contain leadCentralReservedBlock' };
@@ -513,11 +561,13 @@ function validateMemberSlotFrame(
   seenOwnerIds: Set<string>,
   seenAssignments: Set<string>
 ): StableSlotLayoutValidationResult | null {
-  if (!isFiniteRect(frame.bounds)) {
-    return { valid: false, reason: `slot frame for ${frame.ownerId} contains non-finite bounds` };
-  }
-  if (!Number.isFinite(frame.ownerX) || !Number.isFinite(frame.ownerY)) {
-    return { valid: false, reason: `slot frame for ${frame.ownerId} contains non-finite anchor` };
+  const geometryValidation = validateSlotFrameGeometry(
+    frame,
+    snapshot.fitBounds,
+    `slot frame for ${frame.ownerId}`
+  );
+  if (geometryValidation) {
+    return geometryValidation;
   }
   if (seenOwnerIds.has(frame.ownerId)) {
     return { valid: false, reason: `duplicate owner frame for ${frame.ownerId}` };
@@ -536,41 +586,55 @@ function validateMemberSlotFrame(
       reason: `slot frame for ${frame.ownerId} overlaps centralCollisionRects`,
     };
   }
+  return null;
+}
+
+function validateSlotFrameGeometry(
+  frame: SlotFrame,
+  fitBounds: StableRect,
+  label: string
+): StableSlotLayoutValidationResult | null {
+  if (!isFiniteRect(frame.bounds)) {
+    return { valid: false, reason: `${label} contains non-finite bounds` };
+  }
+  if (!Number.isFinite(frame.ownerX) || !Number.isFinite(frame.ownerY)) {
+    return { valid: false, reason: `${label} contains non-finite anchor` };
+  }
   if (!rectContainsRect(frame.bounds, frame.boardBandRect)) {
-    return { valid: false, reason: `boardBandRect escapes slot bounds for ${frame.ownerId}` };
+    return { valid: false, reason: `boardBandRect escapes ${label}` };
   }
   if (!rectContainsRect(frame.bounds, frame.activityColumnRect)) {
-    return { valid: false, reason: `activityColumnRect escapes slot bounds for ${frame.ownerId}` };
+    return { valid: false, reason: `activityColumnRect escapes ${label}` };
   }
   if (!rectContainsRect(frame.bounds, frame.processBandRect)) {
-    return { valid: false, reason: `processBandRect escapes slot bounds for ${frame.ownerId}` };
+    return { valid: false, reason: `processBandRect escapes ${label}` };
   }
   if (!rectContainsRect(frame.bounds, frame.kanbanBandRect)) {
-    return { valid: false, reason: `kanbanBandRect escapes slot bounds for ${frame.ownerId}` };
+    return { valid: false, reason: `kanbanBandRect escapes ${label}` };
   }
   if (!rectContainsRect(frame.boardBandRect, frame.activityColumnRect)) {
     return {
       valid: false,
-      reason: `activityColumnRect escapes boardBandRect for ${frame.ownerId}`,
+      reason: `activityColumnRect escapes boardBandRect in ${label}`,
     };
   }
   if (!rectContainsRect(frame.boardBandRect, frame.kanbanBandRect)) {
     return {
       valid: false,
-      reason: `kanbanBandRect escapes boardBandRect for ${frame.ownerId}`,
+      reason: `kanbanBandRect escapes boardBandRect in ${label}`,
     };
   }
   if (rectsOverlap(frame.activityColumnRect, frame.kanbanBandRect)) {
     return {
       valid: false,
-      reason: `activityColumnRect overlaps kanbanBandRect for ${frame.ownerId}`,
+      reason: `activityColumnRect overlaps kanbanBandRect in ${label}`,
     };
   }
   if (!pointInRect(frame.ownerX, frame.ownerY, frame.bounds)) {
-    return { valid: false, reason: `owner anchor escapes slot bounds for ${frame.ownerId}` };
+    return { valid: false, reason: `owner anchor escapes ${label}` };
   }
-  if (!rectContainsRect(snapshot.fitBounds, frame.bounds)) {
-    return { valid: false, reason: `slot frame for ${frame.ownerId} escapes fitBounds` };
+  if (!rectContainsRect(fitBounds, frame.bounds)) {
+    return { valid: false, reason: `${label} escapes fitBounds` };
   }
 
   return null;

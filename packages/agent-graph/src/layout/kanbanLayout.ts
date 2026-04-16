@@ -10,7 +10,6 @@
 import type { GraphNode } from '../ports/types';
 import { KANBAN_ZONE, TASK_PILL } from '../constants/canvas-constants';
 import { COLORS } from '../constants/colors';
-import { resolveActivityLaneSide } from './activityLane';
 import type { SlotFrame, StableRect } from './stableSlots';
 
 /** Column header info for rendering */
@@ -49,7 +48,7 @@ export function getOwnerKanbanBaseX(args: {
   columnWidth: number;
   leadX?: number | null;
 }): number {
-  const { ownerX, ownerKind, activeColumnCount, columnWidth, leadX } = args;
+  const { ownerX, ownerKind, activeColumnCount, columnWidth } = args;
   if (activeColumnCount <= 0) {
     return ownerX;
   }
@@ -58,17 +57,7 @@ export function getOwnerKanbanBaseX(args: {
     return ownerX - (activeColumnCount * columnWidth) / 2;
   }
 
-  const side = resolveActivityLaneSide({
-    nodeKind: ownerKind,
-    nodeX: ownerX,
-    leadX,
-  });
-
-  if (side === 'left') {
-    return ownerX;
-  }
-
-  return ownerX - (activeColumnCount - 1) * columnWidth;
+  return ownerX - ((activeColumnCount - 1) * columnWidth) / 2;
 }
 
 export class KanbanLayoutEngine {
@@ -89,6 +78,7 @@ export class KanbanLayoutEngine {
     nodes: GraphNode[],
     options?: {
       memberSlotFrames?: readonly SlotFrame[];
+      leadSlotFrame?: SlotFrame | null;
       unassignedTaskRect?: StableRect | null;
     }
   ): void {
@@ -96,9 +86,12 @@ export class KanbanLayoutEngine {
     nodeMap.clear();
     for (const n of nodes) nodeMap.set(n.id, n);
     const leadX = nodes.find((node) => node.kind === 'lead')?.x ?? null;
-    const memberSlotFrameByOwnerId = new Map(
+    const ownerSlotFrameByOwnerId = new Map(
       (options?.memberSlotFrames ?? []).map((frame) => [frame.ownerId, frame] as const)
     );
+    if (options?.leadSlotFrame) {
+      ownerSlotFrameByOwnerId.set(options.leadSlotFrame.ownerId, options.leadSlotFrame);
+    }
 
     const tasksByOwner = this.#tasksByOwner;
     tasksByOwner.clear();
@@ -110,10 +103,10 @@ export class KanbanLayoutEngine {
         return false;
       }
       if (owner.kind === 'lead') {
-        return true;
+        return ownerSlotFrameByOwnerId.has(ownerId);
       }
       if (owner.kind === 'member') {
-        return memberSlotFrameByOwnerId.has(ownerId);
+        return ownerSlotFrameByOwnerId.has(ownerId);
       }
       return false;
     };
@@ -143,7 +136,7 @@ export class KanbanLayoutEngine {
         owner,
         ownerId,
         leadX,
-        memberSlotFrameByOwnerId.get(ownerId) ?? null
+        ownerSlotFrameByOwnerId.get(ownerId) ?? null
       );
       if (zoneInfo) this.zones.push(zoneInfo);
     }

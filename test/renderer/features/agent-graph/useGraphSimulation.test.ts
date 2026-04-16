@@ -98,7 +98,7 @@ describe('stable slot layout planner', () => {
     expect(snapshot).toBeNull();
   });
 
-  it('builds launch and activity geometry around the central lead block', () => {
+  it('builds lead activity inside the same central owner slot topology', () => {
     const teamName = 'team-a';
     const lead = createLead(teamName);
     const alice = createMember(teamName, 'agent-alice', 'alice');
@@ -118,11 +118,13 @@ describe('stable slot layout planner', () => {
 
     expect(snapshot).not.toBeNull();
     expect(snapshot?.leadNodeId).toBe(lead.id);
-    expect(snapshot?.launchAnchor).not.toBeNull();
+    expect(snapshot?.launchAnchor).toBeNull();
+    expect(snapshot?.leadSlotFrame.ownerId).toBe(lead.id);
     expect(snapshot?.memberSlotFrames).toHaveLength(1);
     expect(snapshot?.memberSlotFrames[0]?.ownerId).toBe(alice.id);
-    expect(snapshot?.leadActivityRect.left).toBeLessThan(snapshot?.leadCoreRect.left ?? 0);
-    expect(snapshot?.fitBounds.right).toBeGreaterThan(snapshot?.leadCoreRect.right ?? 0);
+    expect(snapshot?.leadActivityRect.top).toBeGreaterThan(snapshot?.leadCoreRect.bottom ?? 0);
+    expect(snapshot?.leadSlotFrame.activityColumnRect.left).toBe(snapshot?.leadActivityRect.left);
+    expect(snapshot?.leadSlotFrame.activityColumnRect.top).toBe(snapshot?.leadActivityRect.top);
     expect(validateStableSlotLayout(snapshot!)).toEqual({ valid: true });
   });
 
@@ -309,7 +311,7 @@ describe('stable slot layout planner', () => {
     expect(validateStableSlotLayout(invalid).valid).toBe(false);
   });
 
-  it('rejects member frames that overlap lead activity and launch central collision rects', () => {
+  it('rejects member frames that overlap the lead central reserved block', () => {
     const teamName = 'team-central-rects';
     const lead = createLead(teamName);
     const alice = createMember(teamName, 'agent-alice', 'alice');
@@ -329,27 +331,16 @@ describe('stable slot layout planner', () => {
 
     expect(snapshot).not.toBeNull();
     const [frame] = snapshot!.memberSlotFrames;
-    const overlappingLeadActivity = translateSlotFrame(
+    const overlappingLeadBlock = translateSlotFrame(
       frame,
-      snapshot!.leadActivityRect.left - frame.bounds.left + 1,
-      snapshot!.leadActivityRect.top - frame.bounds.top + 1
-    );
-    const overlappingLaunchHud = translateSlotFrame(
-      frame,
-      snapshot!.launchHudRect.left - frame.bounds.left + 1,
-      snapshot!.launchHudRect.top - frame.bounds.top + 1
+      snapshot!.leadCentralReservedBlock.left - frame.bounds.left + 1,
+      snapshot!.leadCentralReservedBlock.top - frame.bounds.top + 1
     );
 
     expect(
       validateStableSlotLayout({
         ...snapshot!,
-        memberSlotFrames: [overlappingLeadActivity],
-      }).valid
-    ).toBe(false);
-    expect(
-      validateStableSlotLayout({
-        ...snapshot!,
-        memberSlotFrames: [overlappingLaunchHud],
+        memberSlotFrames: [overlappingLeadBlock],
       }).valid
     ).toBe(false);
   });
@@ -626,6 +617,50 @@ describe('stable slot layout planner', () => {
       expect(task.x).toBeLessThanOrEqual(ownerFrame!.kanbanBandRect.right);
       expect(task.y).toBeGreaterThanOrEqual(ownerFrame!.kanbanBandRect.top);
       expect(task.y).toBeLessThanOrEqual(ownerFrame!.kanbanBandRect.bottom);
+    }
+  });
+
+  it('positions lead-owned tasks inside the lead kanban band instead of unassigned', () => {
+    const teamName = 'team-lead-owned-tasks';
+    const lead = createLead(teamName);
+    const alice = createMember(teamName, 'agent-alice', 'alice');
+    const leadTasks = [
+      createTask(teamName, 'lead-a', lead.id, { taskStatus: 'completed' }),
+      createTask(teamName, 'lead-b', lead.id, { taskStatus: 'in_progress' }),
+    ];
+    const layout: GraphLayoutPort = {
+      version: 'stable-slots-v1',
+      ownerOrder: [alice.id],
+      slotAssignments: {
+        [alice.id]: { ringIndex: 0, sectorIndex: 1 },
+      },
+    };
+
+    const nodes = [lead, alice, ...leadTasks];
+    const snapshot = buildStableSlotLayoutSnapshot({
+      teamName,
+      nodes,
+      layout,
+    });
+
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.unassignedTaskRect).toBeNull();
+    lead.x = snapshot!.leadSlotFrame.ownerX;
+    lead.y = snapshot!.leadSlotFrame.ownerY;
+    alice.x = snapshot!.memberSlotFrames[0]?.ownerX;
+    alice.y = snapshot!.memberSlotFrames[0]?.ownerY;
+
+    KanbanLayoutEngine.layout(nodes, {
+      leadSlotFrame: snapshot!.leadSlotFrame,
+      memberSlotFrames: snapshot!.memberSlotFrames,
+      unassignedTaskRect: snapshot!.unassignedTaskRect,
+    });
+
+    for (const task of leadTasks) {
+      expect(task.x).toBeGreaterThanOrEqual(snapshot!.leadSlotFrame.kanbanBandRect.left);
+      expect(task.x).toBeLessThanOrEqual(snapshot!.leadSlotFrame.kanbanBandRect.right);
+      expect(task.y).toBeGreaterThanOrEqual(snapshot!.leadSlotFrame.kanbanBandRect.top);
+      expect(task.y).toBeLessThanOrEqual(snapshot!.leadSlotFrame.kanbanBandRect.bottom);
     }
   });
 

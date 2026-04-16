@@ -47,6 +47,7 @@ export interface GraphViewProps {
   onCreateTask?: () => void;
   onToggleSidebar?: () => void;
   isSidebarVisible?: boolean;
+  renderTopToolbarContent?: () => React.ReactNode;
   onOwnerSlotDrop?: (payload: {
     nodeId: string;
     assignment: GraphOwnerSlotAssignment;
@@ -92,6 +93,7 @@ export function GraphView({
   onCreateTask,
   onToggleSidebar,
   isSidebarVisible = true,
+  renderTopToolbarContent,
   onOwnerSlotDrop,
   renderOverlay,
   renderEdgeOverlay,
@@ -748,6 +750,7 @@ export function GraphView({
         teamName={data.teamName}
         teamColor={data.teamColor}
         isAlive={data.isAlive}
+        topToolbarContent={renderTopToolbarContent?.()}
       />
 
       {renderHud ? (

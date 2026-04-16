@@ -259,6 +259,48 @@ describe('teamSlice actions', () => {
     });
   });
 
+  it('seeds first-open cardinal slot defaults for small visible teams with no saved placements', () => {
+    const store = createSliceStore();
+
+    store.getState().ensureTeamGraphSlotAssignments('my-team', [
+      { name: 'alice', agentId: 'agent-alice' },
+      { name: 'bob', agentId: 'agent-bob' },
+      { name: 'tom', agentId: 'agent-tom' },
+      { name: 'jack', agentId: 'agent-jack' },
+    ]);
+
+    expect(store.getState().slotAssignmentsByTeam['my-team']).toEqual({
+      'agent-alice': { ringIndex: 0, sectorIndex: 5 },
+      'agent-bob': { ringIndex: 0, sectorIndex: 1 },
+      'agent-tom': { ringIndex: 0, sectorIndex: 4 },
+      'agent-jack': { ringIndex: 0, sectorIndex: 2 },
+    });
+  });
+
+  it('seeds visible members even when only hidden owners have saved placements', () => {
+    const store = createSliceStore();
+    store.setState({
+      slotLayoutVersion: 'stable-slots-v1',
+      slotAssignmentsByTeam: {
+        'my-team': {
+          'agent-hidden': { ringIndex: 2, sectorIndex: 4 },
+        },
+      },
+    });
+
+    store.getState().ensureTeamGraphSlotAssignments('my-team', [
+      { name: 'hidden', agentId: 'agent-hidden', removedAt: '2026-04-16T08:00:00.000Z' },
+      { name: 'alice', agentId: 'agent-alice' },
+      { name: 'bob', agentId: 'agent-bob' },
+    ]);
+
+    expect(store.getState().slotAssignmentsByTeam['my-team']).toEqual({
+      'agent-hidden': { ringIndex: 2, sectorIndex: 4 },
+      'agent-alice': { ringIndex: 0, sectorIndex: 5 },
+      'agent-bob': { ringIndex: 0, sectorIndex: 1 },
+    });
+  });
+
   it('resets stale slot assignments when slot layout version mismatches', () => {
     const store = createSliceStore();
     store.setState({
@@ -278,7 +320,11 @@ describe('teamSlice actions', () => {
     ]);
 
     expect(store.getState().slotLayoutVersion).toBe('stable-slots-v1');
-    expect(store.getState().slotAssignmentsByTeam).toEqual({});
+    expect(store.getState().slotAssignmentsByTeam).toEqual({
+      'my-team': {
+        'agent-alice': { ringIndex: 0, sectorIndex: 0 },
+      },
+    });
   });
 
   it('keeps hidden-member slot assignments so the same stable owner can reuse them later', () => {

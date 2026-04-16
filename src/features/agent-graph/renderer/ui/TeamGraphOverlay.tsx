@@ -58,10 +58,6 @@ export const TeamGraphOverlay = ({
   const { dialog: createTaskDialog, openCreateTaskDialog } = useGraphCreateTaskDialog(teamName);
   const effectiveSidebarVisible = sidebarVisible ?? persistedSidebarVisible;
   const handleToggleSidebar = onToggleSidebar ?? toggleSidebarVisible;
-  const leadNodeId = useMemo(
-    () => graphData.nodes.find((node) => node.kind === 'lead')?.id ?? null,
-    [graphData.nodes]
-  );
 
   // Task action dispatchers (same pattern as TeamGraphTab)
   const dispatchTaskAction = useCallback(
@@ -126,6 +122,7 @@ export const TeamGraphOverlay = ({
         onCreateTask={openCreateTask}
         onToggleSidebar={handleToggleSidebar}
         isSidebarVisible={effectiveSidebarVisible}
+        renderTopToolbarContent={() => <GraphProvisioningHud teamName={teamName} />}
         onOwnerSlotDrop={commitOwnerSlotDrop}
         className="team-graph-view min-w-0 flex-1"
         renderHud={(hudProps) => {
@@ -143,7 +140,7 @@ export const TeamGraphOverlay = ({
             worldToScreen?: (x: number, y: number) => { x: number; y: number };
             getNodeWorldPosition?: (nodeId: string) => { x: number; y: number } | null;
           };
-          const { getLaunchAnchorScreenPlacement, getViewportSize, focusNodeIds } = extraHudProps;
+          const { getViewportSize, focusNodeIds } = extraHudProps;
 
           return (
             <>
@@ -158,11 +155,6 @@ export const TeamGraphOverlay = ({
                 focusNodeIds={focusNodeIds}
                 onOpenTaskDetail={onOpenTaskDetail}
                 onOpenMemberProfile={onOpenMemberProfile}
-              />
-              <GraphProvisioningHud
-                teamName={teamName}
-                leadNodeId={leadNodeId}
-                getLaunchAnchorScreenPlacement={getLaunchAnchorScreenPlacement}
               />
             </>
           );

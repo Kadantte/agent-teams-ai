@@ -46,10 +46,6 @@ export const TeamGraphTab = ({
 }: TeamGraphTabProps): React.JSX.Element => {
   const graphData = useTeamGraphAdapter(teamName);
   const { openTeamPage, commitOwnerSlotDrop } = useTeamGraphSurfaceActions(teamName);
-  const leadNodeId = useMemo(
-    () => graphData.nodes.find((node) => node.kind === 'lead')?.id ?? null,
-    [graphData.nodes]
-  );
   const [fullscreen, setFullscreen] = useState(false);
   const { sidebarVisible, toggleSidebarVisible } = useGraphSidebarVisibility();
   const { dialog: createTaskDialog, openCreateTaskDialog } = useGraphCreateTaskDialog(teamName);
@@ -149,6 +145,9 @@ export const TeamGraphTab = ({
           onCreateTask={openCreateTask}
           onToggleSidebar={toggleSidebarVisible}
           isSidebarVisible={sidebarVisible}
+          renderTopToolbarContent={() => (
+            <GraphProvisioningHud teamName={teamName} enabled={isActive} />
+          )}
           onOwnerSlotDrop={commitOwnerSlotDrop}
           renderHud={(hudProps) => {
             const extraHudProps = hudProps as typeof hudProps & {
@@ -165,7 +164,7 @@ export const TeamGraphTab = ({
               worldToScreen?: (x: number, y: number) => { x: number; y: number };
               getNodeWorldPosition?: (nodeId: string) => { x: number; y: number } | null;
             };
-            const { getLaunchAnchorScreenPlacement, getViewportSize, focusNodeIds } = extraHudProps;
+            const { getViewportSize, focusNodeIds } = extraHudProps;
 
             return (
               <>
@@ -181,12 +180,6 @@ export const TeamGraphTab = ({
                   enabled={isActive}
                   onOpenTaskDetail={dispatchOpenTask}
                   onOpenMemberProfile={dispatchOpenProfile}
-                />
-                <GraphProvisioningHud
-                  teamName={teamName}
-                  leadNodeId={leadNodeId}
-                  getLaunchAnchorScreenPlacement={getLaunchAnchorScreenPlacement}
-                  enabled={isActive}
                 />
               </>
             );
