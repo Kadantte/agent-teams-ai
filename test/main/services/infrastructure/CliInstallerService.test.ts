@@ -288,11 +288,11 @@ describe('CliInstallerService', () => {
       expect(status.providers.find((provider) => provider.providerId === 'codex')?.modelAvailability).toEqual([]);
 
       const verifiedProvider = await service.verifyProviderModels('codex');
-      expect(verifiedProvider?.modelAvailability).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ modelId: 'gpt-5.4', status: 'checking' }),
-          expect.objectContaining({ modelId: 'gpt-5.2-codex', status: 'checking' }),
-        ])
+      expect(verifiedProvider?.modelAvailability).toEqual([
+        expect.objectContaining({ modelId: 'gpt-5.4', status: 'checking' }),
+      ]);
+      expect(verifiedProvider?.modelAvailability).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ modelId: 'gpt-5.2-codex' })])
       );
 
       await vi.waitFor(() => {
@@ -302,12 +302,14 @@ describe('CliInstallerService', () => {
 
         expect(latestCodexProvider?.modelAvailability).toEqual([
           expect.objectContaining({ modelId: 'gpt-5.4', status: 'available' }),
-          expect.objectContaining({
-            modelId: 'gpt-5.2-codex',
-            status: 'unavailable',
-          }),
         ]);
       });
+
+      expect(execCli).not.toHaveBeenCalledWith(
+        '/usr/local/bin/claude',
+        expect.arrayContaining(['--model', 'gpt-5.2-codex']),
+        expect.anything()
+      );
 
       const statusEvents = mockWindow.webContents.send.mock.calls
         .filter((call: unknown[]) => call[0] === 'cliInstaller:progress')
@@ -325,12 +327,29 @@ describe('CliInstallerService', () => {
               'modelAvailability' in provider &&
               (provider as { providerId?: string }).providerId === 'codex' &&
               Array.isArray((provider as { modelAvailability?: unknown[] }).modelAvailability) &&
-              (provider as { modelAvailability: Array<{ status?: string }> }).modelAvailability.some(
-                (item) => item.status === 'unavailable'
-              )
+              (provider as { modelAvailability: Array<{ modelId?: string; status?: string }> })
+                .modelAvailability.some(
+                  (item) => item.modelId === 'gpt-5.4' && item.status === 'available'
+                )
           )
         )
       ).toBe(true);
+      expect(
+        statusEvents.some((event) =>
+          event.status?.providers?.some(
+            (provider) =>
+              typeof provider === 'object' &&
+              provider !== null &&
+              'providerId' in provider &&
+              'modelAvailability' in provider &&
+              (provider as { providerId?: string }).providerId === 'codex' &&
+              Array.isArray((provider as { modelAvailability?: unknown[] }).modelAvailability) &&
+              (provider as { modelAvailability: Array<{ modelId?: string }> }).modelAvailability.some(
+                (item) => item.modelId === 'gpt-5.2-codex'
+              )
+          )
+        )
+      ).toBe(false);
     });
   });
 

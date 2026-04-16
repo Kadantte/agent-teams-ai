@@ -48,6 +48,7 @@ import { normalizePath } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import {
   getTeamModelSelectionError,
+  normalizeExplicitTeamModelForUi,
   normalizeTeamModelForUi,
 } from '@renderer/utils/teamModelAvailability';
 import { getTeamProviderLabel as getCatalogTeamProviderLabel } from '@renderer/utils/teamModelCatalog';
@@ -73,21 +74,21 @@ import { resolveLaunchDialogPrefill } from './launchDialogPrefill';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
 import { ProjectPathSelector } from './ProjectPathSelector';
 import {
+  getProviderPrepareCachedSnapshot,
+  type ProviderPrepareDiagnosticsModelResult,
+  runProviderPrepareDiagnostics,
+} from './providerPrepareDiagnostics';
+import { getProvisioningModelIssue } from './provisioningModelIssues';
+import {
   failIncompleteProviderChecks,
-  getProvisioningFailureHint,
   getPrimaryProvisioningFailureDetail,
+  getProvisioningFailureHint,
   getProvisioningProviderBackendSummary,
   type ProvisioningProviderCheck,
   ProvisioningProviderStatusList,
   shouldHideProvisioningProviderStatusList,
   updateProviderCheck,
 } from './ProvisioningProviderStatusList';
-import { getProvisioningModelIssue } from './provisioningModelIssues';
-import {
-  getProviderPrepareCachedSnapshot,
-  runProviderPrepareDiagnostics,
-  type ProviderPrepareDiagnosticsModelResult,
-} from './providerPrepareDiagnostics';
 import {
   computeEffectiveTeamModel,
   formatTeamModelSummary,
@@ -195,7 +196,7 @@ function getStoredTeamModel(providerId: TeamProviderId): string {
   if (stored === null) {
     return providerId === 'anthropic' ? 'opus' : '';
   }
-  return normalizeTeamModelForUi(providerId, stored === '__default__' ? '' : stored);
+  return normalizeExplicitTeamModelForUi(providerId, stored === '__default__' ? '' : stored);
 }
 
 function getProviderLabel(providerId: TeamProviderId): string {

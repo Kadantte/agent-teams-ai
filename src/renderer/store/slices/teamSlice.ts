@@ -1,4 +1,5 @@
 import { api } from '@renderer/api';
+import { mergeTeamMessages } from '@renderer/utils/mergeTeamMessages';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import {
   buildTaskChangePresenceKey,
@@ -6,10 +7,9 @@ import {
   canDisplayTaskChangesForOptions,
   type TaskChangeRequestOptions,
 } from '@renderer/utils/taskChangeRequest';
-import { extractProviderScopedBaseModel } from '@renderer/utils/teamModelContext';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
+import { extractProviderScopedBaseModel } from '@renderer/utils/teamModelContext';
 import { IpcError, unwrapIpc } from '@renderer/utils/unwrapIpc';
-import { mergeTeamMessages } from '@renderer/utils/mergeTeamMessages';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { DEFAULT_TOOL_APPROVAL_SETTINGS } from '@shared/types/team';
 import { isLeadMember } from '@shared/utils/leadDetection';
@@ -111,10 +111,10 @@ type TeamGraphConfigMemberSeedInput = Pick<
   NonNullable<TeamViewSnapshot['config']['members']>[number],
   'name' | 'agentId' | 'removedAt'
 >;
-type TeamGraphLayoutSessionState = {
+interface TeamGraphLayoutSessionState {
   mode: 'default' | 'manual';
   signature: string | null;
-};
+}
 
 export function isTeamDataRefreshPending(teamName: string): boolean {
   return (
@@ -3202,8 +3202,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
     const existingOlderRequest = inFlightTeamMessagesOlderRequests.get(teamName);
     if (existingOlderRequest) {
-      let queuedRequest: Promise<RefreshTeamMessagesHeadResult>;
-      queuedRequest = existingOlderRequest
+      const queuedRequest: Promise<RefreshTeamMessagesHeadResult> = existingOlderRequest
         .then(() => {
           if (queuedTeamMessagesHeadRefreshesAfterOlder.get(teamName) === queuedRequest) {
             queuedTeamMessagesHeadRefreshesAfterOlder.delete(teamName);

@@ -4,8 +4,8 @@
 
 import type {
   CliInstallationStatus,
-  InstallScope,
   InstalledPluginEntry,
+  InstallScope,
   PluginCapability,
   PluginCatalogItem,
 } from '@shared/types';

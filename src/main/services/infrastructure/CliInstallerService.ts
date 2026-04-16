@@ -50,8 +50,8 @@ import type {
   CliInstallationStatus,
   CliInstallerProgress,
   CliPlatform,
-  CliProviderModelAvailability,
   CliProviderId,
+  CliProviderModelAvailability,
   CliProviderStatus,
 } from '@shared/types';
 import type { BrowserWindow } from 'electron';
@@ -596,7 +596,7 @@ export class CliInstallerService {
   private updateLatestProviderStatus(providerStatus: CliProviderStatus): void {
     if (
       providerStatus.modelVerificationState !== 'verifying' &&
-      !((providerStatus.modelAvailability?.length ?? 0) > 0)
+      (providerStatus.modelAvailability?.length ?? 0) <= 0
     ) {
       this.latestProviderSignatures.set(providerStatus.providerId, null);
     }

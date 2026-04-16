@@ -43,6 +43,7 @@ import {
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import {
   getTeamModelSelectionError,
+  normalizeExplicitTeamModelForUi,
   normalizeTeamModelForUi,
 } from '@renderer/utils/teamModelAvailability';
 import { getTeamProviderLabel as getCatalogTeamProviderLabel } from '@renderer/utils/teamModelCatalog';
@@ -54,21 +55,21 @@ import { AdvancedCliSection } from './AdvancedCliSection';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
 import { ProjectPathSelector } from './ProjectPathSelector';
 import {
+  getProviderPrepareCachedSnapshot,
+  type ProviderPrepareDiagnosticsModelResult,
+  runProviderPrepareDiagnostics,
+} from './providerPrepareDiagnostics';
+import { getProvisioningModelIssue } from './provisioningModelIssues';
+import {
   failIncompleteProviderChecks,
-  getProvisioningFailureHint,
   getPrimaryProvisioningFailureDetail,
+  getProvisioningFailureHint,
   getProvisioningProviderBackendSummary,
   type ProvisioningProviderCheck,
   ProvisioningProviderStatusList,
   shouldHideProvisioningProviderStatusList,
   updateProviderCheck,
 } from './ProvisioningProviderStatusList';
-import { getProvisioningModelIssue } from './provisioningModelIssues';
-import {
-  getProviderPrepareCachedSnapshot,
-  runProviderPrepareDiagnostics,
-  type ProviderPrepareDiagnosticsModelResult,
-} from './providerPrepareDiagnostics';
 import { SkipPermissionsCheckbox } from './SkipPermissionsCheckbox';
 import { computeEffectiveTeamModel } from './TeamModelSelector';
 import { getNextSuggestedTeamName } from './teamNameSets';
@@ -108,7 +109,7 @@ function getStoredTeamModel(providerId: TeamProviderId): string {
   if (stored === null) {
     return providerId === 'anthropic' ? 'opus' : '';
   }
-  return normalizeTeamModelForUi(providerId, stored === '__default__' ? '' : stored);
+  return normalizeExplicitTeamModelForUi(providerId, stored === '__default__' ? '' : stored);
 }
 
 function isEphemeralRenderedProjectPath(projectPath: string | null | undefined): boolean {

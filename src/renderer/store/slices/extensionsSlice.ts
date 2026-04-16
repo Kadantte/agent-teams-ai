@@ -127,7 +127,7 @@ export interface ExtensionsSlice {
 // Slice Creator
 // =============================================================================
 
-let pluginFetchInFlight: { key: string; promise: Promise<void> } | null = null;
+let pluginFetchInFlight: { key: string; promise: Promise<void>; token: symbol } | null = null;
 let pluginCatalogRequestSeq = 0;
 const pluginSuccessResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let mcpDiagnosticsInFlight: Promise<void> | null = null;
@@ -286,6 +286,7 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
     }
 
     const requestSeq = ++pluginCatalogRequestSeq;
+    const requestToken = Symbol('pluginCatalogRequest');
     set({ pluginCatalogLoading: true, pluginCatalogError: null });
 
     const promise = (async () => {
@@ -344,13 +345,13 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
           };
         });
       } finally {
-        if (pluginFetchInFlight?.promise === promise) {
+        if (pluginFetchInFlight?.token === requestToken) {
           pluginFetchInFlight = null;
         }
       }
     })();
 
-    pluginFetchInFlight = { key: requestKey, promise };
+    pluginFetchInFlight = { key: requestKey, promise, token: requestToken };
     await promise;
   },
 

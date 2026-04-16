@@ -72,18 +72,20 @@ describe('CliProviderModelAvailabilityService', () => {
     expect(execCliMock).toHaveBeenCalledTimes(2);
   });
 
-  it('marks unsupported models as unavailable with the runtime reason', async () => {
+  it('marks visible unsupported models as unavailable with the runtime reason', async () => {
     buildProviderAwareCliEnvMock.mockResolvedValue({
       env: { HOME: '/Users/tester' },
       connectionIssues: {},
     });
     execCliMock.mockRejectedValue(
-      new Error("The 'gpt-5.2-codex' model is not supported when using Codex with a ChatGPT account.")
+      new Error(
+        "The 'gpt-5.1-codex-max' model is not supported when using Codex with a ChatGPT account."
+      )
     );
 
     const onUpdate = vi.fn();
     const service = new CliProviderModelAvailabilityService(onUpdate);
-    service.getSnapshot(createContext(['gpt-5.2-codex']));
+    service.getSnapshot(createContext(['gpt-5.1-codex-max']));
 
     await vi.waitFor(() => {
       expect(onUpdate).toHaveBeenCalledWith(
@@ -92,7 +94,7 @@ describe('CliProviderModelAvailabilityService', () => {
         expect.objectContaining({
           modelAvailability: [
             expect.objectContaining({
-              modelId: 'gpt-5.2-codex',
+              modelId: 'gpt-5.1-codex-max',
               status: 'unavailable',
               reason: 'Not available with Codex ChatGPT subscription',
             }),

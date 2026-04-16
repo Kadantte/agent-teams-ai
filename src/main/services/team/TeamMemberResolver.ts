@@ -1,9 +1,9 @@
+import { getMemberColorByName } from '@shared/constants/memberColors';
 import {
   createCliAutoSuffixNameGuard,
   createCliProvisionerNameGuard,
 } from '@shared/utils/teamMemberName';
 import { getStableTeamOwnerId } from '@shared/utils/teamStableOwnerId';
-import { getMemberColorByName } from '@shared/constants/memberColors';
 
 import type { TeamConfig, TeamMember, TeamMemberSnapshot, TeamTaskWithKanban } from '@shared/types';
 

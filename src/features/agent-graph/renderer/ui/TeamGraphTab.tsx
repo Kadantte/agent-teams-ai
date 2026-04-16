@@ -7,8 +7,6 @@ import { lazy, Suspense, useCallback, useLayoutEffect, useMemo, useState } from 
 
 import { GraphView } from '@claude-teams/agent-graph';
 import { TeamSidebarHost } from '@renderer/components/team/sidebar/TeamSidebarHost';
-import { useStore } from '@renderer/store';
-import { isTeamGraphSlotPersistenceDisabled } from '@renderer/store/slices/teamSlice';
 
 import { useGraphCreateTaskDialog } from '../hooks/useGraphCreateTaskDialog';
 import { useGraphSidebarVisibility } from '../hooks/useGraphSidebarVisibility';
@@ -47,10 +45,8 @@ export const TeamGraphTab = ({
   isPaneFocused = false,
 }: TeamGraphTabProps): React.JSX.Element => {
   const graphData = useTeamGraphAdapter(teamName);
-  const { openTeamPage, commitOwnerSlotDrop } = useTeamGraphSurfaceActions(teamName);
-  const resetTeamGraphSlotAssignmentsToDefaults = useStore(
-    (s) => s.resetTeamGraphSlotAssignmentsToDefaults
-  );
+  const { openTeamPage, resetOwnerSlotAssignmentsToDefaults, commitOwnerSlotDrop } =
+    useTeamGraphSurfaceActions(teamName);
   const [fullscreen, setFullscreen] = useState(false);
   const { sidebarVisible, toggleSidebarVisible } = useGraphSidebarVisibility();
   const { dialog: createTaskDialog, openCreateTaskDialog } = useGraphCreateTaskDialog(teamName);
@@ -82,11 +78,11 @@ export const TeamGraphTab = ({
   }, [openCreateTaskDialog]);
 
   useLayoutEffect(() => {
-    if (!isTeamGraphSlotPersistenceDisabled() || !isActive) {
+    if (!isActive) {
       return;
     }
-    resetTeamGraphSlotAssignmentsToDefaults(teamName);
-  }, [isActive, resetTeamGraphSlotAssignmentsToDefaults, teamName]);
+    resetOwnerSlotAssignmentsToDefaults();
+  }, [isActive, resetOwnerSlotAssignmentsToDefaults]);
 
   // Task action dispatchers
   const dispatchTaskAction = useCallback(

@@ -47,8 +47,8 @@ import { TeamInboxWriter } from './TeamInboxWriter';
 import { TeamKanbanManager } from './TeamKanbanManager';
 import { TeamMemberResolver } from './TeamMemberResolver';
 import { TeamMemberRuntimeAdvisoryService } from './TeamMemberRuntimeAdvisoryService';
-import { TeamMessageFeedService } from './TeamMessageFeedService';
 import { TeamMembersMetaStore } from './TeamMembersMetaStore';
+import { TeamMessageFeedService } from './TeamMessageFeedService';
 import { TeamMetaStore } from './TeamMetaStore';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskCommentNotificationJournal } from './TeamTaskCommentNotificationJournal';
@@ -75,8 +75,8 @@ import type {
   TaskRef,
   TeamConfig,
   TeamCreateConfigRequest,
-  TeamMemberActivityMeta,
   TeamMember,
+  TeamMemberActivityMeta,
   TeamProcess,
   TeamSummary,
   TeamTask,

@@ -6,8 +6,8 @@ import {
 } from '@renderer/store/slices/teamSlice';
 import { useShallow } from 'zustand/react/shallow';
 
-import type { TeamSummary } from '@shared/types/team';
 import type { TeamGraphData } from '../adapters/TeamGraphAdapter';
+import type { TeamSummary } from '@shared/types/team';
 
 export function useGraphActivityContext(teamName: string): {
   teamData: TeamGraphData | null;

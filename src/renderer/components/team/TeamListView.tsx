@@ -56,10 +56,10 @@ import {
 import type { ActiveTeamRef, TeamCopyData } from './dialogs/CreateTeamDialog';
 import type { TeamListFilterState } from './TeamListFilterPopover';
 import type {
-  TeamMemberSnapshot,
   ResolvedTeamMember,
   TeamCreateRequest,
   TeamLaunchRequest,
+  TeamMemberSnapshot,
   TeamSummary,
   TeamSummaryMember,
 } from '@shared/types';

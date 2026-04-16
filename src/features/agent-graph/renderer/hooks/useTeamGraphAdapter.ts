@@ -9,8 +9,8 @@ import { getSnapshot, subscribe } from '@renderer/services/commentReadStorage';
 import { useStore } from '@renderer/store';
 import {
   getCurrentProvisioningProgressForTeam,
-  selectResolvedMembersForTeamName,
   isTeamGraphSlotPersistenceDisabled,
+  selectResolvedMembersForTeamName,
   selectTeamDataForName,
   selectTeamMessages,
 } from '@renderer/store/slices/teamSlice';
@@ -19,8 +19,8 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { TeamGraphAdapter } from '../adapters/TeamGraphAdapter';
 
-import type { GraphDataPort } from '@claude-teams/agent-graph';
 import type { TeamGraphData } from '../adapters/TeamGraphAdapter';
+import type { GraphDataPort } from '@claude-teams/agent-graph';
 
 export function useTeamGraphAdapter(teamName: string): GraphDataPort {
   const adapterRef = useRef<TeamGraphAdapter>(TeamGraphAdapter.create());

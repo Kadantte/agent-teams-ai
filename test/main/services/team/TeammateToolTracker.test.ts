@@ -49,6 +49,13 @@ function createDeferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+function createLogsFinderMock(listAttributedMemberFiles: ReturnType<typeof vi.fn>) {
+  return {
+    listAttributedMemberFiles,
+    listAttributedSubagentFiles: listAttributedMemberFiles,
+  } as never;
+}
+
 describe('TeammateToolTracker', () => {
   const tempDirs: string[] = [];
 
@@ -90,7 +97,7 @@ describe('TeammateToolTracker', () => {
     const events: TeamChangeEvent[] = [];
 
     const tracker = new TeammateToolTracker(
-      { listAttributedSubagentFiles } as never,
+      createLogsFinderMock(listAttributedSubagentFiles),
       { enableTracking, disableTracking } as never,
       (event) => events.push(event)
     );
@@ -136,7 +143,7 @@ describe('TeammateToolTracker', () => {
     ]);
     const events: TeamChangeEvent[] = [];
     const tracker = new TeammateToolTracker(
-      { listAttributedSubagentFiles } as never,
+      createLogsFinderMock(listAttributedSubagentFiles),
       { enableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })), disableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
       (event) => events.push(event)
     );
@@ -193,7 +200,7 @@ describe('TeammateToolTracker', () => {
     const listAttributedSubagentFiles = vi.fn(async () => [...attributedFiles]);
     const events: TeamChangeEvent[] = [];
     const tracker = new TeammateToolTracker(
-      { listAttributedSubagentFiles } as never,
+      createLogsFinderMock(listAttributedSubagentFiles),
       { enableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })), disableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
       (event) => events.push(event)
     );
@@ -242,7 +249,7 @@ describe('TeammateToolTracker', () => {
     ]);
     const events: TeamChangeEvent[] = [];
     const tracker = new TeammateToolTracker(
-      { listAttributedSubagentFiles } as never,
+      createLogsFinderMock(listAttributedSubagentFiles),
       { enableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })), disableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
       (event) => events.push(event)
     );
@@ -299,7 +306,7 @@ describe('TeammateToolTracker', () => {
     ]);
     const events: TeamChangeEvent[] = [];
     const tracker = new TeammateToolTracker(
-      { listAttributedSubagentFiles } as never,
+      createLogsFinderMock(listAttributedSubagentFiles),
       { enableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })), disableTracking: vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null })) } as never,
       (event) => events.push(event)
     );
@@ -353,7 +360,7 @@ describe('TeammateToolTracker', () => {
     const disableTracking = vi.fn(async () => ({ projectFingerprint: null, logSourceGeneration: null }));
     const events: TeamChangeEvent[] = [];
     const tracker = new TeammateToolTracker(
-      { listAttributedSubagentFiles } as never,
+      createLogsFinderMock(listAttributedSubagentFiles),
       { enableTracking, disableTracking } as never,
       (event) => events.push(event)
     );

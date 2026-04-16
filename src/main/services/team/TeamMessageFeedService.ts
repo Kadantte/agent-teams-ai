@@ -1,7 +1,6 @@
-import { createHash } from 'crypto';
-
-import { buildStandaloneSlashCommandMeta } from '@shared/utils/slashCommands';
 import { classifyIdleNotificationText } from '@shared/utils/idleNotificationSemantics';
+import { buildStandaloneSlashCommandMeta } from '@shared/utils/slashCommands';
+import { createHash } from 'crypto';
 
 import { getEffectiveInboxMessageId } from './inboxMessageIdentity';
 

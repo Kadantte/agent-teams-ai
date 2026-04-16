@@ -54,7 +54,6 @@ import type {
   SshLastConnection,
   SubagentDetail,
   TeamChangeEvent,
-  UpdateSchedulePatch,
   TeamClaudeLogsQuery,
   TeamClaudeLogsResponse,
   TeamCreateRequest,
@@ -74,6 +73,7 @@ import type {
   TriggerTestResult,
   UpdateKanbanPatch,
   UpdaterAPI,
+  UpdateSchedulePatch,
   WaterfallData,
   WslClaudeRootCandidate,
 } from '@shared/types';
