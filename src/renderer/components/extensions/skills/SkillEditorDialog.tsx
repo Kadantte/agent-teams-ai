@@ -730,6 +730,7 @@ export const SkillEditorDialog = ({
                           size="sm"
                           onClick={() => {
                             setManualRawEdit(false);
+                            setCustomMarkdownDetected(false);
                             const nextRawContent = buildSkillTemplate({
                               name,
                               description,
