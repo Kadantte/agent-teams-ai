@@ -48,7 +48,8 @@ interface PluginDetailDialogProps {
 
 const SCOPE_OPTIONS: { value: InstallScope; label: string }[] = [
   { value: 'user', label: 'User (global)' },
-  { value: 'project', label: 'Project' },
+  { value: 'project', label: 'Project (shared)' },
+  { value: 'local', label: 'Local (gitignored)' },
 ];
 
 export const PluginDetailDialog = ({
@@ -94,7 +95,7 @@ export const PluginDetailDialog = ({
   }, [open, plugin?.pluginId]);
 
   useEffect(() => {
-    if (scope === 'project' && !projectScopeAvailable) {
+    if (scope !== 'user' && !projectScopeAvailable) {
       setScope('user');
     }
   }, [projectScopeAvailable, scope]);
@@ -186,7 +187,7 @@ export const PluginDetailDialog = ({
                   <SelectItem
                     key={opt.value}
                     value={opt.value}
-                    disabled={opt.value === 'project' && !projectScopeAvailable}
+                    disabled={opt.value !== 'user' && !projectScopeAvailable}
                   >
                     {opt.label}
                   </SelectItem>
@@ -201,7 +202,7 @@ export const PluginDetailDialog = ({
               installPlugin({
                 pluginId: plugin.pluginId,
                 scope,
-                ...(scope === 'project' && pluginCatalogProjectPath
+                ...(scope !== 'user' && pluginCatalogProjectPath
                   ? { projectPath: pluginCatalogProjectPath }
                   : {}),
               })
@@ -210,7 +211,7 @@ export const PluginDetailDialog = ({
               uninstallPlugin(
                 plugin.pluginId,
                 scope,
-                scope === 'project' ? (pluginCatalogProjectPath ?? undefined) : undefined
+                scope !== 'user' ? (pluginCatalogProjectPath ?? undefined) : undefined
               )
             }
             size="default"

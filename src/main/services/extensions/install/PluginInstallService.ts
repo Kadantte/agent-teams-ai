@@ -26,6 +26,10 @@ const VALID_SCOPES = new Set(['local', 'user', 'project']);
 const INSTALL_TIMEOUT_MS = 120_000; // plugins may clone repos
 const UNINSTALL_TIMEOUT_MS = 30_000;
 
+function scopeRequiresProjectPath(scope?: string): boolean {
+  return scope === 'project' || scope === 'local';
+}
+
 export class PluginInstallService {
   constructor(private readonly catalogService: PluginCatalogService) {}
 
@@ -48,10 +52,10 @@ export class PluginInstallService {
       };
     }
 
-    if (scope === 'project' && !projectPath) {
+    if (scopeRequiresProjectPath(scope) && !projectPath) {
       return {
         state: 'error',
-        error: 'projectPath is required for project-scoped plugin installs',
+        error: `projectPath is required for ${scope}-scoped plugin installs`,
       };
     }
 
@@ -130,10 +134,10 @@ export class PluginInstallService {
       };
     }
 
-    if (scope === 'project' && !projectPath) {
+    if (scopeRequiresProjectPath(scope) && !projectPath) {
       return {
         state: 'error',
-        error: 'projectPath is required for project-scoped plugin uninstalls',
+        error: `projectPath is required for ${scope}-scoped plugin uninstalls`,
       };
     }
 

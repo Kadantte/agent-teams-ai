@@ -225,7 +225,7 @@ const CLI_HEALTHCHECK_FAILED_MESSAGE =
 const CLI_STATUS_UNKNOWN_MESSAGE =
   'Unable to verify Claude CLI status. Open the Dashboard and check the CLI before retrying.';
 const PROJECT_SCOPE_REQUIRED_MESSAGE =
-  'Project-scoped plugins require an active project in the Extensions tab.';
+  'Project- and local-scoped plugins require an active project in the Extensions tab.';
 
 export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSlice> = (
   set,
@@ -688,7 +688,7 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
     if (!api.plugins) return;
 
     const effectiveProjectPath =
-      request.scope === 'project'
+      request.scope !== 'user'
         ? (request.projectPath ?? get().pluginCatalogProjectPath ?? undefined)
         : request.projectPath;
     const effectiveRequest =
@@ -707,7 +707,7 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
 
     const cliStatus = get().cliStatus;
     const preflightError =
-      effectiveRequest.scope === 'project' && !effectiveRequest.projectPath
+      effectiveRequest.scope !== 'user' && !effectiveRequest.projectPath
         ? PROJECT_SCOPE_REQUIRED_MESSAGE
         : cliStatus === null
           ? CLI_STATUS_UNKNOWN_MESSAGE
@@ -770,10 +770,10 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
     if (!api.plugins) return;
 
     const effectiveProjectPath =
-      scope === 'project'
+      scope && scope !== 'user'
         ? (projectPath ?? get().pluginCatalogProjectPath ?? undefined)
         : projectPath;
-    if (scope === 'project' && !effectiveProjectPath) {
+    if (scope && scope !== 'user' && !effectiveProjectPath) {
       clearPluginSuccessResetTimer(pluginId);
       set((prev) => ({
         pluginInstallProgress: { ...prev.pluginInstallProgress, [pluginId]: 'error' },

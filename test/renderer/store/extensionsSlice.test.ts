@@ -492,6 +492,32 @@ describe('extensionsSlice', () => {
       expect(store.getState().installErrors['project@m']).toContain('active project');
     });
 
+    it('fills missing projectPath for local scope from the active Extensions project context', async () => {
+      store.setState({
+        cliStatus: makeReadyCliStatus(),
+        pluginCatalogProjectPath: '/tmp/project-a',
+      });
+      (api.plugins!.install as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'success' });
+
+      await store.getState().installPlugin({ pluginId: 'local@m', scope: 'local' });
+
+      expect(api.plugins!.install).toHaveBeenCalledWith({
+        pluginId: 'local@m',
+        scope: 'local',
+        projectPath: '/tmp/project-a',
+      });
+    });
+
+    it('fails fast for local scope when there is no active project path', async () => {
+      store.setState({ cliStatus: makeReadyCliStatus(), pluginCatalogProjectPath: null });
+
+      await store.getState().installPlugin({ pluginId: 'local@m', scope: 'local' });
+
+      expect(api.plugins!.install).not.toHaveBeenCalled();
+      expect(store.getState().pluginInstallProgress['local@m']).toBe('error');
+      expect(store.getState().installErrors['local@m']).toContain('active project');
+    });
+
     it('clears older success reset timers before a new operation on the same plugin', async () => {
       vi.useFakeTimers();
       store.setState({ cliStatus: makeReadyCliStatus() });
@@ -543,6 +569,25 @@ describe('extensionsSlice', () => {
       expect(api.plugins!.uninstall).not.toHaveBeenCalled();
       expect(store.getState().pluginInstallProgress['project@m']).toBe('error');
       expect(store.getState().installErrors['project@m']).toContain('active project');
+    });
+
+    it('fills missing projectPath for local uninstall from the active Extensions project context', async () => {
+      store.setState({ pluginCatalogProjectPath: '/tmp/project-a' });
+      (api.plugins!.uninstall as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'success' });
+
+      await store.getState().uninstallPlugin('local@m', 'local');
+
+      expect(api.plugins!.uninstall).toHaveBeenCalledWith('local@m', 'local', '/tmp/project-a');
+    });
+
+    it('fails fast for local uninstall when there is no active project path', async () => {
+      store.setState({ pluginCatalogProjectPath: null });
+
+      await store.getState().uninstallPlugin('local@m', 'local');
+
+      expect(api.plugins!.uninstall).not.toHaveBeenCalled();
+      expect(store.getState().pluginInstallProgress['local@m']).toBe('error');
+      expect(store.getState().installErrors['local@m']).toContain('active project');
     });
 
     it('does not restore idle state after project switch clears a pending success timer', async () => {
