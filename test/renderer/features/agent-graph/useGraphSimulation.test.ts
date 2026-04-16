@@ -155,6 +155,97 @@ describe('stable slot layout planner', () => {
     expect(frame?.processBandRect.width).toBe(computeProcessBandWidth(0));
   });
 
+  it('uses strict cardinal owner slots for teams with up to four members', () => {
+    const teamName = 'team-cardinal-four';
+    const lead = createLead(teamName);
+    const top = createMember(teamName, 'agent-top', 'top');
+    const right = createMember(teamName, 'agent-right', 'right');
+    const bottom = createMember(teamName, 'agent-bottom', 'bottom');
+    const left = createMember(teamName, 'agent-left', 'left');
+    const layout: GraphLayoutPort = {
+      version: 'stable-slots-v1',
+      ownerOrder: [top.id, right.id, bottom.id, left.id],
+      slotAssignments: {
+        [top.id]: { ringIndex: 0, sectorIndex: 0 },
+        [right.id]: { ringIndex: 0, sectorIndex: 1 },
+        [bottom.id]: { ringIndex: 0, sectorIndex: 2 },
+        [left.id]: { ringIndex: 0, sectorIndex: 3 },
+      },
+    };
+
+    const snapshot = buildStableSlotLayoutSnapshot({
+      teamName,
+      nodes: [lead, top, right, bottom, left],
+      layout,
+    });
+
+    expect(snapshot).not.toBeNull();
+
+    const topFrame = snapshot!.memberSlotFrameByOwnerId.get(top.id)!;
+    const rightFrame = snapshot!.memberSlotFrameByOwnerId.get(right.id)!;
+    const bottomFrame = snapshot!.memberSlotFrameByOwnerId.get(bottom.id)!;
+    const leftFrame = snapshot!.memberSlotFrameByOwnerId.get(left.id)!;
+
+    expect(Math.abs(topFrame.ownerX)).toBeLessThan(1);
+    expect(topFrame.ownerY).toBeLessThan(0);
+
+    expect(rightFrame.ownerX).toBeGreaterThan(0);
+    expect(Math.abs(rightFrame.ownerY)).toBeLessThan(1);
+
+    expect(Math.abs(bottomFrame.ownerX)).toBeLessThan(1);
+    expect(bottomFrame.ownerY).toBeGreaterThan(0);
+
+    expect(leftFrame.ownerX).toBeLessThan(0);
+    expect(Math.abs(leftFrame.ownerY)).toBeLessThan(1);
+
+    expect(Math.abs(Math.abs(leftFrame.ownerX) - Math.abs(rightFrame.ownerX))).toBeLessThan(1);
+    expect(Math.abs(Math.abs(topFrame.ownerY) - Math.abs(bottomFrame.ownerY))).toBeLessThan(1);
+  });
+
+  it('uses strict cardinal owner slots even when ownerOrder differs from assignment order', () => {
+    const teamName = 'team-cardinal-misaligned-order';
+    const lead = createLead(teamName);
+    const alice = createMember(teamName, 'agent-alice', 'alice');
+    const bob = createMember(teamName, 'agent-bob', 'bob');
+    const tom = createMember(teamName, 'agent-tom', 'tom');
+    const jack = createMember(teamName, 'agent-jack', 'jack');
+    const layout: GraphLayoutPort = {
+      version: 'stable-slots-v1',
+      ownerOrder: [jack.id, alice.id, tom.id, bob.id],
+      slotAssignments: {
+        [alice.id]: { ringIndex: 0, sectorIndex: 0 },
+        [bob.id]: { ringIndex: 0, sectorIndex: 1 },
+        [tom.id]: { ringIndex: 0, sectorIndex: 2 },
+        [jack.id]: { ringIndex: 0, sectorIndex: 3 },
+      },
+    };
+
+    const snapshot = buildStableSlotLayoutSnapshot({
+      teamName,
+      nodes: [lead, alice, bob, tom, jack],
+      layout,
+    });
+
+    expect(snapshot).not.toBeNull();
+
+    const aliceFrame = snapshot!.memberSlotFrameByOwnerId.get(alice.id)!;
+    const bobFrame = snapshot!.memberSlotFrameByOwnerId.get(bob.id)!;
+    const tomFrame = snapshot!.memberSlotFrameByOwnerId.get(tom.id)!;
+    const jackFrame = snapshot!.memberSlotFrameByOwnerId.get(jack.id)!;
+
+    expect(Math.abs(aliceFrame.ownerX)).toBeLessThan(1);
+    expect(aliceFrame.ownerY).toBeLessThan(0);
+
+    expect(bobFrame.ownerX).toBeGreaterThan(0);
+    expect(Math.abs(bobFrame.ownerY)).toBeLessThan(1);
+
+    expect(Math.abs(tomFrame.ownerX)).toBeLessThan(1);
+    expect(tomFrame.ownerY).toBeGreaterThan(0);
+
+    expect(jackFrame.ownerX).toBeLessThan(0);
+    expect(Math.abs(jackFrame.ownerY)).toBeLessThan(1);
+  });
+
   it('reserves a full empty activity column and minimum kanban width for idle members', () => {
     const teamName = 'team-empty-slot';
     const lead = createLead(teamName);
@@ -382,6 +473,48 @@ describe('stable slot layout planner', () => {
     expect(nearest?.assignment).toEqual({ ringIndex: 0, sectorIndex: 2 });
     expect(nearest?.displacedOwnerId).toBe(bob.id);
     expect(nearest?.displacedAssignment).toEqual({ ringIndex: 0, sectorIndex: 1 });
+  });
+
+  it('keeps drag resolution inside strict cardinal slots for four-member teams', () => {
+    const teamName = 'team-cardinal-drag';
+    const lead = createLead(teamName);
+    const top = createMember(teamName, 'agent-top', 'top');
+    const right = createMember(teamName, 'agent-right', 'right');
+    const bottom = createMember(teamName, 'agent-bottom', 'bottom');
+    const left = createMember(teamName, 'agent-left', 'left');
+    const layout: GraphLayoutPort = {
+      version: 'stable-slots-v1',
+      ownerOrder: [top.id, right.id, bottom.id, left.id],
+      slotAssignments: {
+        [top.id]: { ringIndex: 0, sectorIndex: 0 },
+        [right.id]: { ringIndex: 0, sectorIndex: 1 },
+        [bottom.id]: { ringIndex: 0, sectorIndex: 2 },
+        [left.id]: { ringIndex: 0, sectorIndex: 3 },
+      },
+    };
+
+    const snapshot = buildStableSlotLayoutSnapshot({
+      teamName,
+      nodes: [lead, top, right, bottom, left],
+      layout,
+    });
+
+    expect(snapshot).not.toBeNull();
+    const rightFrame = snapshot!.memberSlotFrameByOwnerId.get(right.id)!;
+
+    const nearest = resolveNearestSlotAssignment({
+      ownerId: top.id,
+      ownerX: rightFrame.ownerX,
+      ownerY: rightFrame.ownerY,
+      nodes: [lead, top, right, bottom, left],
+      snapshot: snapshot!,
+      layout,
+    });
+
+    expect(nearest).not.toBeNull();
+    expect(nearest?.assignment).toEqual({ ringIndex: 0, sectorIndex: 1 });
+    expect(nearest?.displacedOwnerId).toBe(right.id);
+    expect(nearest?.displacedAssignment).toEqual({ ringIndex: 0, sectorIndex: 0 });
   });
 
   it('keeps nearest-slot drag resolution on the same central collision model as the planner', () => {

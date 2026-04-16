@@ -38,6 +38,7 @@ export interface UseGraphSimulationResult {
   tick: (dt: number) => void;
   setNodePosition: (nodeId: string, x: number, y: number) => void;
   clearNodePosition: (nodeId: string) => void;
+  clearTransientOwnerPositions: () => void;
   resolveNearestOwnerSlot: (
     nodeId: string,
     x: number,
@@ -46,6 +47,8 @@ export interface UseGraphSimulationResult {
     assignment: GraphOwnerSlotAssignment;
     displacedOwnerId?: string;
     displacedAssignment?: GraphOwnerSlotAssignment;
+    previewOwnerX: number;
+    previewOwnerY: number;
   } | null;
   getLaunchAnchorWorldPosition: (leadNodeId: string) => { x: number; y: number } | null;
   getActivityWorldRect: (nodeId: string) => StableRect | null;
@@ -199,6 +202,14 @@ export function useGraphSimulation(): UseGraphSimulationResult {
     [applyCurrentLayout]
   );
 
+  const clearTransientOwnerPositions = useCallback(() => {
+    if (dragOwnerPositionsRef.current.size === 0) {
+      return;
+    }
+    dragOwnerPositionsRef.current.clear();
+    applyCurrentLayout();
+  }, [applyCurrentLayout]);
+
   const resolveNearestOwnerSlot = useCallback(
     (nodeId: string, x: number, y: number) => {
       const snapshot = layoutSnapshotRef.current;
@@ -234,6 +245,7 @@ export function useGraphSimulation(): UseGraphSimulationResult {
     tick,
     setNodePosition,
     clearNodePosition,
+    clearTransientOwnerPositions,
     resolveNearestOwnerSlot,
     getLaunchAnchorWorldPosition: (leadNodeId: string) =>
       launchAnchorPositionsRef.current.get(leadNodeId) ?? null,

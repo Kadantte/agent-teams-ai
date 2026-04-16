@@ -77,6 +77,8 @@ interface NearestSlotAssignmentResult {
   assignment: GraphOwnerSlotAssignment;
   displacedOwnerId?: string;
   displacedAssignment?: GraphOwnerSlotAssignment;
+  previewOwnerX: number;
+  previewOwnerY: number;
 }
 
 interface RankedNearestSlotAssignmentResult extends NearestSlotAssignmentResult {
@@ -116,8 +118,41 @@ const SLOT_GEOMETRY = {
 const PROCESS_RAIL_NODE_GAP = 42;
 const PROCESS_RAIL_NODE_FOOTPRINT = 28;
 const GEOMETRY_EPSILON = 0.001;
+const SMALL_TEAM_CARDINAL_RADIUS_STEP = 24;
 
 const SECTOR_VECTORS = STABLE_SLOT_SECTOR_VECTORS;
+const SMALL_TEAM_CARDINAL_LAYOUTS: ReadonlyArray<
+  ReadonlyArray<{
+    assignment: GraphOwnerSlotAssignment;
+    vector: { x: number; y: number };
+  }>
+> = [
+  [],
+  [{ assignment: { ringIndex: 0, sectorIndex: 0 }, vector: { x: 0, y: -1 } }],
+  [
+    { assignment: { ringIndex: 0, sectorIndex: 0 }, vector: { x: -1, y: 0 } },
+    { assignment: { ringIndex: 0, sectorIndex: 1 }, vector: { x: 1, y: 0 } },
+  ],
+  [
+    { assignment: { ringIndex: 0, sectorIndex: 0 }, vector: { x: 0, y: -1 } },
+    { assignment: { ringIndex: 0, sectorIndex: 1 }, vector: { x: -1, y: 0 } },
+    { assignment: { ringIndex: 0, sectorIndex: 2 }, vector: { x: 1, y: 0 } },
+  ],
+  [
+    { assignment: { ringIndex: 0, sectorIndex: 0 }, vector: { x: 0, y: -1 } },
+    { assignment: { ringIndex: 0, sectorIndex: 1 }, vector: { x: 1, y: 0 } },
+    { assignment: { ringIndex: 0, sectorIndex: 2 }, vector: { x: 0, y: 1 } },
+    { assignment: { ringIndex: 0, sectorIndex: 3 }, vector: { x: -1, y: 0 } },
+  ],
+];
+
+const SMALL_TEAM_CARDINAL_ASSIGNMENTS: ReadonlyArray<ReadonlyArray<GraphOwnerSlotAssignment>> =
+  SMALL_TEAM_CARDINAL_LAYOUTS.map((layout) => layout.map((slot) => slot.assignment));
+const SMALL_TEAM_CARDINAL_VECTOR_BY_ASSIGNMENT_KEY = new Map(
+  SMALL_TEAM_CARDINAL_LAYOUTS.flatMap((layout) =>
+    layout.map((slot) => [buildAssignmentKey(slot.assignment), slot.vector] as const)
+  )
+);
 
 export function buildStableSlotLayoutSnapshot({
   teamName,
@@ -378,6 +413,17 @@ export function resolveNearestSlotAssignment(args: {
     return null;
   }
 
+  const strictSmallTeamCandidate = resolveStrictSmallTeamNearestSlotAssignment({
+    ownerId: args.ownerId,
+    ownerX: args.ownerX,
+    ownerY: args.ownerY,
+    currentFrame,
+    snapshot: args.snapshot,
+  });
+  if (strictSmallTeamCandidate) {
+    return strictSmallTeamCandidate;
+  }
+
   const existingFrames = args.snapshot.memberSlotFrames.filter((frame) => frame.ownerId !== args.ownerId);
   const maxOccupiedRing = existingFrames.reduce((max, frame) => Math.max(max, frame.ringIndex), 0);
   const candidateAssignments = buildCandidateAssignments(
@@ -423,8 +469,91 @@ export function resolveNearestSlotAssignment(args: {
         assignment: best.assignment,
         displacedOwnerId: best.displacedOwnerId,
         displacedAssignment: best.displacedAssignment,
+        previewOwnerX: best.previewOwnerX,
+        previewOwnerY: best.previewOwnerY,
       }
     : null;
+}
+
+function resolveStrictSmallTeamNearestSlotAssignment(args: {
+  ownerId: string;
+  ownerX: number;
+  ownerY: number;
+  currentFrame: SlotFrame;
+  snapshot: StableSlotLayoutSnapshot;
+}): NearestSlotAssignmentResult | null {
+  const strictFrames = getStrictSmallTeamFrames(args.snapshot.memberSlotFrames);
+  if (!strictFrames) {
+    return null;
+  }
+
+  let best:
+    | {
+        frame: SlotFrame;
+        distanceSquared: number;
+      }
+    | null = null;
+  for (const frame of strictFrames) {
+    const dx = frame.ownerX - args.ownerX;
+    const dy = frame.ownerY - args.ownerY;
+    const distanceSquared = dx * dx + dy * dy;
+    if (!best || distanceSquared < best.distanceSquared) {
+      best = { frame, distanceSquared };
+    }
+  }
+
+  if (!best) {
+    return null;
+  }
+
+  const targetFrame = best.frame;
+  if (targetFrame.ownerId === args.ownerId) {
+    return {
+      assignment: {
+        ringIndex: targetFrame.ringIndex,
+        sectorIndex: targetFrame.sectorIndex,
+      },
+      previewOwnerX: targetFrame.ownerX,
+      previewOwnerY: targetFrame.ownerY,
+    };
+  }
+
+  return {
+    assignment: {
+      ringIndex: targetFrame.ringIndex,
+      sectorIndex: targetFrame.sectorIndex,
+    },
+    displacedOwnerId: targetFrame.ownerId,
+    displacedAssignment: {
+      ringIndex: args.currentFrame.ringIndex,
+      sectorIndex: args.currentFrame.sectorIndex,
+    },
+    previewOwnerX: targetFrame.ownerX,
+    previewOwnerY: targetFrame.ownerY,
+  };
+}
+
+function getStrictSmallTeamFrames(frames: readonly SlotFrame[]): readonly SlotFrame[] | null {
+  if (frames.length === 0 || frames.length > 4) {
+    return null;
+  }
+  const preset = SMALL_TEAM_CARDINAL_ASSIGNMENTS[frames.length];
+  if (!preset || preset.length !== frames.length) {
+    return null;
+  }
+
+  const actualAssignmentKeys = frames
+    .map((frame) => buildAssignmentKey({ ringIndex: frame.ringIndex, sectorIndex: frame.sectorIndex }))
+    .sort();
+  const presetAssignmentKeys = preset.map((assignment) => buildAssignmentKey(assignment)).sort();
+
+  for (let index = 0; index < presetAssignmentKeys.length; index += 1) {
+    if (actualAssignmentKeys[index] !== presetAssignmentKeys[index]) {
+      return null;
+    }
+  }
+
+  return frames;
 }
 
 export function validateStableSlotLayout(
@@ -730,6 +859,18 @@ function planOwnerSlots(
   runtimeCentralExclusion: StableRect,
   layout?: GraphLayoutPort
 ): SlotFrame[] {
+  const strictSmallTeamFrames = shouldUseStrictSmallTeamCardinalLayout(ownerFootprints, layout)
+    ? planStrictSmallTeamOwnerSlots(
+        ownerFootprints,
+        centralCollisionRects,
+        runtimeCentralExclusion,
+        layout
+      )
+    : null;
+  if (strictSmallTeamFrames) {
+    return strictSmallTeamFrames;
+  }
+
   const placedFrames: SlotFrame[] = [];
   const preferredAssignments = buildPreferredAssignmentsMap(layout?.slotAssignments);
   const usedSlotKeys = new Set<string>();
@@ -752,6 +893,105 @@ function planOwnerSlots(
   }
 
   return placedFrames;
+}
+
+function shouldUseStrictSmallTeamCardinalLayout(
+  ownerFootprints: readonly OwnerFootprint[],
+  layout?: GraphLayoutPort
+): boolean {
+  if (ownerFootprints.length === 0 || ownerFootprints.length > 4) {
+    return false;
+  }
+
+  const preset = SMALL_TEAM_CARDINAL_ASSIGNMENTS[ownerFootprints.length];
+  if (!preset || preset.length !== ownerFootprints.length) {
+    return false;
+  }
+
+  const actualAssignmentKeys = ownerFootprints
+    .map((footprint) => layout?.slotAssignments?.[footprint.ownerId])
+    .filter((assignment): assignment is GraphOwnerSlotAssignment => assignment != null)
+    .map((assignment) => buildAssignmentKey(assignment))
+    .sort();
+  const presetAssignmentKeys = preset.map((assignment) => buildAssignmentKey(assignment)).sort();
+
+  if (actualAssignmentKeys.length !== presetAssignmentKeys.length) {
+    return false;
+  }
+
+  for (let index = 0; index < presetAssignmentKeys.length; index += 1) {
+    if (actualAssignmentKeys[index] !== presetAssignmentKeys[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function planStrictSmallTeamOwnerSlots(
+  ownerFootprints: readonly OwnerFootprint[],
+  centralCollisionRects: readonly StableRect[],
+  runtimeCentralExclusion: StableRect,
+  layout?: GraphLayoutPort
+): SlotFrame[] | null {
+  if (ownerFootprints.length === 0 || ownerFootprints.length > 4) {
+    return null;
+  }
+
+  const preset = SMALL_TEAM_CARDINAL_LAYOUTS[ownerFootprints.length];
+  if (!preset || preset.length !== ownerFootprints.length) {
+    return null;
+  }
+
+  const slotConfigs = ownerFootprints.map((footprint) => {
+    const assignment = layout?.slotAssignments?.[footprint.ownerId];
+    if (!assignment) {
+      return null;
+    }
+    const vector = SMALL_TEAM_CARDINAL_VECTOR_BY_ASSIGNMENT_KEY.get(buildAssignmentKey(assignment));
+    if (!vector) {
+      return null;
+    }
+    return {
+      footprint,
+      assignment,
+      vector,
+    };
+  });
+
+  if (slotConfigs.some((slot) => slot == null)) {
+    return null;
+  }
+
+  let radius = Math.max(
+    ...slotConfigs.map((slot) =>
+      resolveMinimumDirectionalRadiusForVector({
+        vector: slot!.vector,
+        footprint: slot!.footprint,
+        centralCollisionRects,
+        runtimeCentralExclusion,
+      })
+    )
+  );
+
+  for (let iteration = 0; iteration < 48; iteration += 1) {
+    const frames = slotConfigs.map((slot) =>
+      buildSlotFrameAtRadiusWithVector(slot!.footprint, slot!.assignment, radius, slot!.vector)
+    );
+    const allValid = frames.every((frame, frameIndex) =>
+      isSlotFramePlacementValid(
+        frame,
+        frames.filter((_, index) => index !== frameIndex),
+        centralCollisionRects
+      )
+    );
+    if (allValid) {
+      return frames;
+    }
+    radius += SMALL_TEAM_CARDINAL_RADIUS_STEP;
+  }
+
+  return null;
 }
 
 function buildPreferredAssignmentsMap(
@@ -870,6 +1110,15 @@ function buildSlotFrameAtRadius(
   radius: number
 ): SlotFrame {
   const vector = SECTOR_VECTORS[assignment.sectorIndex % SECTOR_VECTORS.length] ?? SECTOR_VECTORS[0];
+  return buildSlotFrameAtRadiusWithVector(footprint, assignment, radius, vector);
+}
+
+function buildSlotFrameAtRadiusWithVector(
+  footprint: OwnerFootprint,
+  assignment: GraphOwnerSlotAssignment,
+  radius: number,
+  vector: { x: number; y: number }
+): SlotFrame {
   const ownerX = vector.x * radius;
   const ownerY = vector.y * radius;
   const slotTop =
@@ -1122,6 +1371,8 @@ function buildRankedNearestSlotAssignmentResult(args: {
     assignment: args.assignment,
     displacedOwnerId: args.displacedOwnerId,
     displacedAssignment: args.displacedAssignment,
+    previewOwnerX: args.frame.ownerX,
+    previewOwnerY: args.frame.ownerY,
     distanceSquared: dx * dx + dy * dy,
   };
 }
@@ -1378,13 +1629,32 @@ function resolveMinimumDirectionalRadius(args: {
   centralCollisionRects: readonly StableRect[];
   runtimeCentralExclusion: StableRect;
 }): number {
+  return resolveMinimumDirectionalRadiusForVector({
+    vector: SECTOR_VECTORS[args.assignment.sectorIndex % SECTOR_VECTORS.length] ?? SECTOR_VECTORS[0],
+    footprint: args.footprint,
+    centralCollisionRects: args.centralCollisionRects,
+    runtimeCentralExclusion: args.runtimeCentralExclusion,
+  });
+}
+
+function resolveMinimumDirectionalRadiusForVector(args: {
+  vector: { x: number; y: number };
+  footprint: OwnerFootprint;
+  centralCollisionRects: readonly StableRect[];
+  runtimeCentralExclusion: StableRect;
+}): number {
   const legacyRadiusHint = computeLegacyMinimumRingRadius(
-    SECTOR_VECTORS[args.assignment.sectorIndex % SECTOR_VECTORS.length] ?? SECTOR_VECTORS[0],
+    args.vector,
     args.footprint,
     args.runtimeCentralExclusion
   );
   const overlapsCentralCollision = (radius: number): boolean => {
-    const frame = buildSlotFrameAtRadius(args.footprint, args.assignment, radius);
+    const frame = buildSlotFrameAtRadiusWithVector(
+      args.footprint,
+      { ringIndex: 0, sectorIndex: 0 },
+      radius,
+      args.vector
+    );
     return rectOverlapsAnyCentralRect(frame.bounds, args.centralCollisionRects);
   };
 

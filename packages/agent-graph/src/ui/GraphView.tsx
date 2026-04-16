@@ -43,6 +43,7 @@ export interface GraphViewProps {
   onRequestClose?: () => void;
   onRequestPinAsTab?: () => void;
   onRequestFullscreen?: () => void;
+  isSurfaceActive?: boolean;
   onOpenTeamPage?: () => void;
   onCreateTask?: () => void;
   onToggleSidebar?: () => void;
@@ -89,6 +90,7 @@ export function GraphView({
   onRequestClose,
   onRequestPinAsTab,
   onRequestFullscreen,
+  isSurfaceActive = true,
   onOpenTeamPage,
   onCreateTask,
   onToggleSidebar,
@@ -127,6 +129,12 @@ export function GraphView({
   const allowAutoFitRef = useRef(true);
   const nodeMapRef = useRef(new Map<string, GraphNode>());
   const nodeMapNodesRef = useRef<GraphNode[] | null>(null);
+  const dragPreviewRef = useRef<{
+    nodeId: string;
+    x: number;
+    y: number;
+    color?: string | null;
+  } | null>(null);
 
   // ─── Hooks ──────────────────────────────────────────────────────────────
   const simulation = useGraphSimulation();
@@ -284,6 +292,7 @@ export function GraphView({
       hoveredEdgeId: hoveredEdgeIdRef.current,
       focusNodeIds: focusState.focusNodeIds,
       focusEdgeIds: focusState.focusEdgeIds,
+      dragPreview: dragPreviewRef.current,
     });
 
     rafRef.current = requestAnimationFrame(animate);
@@ -370,6 +379,17 @@ export function GraphView({
     allowAutoFitRef.current = false;
   }, []);
 
+  useLayoutEffect(() => {
+    if (!isSurfaceActive) {
+      return;
+    }
+    interaction.handleMouseUp();
+    simulation.clearTransientOwnerPositions();
+    dragPreviewRef.current = null;
+    isPanningRef.current = false;
+    edgeMouseDownRef.current = null;
+  }, [interaction, isSurfaceActive, simulation]);
+
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       markUserInteracted();
@@ -385,6 +405,7 @@ export function GraphView({
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return; // only left click
+      dragPreviewRef.current = null;
 
       const canvas = canvasHandle.current?.getCanvas();
       if (!canvas) return;
@@ -435,59 +456,64 @@ export function GraphView({
     ]
   );
 
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      // Dragging with left button held
-      if (e.buttons & 1) {
-        if (isPanningRef.current) {
-          camera.handlePanMove(e.clientX, e.clientY);
-          return;
-        }
-        const canvas = canvasHandle.current?.getCanvas();
-        if (!canvas) return;
-        const rect = canvas.getBoundingClientRect();
-        const world = camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
-        interaction.handleMouseMove(world.x, world.y, getVisibleNodes(simulation.stateRef.current.nodes));
-        return;
+  const processActivePointerMove = useCallback(
+    (clientX: number, clientY: number, buttons: number) => {
+      if ((buttons & 1) === 0) {
+        dragPreviewRef.current = null;
+        return false;
       }
 
-      // No button held — hover detection + cursor update
+      if (isPanningRef.current) {
+        camera.handlePanMove(clientX, clientY);
+        return true;
+      }
+
       const canvas = canvasHandle.current?.getCanvas();
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const world = camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
-      const nodes = getVisibleNodes(simulation.stateRef.current.nodes);
-      const visibleNodeIds = new Set(nodes.map((node) => node.id));
-      const edges = getVisibleEdges(simulation.stateRef.current.edges, visibleNodeIds);
-
-      const hoveredNodeId = findNodeAt(world.x, world.y, nodes);
-      interaction.hoveredNodeId.current = hoveredNodeId;
-
-      if (hoveredNodeId) {
-        hoveredEdgeIdRef.current = null;
-        canvas.style.cursor = 'pointer';
-        return;
+      if (!canvas) {
+        dragPreviewRef.current = null;
+        return false;
       }
 
-      const nodeMap = getNodeMap(nodes);
-      const interactiveEdges = getInteractiveEdges(canvas, nodes, edges);
-      hoveredEdgeIdRef.current = findEdgeAt(world.x, world.y, interactiveEdges, nodeMap);
-      canvas.style.cursor = hoveredEdgeIdRef.current ? 'pointer' : 'grab';
+      const rect = canvas.getBoundingClientRect();
+      const world = camera.screenToWorld(clientX - rect.left, clientY - rect.top);
+      interaction.handleMouseMove(world.x, world.y, getVisibleNodes(simulation.stateRef.current.nodes));
+
+      const draggedNodeId = interaction.dragNodeId.current;
+      if (interaction.isDragging.current && draggedNodeId) {
+        const draggedNode = simulation.stateRef.current.nodes.find((node) => node.id === draggedNodeId);
+        if (draggedNode?.kind === 'member') {
+          const nearest = simulation.resolveNearestOwnerSlot(draggedNodeId, world.x, world.y);
+          if (nearest) {
+            dragPreviewRef.current = {
+              nodeId: draggedNodeId,
+              x: nearest.previewOwnerX,
+              y: nearest.previewOwnerY,
+              color: draggedNode.color,
+            };
+            return true;
+          }
+        }
+      }
+
+      dragPreviewRef.current = null;
+      return true;
     },
-    [camera, getInteractiveEdges, getNodeMap, getVisibleEdges, getVisibleNodes, interaction, simulation.stateRef]
+    [camera, getVisibleNodes, interaction, simulation]
   );
 
-  const handleMouseUp = useCallback(
-    (e: React.MouseEvent) => {
+  const completePointerInteraction = useCallback(
+    (clientX: number, clientY: number) => {
       const draggedNodeId = interaction.dragNodeId.current;
       const wasDragging = interaction.isDragging.current;
 
       if (isPanningRef.current) {
         camera.handlePanEnd();
         isPanningRef.current = false;
-        setSelectedNodeId(null); // hide popover after pan
+        dragPreviewRef.current = null;
+        setSelectedNodeId(null);
         setSelectedEdgeId(null);
         edgeMouseDownRef.current = null;
+        interaction.handleMouseUp();
         return;
       }
 
@@ -510,11 +536,13 @@ export function GraphView({
             requestAnimationFrame(() => {
               simulation.clearNodePosition(draggedNodeId);
             });
+            dragPreviewRef.current = null;
             edgeMouseDownRef.current = null;
             return;
           }
         }
         simulation.clearNodePosition(draggedNodeId);
+        dragPreviewRef.current = null;
         edgeMouseDownRef.current = null;
         return;
       }
@@ -529,7 +557,7 @@ export function GraphView({
         let clickedEdgeId: string | null = null;
         if (canvas && edgeMouseDownRef.current && !interaction.isDragging.current) {
           const rect = canvas.getBoundingClientRect();
-          const world = camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+          const world = camera.screenToWorld(clientX - rect.left, clientY - rect.top);
           const dx = world.x - edgeMouseDownRef.current.x;
           const dy = world.y - edgeMouseDownRef.current.y;
           if (dx * dx + dy * dy <= 25) {
@@ -548,16 +576,102 @@ export function GraphView({
             events?.onEdgeClick?.(edge);
           }
         } else {
-          setSelectedNodeId(null); // click on empty space — hide popover
+          setSelectedNodeId(null);
           setSelectedEdgeId(null);
         }
         if (!interaction.isDragging.current && !clickedEdgeId) {
           events?.onBackgroundClick?.();
         }
       }
+      dragPreviewRef.current = null;
     },
-    [camera, data.teamName, events, interaction, onOwnerSlotDrop, simulation]
+    [camera, events, interaction, onOwnerSlotDrop, simulation]
   );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (processActivePointerMove(e.clientX, e.clientY, e.buttons)) {
+        return;
+      }
+
+      dragPreviewRef.current = null;
+
+      const canvas = canvasHandle.current?.getCanvas();
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const world = camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      const nodes = getVisibleNodes(simulation.stateRef.current.nodes);
+      const visibleNodeIds = new Set(nodes.map((node) => node.id));
+      const edges = getVisibleEdges(simulation.stateRef.current.edges, visibleNodeIds);
+
+      const hoveredNodeId = findNodeAt(world.x, world.y, nodes);
+      interaction.hoveredNodeId.current = hoveredNodeId;
+
+      if (hoveredNodeId) {
+        hoveredEdgeIdRef.current = null;
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+
+      const nodeMap = getNodeMap(nodes);
+      const interactiveEdges = getInteractiveEdges(canvas, nodes, edges);
+      hoveredEdgeIdRef.current = findEdgeAt(world.x, world.y, interactiveEdges, nodeMap);
+      canvas.style.cursor = hoveredEdgeIdRef.current ? 'pointer' : 'grab';
+    },
+    [
+      camera,
+      getInteractiveEdges,
+      getNodeMap,
+      getVisibleEdges,
+      getVisibleNodes,
+      interaction,
+      processActivePointerMove,
+      simulation.stateRef,
+    ]
+  );
+
+  const handleMouseUp = useCallback(
+    (e: React.MouseEvent) => {
+      completePointerInteraction(e.clientX, e.clientY);
+    },
+    [completePointerInteraction]
+  );
+
+  useEffect(() => {
+    const handleWindowMouseMove = (event: MouseEvent): void => {
+      if ((event.buttons & 1) === 0) {
+        return;
+      }
+      if (
+        !isPanningRef.current &&
+        !interaction.dragNodeId.current &&
+        !interaction.isDragging.current &&
+        !edgeMouseDownRef.current
+      ) {
+        return;
+      }
+      processActivePointerMove(event.clientX, event.clientY, event.buttons);
+    };
+
+    const handleWindowMouseUp = (event: MouseEvent): void => {
+      if (
+        !isPanningRef.current &&
+        !interaction.dragNodeId.current &&
+        !interaction.isDragging.current &&
+        !edgeMouseDownRef.current
+      ) {
+        return;
+      }
+      completePointerInteraction(event.clientX, event.clientY);
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+  }, [completePointerInteraction, interaction, processActivePointerMove]);
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
