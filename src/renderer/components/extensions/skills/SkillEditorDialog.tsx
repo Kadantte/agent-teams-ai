@@ -35,6 +35,7 @@ import {
 import { toSuggestedSkillFolderName } from './skillFolderNameUtils';
 import { resolveSkillProjectPath } from './skillProjectUtils';
 import { SkillReviewDialog } from './SkillReviewDialog';
+import { validateSkillFolderName } from './skillValidationUtils';
 
 import type {
   SkillDetail,
@@ -304,6 +305,10 @@ export const SkillEditorDialog = ({
     }
     if (!folderName.trim()) {
       return 'Choose a folder name for this skill.';
+    }
+    const folderNameError = validateSkillFolderName(folderName);
+    if (folderNameError) {
+      return folderNameError;
     }
     if (scope === 'project' && !effectiveProjectPath) {
       return 'Project skills need an active project.';

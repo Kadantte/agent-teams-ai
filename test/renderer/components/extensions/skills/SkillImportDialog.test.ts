@@ -378,4 +378,52 @@ describe('SkillImportDialog', () => {
       await Promise.resolve();
     });
   });
+
+  it('blocks import review locally when the folder name is invalid', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(SkillImportDialog, {
+          open: true,
+          projectPath: null,
+          projectLabel: null,
+          onClose: vi.fn(),
+          onImported: vi.fn(),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const sourceInput = host.querySelector('#skill-import-source') as HTMLInputElement;
+    const folderInput = host.querySelector('#skill-import-folder') as HTMLInputElement;
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setValue?.call(sourceInput, '/tmp/source-skill');
+      sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setValue?.call(folderInput, 'bad/name');
+      folderInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const reviewButton = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Review And Import')
+    ) as HTMLButtonElement;
+    await act(async () => {
+      reviewButton.click();
+      await Promise.resolve();
+    });
+
+    expect(storeState.previewSkillImport).not.toHaveBeenCalled();
+    expect(host.textContent).toContain(
+      'Pick a simpler folder name using letters, numbers, dots, dashes, or underscores.'
+    );
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
 });

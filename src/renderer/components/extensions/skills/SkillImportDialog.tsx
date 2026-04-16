@@ -25,6 +25,7 @@ import { FileSearch, FolderOpen, X } from 'lucide-react';
 import { getSuggestedSkillFolderNameFromPath } from './skillFolderNameUtils';
 import { SkillReviewDialog } from './SkillReviewDialog';
 import { resolveSkillProjectPath } from './skillProjectUtils';
+import { validateSkillFolderName } from './skillValidationUtils';
 
 import type { SkillReviewPreview } from '@shared/types/extensions';
 
@@ -126,6 +127,13 @@ export const SkillImportDialog = ({
   }
 
   async function handleReview(): Promise<void> {
+    const folderNameError =
+      folderName.trim().length > 0 ? validateSkillFolderName(folderName) : null;
+    if (folderNameError) {
+      setMutationError(folderNameError);
+      return;
+    }
+
     setReviewLoading(true);
     setMutationError(null);
     try {

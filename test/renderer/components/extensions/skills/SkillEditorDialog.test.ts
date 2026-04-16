@@ -313,4 +313,51 @@ This file uses a freeform layout without generated sections.
       await Promise.resolve();
     });
   });
+
+  it('blocks review locally when the folder name is invalid', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(SkillEditorDialog, {
+          open: true,
+          mode: 'create',
+          projectPath: '/tmp/project',
+          projectLabel: 'Project',
+          detail: null,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const folderInput = host.querySelector('#skill-folder') as HTMLInputElement;
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setValue?.call(folderInput, 'bad/name');
+      folderInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const reviewButton = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Review And Create')
+    ) as HTMLButtonElement;
+    await act(async () => {
+      reviewButton.click();
+      await Promise.resolve();
+    });
+
+    expect(storeState.previewSkillUpsert).not.toHaveBeenCalled();
+    expect(host.textContent).toContain(
+      'Pick a simpler folder name using letters, numbers, dots, dashes, or underscores.'
+    );
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
 });
