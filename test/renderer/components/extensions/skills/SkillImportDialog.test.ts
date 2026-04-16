@@ -120,6 +120,36 @@ describe('SkillImportDialog', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps destination folder empty until a source folder is chosen', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(SkillImportDialog, {
+          open: true,
+          projectPath: null,
+          projectLabel: null,
+          onClose: vi.fn(),
+          onImported: vi.fn(),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const sourceInput = host.querySelector('#skill-import-source') as HTMLInputElement;
+    const folderInput = host.querySelector('#skill-import-folder') as HTMLInputElement;
+
+    expect(sourceInput.value).toBe('');
+    expect(folderInput.value).toBe('');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('keeps destination folder name synced with the chosen source until edited manually', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);

@@ -97,7 +97,7 @@ export const SkillImportDialog = ({
     if (!open || folderNameEdited) {
       return;
     }
-    setFolderName(getSuggestedSkillFolderNameFromPath(sourceDir));
+    setFolderName(sourceDir.trim() ? getSuggestedSkillFolderNameFromPath(sourceDir) : '');
   }, [folderNameEdited, open, sourceDir]);
 
   useEffect(() => {
