@@ -68,6 +68,18 @@ export function useExtensionsTabState() {
     };
   }, []);
 
+  useEffect(() => {
+    if (activeSubTab !== 'plugins' && selectedPluginId !== null) {
+      setSelectedPluginId(null);
+    }
+    if (activeSubTab !== 'mcp-servers' && selectedMcpServerId !== null) {
+      setSelectedMcpServerId(null);
+    }
+    if (activeSubTab !== 'skills' && selectedSkillId !== null) {
+      setSelectedSkillId(null);
+    }
+  }, [activeSubTab, selectedMcpServerId, selectedPluginId, selectedSkillId]);
+
   const mcpSearch = useCallback((query: string) => {
     setMcpSearchQuery(query);
 
