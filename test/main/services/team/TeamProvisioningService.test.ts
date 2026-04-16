@@ -143,6 +143,68 @@ function writeLaunchState(
   );
 }
 
+function createMemberSpawnStatusEntry(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    status: 'waiting',
+    launchState: 'runtime_pending_bootstrap',
+    error: undefined,
+    updatedAt: new Date().toISOString(),
+    runtimeAlive: false,
+    livenessSource: undefined,
+    bootstrapConfirmed: false,
+    hardFailure: false,
+    agentToolAccepted: true,
+    firstSpawnAcceptedAt: new Date().toISOString(),
+    lastHeartbeatAt: undefined,
+    ...overrides,
+  };
+}
+
+function createMemberSpawnRun(params?: {
+  runId?: string;
+  teamName?: string;
+  startedAt?: string;
+  expectedMembers?: string[];
+  memberSpawnStatuses?: Map<string, Record<string, unknown>>;
+  memberSpawnLeadInboxCursorByMember?: Map<string, { timestamp: string; messageId: string }>;
+  memberSpawnProcessedLeadInboxMessageIdsByMember?: Map<string, Set<string>>;
+}) {
+  const teamName = params?.teamName ?? 'member-spawn-team';
+  const expectedMembers = params?.expectedMembers ?? ['alice'];
+  const memberSpawnStatuses =
+    params?.memberSpawnStatuses ??
+    new Map([
+      [
+        expectedMembers[0]!,
+        createMemberSpawnStatusEntry({
+          firstSpawnAcceptedAt: new Date(Date.now() - 5_000).toISOString(),
+        }),
+      ],
+    ]);
+
+  return {
+    runId: params?.runId ?? 'run-member-spawn-1',
+    teamName,
+    startedAt: params?.startedAt ?? new Date(Date.now() - 60_000).toISOString(),
+    request: {
+      members: [],
+    },
+    expectedMembers,
+    memberSpawnStatuses,
+    memberSpawnToolUseIds: new Map(),
+    memberSpawnLeadInboxCursorByMember:
+      params?.memberSpawnLeadInboxCursorByMember ?? new Map(),
+    memberSpawnProcessedLeadInboxMessageIdsByMember:
+      params?.memberSpawnProcessedLeadInboxMessageIdsByMember ?? new Map(),
+    provisioningOutputParts: [],
+    activeToolCalls: new Map(),
+    isLaunch: false,
+    provisioningComplete: false,
+  } as any;
+}
+
 describe('TeamProvisioningService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -919,4 +981,336 @@ describe('TeamProvisioningService', () => {
     expect(result.statuses.jack?.hardFailureReason).toContain('requested model is not available');
     expect(result.teamLaunchState).toBe('partial_failure');
   });
+
+  it('does not reprocess already-seen teammate lead inbox messages', async () => {
+    const svc = new TeamProvisioningService();
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T09:00:00.000Z',
+      memberSpawnProcessedLeadInboxMessageIdsByMember: new Map([
+        ['alice', new Set(['msg-1', 'msg-2'])],
+      ]),
+      memberSpawnLeadInboxCursorByMember: new Map([
+        [
+          'alice',
+          {
+            timestamp: '2026-04-16T10:00:00.000Z',
+            messageId: 'msg-2',
+          },
+        ],
+      ]),
+    });
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: 'heartbeat',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        messageId: 'msg-1',
+        read: false,
+      },
+      {
+        from: 'alice',
+        text: 'heartbeat',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        messageId: 'msg-2',
+        read: false,
+      },
+    ]);
+
+    const applySignalSpy = vi.spyOn(svc as any, 'applyLeadInboxSpawnSignal');
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(applySignalSpy).not.toHaveBeenCalled();
+  });
+
+  it('processes an unseen teammate heartbeat on the first refresh', async () => {
+    const svc = new TeamProvisioningService();
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T09:00:00.000Z',
+    });
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: '{"type":"heartbeat","timestamp":"2026-04-16T10:00:00.000Z"}',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        messageId: 'msg-1',
+        read: false,
+      },
+    ]);
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(run.memberSpawnStatuses.get('alice')).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      bootstrapConfirmed: true,
+      hardFailure: false,
+      lastHeartbeatAt: '2026-04-16T10:00:00.000Z',
+    });
+    expect(run.memberSpawnLeadInboxCursorByMember.get('alice')).toEqual({
+      timestamp: '2026-04-16T10:00:00.000Z',
+      messageId: 'msg-1',
+    });
+    expect(run.memberSpawnProcessedLeadInboxMessageIdsByMember.get('alice')).toEqual(
+      new Set(['msg-1'])
+    );
+  });
+
+  it('ignores teammate lead inbox signals that predate the current run', async () => {
+    const svc = new TeamProvisioningService();
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T10:00:00.000Z',
+    });
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: '{"type":"heartbeat","timestamp":"2026-04-16T09:59:59.000Z"}',
+        timestamp: '2026-04-16T09:59:59.000Z',
+        messageId: 'msg-early',
+        read: false,
+      },
+    ]);
+
+    const applySignalSpy = vi.spyOn(svc as any, 'applyLeadInboxSpawnSignal');
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(applySignalSpy).not.toHaveBeenCalled();
+    expect(run.memberSpawnLeadInboxCursorByMember.size).toBe(0);
+    expect(run.memberSpawnProcessedLeadInboxMessageIdsByMember.size).toBe(0);
+    expect(run.memberSpawnStatuses.get('alice')).toMatchObject({
+      status: 'waiting',
+      launchState: 'runtime_pending_bootstrap',
+      bootstrapConfirmed: false,
+    });
+  });
+
+  it('marks an unseen older lead inbox signal as processed without replaying older state', async () => {
+    const latestHeartbeatAt = '2026-04-16T10:05:00.000Z';
+    const existingEntry = createMemberSpawnStatusEntry({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      livenessSource: 'heartbeat',
+      bootstrapConfirmed: true,
+      lastHeartbeatAt: latestHeartbeatAt,
+    });
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T09:00:00.000Z',
+      memberSpawnStatuses: new Map([['alice', existingEntry]]),
+      memberSpawnProcessedLeadInboxMessageIdsByMember: new Map([
+        ['alice', new Set(['msg-3'])],
+      ]),
+      memberSpawnLeadInboxCursorByMember: new Map([
+        [
+          'alice',
+          {
+            timestamp: latestHeartbeatAt,
+            messageId: 'msg-3',
+          },
+        ],
+      ]),
+    });
+    const svc = new TeamProvisioningService();
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: 'Bootstrap failed: unsupported model',
+        timestamp: '2026-04-16T10:04:00.000Z',
+        messageId: 'msg-2b',
+        read: false,
+      },
+      {
+        from: 'alice',
+        text: 'heartbeat',
+        timestamp: latestHeartbeatAt,
+        messageId: 'msg-3',
+        read: false,
+      },
+    ]);
+
+    const applySignalSpy = vi.spyOn(svc as any, 'applyLeadInboxSpawnSignal');
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(applySignalSpy).not.toHaveBeenCalled();
+    expect(run.memberSpawnStatuses.get('alice')).toBe(existingEntry);
+    expect(
+      run.memberSpawnProcessedLeadInboxMessageIdsByMember.get('alice')?.has('msg-2b')
+    ).toBe(true);
+    expect(run.memberSpawnLeadInboxCursorByMember.get('alice')).toEqual({
+      timestamp: latestHeartbeatAt,
+      messageId: 'msg-3',
+    });
+  });
+
+  it('applies an unseen newer failure signal and transitions the member to failed_to_start', async () => {
+    const latestHeartbeatAt = '2026-04-16T10:00:00.000Z';
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T09:00:00.000Z',
+      memberSpawnStatuses: new Map([
+        [
+          'alice',
+          createMemberSpawnStatusEntry({
+            status: 'online',
+            launchState: 'confirmed_alive',
+            runtimeAlive: true,
+            livenessSource: 'heartbeat',
+            bootstrapConfirmed: true,
+            lastHeartbeatAt: latestHeartbeatAt,
+          }),
+        ],
+      ]),
+      memberSpawnProcessedLeadInboxMessageIdsByMember: new Map([
+        ['alice', new Set(['msg-1'])],
+      ]),
+      memberSpawnLeadInboxCursorByMember: new Map([
+        [
+          'alice',
+          {
+            timestamp: latestHeartbeatAt,
+            messageId: 'msg-1',
+          },
+        ],
+      ]),
+    });
+    const svc = new TeamProvisioningService();
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: 'Bootstrap failed: unsupported model',
+        timestamp: '2026-04-16T10:01:00.000Z',
+        messageId: 'msg-2',
+        read: false,
+      },
+    ]);
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(run.memberSpawnStatuses.get('alice')).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'Bootstrap failed: unsupported model',
+    });
+    expect(run.memberSpawnLeadInboxCursorByMember.get('alice')).toEqual({
+      timestamp: '2026-04-16T10:01:00.000Z',
+      messageId: 'msg-2',
+    });
+    expect(run.memberSpawnProcessedLeadInboxMessageIdsByMember.get('alice')).toEqual(
+      new Set(['msg-1', 'msg-2'])
+    );
+  });
+
+  it('applies an unseen same-timestamp signal with a greater messageId and advances the cursor', async () => {
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T09:00:00.000Z',
+      memberSpawnProcessedLeadInboxMessageIdsByMember: new Map([
+        ['alice', new Set(['msg-2'])],
+      ]),
+      memberSpawnLeadInboxCursorByMember: new Map([
+        [
+          'alice',
+          {
+            timestamp: '2026-04-16T10:00:00.000Z',
+            messageId: 'msg-2',
+          },
+        ],
+      ]),
+    });
+    const svc = new TeamProvisioningService();
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: 'heartbeat',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        messageId: 'msg-2',
+        read: false,
+      },
+      {
+        from: 'alice',
+        text: 'heartbeat',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        messageId: 'msg-3',
+        read: false,
+      },
+    ]);
+
+    const applySignalSpy = vi.spyOn(svc as any, 'applyLeadInboxSpawnSignal');
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(applySignalSpy).toHaveBeenCalledTimes(1);
+    expect(applySignalSpy).toHaveBeenCalledWith(
+      run,
+      'alice',
+      expect.objectContaining({ messageId: 'msg-3' })
+    );
+    expect(run.memberSpawnLeadInboxCursorByMember.get('alice')).toEqual({
+      timestamp: '2026-04-16T10:00:00.000Z',
+      messageId: 'msg-3',
+    });
+    expect(
+      run.memberSpawnProcessedLeadInboxMessageIdsByMember.get('alice')
+    ).toEqual(new Set(['msg-2', 'msg-3']));
+  });
+
+  it('does not bump lastHeartbeatAt for an equal heartbeat timestamp', () => {
+    const existingEntry = createMemberSpawnStatusEntry({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      livenessSource: 'heartbeat',
+      bootstrapConfirmed: true,
+      lastHeartbeatAt: '2026-04-16T10:00:00.000Z',
+    });
+    const run = createMemberSpawnRun({
+      memberSpawnStatuses: new Map([['alice', existingEntry]]),
+    });
+    const svc = new TeamProvisioningService();
+
+    (svc as any).setMemberSpawnStatus(
+      run,
+      'alice',
+      'online',
+      undefined,
+      'heartbeat',
+      '2026-04-16T10:00:00.000Z'
+    );
+
+    expect(run.memberSpawnStatuses.get('alice')).toBe(existingEntry);
+  });
+
+  it('does not bump lastHeartbeatAt for an older heartbeat timestamp', () => {
+    const existingEntry = createMemberSpawnStatusEntry({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      livenessSource: 'heartbeat',
+      bootstrapConfirmed: true,
+      lastHeartbeatAt: '2026-04-16T10:00:00.000Z',
+    });
+    const run = createMemberSpawnRun({
+      memberSpawnStatuses: new Map([['alice', existingEntry]]),
+    });
+    const svc = new TeamProvisioningService();
+
+    (svc as any).setMemberSpawnStatus(
+      run,
+      'alice',
+      'online',
+      undefined,
+      'heartbeat',
+      '2026-04-16T09:59:59.000Z'
+    );
+
+    expect(run.memberSpawnStatuses.get('alice')).toBe(existingEntry);
+  });
+
 });

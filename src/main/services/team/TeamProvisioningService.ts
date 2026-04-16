@@ -700,6 +700,13 @@ interface ProvisioningRun {
   >;
   /** Agent tool_use_id -> teammate name for persistent teammate spawns. */
   memberSpawnToolUseIds: Map<string, string>;
+  /** Per-member latest processed lead-inbox bootstrap signal cursor for the current live run. */
+  memberSpawnLeadInboxCursorByMember: Map<string, MemberSpawnInboxCursor>;
+  /**
+   * Per-member exact processed lead-inbox messageIds for the current live run.
+   * This owns live-path correctness and protects against out-of-order inserts.
+   */
+  memberSpawnProcessedLeadInboxMessageIdsByMember: Map<string, Set<string>>;
   /** Highest accepted deterministic bootstrap event sequence for this run. */
   lastDeterministicBootstrapSeq: number;
   /** Throttles config/inbox audit work triggered by frequent status polling. */
@@ -785,6 +792,88 @@ function createInitialMemberSpawnStatusEntry(): MemberSpawnStatusEntry {
 
 interface LiveTeamAgentRuntimeMetadata {
   model?: string;
+}
+
+interface MemberSpawnInboxCursor {
+  timestamp: string;
+  messageId: string;
+}
+
+type LeadInboxMemberSpawnMessage = InboxMessage & { messageId: string };
+
+function compareMemberSpawnInboxCursor(
+  left: MemberSpawnInboxCursor,
+  right: MemberSpawnInboxCursor
+): number {
+  const leftMs = Date.parse(left.timestamp);
+  const rightMs = Date.parse(right.timestamp);
+  const leftValid = Number.isFinite(leftMs);
+  const rightValid = Number.isFinite(rightMs);
+
+  if (leftValid && rightValid && leftMs !== rightMs) {
+    return leftMs - rightMs;
+  }
+  if (leftValid !== rightValid) {
+    return leftValid ? -1 : 1;
+  }
+  return left.messageId.localeCompare(right.messageId);
+}
+
+function toMemberSpawnInboxCursor(
+  message: Pick<InboxMessage, 'timestamp' | 'messageId'>
+): MemberSpawnInboxCursor | null {
+  const messageId = typeof message.messageId === 'string' ? message.messageId.trim() : '';
+  if (!messageId) {
+    return null;
+  }
+  return {
+    timestamp: message.timestamp,
+    messageId,
+  };
+}
+
+function maxMemberSpawnInboxCursor(
+  left: MemberSpawnInboxCursor | undefined,
+  right: MemberSpawnInboxCursor
+): MemberSpawnInboxCursor {
+  if (!left) {
+    return right;
+  }
+  return compareMemberSpawnInboxCursor(left, right) >= 0 ? left : right;
+}
+
+function getOrCreateMemberSpawnProcessedMessageIds(
+  run: ProvisioningRun,
+  memberName: string
+): Set<string> {
+  const existing = run.memberSpawnProcessedLeadInboxMessageIdsByMember.get(memberName);
+  if (existing) {
+    return existing;
+  }
+  const created = new Set<string>();
+  run.memberSpawnProcessedLeadInboxMessageIdsByMember.set(memberName, created);
+  return created;
+}
+
+function isMemberSpawnHeartbeatTimestampNewer(
+  previous: string | undefined,
+  incoming: string | undefined
+): boolean {
+  const normalizedIncoming = incoming?.trim();
+  if (!normalizedIncoming) {
+    return false;
+  }
+  const normalizedPrevious = previous?.trim();
+  if (!normalizedPrevious) {
+    return true;
+  }
+
+  const previousMs = Date.parse(normalizedPrevious);
+  const incomingMs = Date.parse(normalizedIncoming);
+  if (Number.isFinite(previousMs) && Number.isFinite(incomingMs)) {
+    return incomingMs > previousMs;
+  }
+  return normalizedIncoming > normalizedPrevious;
 }
 
 function stripWrappedCliFlagValue(raw: string | undefined): string | undefined {
@@ -2841,12 +2930,15 @@ export class TeamProvisioningService {
     }
 
     const runStartedAtMs = Date.parse(run.startedAt);
-    const expectedMembers = Array.isArray(run.expectedMembers) ? run.expectedMembers : [];
+    const expectedMembers = new Set(Array.isArray(run.expectedMembers) ? run.expectedMembers : []);
     const teammateMessages = leadInboxMessages
-      .filter((message) => {
+      .filter((message): message is LeadInboxMemberSpawnMessage => {
         const from = typeof message.from === 'string' ? message.from.trim() : '';
         if (!from || from === leadName || from === 'user' || from === 'system') return false;
-        if (!expectedMembers.includes(from)) return false;
+        if (!expectedMembers.has(from)) return false;
+        if (typeof message.messageId !== 'string' || message.messageId.trim().length === 0) {
+          return false;
+        }
         const messageTs = Date.parse(message.timestamp);
         if (
           Number.isFinite(messageTs) &&
@@ -2857,24 +2949,81 @@ export class TeamProvisioningService {
         }
         return typeof message.text === 'string' && message.text.trim().length > 0;
       })
-      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+      .sort((left, right) =>
+        compareMemberSpawnInboxCursor(
+          { timestamp: left.timestamp, messageId: left.messageId },
+          { timestamp: right.timestamp, messageId: right.messageId }
+        )
+      );
 
+    const messagesByMember = new Map<string, LeadInboxMemberSpawnMessage[]>();
     for (const message of teammateMessages) {
-      const from = message.from.trim();
-      const reason = extractBootstrapFailureReason(message.text);
-      if (reason) {
-        this.setMemberSpawnStatus(run, from, 'error', reason);
+      const memberName = message.from.trim();
+      const bucket = messagesByMember.get(memberName) ?? [];
+      bucket.push(message);
+      messagesByMember.set(memberName, bucket);
+    }
+
+    for (const [memberName, messages] of messagesByMember.entries()) {
+      const processedMessageIds = getOrCreateMemberSpawnProcessedMessageIds(run, memberName);
+      const currentCursor = run.memberSpawnLeadInboxCursorByMember.get(memberName);
+      const newlyProcessedMessageIds: string[] = [];
+      let nextCursor = currentCursor;
+
+      for (const message of messages) {
+        if (processedMessageIds.has(message.messageId)) {
+          continue;
+        }
+
+        const messageCursor = toMemberSpawnInboxCursor(message);
+        const shouldApplySignal =
+          messageCursor == null ||
+          currentCursor == null ||
+          compareMemberSpawnInboxCursor(messageCursor, currentCursor) > 0;
+
+        if (shouldApplySignal) {
+          this.applyLeadInboxSpawnSignal(run, memberName, message);
+          if (messageCursor) {
+            nextCursor = maxMemberSpawnInboxCursor(nextCursor, messageCursor);
+          }
+        }
+
+        // Mark late out-of-order signals as seen so they cannot replay forever, but only
+        // let strictly newer cursors mutate the already-advanced live member state.
+        newlyProcessedMessageIds.push(message.messageId);
+      }
+
+      if (newlyProcessedMessageIds.length === 0) {
         continue;
       }
-      this.setMemberSpawnStatus(
-        run,
-        from,
-        'online',
-        undefined,
-        'heartbeat',
-        extractHeartbeatTimestamp(message.text, message.timestamp)
-      );
+
+      for (const messageId of newlyProcessedMessageIds) {
+        processedMessageIds.add(messageId);
+      }
+      if (nextCursor) {
+        run.memberSpawnLeadInboxCursorByMember.set(memberName, nextCursor);
+      }
     }
+  }
+
+  private applyLeadInboxSpawnSignal(
+    run: ProvisioningRun,
+    memberName: string,
+    message: LeadInboxMemberSpawnMessage
+  ): void {
+    const reason = extractBootstrapFailureReason(message.text);
+    if (reason) {
+      this.setMemberSpawnStatus(run, memberName, 'error', reason);
+      return;
+    }
+    this.setMemberSpawnStatus(
+      run,
+      memberName,
+      'online',
+      undefined,
+      'heartbeat',
+      extractHeartbeatTimestamp(message.text, message.timestamp)
+    );
   }
 
   private persistSentMessage(teamName: string, message: InboxMessage): void {
@@ -3341,8 +3490,14 @@ export class TeamProvisioningService {
       next.livenessSource = livenessSource;
       next.firstSpawnAcceptedAt = prev.firstSpawnAcceptedAt ?? updatedAt;
       if (livenessSource === 'heartbeat') {
+        const incomingHeartbeatAt = heartbeatAt?.trim() || updatedAt;
         next.bootstrapConfirmed = true;
-        next.lastHeartbeatAt = heartbeatAt?.trim() || prev.lastHeartbeatAt || updatedAt;
+        next.lastHeartbeatAt = isMemberSpawnHeartbeatTimestampNewer(
+          prev.lastHeartbeatAt,
+          incomingHeartbeatAt
+        )
+          ? incomingHeartbeatAt
+          : prev.lastHeartbeatAt;
       }
       next.hardFailure = false;
       next.error = undefined;
@@ -4971,6 +5126,8 @@ export class TeamProvisioningService {
           request.members.map((m) => [m.name, createInitialMemberSpawnStatusEntry()])
         ),
         memberSpawnToolUseIds: new Map(),
+        memberSpawnLeadInboxCursorByMember: new Map(),
+        memberSpawnProcessedLeadInboxMessageIdsByMember: new Map(),
         lastDeterministicBootstrapSeq: 0,
         lastMemberSpawnAuditAt: 0,
         lastMemberSpawnAuditConfigReadWarningAt: 0,
@@ -5550,6 +5707,8 @@ export class TeamProvisioningService {
           expectedMembers.map((name) => [name, createInitialMemberSpawnStatusEntry()])
         ),
         memberSpawnToolUseIds: new Map(),
+        memberSpawnLeadInboxCursorByMember: new Map(),
+        memberSpawnProcessedLeadInboxMessageIdsByMember: new Map(),
         lastDeterministicBootstrapSeq: 0,
         lastMemberSpawnAuditAt: 0,
         lastMemberSpawnAuditConfigReadWarningAt: 0,
