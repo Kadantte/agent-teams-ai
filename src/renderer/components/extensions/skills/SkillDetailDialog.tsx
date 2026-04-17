@@ -24,7 +24,7 @@ import {
 } from '@renderer/components/ui/dialog';
 import { useStore } from '@renderer/store';
 import { formatSkillRootKind, getSkillAudienceLabel } from '@shared/utils/skillRoots';
-import { AlertTriangle, ExternalLink, FolderOpen, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, ExternalLink, FolderOpen, Info, Pencil, Trash2 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { resolveSkillProjectPath } from './skillProjectUtils';
@@ -81,6 +81,7 @@ export const SkillDetailDialog = ({
   const effectiveProjectPath = item
     ? resolveSkillProjectPath(item.scope, projectPath, item.projectRoot)
     : (projectPath ?? undefined);
+  const issuesTone = item?.issues.length ? getIssuesTone(item.issues) : null;
 
   function formatScopeLabel(scope: 'user' | 'project'): string {
     return scope === 'project' ? 'This project only' : 'Your personal skills';
@@ -90,6 +91,27 @@ export const SkillDetailDialog = ({
     return invocationMode === 'manual-only'
       ? 'Only runs when you explicitly ask for it.'
       : 'Runs automatically when it matches the task.';
+  }
+
+  function getIssuesTone(issues: typeof item.issues): {
+    className: string;
+    title: string;
+    Icon: typeof AlertTriangle;
+  } {
+    const informationalOnly = issues.every((issue) => issue.severity === 'info');
+    if (informationalOnly) {
+      return {
+        className: 'border-blue-500/30 bg-blue-500/5',
+        title: 'This skill includes bundled scripts',
+        Icon: Info,
+      };
+    }
+
+    return {
+      className: 'border-amber-500/30 bg-amber-500/5',
+      title: 'Review this skill carefully before using it',
+      Icon: AlertTriangle,
+    };
   }
 
   async function handleDelete(): Promise<void> {
@@ -167,16 +189,30 @@ export const SkillDetailDialog = ({
             </div>
 
             {item.issues.length > 0 && (
-              <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-4">
-                <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
-                  Review this skill carefully before using it
+              <div className={`space-y-2 rounded-md border p-4 ${issuesTone?.className ?? ''}`}>
+                <p
+                  className={`text-sm font-medium ${
+                    issuesTone?.Icon === Info
+                      ? 'text-blue-700 dark:text-blue-300'
+                      : 'text-amber-700 dark:text-amber-300'
+                  }`}
+                >
+                  {issuesTone?.title}
                 </p>
                 {item.issues.map((issue, index) => (
                   <div
                     key={`${issue.code}-${index}`}
-                    className="flex gap-2 text-sm text-amber-700 dark:text-amber-300"
+                    className={`flex gap-2 text-sm ${
+                      issue.severity === 'info'
+                        ? 'text-blue-700 dark:text-blue-300'
+                        : 'text-amber-700 dark:text-amber-300'
+                    }`}
                   >
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    {issue.severity === 'info' ? (
+                      <Info className="mt-0.5 size-4 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    )}
                     <span>{issue.message}</span>
                   </div>
                 ))}

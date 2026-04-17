@@ -10,7 +10,7 @@ export type SkillSourceType = 'filesystem';
 
 export type SkillInvocationMode = 'auto' | 'manual-only';
 
-export type SkillIssueSeverity = 'warning' | 'error';
+export type SkillIssueSeverity = 'info' | 'warning' | 'error';
 
 export interface SkillDirectoryFlags {
   hasScripts: boolean;

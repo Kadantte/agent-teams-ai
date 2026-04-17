@@ -26,6 +26,7 @@ import {
   CheckCircle2,
   Clock3,
   Download,
+  Info,
   Plus,
   Search,
 } from 'lucide-react';
@@ -39,7 +40,7 @@ import { SkillImportDialog } from './SkillImportDialog';
 import { resolveSkillProjectPath } from './skillProjectUtils';
 
 import type { SkillsSortState } from '@renderer/hooks/useExtensionsTabState';
-import type { SkillCatalogItem, SkillDetail } from '@shared/types/extensions';
+import type { SkillCatalogItem, SkillDetail, SkillValidationIssue } from '@shared/types/extensions';
 
 const SUCCESS_BANNER_MS = 2500;
 const NEW_SKILL_HIGHLIGHT_MS = 4000;
@@ -93,6 +94,32 @@ function getSkillStatus(skill: SkillCatalogItem): string {
     return 'Includes scripts, so review it carefully';
   }
   return 'Ready to use';
+}
+
+function getPrimarySkillIssue(skill: SkillCatalogItem): SkillValidationIssue | null {
+  return (
+    skill.issues.find((issue) => issue.severity === 'error') ??
+    skill.issues.find((issue) => issue.severity === 'warning') ??
+    skill.issues[0] ??
+    null
+  );
+}
+
+function getSkillIssueTone(issue: SkillValidationIssue | null): {
+  className: string;
+  Icon: typeof AlertTriangle;
+} {
+  if (issue?.severity === 'info') {
+    return {
+      className: 'border-blue-500/20 bg-blue-500/10 text-blue-700 dark:text-blue-300',
+      Icon: Info,
+    };
+  }
+
+  return {
+    className: 'border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-300',
+    Icon: AlertTriangle,
+  };
 }
 
 function formatRuntimeAudienceLabel(providerNames: readonly string[]): string {
@@ -487,74 +514,83 @@ export const SkillsPanel = ({
                 </Badge>
               </div>
               <div className="skills-grid grid grid-cols-1 gap-3 xl:grid-cols-2">
-                {visibleProjectSkills.map((skill) => (
-                  <button
-                    key={skill.id}
-                    type="button"
-                    onClick={() => setSelectedSkillId(skill.id)}
-                    className={`rounded-xl border p-4 text-left transition-colors ${
-                      highlightedSkillId === skill.id
-                        ? 'border-green-500/50 bg-green-500/10 shadow-[0_0_0_1px_rgba(34,197,94,0.18)]'
-                        : 'bg-surface-raised/10 border-border hover:border-border-emphasis'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="truncate text-sm font-semibold text-text">{skill.name}</h3>
-                          {!skill.isValid && (
-                            <Badge
-                              variant="outline"
-                              className="border-amber-500/40 text-amber-700 dark:text-amber-300"
-                            >
-                              Needs attention
-                            </Badge>
-                          )}
+                {visibleProjectSkills.map((skill) => {
+                  const primaryIssue = getPrimarySkillIssue(skill);
+                  const issueTone = getSkillIssueTone(primaryIssue);
+                  const IssueIcon = issueTone.Icon;
+                  return (
+                    <button
+                      key={skill.id}
+                      type="button"
+                      onClick={() => setSelectedSkillId(skill.id)}
+                      className={`rounded-xl border p-4 text-left transition-colors ${
+                        highlightedSkillId === skill.id
+                          ? 'border-green-500/50 bg-green-500/10 shadow-[0_0_0_1px_rgba(34,197,94,0.18)]'
+                          : 'bg-surface-raised/10 border-border hover:border-border-emphasis'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="truncate text-sm font-semibold text-text">
+                              {skill.name}
+                            </h3>
+                            {!skill.isValid && (
+                              <Badge
+                                variant="outline"
+                                className="border-amber-500/40 text-amber-700 dark:text-amber-300"
+                              >
+                                Needs attention
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="line-clamp-2 text-sm text-text-secondary">
+                            {skill.description}
+                          </p>
                         </div>
-                        <p className="line-clamp-2 text-sm text-text-secondary">
-                          {skill.description}
-                        </p>
+                        <Badge variant="outline">{getScopeLabel(skill)}</Badge>
                       </div>
-                      <Badge variant="outline">{getScopeLabel(skill)}</Badge>
-                    </div>
 
-                    <div className="mt-3 space-y-2 text-xs text-text-muted">
-                      <p>{getInvocationLabel(skill)}</p>
-                      <p>{getSkillStatus(skill)}</p>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Badge variant="secondary" className="font-normal">
-                        Stored in {formatSkillRootKind(skill.rootKind)}
-                      </Badge>
-                      <Badge variant="outline" className="font-normal">
-                        {getSkillAudienceLabel(skill.rootKind)}
-                      </Badge>
-                      {skill.flags.hasScripts && (
-                        <Badge variant="destructive" className="font-normal">
-                          Has scripts
-                        </Badge>
-                      )}
-                      {skill.flags.hasReferences && (
-                        <Badge variant="secondary" className="font-normal">
-                          References
-                        </Badge>
-                      )}
-                      {skill.flags.hasAssets && (
-                        <Badge variant="secondary" className="font-normal">
-                          Assets
-                        </Badge>
-                      )}
-                    </div>
-
-                    {skill.issues.length > 0 && (
-                      <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                        <span>{skill.issues[0]?.message}</span>
+                      <div className="mt-3 space-y-2 text-xs text-text-muted">
+                        <p>{getInvocationLabel(skill)}</p>
+                        <p>{getSkillStatus(skill)}</p>
                       </div>
-                    )}
-                  </button>
-                ))}
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Badge variant="secondary" className="font-normal">
+                          Stored in {formatSkillRootKind(skill.rootKind)}
+                        </Badge>
+                        <Badge variant="outline" className="font-normal">
+                          {getSkillAudienceLabel(skill.rootKind)}
+                        </Badge>
+                        {skill.flags.hasScripts && (
+                          <Badge variant="destructive" className="font-normal">
+                            Has scripts
+                          </Badge>
+                        )}
+                        {skill.flags.hasReferences && (
+                          <Badge variant="secondary" className="font-normal">
+                            References
+                          </Badge>
+                        )}
+                        {skill.flags.hasAssets && (
+                          <Badge variant="secondary" className="font-normal">
+                            Assets
+                          </Badge>
+                        )}
+                      </div>
+
+                      {primaryIssue && (
+                        <div
+                          className={`mt-3 flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${issueTone.className}`}
+                        >
+                          <IssueIcon className="mt-0.5 size-3.5 shrink-0" />
+                          <span>{primaryIssue.message}</span>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -573,74 +609,83 @@ export const SkillsPanel = ({
                 </Badge>
               </div>
               <div className="skills-grid grid grid-cols-1 gap-3 xl:grid-cols-2">
-                {visibleUserSkills.map((skill) => (
-                  <button
-                    key={skill.id}
-                    type="button"
-                    onClick={() => setSelectedSkillId(skill.id)}
-                    className={`rounded-xl border p-4 text-left transition-colors ${
-                      highlightedSkillId === skill.id
-                        ? 'border-green-500/50 bg-green-500/10 shadow-[0_0_0_1px_rgba(34,197,94,0.18)]'
-                        : 'bg-surface-raised/10 border-border hover:border-border-emphasis'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="truncate text-sm font-semibold text-text">{skill.name}</h3>
-                          {!skill.isValid && (
-                            <Badge
-                              variant="outline"
-                              className="border-amber-500/40 text-amber-700 dark:text-amber-300"
-                            >
-                              Needs attention
-                            </Badge>
-                          )}
+                {visibleUserSkills.map((skill) => {
+                  const primaryIssue = getPrimarySkillIssue(skill);
+                  const issueTone = getSkillIssueTone(primaryIssue);
+                  const IssueIcon = issueTone.Icon;
+                  return (
+                    <button
+                      key={skill.id}
+                      type="button"
+                      onClick={() => setSelectedSkillId(skill.id)}
+                      className={`rounded-xl border p-4 text-left transition-colors ${
+                        highlightedSkillId === skill.id
+                          ? 'border-green-500/50 bg-green-500/10 shadow-[0_0_0_1px_rgba(34,197,94,0.18)]'
+                          : 'bg-surface-raised/10 border-border hover:border-border-emphasis'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="truncate text-sm font-semibold text-text">
+                              {skill.name}
+                            </h3>
+                            {!skill.isValid && (
+                              <Badge
+                                variant="outline"
+                                className="border-amber-500/40 text-amber-700 dark:text-amber-300"
+                              >
+                                Needs attention
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="line-clamp-2 text-sm text-text-secondary">
+                            {skill.description}
+                          </p>
                         </div>
-                        <p className="line-clamp-2 text-sm text-text-secondary">
-                          {skill.description}
-                        </p>
+                        <Badge variant="outline">{getScopeLabel(skill)}</Badge>
                       </div>
-                      <Badge variant="outline">{getScopeLabel(skill)}</Badge>
-                    </div>
 
-                    <div className="mt-3 space-y-2 text-xs text-text-muted">
-                      <p>{getInvocationLabel(skill)}</p>
-                      <p>{getSkillStatus(skill)}</p>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Badge variant="secondary" className="font-normal">
-                        Stored in {formatSkillRootKind(skill.rootKind)}
-                      </Badge>
-                      <Badge variant="outline" className="font-normal">
-                        {getSkillAudienceLabel(skill.rootKind)}
-                      </Badge>
-                      {skill.flags.hasScripts && (
-                        <Badge variant="destructive" className="font-normal">
-                          Has scripts
-                        </Badge>
-                      )}
-                      {skill.flags.hasReferences && (
-                        <Badge variant="secondary" className="font-normal">
-                          References
-                        </Badge>
-                      )}
-                      {skill.flags.hasAssets && (
-                        <Badge variant="secondary" className="font-normal">
-                          Assets
-                        </Badge>
-                      )}
-                    </div>
-
-                    {skill.issues.length > 0 && (
-                      <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                        <span>{skill.issues[0]?.message}</span>
+                      <div className="mt-3 space-y-2 text-xs text-text-muted">
+                        <p>{getInvocationLabel(skill)}</p>
+                        <p>{getSkillStatus(skill)}</p>
                       </div>
-                    )}
-                  </button>
-                ))}
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Badge variant="secondary" className="font-normal">
+                          Stored in {formatSkillRootKind(skill.rootKind)}
+                        </Badge>
+                        <Badge variant="outline" className="font-normal">
+                          {getSkillAudienceLabel(skill.rootKind)}
+                        </Badge>
+                        {skill.flags.hasScripts && (
+                          <Badge variant="destructive" className="font-normal">
+                            Has scripts
+                          </Badge>
+                        )}
+                        {skill.flags.hasReferences && (
+                          <Badge variant="secondary" className="font-normal">
+                            References
+                          </Badge>
+                        )}
+                        {skill.flags.hasAssets && (
+                          <Badge variant="secondary" className="font-normal">
+                            Assets
+                          </Badge>
+                        )}
+                      </div>
+
+                      {primaryIssue && (
+                        <div
+                          className={`mt-3 flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${issueTone.className}`}
+                        >
+                          <IssueIcon className="mt-0.5 size-3.5 shrink-0" />
+                          <span>{primaryIssue.message}</span>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </section>
           )}
