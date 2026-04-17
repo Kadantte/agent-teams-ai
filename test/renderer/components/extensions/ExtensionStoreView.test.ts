@@ -302,4 +302,28 @@ describe('ExtensionStoreView provider loading placeholders', () => {
       await Promise.resolve();
     });
   });
+
+  it('keeps provider placeholders visible when bootstrap data still says Checking...', async () => {
+    storeState.cliStatusLoading = false;
+    storeState.cliProviderStatusLoading = {};
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(ExtensionStoreView));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Checking provider status...');
+    expect(host.textContent).toContain('Loading...');
+    expect(host.textContent).not.toContain('Plugins: unsupported');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
 });

@@ -48,6 +48,8 @@ import { PluginsPanel } from './plugins/PluginsPanel';
 import { SkillsPanel } from './skills/SkillsPanel';
 import { ExtensionsSubTabTrigger } from './ExtensionsSubTabTrigger';
 
+import type { CliProviderStatus } from '@shared/types';
+
 const ProviderCapabilityCardSkeleton = ({
   providerId,
   displayName,
@@ -81,6 +83,19 @@ const ProviderCapabilityCardSkeleton = ({
     </div>
   </div>
 );
+
+function isProviderCapabilityCardLoading(
+  provider: CliProviderStatus,
+  providerLoading: boolean
+): boolean {
+  return (
+    providerLoading ||
+    (!provider.authenticated &&
+      provider.statusMessage === 'Checking...' &&
+      provider.models.length === 0 &&
+      provider.backend == null)
+  );
+}
 
 export const ExtensionStoreView = (): React.JSX.Element => {
   const tabId = useTabIdOptional();
@@ -317,7 +332,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
             <div className="mt-3 grid gap-2 md:grid-cols-2">
               {visibleProviders.map((provider) => {
                 const providerLoading = cliProviderStatusLoading[provider.providerId] === true;
-                if (providerLoading) {
+                if (isProviderCapabilityCardLoading(provider, providerLoading)) {
                   return (
                     <ProviderCapabilityCardSkeleton
                       key={provider.providerId}
@@ -365,7 +380,14 @@ export const ExtensionStoreView = (): React.JSX.Element => {
                       </Badge>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                      <Badge variant="secondary">
+                      <Badge
+                        variant={pluginStatus === 'unsupported' ? 'outline' : 'secondary'}
+                        className={
+                          pluginStatus === 'unsupported'
+                            ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                            : undefined
+                        }
+                      >
                         Plugins: {formatCliExtensionCapabilityStatus(pluginStatus)}
                       </Badge>
                       <Badge variant="secondary">
