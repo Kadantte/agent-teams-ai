@@ -56,7 +56,7 @@ function loadGroupingMode(): TaskGroupingMode {
   } catch {
     /* ignore */
   }
-  return 'none';
+  return 'project';
 }
 
 function saveGroupingMode(mode: TaskGroupingMode): void {
