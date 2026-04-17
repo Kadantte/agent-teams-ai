@@ -856,6 +856,9 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
     if (isCheckingMultimodelStatus(cliStatus, visibleCliProviders)) return 'info';
     if (cliStatus.authStatusChecking) return 'info';
     if (!cliStatus.installed) return 'error';
+    if (isMultimodelRuntimeStatus(cliStatus) && visibleCliProviders.length === 0) {
+      return 'warning';
+    }
     if (
       isMultimodelRuntimeStatus(cliStatus) &&
       visibleCliProviders.length > 0 &&

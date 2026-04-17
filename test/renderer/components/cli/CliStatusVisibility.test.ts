@@ -411,6 +411,9 @@ describe('CLI status visibility during completed install state', () => {
 
     expect(host.textContent).not.toContain('Authenticated');
     expect(host.textContent).not.toContain('Providers:');
+    expect((host.firstElementChild as HTMLElement | null)?.getAttribute('style')).toContain(
+      '245, 158, 11'
+    );
 
     await act(async () => {
       root.unmount();
