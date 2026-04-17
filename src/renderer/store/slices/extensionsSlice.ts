@@ -5,6 +5,7 @@
 
 import { api } from '@renderer/api';
 import { CLI_NOT_FOUND_MESSAGE } from '@shared/constants/cli';
+import { isProjectScopedMcpScope } from '@shared/utils/mcpScopes';
 import { getMcpOperationKey, getPluginOperationKey } from '@shared/utils/extensionNormalizers';
 
 import { findPaneByTabId, updatePane } from '../utils/paneHelpers';
@@ -1034,7 +1035,8 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
     scope?: string,
     projectPath?: string
   ) => {
-    const operationScope: InstallScope = scope === 'project' || scope === 'local' ? scope : 'user';
+    const operationScope: InstallScope =
+      scope === 'global' || scope === 'user' || isProjectScopedMcpScope(scope) ? scope : 'user';
     const operationKey = getMcpOperationKey(registryId, operationScope);
     if (!api.mcpRegistry) {
       clearMcpSuccessResetTimer(operationKey);

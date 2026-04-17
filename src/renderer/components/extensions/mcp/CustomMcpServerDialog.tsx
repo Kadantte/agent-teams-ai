@@ -24,6 +24,11 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { useStore } from '@renderer/store';
+import {
+  getDefaultMcpSharedScope,
+  getMcpScopeLabel,
+  isProjectScopedMcpScope,
+} from '@shared/utils/mcpScopes';
 import { Plus, Server, Trash2 } from 'lucide-react';
 
 import type {
@@ -42,13 +47,7 @@ interface CustomMcpServerDialogProps {
 
 type TransportMode = 'stdio' | 'http';
 type HttpTransport = 'streamable-http' | 'sse' | 'http';
-type Scope = 'local' | 'user' | 'project';
-
-const SCOPE_OPTIONS: { value: Scope; label: string }[] = [
-  { value: 'user', label: 'User (global)' },
-  { value: 'project', label: 'Project' },
-  { value: 'local', label: 'Local' },
-];
+type Scope = 'local' | 'user' | 'project' | 'global';
 
 const HTTP_TRANSPORT_OPTIONS: { value: HttpTransport; label: string }[] = [
   { value: 'streamable-http', label: 'Streamable HTTP' },
@@ -67,11 +66,18 @@ export const CustomMcpServerDialog = ({
   projectPath,
 }: CustomMcpServerDialogProps): React.JSX.Element => {
   const installCustomMcpServer = useStore((s) => s.installCustomMcpServer);
+  const cliStatus = useStore((s) => s.cliStatus);
+  const defaultSharedScope = getDefaultMcpSharedScope(cliStatus?.flavor);
+  const scopeOptions: { value: Scope; label: string }[] = [
+    { value: defaultSharedScope, label: getMcpScopeLabel(defaultSharedScope, cliStatus?.flavor) },
+    { value: 'project', label: 'Project' },
+    { value: 'local', label: 'Local' },
+  ];
 
   // Form state
   const [serverName, setServerName] = useState('');
   const [transportMode, setTransportMode] = useState<TransportMode>('stdio');
-  const [scope, setScope] = useState<Scope>('user');
+  const [scope, setScope] = useState<Scope>(defaultSharedScope);
 
   // Stdio fields
   const [npmPackage, setNpmPackage] = useState('');
@@ -92,7 +98,7 @@ export const CustomMcpServerDialog = ({
     if (open) {
       setServerName('');
       setTransportMode('stdio');
-      setScope('user');
+      setScope(defaultSharedScope);
       setNpmPackage('');
       setNpmVersion('');
       setHttpUrl('');
@@ -102,13 +108,13 @@ export const CustomMcpServerDialog = ({
       setError(null);
       setInstalling(false);
     }
-  }, [open]);
+  }, [defaultSharedScope, open]);
 
   useEffect(() => {
-    if (open && scope !== 'user' && !projectPath) {
-      setScope('user');
+    if (open && isProjectScopedMcpScope(scope) && !projectPath) {
+      setScope(defaultSharedScope);
     }
-  }, [open, projectPath, scope]);
+  }, [defaultSharedScope, open, projectPath, scope]);
 
   // Auto-fill env vars from saved API keys
   useEffect(() => {
@@ -177,7 +183,7 @@ export const CustomMcpServerDialog = ({
     const request: McpCustomInstallRequest = {
       serverName,
       scope,
-      projectPath: scope !== 'user' ? (projectPath ?? undefined) : undefined,
+      projectPath: isProjectScopedMcpScope(scope) ? (projectPath ?? undefined) : undefined,
       installSpec,
       envValues,
       headers: headers.filter((h) => h.key.trim() && h.value.trim()),
@@ -207,7 +213,7 @@ export const CustomMcpServerDialog = ({
   const canSubmit =
     serverName.trim() &&
     (transportMode === 'stdio' ? npmPackage.trim() : httpUrl.trim()) &&
-    !(scope !== 'user' && !projectPath) &&
+    !(isProjectScopedMcpScope(scope) && !projectPath) &&
     !installing;
 
   return (
@@ -382,11 +388,11 @@ export const CustomMcpServerDialog = ({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {SCOPE_OPTIONS.map((opt) => (
+                {scopeOptions.map((opt) => (
                   <SelectItem
                     key={opt.value}
                     value={opt.value}
-                    disabled={opt.value !== 'user' && !projectPath}
+                    disabled={isProjectScopedMcpScope(opt.value) && !projectPath}
                   >
                     {opt.label}
                   </SelectItem>

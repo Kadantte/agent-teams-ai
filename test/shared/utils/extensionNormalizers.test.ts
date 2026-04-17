@@ -241,6 +241,10 @@ describe('getMcpInstallationSummaryLabel', () => {
     expect(getMcpInstallationSummaryLabel([{ scope: 'local' }])).toBe('Installed locally');
   });
 
+  it('describes a single global MCP installation', () => {
+    expect(getMcpInstallationSummaryLabel([{ scope: 'global' }])).toBe('Installed globally');
+  });
+
   it('summarizes multiple MCP scopes', () => {
     expect(
       getMcpInstallationSummaryLabel([

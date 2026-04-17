@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface StoreState {
   installCustomMcpServer: ReturnType<typeof vi.fn>;
+  cliStatus?: { flavor: 'claude' | 'agent_teams_orchestrator' } | null;
 }
 
 const storeState = {} as StoreState;
@@ -116,6 +117,7 @@ describe('CustomMcpServerDialog project scope', () => {
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     storeState.installCustomMcpServer = vi.fn().mockResolvedValue(undefined);
+    storeState.cliStatus = null;
     lookupMock.mockReset();
     lookupMock.mockResolvedValue([]);
   });
@@ -145,6 +147,32 @@ describe('CustomMcpServerDialog project scope', () => {
     const localOption = host.querySelector('option[value="local"]') as HTMLOptionElement;
     expect(projectOption.disabled).toBe(true);
     expect(localOption.disabled).toBe(true);
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('defaults to global scope in multimodel mode', async () => {
+    storeState.cliStatus = { flavor: 'agent_teams_orchestrator' };
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(CustomMcpServerDialog, {
+          open: true,
+          onClose: vi.fn(),
+          projectPath: null,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const scopeSelect = host.querySelector('[data-testid="scope-select"]') as HTMLSelectElement;
+    expect(scopeSelect.value).toBe('global');
 
     await act(async () => {
       root.unmount();

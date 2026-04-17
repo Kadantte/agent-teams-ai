@@ -11,6 +11,7 @@ interface StoreState {
   uninstallMcpServer: ReturnType<typeof vi.fn>;
   installErrors: Record<string, string>;
   mcpGitHubStars: Record<string, number>;
+  cliStatus?: { flavor: 'claude' | 'agent_teams_orchestrator' } | null;
 }
 
 const storeState = {} as StoreState;
@@ -172,6 +173,7 @@ describe('McpServerDetailDialog installed entry handling', () => {
     storeState.uninstallMcpServer = vi.fn();
     storeState.installErrors = {};
     storeState.mcpGitHubStars = {};
+    storeState.cliStatus = null;
     lookupMock.mockReset();
     lookupMock.mockResolvedValue([]);
   });
@@ -269,6 +271,38 @@ describe('McpServerDetailDialog installed entry handling', () => {
     const localOption = host.querySelector('option[value="local"]') as HTMLOptionElement;
     expect(projectOption.disabled).toBe(true);
     expect(localOption.disabled).toBe(true);
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('defaults to global scope in multimodel mode', async () => {
+    storeState.cliStatus = { flavor: 'agent_teams_orchestrator' };
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(McpServerDetailDialog, {
+          server: makeServer(),
+          isInstalled: false,
+          installedEntry: null,
+          installedEntries: [],
+          diagnostic: null,
+          diagnosticsLoading: false,
+          projectPath: null,
+          open: true,
+          onClose: vi.fn(),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const scopeSelect = host.querySelector('[data-testid="scope-select"]') as HTMLSelectElement;
+    expect(scopeSelect.value).toBe('global');
 
     await act(async () => {
       root.unmount();

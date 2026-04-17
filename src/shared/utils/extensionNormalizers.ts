@@ -160,6 +160,7 @@ export function getInstallationSummaryLabel(
 const MCP_SCOPE_PRIORITY: Record<InstalledMcpEntry['scope'], number> = {
   local: 0,
   project: 1,
+  global: 2,
   user: 2,
 };
 
@@ -195,6 +196,7 @@ export function getMcpInstallationSummaryLabel(
   }
 
   switch (scopes[0]) {
+    case 'global':
     case 'user':
       return 'Installed globally';
     case 'project':

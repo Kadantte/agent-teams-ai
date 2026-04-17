@@ -83,7 +83,7 @@ export interface McpHeaderDef {
 
 export interface InstalledMcpEntry {
   name: string;
-  scope: 'local' | 'user' | 'project';
+  scope: 'local' | 'user' | 'project' | 'global';
   transport?: string;
 }
 
@@ -100,7 +100,7 @@ export interface McpServerDiagnostic {
 
 // ── Install request (renderer → main, minimal trusted data) ────────────────
 
-export type McpInstallScope = 'local' | 'user' | 'project';
+export type McpInstallScope = 'local' | 'user' | 'project' | 'global';
 
 export interface McpInstallRequest {
   registryId: string; // server ID from registry (NOT full catalog item)

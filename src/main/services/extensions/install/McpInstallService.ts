@@ -11,6 +11,7 @@ import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
 import { execCli } from '@main/utils/childProcess';
 import { CLI_NOT_FOUND_MESSAGE } from '@shared/constants/cli';
 import { createLogger } from '@shared/utils/logger';
+import { isProjectScopedMcpScope } from '@shared/utils/mcpScopes';
 import path from 'path';
 
 import { createExtensionsRuntimeAdapter } from '../runtime/ExtensionsRuntimeAdapter';
@@ -29,7 +30,7 @@ const logger = createLogger('Extensions:McpInstall');
 const SERVER_NAME_RE = /^[\w.-]{1,100}$/;
 
 /** Allowed scope values (prevent command injection) */
-const VALID_SCOPES = new Set(['local', 'user', 'project']);
+const VALID_SCOPES = new Set(['local', 'user', 'project', 'global']);
 
 /** Env var key must be safe shell identifier */
 const ENV_KEY_RE = /^[A-Z_][A-Z0-9_]{0,100}$/i;
@@ -40,7 +41,7 @@ const HEADER_KEY_RE = /^[A-Za-z][\w-]{0,100}$/;
 const TIMEOUT_MS = 30_000;
 
 function scopeRequiresProjectPath(scope?: string): boolean {
-  return scope === 'local' || scope === 'project';
+  return isProjectScopedMcpScope(scope);
 }
 
 export class McpInstallService {
@@ -64,7 +65,7 @@ export class McpInstallService {
     if (scope && !VALID_SCOPES.has(scope)) {
       return {
         state: 'error',
-        error: `Invalid scope: "${scope}". Must be one of: local, user, project.`,
+        error: `Invalid scope: "${scope}". Must be one of: local, user, project, global.`,
       };
     }
 
@@ -337,7 +338,7 @@ export class McpInstallService {
     if (scope && !VALID_SCOPES.has(scope)) {
       return {
         state: 'error',
-        error: `Invalid scope: "${scope}". Must be one of: local, user, project.`,
+        error: `Invalid scope: "${scope}". Must be one of: local, user, project, global.`,
       };
     }
 

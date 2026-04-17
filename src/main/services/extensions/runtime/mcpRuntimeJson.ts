@@ -1,3 +1,5 @@
+import { isInstalledMcpScope } from '@shared/utils/mcpScopes';
+
 import type { InstalledMcpEntry } from '@shared/types/extensions';
 
 interface McpListJsonServer {
@@ -24,15 +26,11 @@ function extractJsonObject<T>(raw: string): T {
   }
 }
 
-function isSupportedScope(scope: unknown): scope is InstalledMcpEntry['scope'] {
-  return scope === 'user' || scope === 'project' || scope === 'local';
-}
-
 export function parseInstalledMcpJsonOutput(output: string): InstalledMcpEntry[] {
   const parsed = extractJsonObject<McpListJsonPayload>(output);
 
   return (parsed.servers ?? []).flatMap<InstalledMcpEntry>((entry) => {
-    if (typeof entry.name !== 'string' || !isSupportedScope(entry.scope)) {
+    if (typeof entry.name !== 'string' || !isInstalledMcpScope(entry.scope)) {
       return [];
     }
 

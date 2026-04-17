@@ -26,6 +26,11 @@ import {
 } from '@renderer/components/ui/select';
 import { useStore } from '@renderer/store';
 import {
+  getDefaultMcpSharedScope,
+  getMcpScopeLabel,
+  isProjectScopedMcpScope,
+} from '@shared/utils/mcpScopes';
+import {
   getMcpInstallationSummaryLabel,
   getMcpOperationKey,
   getPreferredMcpInstallationEntry,
@@ -55,13 +60,7 @@ interface McpServerDetailDialogProps {
   onClose: () => void;
 }
 
-type Scope = 'local' | 'user' | 'project';
-
-const SCOPE_OPTIONS: { value: Scope; label: string }[] = [
-  { value: 'user', label: 'User (global)' },
-  { value: 'project', label: 'Project' },
-  { value: 'local', label: 'Local' },
-];
+type Scope = 'local' | 'user' | 'project' | 'global';
 
 export const McpServerDetailDialog = ({
   server,
@@ -74,7 +73,9 @@ export const McpServerDetailDialog = ({
   open,
   onClose,
 }: McpServerDetailDialogProps): React.JSX.Element => {
-  const [scope, setScope] = useState<Scope>('user');
+  const cliStatus = useStore((s) => s.cliStatus);
+  const defaultSharedScope = getDefaultMcpSharedScope(cliStatus?.flavor);
+  const [scope, setScope] = useState<Scope>(defaultSharedScope);
   const operationKey = server ? getMcpOperationKey(server.id, scope) : null;
   const installProgress = useStore(
     (s) => (operationKey ? s.mcpInstallProgress[operationKey] : undefined) ?? 'idle'
@@ -96,6 +97,15 @@ export const McpServerDetailDialog = ({
     : installedEntry
       ? [installedEntry]
       : [];
+  const scopeOptions: { value: Scope; label: string }[] = [
+    { value: defaultSharedScope, label: getMcpScopeLabel(defaultSharedScope, cliStatus?.flavor) },
+    ...(defaultSharedScope !== 'user' &&
+    normalizedInstalledEntries.some((entry) => entry.scope === 'user')
+      ? [{ value: 'user' as const, label: getMcpScopeLabel('user', cliStatus?.flavor) }]
+      : []),
+    { value: 'project', label: 'Project' },
+    { value: 'local', label: 'Local' },
+  ];
   const preferredInstalledEntry = getPreferredMcpInstallationEntry(normalizedInstalledEntries);
   const selectedInstalledEntry =
     normalizedInstalledEntries.find((entry) => entry.scope === scope) ?? null;
@@ -120,10 +130,16 @@ export const McpServerDetailDialog = ({
       }))
     );
     setServerName(preferredInstalledEntry?.name ?? sanitizeMcpServerName(server.name));
-    setScope(preferredInstalledEntry?.scope ?? 'user');
+    setScope((preferredInstalledEntry?.scope as Scope | undefined) ?? defaultSharedScope);
     setImgError(false);
     setAutoFilledFields(new Set());
-  }, [open, preferredInstalledEntry?.name, preferredInstalledEntry?.scope, server?.id]);
+  }, [
+    defaultSharedScope,
+    open,
+    preferredInstalledEntry?.name,
+    preferredInstalledEntry?.scope,
+    server?.id,
+  ]);
 
   useEffect(() => {
     if (!server || !open) {
@@ -134,10 +150,10 @@ export const McpServerDetailDialog = ({
   }, [open, scope, selectedInstalledEntry?.name, server]);
 
   useEffect(() => {
-    if (open && scope !== 'user' && !projectPath) {
-      setScope('user');
+    if (open && isProjectScopedMcpScope(scope) && !projectPath) {
+      setScope(defaultSharedScope);
     }
-  }, [open, projectPath, scope]);
+  }, [defaultSharedScope, open, projectPath, scope]);
 
   // Auto-fill env values from saved API keys
   useEffect(() => {
@@ -181,7 +197,7 @@ export const McpServerDetailDialog = ({
   const isInstalledForScope = selectedInstalledEntry !== null;
   const uninstallServerName = selectedInstalledEntry?.name ?? serverName;
   const uninstallScope = selectedInstalledEntry?.scope ?? scope;
-  const scopeRequiresProjectPath = scope !== 'user' && !projectPath;
+  const scopeRequiresProjectPath = isProjectScopedMcpScope(scope) && !projectPath;
   const installDisabled =
     !serverName.trim() ||
     missingRequiredEnvVars ||
@@ -201,7 +217,7 @@ export const McpServerDetailDialog = ({
       registryId: server.id,
       serverName,
       scope,
-      projectPath: scope !== 'user' ? (projectPath ?? undefined) : undefined,
+      projectPath: isProjectScopedMcpScope(scope) ? (projectPath ?? undefined) : undefined,
       envValues,
       headers,
     });
@@ -212,7 +228,7 @@ export const McpServerDetailDialog = ({
       server.id,
       uninstallServerName,
       uninstallScope,
-      uninstallScope !== 'user' ? (projectPath ?? undefined) : undefined
+      isProjectScopedMcpScope(uninstallScope) ? (projectPath ?? undefined) : undefined
     );
   };
 
@@ -415,11 +431,11 @@ export const McpServerDetailDialog = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {SCOPE_OPTIONS.map((opt) => (
+                  {scopeOptions.map((opt) => (
                     <SelectItem
                       key={opt.value}
                       value={opt.value}
-                      disabled={opt.value !== 'user' && !projectPath}
+                      disabled={isProjectScopedMcpScope(opt.value) && !projectPath}
                     >
                       {opt.label}
                     </SelectItem>
