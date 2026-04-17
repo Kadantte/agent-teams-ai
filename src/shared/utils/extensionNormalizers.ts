@@ -109,7 +109,14 @@ export function buildPluginId(pluginName: string, marketplaceName: string): stri
 /**
  * Namespaced operation-state key for plugin install/uninstall UI state.
  */
-export function getPluginOperationKey(pluginId: string, scope: InstallScope): string {
+export function getPluginOperationKey(
+  pluginId: string,
+  scope: InstallScope,
+  projectPath?: string | null
+): string {
+  if (scope === 'project' || scope === 'local') {
+    return `plugin:${pluginId}:${scope}:${getMcpProjectStateKey(projectPath)}`;
+  }
   return `plugin:${pluginId}:${scope}`;
 }
 

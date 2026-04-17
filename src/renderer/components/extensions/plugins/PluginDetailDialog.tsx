@@ -91,7 +91,9 @@ export const PluginDetailDialog = ({
     }
   }, [projectScopeAvailable, scope]);
 
-  const operationKey = plugin ? getPluginOperationKey(plugin.pluginId, scope) : null;
+  const operationKey = plugin
+    ? getPluginOperationKey(plugin.pluginId, scope, scope !== 'user' ? projectPath : undefined)
+    : null;
   const installProgress = useStore(
     (s) => (operationKey ? s.pluginInstallProgress[operationKey] : undefined) ?? 'idle'
   );

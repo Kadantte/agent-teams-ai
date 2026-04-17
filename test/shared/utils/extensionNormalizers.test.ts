@@ -157,10 +157,16 @@ describe('buildPluginId', () => {
 });
 
 describe('getPluginOperationKey', () => {
-  it('namespaces plugin operation keys by scope', () => {
-    expect(getPluginOperationKey('context7@claude-plugins-official', 'local')).toBe(
-      'plugin:context7@claude-plugins-official:local',
+  it('namespaces user-scope plugin operation keys without a project suffix', () => {
+    expect(getPluginOperationKey('context7@claude-plugins-official', 'user')).toBe(
+      'plugin:context7@claude-plugins-official:user',
     );
+  });
+
+  it('namespaces repo-scoped plugin operation keys by project path', () => {
+    expect(
+      getPluginOperationKey('context7@claude-plugins-official', 'local', '/tmp/project'),
+    ).toBe('plugin:context7@claude-plugins-official:local:/tmp/project');
   });
 });
 

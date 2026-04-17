@@ -153,8 +153,11 @@ const makeReadyCliStatus = () => ({
   providers: [],
 });
 
-const pluginOperationKey = (pluginId: string, scope: 'user' | 'project' | 'local' = 'user') =>
-  getPluginOperationKey(pluginId, scope);
+const pluginOperationKey = (
+  pluginId: string,
+  scope: 'user' | 'project' | 'local' = 'user',
+  projectPath?: string
+) => getPluginOperationKey(pluginId, scope, projectPath);
 const mcpOperationKey = (
   registryId: string,
   scope: 'user' | 'project' | 'local' | 'global' = 'user',
@@ -574,6 +577,33 @@ describe('extensionsSlice', () => {
       });
     });
 
+    it('keys project-scope install state by project path and refreshes that same project context', async () => {
+      store.setState({
+        cliStatus: makeReadyCliStatus(),
+        pluginCatalogProjectPath: '/tmp/project-b',
+      });
+      (api.plugins!.getAll as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (api.plugins!.install as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'success' });
+
+      await store.getState().installPlugin({
+        pluginId: 'project@m',
+        scope: 'project',
+        projectPath: '/tmp/project-a',
+      });
+
+      expect(
+        store.getState().pluginInstallProgress[
+          pluginOperationKey('project@m', 'project', '/tmp/project-a')
+        ]
+      ).toBe('success');
+      expect(
+        store.getState().pluginInstallProgress[
+          pluginOperationKey('project@m', 'project', '/tmp/project-b')
+        ]
+      ).toBeUndefined();
+      expect(api.plugins!.getAll).toHaveBeenLastCalledWith('/tmp/project-a', true);
+    });
+
     it('fails fast for project scope when there is no active project path', async () => {
       store.setState({ cliStatus: makeReadyCliStatus(), pluginCatalogProjectPath: null });
 
@@ -671,6 +701,26 @@ describe('extensionsSlice', () => {
       await store.getState().uninstallPlugin('project@m', 'project');
 
       expect(api.plugins!.uninstall).toHaveBeenCalledWith('project@m', 'project', '/tmp/project-a');
+    });
+
+    it('keys project-scope uninstall state by project path and refreshes that same project context', async () => {
+      store.setState({ pluginCatalogProjectPath: '/tmp/project-b' });
+      (api.plugins!.getAll as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (api.plugins!.uninstall as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'success' });
+
+      await store.getState().uninstallPlugin('project@m', 'project', '/tmp/project-a');
+
+      expect(
+        store.getState().pluginInstallProgress[
+          pluginOperationKey('project@m', 'project', '/tmp/project-a')
+        ]
+      ).toBe('success');
+      expect(
+        store.getState().pluginInstallProgress[
+          pluginOperationKey('project@m', 'project', '/tmp/project-b')
+        ]
+      ).toBeUndefined();
+      expect(api.plugins!.getAll).toHaveBeenLastCalledWith('/tmp/project-a', true);
     });
 
     it('fails fast for project uninstall when there is no active project path', async () => {

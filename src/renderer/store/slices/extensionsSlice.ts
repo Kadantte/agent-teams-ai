@@ -163,8 +163,8 @@ function buildPluginIdSet(catalog: EnrichedPlugin[]): Set<string> {
   return new Set(catalog.map((plugin) => plugin.pluginId));
 }
 
-function buildPluginOperationKeys(pluginId: string): string[] {
-  return PLUGIN_OPERATION_SCOPES.map((scope) => getPluginOperationKey(pluginId, scope));
+function isPluginOperationKeyForPlugin(operationKey: string, pluginId: string): boolean {
+  return operationKey.startsWith(`plugin:${pluginId}:`);
 }
 
 function clearPluginOperationState(
@@ -181,10 +181,16 @@ function clearPluginOperationState(
 
   const nextPluginInstallProgress = { ...pluginInstallProgress };
   const nextInstallErrors = { ...installErrors };
+  const pluginIdsList = Array.from(pluginIds);
 
-  for (const pluginId of pluginIds) {
-    for (const operationKey of buildPluginOperationKeys(pluginId)) {
+  for (const operationKey of Object.keys(nextPluginInstallProgress)) {
+    if (pluginIdsList.some((pluginId) => isPluginOperationKeyForPlugin(operationKey, pluginId))) {
       delete nextPluginInstallProgress[operationKey];
+    }
+  }
+
+  for (const operationKey of Object.keys(nextInstallErrors)) {
+    if (pluginIdsList.some((pluginId) => isPluginOperationKeyForPlugin(operationKey, pluginId))) {
       delete nextInstallErrors[operationKey];
     }
   }
@@ -206,8 +212,9 @@ function clearPluginSuccessResetTimer(operationKey: string): void {
 }
 
 function clearPluginSuccessResetTimers(pluginIds: Set<string>): void {
-  for (const pluginId of pluginIds) {
-    for (const operationKey of buildPluginOperationKeys(pluginId)) {
+  const pluginIdsList = Array.from(pluginIds);
+  for (const operationKey of Array.from(pluginSuccessResetTimers.keys())) {
+    if (pluginIdsList.some((pluginId) => isPluginOperationKeyForPlugin(operationKey, pluginId))) {
       clearPluginSuccessResetTimer(operationKey);
     }
   }
@@ -339,8 +346,6 @@ const CLI_STATUS_UNKNOWN_MESSAGE =
   'Unable to verify Claude CLI status. Open the Dashboard and check the CLI before retrying.';
 const PROJECT_SCOPE_REQUIRED_MESSAGE =
   'Project- and local-scoped plugins require an active project in the Extensions tab.';
-const PLUGIN_OPERATION_SCOPES: InstallScope[] = ['user', 'project', 'local'];
-
 export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSlice> = (
   set,
   get
@@ -865,11 +870,16 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
   installPlugin: async (request: PluginInstallRequest) => {
     if (!api.plugins) return;
 
+    const catalogProjectPathAtOperationStart = get().pluginCatalogProjectPath ?? undefined;
     const effectiveProjectPath =
       request.scope !== 'user'
         ? (request.projectPath ?? get().pluginCatalogProjectPath ?? undefined)
         : request.projectPath;
-    const operationKey = getPluginOperationKey(request.pluginId, request.scope);
+    const operationKey = getPluginOperationKey(
+      request.pluginId,
+      request.scope,
+      effectiveProjectPath
+    );
     const effectiveRequest =
       effectiveProjectPath === request.projectPath
         ? request
@@ -931,7 +941,12 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
       }));
 
       // Refresh catalog to pick up new installed state
-      void get().fetchPluginCatalog(get().pluginCatalogProjectPath ?? undefined, true);
+      void get().fetchPluginCatalog(
+        effectiveRequest.scope !== 'user'
+          ? effectiveRequest.projectPath
+          : catalogProjectPathAtOperationStart,
+        true
+      );
 
       schedulePluginSuccessReset(operationKey, set);
     } catch (err) {
@@ -948,12 +963,13 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
   uninstallPlugin: async (pluginId: string, scope?: InstallScope, projectPath?: string) => {
     if (!api.plugins) return;
 
+    const catalogProjectPathAtOperationStart = get().pluginCatalogProjectPath ?? undefined;
     const effectiveScope = scope ?? 'user';
-    const operationKey = getPluginOperationKey(pluginId, effectiveScope);
     const effectiveProjectPath =
       effectiveScope !== 'user'
         ? (projectPath ?? get().pluginCatalogProjectPath ?? undefined)
         : projectPath;
+    const operationKey = getPluginOperationKey(pluginId, effectiveScope, effectiveProjectPath);
     if (effectiveScope !== 'user' && !effectiveProjectPath) {
       clearPluginSuccessResetTimer(operationKey);
       set((prev) => ({
@@ -986,7 +1002,10 @@ export const createExtensionsSlice: StateCreator<AppState, [], [], ExtensionsSli
       }));
 
       // Refresh catalog
-      void get().fetchPluginCatalog(get().pluginCatalogProjectPath ?? undefined, true);
+      void get().fetchPluginCatalog(
+        effectiveScope !== 'user' ? effectiveProjectPath : catalogProjectPathAtOperationStart,
+        true
+      );
 
       schedulePluginSuccessReset(operationKey, set);
     } catch (err) {
