@@ -364,6 +364,12 @@ function isCheckingMultimodelStatus(
   );
 }
 
+function hasVisibleAuthenticatedMultimodelProvider(
+  visibleProviders: readonly CliProviderStatus[]
+): boolean {
+  return visibleProviders.some((provider) => provider.authenticated);
+}
+
 const InstalledBanner = ({
   cliStatus,
   cliStatusLoading,
@@ -850,6 +856,13 @@ export const CliStatusBanner = (): React.JSX.Element | null => {
     if (isCheckingMultimodelStatus(cliStatus, visibleCliProviders)) return 'info';
     if (cliStatus.authStatusChecking) return 'info';
     if (!cliStatus.installed) return 'error';
+    if (
+      isMultimodelRuntimeStatus(cliStatus) &&
+      visibleCliProviders.length > 0 &&
+      !hasVisibleAuthenticatedMultimodelProvider(visibleCliProviders)
+    ) {
+      return 'warning';
+    }
     if (cliStatus.installed && !cliStatus.authLoggedIn) return 'warning';
     if (cliStatus.updateAvailable) return 'info';
     return 'success';

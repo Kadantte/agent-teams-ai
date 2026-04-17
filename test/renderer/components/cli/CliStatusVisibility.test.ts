@@ -418,6 +418,84 @@ describe('CLI status visibility during completed install state', () => {
     });
   });
 
+  it('keeps the dashboard banner in warning state when only hidden providers are authenticated', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.cliInstallerState = 'idle';
+    storeState.cliStatus = createInstalledCliStatus({
+      flavor: 'agent_teams_orchestrator',
+      authLoggedIn: true,
+      showVersionDetails: false,
+      showBinaryPath: false,
+      supportsSelfUpdate: false,
+      providers: [
+        {
+          providerId: 'anthropic',
+          displayName: 'Anthropic',
+          supported: true,
+          authenticated: false,
+          authMethod: null,
+          verificationState: 'unknown',
+          statusMessage: 'Authentication required',
+          models: [],
+          canLoginFromUi: true,
+          capabilities: {
+            teamLaunch: true,
+            oneShot: true,
+          },
+        },
+        {
+          providerId: 'codex',
+          displayName: 'Codex',
+          supported: true,
+          authenticated: false,
+          authMethod: null,
+          verificationState: 'unknown',
+          statusMessage: 'Authentication required',
+          models: [],
+          canLoginFromUi: true,
+          capabilities: {
+            teamLaunch: true,
+            oneShot: true,
+          },
+        },
+        {
+          providerId: 'gemini',
+          displayName: 'Gemini',
+          supported: true,
+          authenticated: true,
+          authMethod: 'cli_oauth_personal',
+          verificationState: 'verified',
+          statusMessage: 'Resolved to CLI SDK',
+          models: [],
+          canLoginFromUi: true,
+          capabilities: {
+            teamLaunch: true,
+            oneShot: true,
+          },
+        },
+      ],
+    });
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(CliStatusBanner));
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Providers: 0/2 connected');
+    expect((host.firstElementChild as HTMLElement | null)?.getAttribute('style')).toContain(
+      '245, 158, 11'
+    );
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('shows a degraded runtime warning when a binary is found but the health check fails', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     storeState.cliInstallerState = 'idle';
