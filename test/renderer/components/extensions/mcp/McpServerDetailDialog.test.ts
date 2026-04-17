@@ -266,11 +266,43 @@ describe('McpServerDetailDialog installed entry handling', () => {
     });
 
     expect(lookupMock).toHaveBeenCalledTimes(1);
-    expect(lookupMock).toHaveBeenCalledWith(['CONTEXT7_API_KEY']);
+    expect(lookupMock).toHaveBeenCalledWith(['CONTEXT7_API_KEY'], undefined);
     const projectOption = host.querySelector('option[value="project"]') as HTMLOptionElement;
     const localOption = host.querySelector('option[value="local"]') as HTMLOptionElement;
     expect(projectOption.disabled).toBe(true);
     expect(localOption.disabled).toBe(true);
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('passes projectPath into API key lookup for project-aware autofill', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const server = makeServer();
+    server.envVars = [{ name: 'CONTEXT7_API_KEY', isSecret: true }];
+
+    await act(async () => {
+      root.render(
+        React.createElement(McpServerDetailDialog, {
+          server,
+          isInstalled: false,
+          installedEntry: null,
+          diagnostic: null,
+          diagnosticsLoading: false,
+          projectPath: '/tmp/project-context7',
+          open: true,
+          onClose: vi.fn(),
+        })
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(lookupMock).toHaveBeenCalledWith(['CONTEXT7_API_KEY'], '/tmp/project-context7');
 
     await act(async () => {
       root.unmount();

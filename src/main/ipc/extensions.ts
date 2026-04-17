@@ -421,11 +421,15 @@ async function handleApiKeysDelete(
 
 async function handleApiKeysLookup(
   _event: IpcMainInvokeEvent,
-  envVarNames?: string[]
+  envVarNames?: string[],
+  projectPath?: string
 ): Promise<IpcResult<ApiKeyLookupResult[]>> {
   return wrapHandler('apiKeysLookup', () => {
     if (!Array.isArray(envVarNames)) throw new Error('envVarNames array is required');
-    return getApiKeyService().lookup(envVarNames);
+    return getApiKeyService().lookup(
+      envVarNames,
+      typeof projectPath === 'string' ? projectPath : undefined
+    );
   });
 }
 

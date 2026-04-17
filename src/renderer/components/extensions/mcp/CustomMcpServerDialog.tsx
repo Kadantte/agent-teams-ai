@@ -92,6 +92,11 @@ export const CustomMcpServerDialog = ({
   const [envVars, setEnvVars] = useState<EnvEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
+  const envVarLookupNames = envVars
+    .map((entry) => entry.key.trim())
+    .filter(Boolean)
+    .sort()
+    .join('\0');
 
   // Reset on open
   useEffect(() => {
@@ -120,10 +125,10 @@ export const CustomMcpServerDialog = ({
   useEffect(() => {
     if (!open || envVars.length === 0 || !api.apiKeys) return;
 
-    const envVarNames = envVars.map((e) => e.key).filter(Boolean);
+    const envVarNames = envVars.map((e) => e.key.trim()).filter(Boolean);
     if (envVarNames.length === 0) return;
 
-    void api.apiKeys.lookup(envVarNames).then(
+    void api.apiKeys.lookup(envVarNames, projectPath ?? undefined).then(
       (results) => {
         if (results.length === 0) return;
         const lookup = new Map(results.map((r) => [r.envVarName, r.value]));
@@ -135,7 +140,7 @@ export const CustomMcpServerDialog = ({
         // Silently fail
       }
     );
-  }, [open, envVars.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [envVarLookupNames, envVars, open, projectPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleInstall = async () => {
     setError(null);

@@ -1623,8 +1623,8 @@ const electronAPI: ElectronAPI = {
     list: () => invokeIpcWithResult<ApiKeyEntry[]>(API_KEYS_LIST),
     save: (request: ApiKeySaveRequest) => invokeIpcWithResult<ApiKeyEntry>(API_KEYS_SAVE, request),
     delete: (id: string) => invokeIpcWithResult<void>(API_KEYS_DELETE, id),
-    lookup: (envVarNames: string[]) =>
-      invokeIpcWithResult<ApiKeyLookupResult[]>(API_KEYS_LOOKUP, envVarNames),
+    lookup: (envVarNames: string[], projectPath?: string) =>
+      invokeIpcWithResult<ApiKeyLookupResult[]>(API_KEYS_LOOKUP, envVarNames, projectPath),
     getStorageStatus: () => invokeIpcWithResult<ApiKeyStorageStatus>(API_KEYS_STORAGE_STATUS),
   },
 

@@ -80,6 +80,6 @@ export interface ApiKeysAPI {
   list: () => Promise<ApiKeyEntry[]>;
   save: (request: ApiKeySaveRequest) => Promise<ApiKeyEntry>;
   delete: (id: string) => Promise<void>;
-  lookup: (envVarNames: string[]) => Promise<ApiKeyLookupResult[]>;
+  lookup: (envVarNames: string[], projectPath?: string) => Promise<ApiKeyLookupResult[]>;
   getStorageStatus: () => Promise<ApiKeyStorageStatus>;
 }

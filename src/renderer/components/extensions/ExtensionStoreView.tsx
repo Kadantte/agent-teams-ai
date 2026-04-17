@@ -431,7 +431,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
               </TabsContent>
 
               <TabsContent value="api-keys" className="mt-0 pt-4">
-                <ApiKeysPanel />
+                <ApiKeysPanel projectPath={projectPath} projectLabel={projectLabel} />
               </TabsContent>
 
               <TabsContent value="skills" className="mt-0 pt-4">

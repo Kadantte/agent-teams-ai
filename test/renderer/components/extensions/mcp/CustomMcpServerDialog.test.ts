@@ -180,6 +180,47 @@ describe('CustomMcpServerDialog project scope', () => {
     });
   });
 
+  it('passes projectPath into API key lookup for project-aware autofill', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(CustomMcpServerDialog, {
+          open: true,
+          onClose: vi.fn(),
+          projectPath: '/tmp/custom-mcp-project',
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const addEnvButton = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Add')
+    ) as HTMLButtonElement;
+    await act(async () => {
+      addEnvButton.click();
+      await Promise.resolve();
+    });
+
+    const envKeyInput = host.querySelector(
+      'input[placeholder="ENV_VAR_NAME"]'
+    ) as HTMLInputElement;
+    await act(async () => {
+      setNativeValue(envKeyInput, 'CONTEXT7_API_KEY', 'input');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(lookupMock).toHaveBeenCalledWith(['CONTEXT7_API_KEY'], '/tmp/custom-mcp-project');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('passes projectPath for project-scoped custom installs', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);

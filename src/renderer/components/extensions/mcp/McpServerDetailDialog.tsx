@@ -110,6 +110,11 @@ export const McpServerDetailDialog = ({
   const selectedInstalledEntry =
     normalizedInstalledEntries.find((entry) => entry.scope === scope) ?? null;
   const installSummaryLabel = getMcpInstallationSummaryLabel(normalizedInstalledEntries);
+  const envVarLookupNames =
+    server?.envVars
+      .map((entry) => entry.name)
+      .sort()
+      .join('\0') ?? '';
 
   // Initialize form when dialog opens or server changes
   useEffect(() => {
@@ -160,7 +165,7 @@ export const McpServerDetailDialog = ({
     if (!server || !open || server.envVars.length === 0 || !api.apiKeys) return;
 
     const envVarNames = server.envVars.map((e) => e.name);
-    void api.apiKeys.lookup(envVarNames).then(
+    void api.apiKeys.lookup(envVarNames, projectPath ?? undefined).then(
       (results) => {
         if (results.length === 0) return;
         const filled = new Set<string>();
@@ -176,7 +181,7 @@ export const McpServerDetailDialog = ({
         // Silently fail — auto-fill is supplementary
       }
     );
-  }, [server?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [envVarLookupNames, open, projectPath, server?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!server) return <></>;
 

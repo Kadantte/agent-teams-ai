@@ -15,7 +15,15 @@ import { ApiKeyFormDialog } from './ApiKeyFormDialog';
 
 import type { ApiKeyEntry } from '@shared/types/extensions';
 
-export const ApiKeysPanel = (): React.JSX.Element => {
+interface ApiKeysPanelProps {
+  projectPath: string | null;
+  projectLabel: string | null;
+}
+
+export const ApiKeysPanel = ({
+  projectPath,
+  projectLabel,
+}: ApiKeysPanelProps): React.JSX.Element => {
   const { apiKeys, apiKeysLoading, apiKeysError, storageStatus, fetchStorageStatus, cliStatus } =
     useStore(
       useShallow((s) => ({
@@ -213,7 +221,13 @@ export const ApiKeysPanel = (): React.JSX.Element => {
       )}
 
       {/* Form dialog */}
-      <ApiKeyFormDialog open={dialogOpen} editingKey={editingKey} onClose={handleDialogClose} />
+      <ApiKeyFormDialog
+        open={dialogOpen}
+        editingKey={editingKey}
+        currentProjectPath={projectPath}
+        currentProjectLabel={projectLabel}
+        onClose={handleDialogClose}
+      />
     </div>
   );
 };
