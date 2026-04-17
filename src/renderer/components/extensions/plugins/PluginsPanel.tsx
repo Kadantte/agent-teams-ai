@@ -192,7 +192,7 @@ export const PluginsPanel = ({
 
           return (
             <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-300">
-              Plugins currently apply to Anthropic sessions in the multimodel runtime.
+              In the multimodel runtime, plugins currently apply only to Anthropic sessions.
               {capability.reason ? ` ${capability.reason}` : ''}
             </div>
           );
