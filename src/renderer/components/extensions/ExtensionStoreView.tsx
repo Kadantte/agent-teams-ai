@@ -20,6 +20,11 @@ import {
 import { useTabIdOptional } from '@renderer/contexts/useTabUIContext';
 import { useExtensionsTabState } from '@renderer/hooks/useExtensionsTabState';
 import { useStore } from '@renderer/store';
+import {
+  formatCliExtensionCapabilityStatus,
+  getVisibleMultimodelProviders,
+  isMultimodelRuntimeStatus,
+} from '@renderer/utils/multimodelProviderVisibility';
 import { resolveProjectPathById } from '@renderer/utils/projectLookup';
 import { getExtensionActionDisableReason } from '@shared/utils/extensionNormalizers';
 import { AlertTriangle, BookOpen, Info, Key, Plus, Puzzle, RefreshCw, Server } from 'lucide-react';
@@ -178,9 +183,8 @@ export const ExtensionStoreView = (): React.JSX.Element => {
   );
   const cliStatusBanner = useMemo(() => {
     const providers = cliStatus?.providers ?? [];
-    const visibleProviders = providers.filter((provider) => provider.providerId !== 'gemini');
-    const isMultimodel =
-      cliStatus?.flavor === 'agent_teams_orchestrator' && visibleProviders.length > 0;
+    const visibleProviders = getVisibleMultimodelProviders(providers);
+    const isMultimodel = isMultimodelRuntimeStatus(cliStatus);
 
     if (cliStatusLoading || cliStatus === null) {
       return (
@@ -260,57 +264,64 @@ export const ExtensionStoreView = (): React.JSX.Element => {
               </p>
             </div>
           </div>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {visibleProviders.map((provider) => {
-              const statusTone = provider.authenticated
-                ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300'
-                : provider.supported
-                  ? 'border-amber-500/30 bg-amber-500/5 text-amber-300'
-                  : 'border-border bg-surface-raised text-text-muted';
-              const statusLabel = provider.authenticated
-                ? 'Connected'
-                : provider.supported
-                  ? 'Needs setup'
-                  : 'Unsupported';
-              const pluginStatus = provider.capabilities.extensions.plugins.status;
+          {visibleProviders.length > 0 && (
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {visibleProviders.map((provider) => {
+                const statusTone = provider.authenticated
+                  ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300'
+                  : provider.supported
+                    ? 'border-amber-500/30 bg-amber-500/5 text-amber-300'
+                    : 'border-border bg-surface-raised text-text-muted';
+                const statusLabel = provider.authenticated
+                  ? 'Connected'
+                  : provider.supported
+                    ? 'Needs setup'
+                    : 'Unsupported';
+                const pluginStatus = provider.capabilities.extensions.plugins.status;
 
-              return (
-                <div
-                  key={provider.providerId}
-                  className={`rounded-md border px-3 py-2 ${statusTone}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="inline-flex items-center gap-2 text-sm font-medium">
-                        <ProviderBrandLogo
-                          providerId={provider.providerId}
-                          className="size-4 shrink-0"
-                        />
-                        <span>{provider.displayName}</span>
-                      </p>
-                      <p className="truncate text-[11px] text-text-muted">
-                        {provider.statusMessage ?? provider.backend?.label ?? 'Ready to configure'}
-                      </p>
+                return (
+                  <div
+                    key={provider.providerId}
+                    className={`rounded-md border px-3 py-2 ${statusTone}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="inline-flex items-center gap-2 text-sm font-medium">
+                          <ProviderBrandLogo
+                            providerId={provider.providerId}
+                            className="size-4 shrink-0"
+                          />
+                          <span>{provider.displayName}</span>
+                        </p>
+                        <p className="truncate text-[11px] text-text-muted">
+                          {provider.statusMessage ??
+                            provider.backend?.label ??
+                            'Ready to configure'}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="shrink-0">
+                        {statusLabel}
+                      </Badge>
                     </div>
-                    <Badge variant="outline" className="shrink-0">
-                      {statusLabel}
-                    </Badge>
+                    <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                      <Badge variant="secondary">
+                        Plugins: {formatCliExtensionCapabilityStatus(pluginStatus)}
+                      </Badge>
+                      <Badge variant="secondary">
+                        MCP:{' '}
+                        {formatCliExtensionCapabilityStatus(
+                          provider.capabilities.extensions.mcp.status
+                        )}
+                      </Badge>
+                      <Badge variant="secondary">
+                        Skills: {provider.capabilities.extensions.skills.ownership}
+                      </Badge>
+                    </div>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                    <Badge variant="secondary">
-                      Plugins: {pluginStatus === 'supported' ? 'supported' : 'limited'}
-                    </Badge>
-                    <Badge variant="secondary">
-                      MCP: {provider.capabilities.extensions.mcp.status}
-                    </Badge>
-                    <Badge variant="secondary">
-                      Skills: {provider.capabilities.extensions.skills.ownership}
-                    </Badge>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       );
     }

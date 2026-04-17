@@ -170,7 +170,8 @@ function createApiKeyMisconfiguredProvider(
     connection: {
       supportsOAuth: true,
       supportsApiKey: true,
-      configurableAuthModes: providerId === 'anthropic' ? ['auto', 'oauth', 'api_key'] : ['oauth', 'api_key'],
+      configurableAuthModes:
+        providerId === 'anthropic' ? ['auto', 'oauth', 'api_key'] : ['oauth', 'api_key'],
       configuredAuthMode: 'api_key',
       apiKeyBetaAvailable: providerId === 'codex' ? true : undefined,
       apiKeyBetaEnabled: providerId === 'codex' ? true : undefined,
@@ -181,9 +182,7 @@ function createApiKeyMisconfiguredProvider(
   };
 }
 
-function createApiKeyModeProviderIssue(
-  providerId: 'anthropic' | 'codex'
-): Record<string, unknown> {
+function createApiKeyModeProviderIssue(providerId: 'anthropic' | 'codex'): Record<string, unknown> {
   return {
     ...createApiKeyMisconfiguredProvider(providerId),
     statusMessage:
@@ -191,8 +190,8 @@ function createApiKeyModeProviderIssue(
         ? 'Anthropic API key was rejected by the runtime.'
         : 'OpenAI API key was rejected by the runtime.',
     connection: {
-      ...((createApiKeyMisconfiguredProvider(providerId) as { connection: Record<string, unknown> })
-        .connection),
+      ...(createApiKeyMisconfiguredProvider(providerId) as { connection: Record<string, unknown> })
+        .connection,
       apiKeyConfigured: true,
       apiKeySource: 'stored',
       apiKeySourceLabel:
@@ -287,9 +286,7 @@ describe('CLI status visibility during completed install state', () => {
   it('preserves dashboard runtime backend refresh errors for the manage dialog', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     storeState.cliInstallerState = 'idle';
-    storeState.fetchCliProviderStatus = vi.fn(() =>
-      Promise.reject(new Error('refresh failed'))
-    );
+    storeState.fetchCliProviderStatus = vi.fn(() => Promise.reject(new Error('refresh failed')));
 
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -338,6 +335,49 @@ describe('CLI status visibility during completed install state', () => {
 
     expect(host.textContent).toContain('Checking authentication...');
     expect(host.textContent).not.toContain('Verifying authentication...');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('does not fall back to direct-Claude auth copy when only hidden multimodel providers are available', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.cliInstallerState = 'idle';
+    storeState.cliStatus = createInstalledCliStatus({
+      flavor: 'agent_teams_orchestrator',
+      authLoggedIn: true,
+      providers: [
+        {
+          providerId: 'gemini',
+          displayName: 'Gemini',
+          supported: true,
+          authenticated: true,
+          authMethod: 'cli_oauth_personal',
+          verificationState: 'verified',
+          statusMessage: 'Resolved to CLI SDK',
+          models: [],
+          canLoginFromUi: true,
+          capabilities: {
+            teamLaunch: true,
+            oneShot: true,
+          },
+        },
+      ],
+    });
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(CliStatusBanner));
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).not.toContain('Authenticated');
+    expect(host.textContent).not.toContain('Providers:');
 
     await act(async () => {
       root.unmount();
@@ -413,9 +453,7 @@ describe('CLI status visibility during completed install state', () => {
   it('preserves settings runtime backend refresh errors for the manage dialog', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     storeState.cliInstallerState = 'idle';
-    storeState.fetchCliProviderStatus = vi.fn(() =>
-      Promise.reject(new Error('refresh failed'))
-    );
+    storeState.fetchCliProviderStatus = vi.fn(() => Promise.reject(new Error('refresh failed')));
 
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -490,8 +528,8 @@ describe('CLI status visibility during completed install state', () => {
     expect(host.textContent).not.toContain('Already logged in?');
     expect(host.textContent).not.toContain('Login');
 
-    const manageButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent?.includes('Manage Providers')
+    const manageButton = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Manage Providers')
     );
     expect(manageButton).not.toBeUndefined();
 

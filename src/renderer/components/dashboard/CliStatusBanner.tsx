@@ -33,6 +33,7 @@ import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import { formatBytes } from '@renderer/utils/formatters';
 import { filterMainScreenCliProviders } from '@renderer/utils/geminiUiFreeze';
+import { isMultimodelRuntimeStatus } from '@renderer/utils/multimodelProviderVisibility';
 import {
   AlertTriangle,
   CheckCircle,
@@ -321,7 +322,11 @@ function formatRuntimeAuthSummary(
   cliStatus: NonNullable<ReturnType<typeof useCliInstaller>['cliStatus']>,
   visibleProviders: readonly CliProviderStatus[]
 ): string | null {
-  if (cliStatus.flavor === 'agent_teams_orchestrator' && visibleProviders.length > 0) {
+  if (isMultimodelRuntimeStatus(cliStatus)) {
+    if (visibleProviders.length === 0) {
+      return null;
+    }
+
     if (
       visibleProviders.every(
         (provider) => provider.statusMessage === 'Checking...' && !provider.authenticated
@@ -351,7 +356,7 @@ function isCheckingMultimodelStatus(
   visibleProviders: readonly CliProviderStatus[]
 ): boolean {
   return (
-    cliStatus.flavor === 'agent_teams_orchestrator' &&
+    isMultimodelRuntimeStatus(cliStatus) &&
     visibleProviders.length > 0 &&
     visibleProviders.every(
       (provider) => provider.statusMessage === 'Checking...' && !provider.authenticated
