@@ -16,12 +16,14 @@ import {
   TEAM_DELETE_DRAFT,
   TEAM_DELETE_TASK_ATTACHMENT,
   TEAM_DELETE_TEAM,
+  TEAM_GET_AGENT_RUNTIME,
   TEAM_GET_ALL_TASKS,
   TEAM_GET_ATTACHMENTS,
   TEAM_GET_CLAUDE_LOGS,
   TEAM_GET_DATA,
   TEAM_GET_DELETED_TASKS,
   TEAM_GET_LOGS_FOR_TASK,
+  TEAM_GET_MEMBER_ACTIVITY_META,
   TEAM_GET_MEMBER_LOGS,
   TEAM_GET_MEMBER_STATS,
   TEAM_GET_MESSAGES_PAGE,
@@ -34,6 +36,7 @@ import {
   TEAM_GET_TASK_EXACT_LOG_DETAIL,
   TEAM_GET_TASK_EXACT_LOG_SUMMARIES,
   TEAM_GET_TASK_LOG_STREAM,
+  TEAM_GET_TASK_LOG_STREAM_SUMMARY,
   TEAM_KILL_PROCESS,
   TEAM_LAUNCH,
   TEAM_LEAD_ACTIVITY,
@@ -50,6 +53,7 @@ import {
   TEAM_REMOVE_TASK_RELATIONSHIP,
   TEAM_REPLACE_MEMBERS,
   TEAM_REQUEST_REVIEW,
+  TEAM_RESTART_MEMBER,
   TEAM_RESTORE,
   TEAM_RESTORE_TASK,
   TEAM_SAVE_TASK_ATTACHMENT,
@@ -57,6 +61,7 @@ import {
   TEAM_SET_CHANGE_PRESENCE_TRACKING,
   TEAM_SET_PROJECT_BRANCH_TRACKING,
   TEAM_SET_TASK_CLARIFICATION,
+  TEAM_SET_TASK_LOG_STREAM_TRACKING,
   TEAM_SET_TOOL_ACTIVITY_TRACKING,
   TEAM_SHOW_MESSAGE_NOTIFICATION,
   TEAM_SOFT_DELETE_TASK,
@@ -92,7 +97,7 @@ import {
   parseStandaloneSlashCommand,
 } from '@shared/utils/slashCommands';
 import crypto from 'crypto';
-import { BrowserWindow, type IpcMain, type IpcMainInvokeEvent, Notification } from 'electron';
+import { app, BrowserWindow, type IpcMain, type IpcMainInvokeEvent, Notification } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -104,9 +109,14 @@ import {
   isAgentActionMode,
 } from '../services/team/actionModeInstructions';
 import {
+  getAutoResumeService,
+  initializeAutoResumeService,
+} from '../services/team/AutoResumeService';
+import {
   buildReplaceMembersDiff,
   buildReplaceMembersSummaryMessage,
 } from '../services/team/memberUpdateNotifications';
+import { mergeLiveLeadProcessMessages } from '../services/team/mergeLiveLeadProcessMessages';
 import { TeamAttachmentStore } from '../services/team/TeamAttachmentStore';
 import { TeamMembersMetaStore } from '../services/team/TeamMembersMetaStore';
 import { TeamMetaStore } from '../services/team/TeamMetaStore';
@@ -130,6 +140,7 @@ import type {
   BranchStatusService,
   MemberStatsComputer,
   TeamDataService,
+  TeamLogSourceTracker,
   TeammateToolTracker,
   TeamMemberLogsFinder,
   TeamProvisioningService,
@@ -146,17 +157,16 @@ import type {
   BoardTaskExactLogDetailResult,
   BoardTaskExactLogSummariesResponse,
   BoardTaskLogStreamResponse,
+  BoardTaskLogStreamSummary,
   CreateTaskRequest,
   EffortLevel,
   GlobalTask,
   IpcResult,
   KanbanColumnId,
   LeadActivitySnapshot,
-  LeadContextUsage,
   LeadContextUsageSnapshot,
   MemberFullStats,
   MemberLogSummary,
-  MemberSpawnStatusEntry,
   MemberSpawnStatusesSnapshot,
   MessagesPage,
   SendMessageRequest,
@@ -164,15 +174,16 @@ import type {
   TaskAttachmentMeta,
   TaskComment,
   TaskRef,
+  TeamAgentRuntimeSnapshot,
   TeamClaudeLogsQuery,
   TeamClaudeLogsResponse,
   TeamConfig,
   TeamCreateConfigRequest,
   TeamCreateRequest,
   TeamCreateResponse,
-  TeamData,
   TeamLaunchRequest,
   TeamLaunchResponse,
+  TeamMemberActivityMeta,
   TeamMessageNotificationData,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
@@ -180,6 +191,7 @@ import type {
   TeamTask,
   TeamTaskStatus,
   TeamUpdateConfigRequest,
+  TeamViewSnapshot,
   ToolApprovalFileContent,
   ToolApprovalSettings,
   UpdateKanbanPatch,
@@ -195,6 +207,16 @@ const logger = createLogger('IPC:teams');
  */
 const seenRateLimitKeys = new Set<string>();
 const SEEN_RATE_LIMIT_KEYS_MAX = 500;
+
+function noteHeavyTeamDataWorkerFallback(operation: string): void {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  logger.error(
+    `[${operation}] team-data-worker unavailable in packaged runtime; falling back to main-thread execution for heavy message/activity path`
+  );
+}
 
 async function getDurableLeadTeammateRoster(
   teamName: string,
@@ -301,11 +323,25 @@ const SEEN_API_ERROR_KEYS_MAX = 500;
  * and NotificationManager dedupeKey (to prevent storage duplicates).
  */
 function checkRateLimitMessages(
-  messages: readonly { messageId?: string; from: string; text: string; timestamp: string }[],
+  messages: readonly {
+    messageId?: string;
+    from: string;
+    text: string;
+    timestamp: string;
+    to?: string;
+    source?: string;
+    leadSessionId?: string;
+  }[],
   teamName: string,
   teamDisplayName: string,
-  projectPath?: string
+  projectPath?: string,
+  teamIsAlive = true,
+  currentLeadSessionId: string | null = null
 ): void {
+  const observedAt = new Date();
+  const autoResumeEnabled =
+    ConfigManager.getInstance().getConfig().notifications.autoResumeOnRateLimit;
+
   for (const msg of messages) {
     if (msg.from === 'user') continue;
     if (!isRateLimitMessage(msg.text)) continue;
@@ -313,28 +349,55 @@ function checkRateLimitMessages(
     const rawKey = msg.messageId ?? `${msg.from}:${msg.timestamp}`;
     const dedupeKey = `rate-limit:${teamName}:${rawKey}`;
 
-    // In-memory guard: prevents resurrection after user deletes the notification
-    if (seenRateLimitKeys.has(dedupeKey)) continue;
-    seenRateLimitKeys.add(dedupeKey);
+    // In-memory guard: prevents resurrection after user deletes the notification.
+    if (!seenRateLimitKeys.has(dedupeKey)) {
+      seenRateLimitKeys.add(dedupeKey);
 
-    // Evict oldest entries to prevent unbounded growth
-    if (seenRateLimitKeys.size > SEEN_RATE_LIMIT_KEYS_MAX) {
-      const first = seenRateLimitKeys.values().next().value;
-      if (first) seenRateLimitKeys.delete(first);
+      // Evict oldest entries to prevent unbounded growth
+      if (seenRateLimitKeys.size > SEEN_RATE_LIMIT_KEYS_MAX) {
+        const first = seenRateLimitKeys.values().next().value;
+        if (first) seenRateLimitKeys.delete(first);
+      }
+
+      void NotificationManager.getInstance()
+        .addTeamNotification({
+          teamEventType: 'rate_limit',
+          teamName,
+          teamDisplayName,
+          from: msg.from,
+          summary: `Rate limit: ${msg.from}`,
+          body: msg.text.slice(0, 200),
+          dedupeKey,
+          projectPath,
+        })
+        .catch(() => undefined);
     }
 
-    void NotificationManager.getInstance()
-      .addTeamNotification({
-        teamEventType: 'rate_limit',
+    // Only schedule auto-resume while a live team run currently exists.
+    // Persisted history for an offline/stopped team may still contain the old
+    // rate-limit message, but arming a new timer from that stale history would
+    // resurrect the nudge into a later manual restart.
+    const isLeadAutoResumeCandidate =
+      !msg.to && (msg.source === 'lead_process' || msg.source === 'lead_session');
+
+    if (autoResumeEnabled && teamIsAlive && isLeadAutoResumeCandidate) {
+      // Only let persisted lead_session history rebuild auto-resume when it
+      // clearly belongs to the currently running lead session. Otherwise an old
+      // rate-limit from a previous manual run can resurrect into a newer restart.
+      if (msg.source === 'lead_session') {
+        if (!currentLeadSessionId) continue;
+        if (msg.leadSessionId !== currentLeadSessionId) continue;
+      }
+
+      // Pass the original message timestamp so relative reset windows survive restarts
+      // and old history does not rebuild a fresh auto-resume timer from "now".
+      getAutoResumeService().handleRateLimitMessage(
         teamName,
-        teamDisplayName,
-        from: msg.from,
-        summary: `Rate limit: ${msg.from}`,
-        body: msg.text.slice(0, 200),
-        dedupeKey,
-        projectPath,
-      })
-      .catch(() => undefined);
+        msg.text,
+        observedAt,
+        new Date(msg.timestamp)
+      );
+    }
   }
 }
 
@@ -385,12 +448,26 @@ function checkApiErrorMessages(
   }
 }
 
+function scanTeamMessageNotifications(
+  messages: readonly { messageId?: string; from: string; text: string; timestamp: string }[],
+  teamName: string,
+  teamDisplayName: string,
+  projectPath?: string
+): void {
+  if (messages.length === 0) {
+    return;
+  }
+  checkRateLimitMessages(messages, teamName, teamDisplayName, projectPath);
+  checkApiErrorMessages(messages, teamName, teamDisplayName, projectPath);
+}
+
 let teamDataService: TeamDataService | null = null;
 let teamProvisioningService: TeamProvisioningService | null = null;
 let teamMemberLogsFinder: TeamMemberLogsFinder | null = null;
 let memberStatsComputer: MemberStatsComputer | null = null;
 let teamBackupService: TeamBackupService | null = null;
 let teammateToolTracker: TeammateToolTracker | null = null;
+let teamLogSourceTracker: TeamLogSourceTracker | null = null;
 let branchStatusService: BranchStatusService | null = null;
 let boardTaskActivityService: BoardTaskActivityService | null = null;
 let boardTaskActivityDetailService: BoardTaskActivityDetailService | null = null;
@@ -427,6 +504,7 @@ export function initializeTeamHandlers(
   statsComputer?: MemberStatsComputer,
   backupService?: TeamBackupService,
   toolTracker?: TeammateToolTracker,
+  logSourceTracker?: TeamLogSourceTracker,
   branchTracker?: BranchStatusService,
   taskActivityService?: BoardTaskActivityService,
   taskActivityDetailService?: BoardTaskActivityDetailService,
@@ -436,10 +514,12 @@ export function initializeTeamHandlers(
 ): void {
   teamDataService = service;
   teamProvisioningService = provisioningService;
+  initializeAutoResumeService(provisioningService);
   teamMemberLogsFinder = logsFinder ?? null;
   memberStatsComputer = statsComputer ?? null;
   teamBackupService = backupService ?? null;
   teammateToolTracker = toolTracker ?? null;
+  teamLogSourceTracker = logSourceTracker ?? null;
   branchStatusService = branchTracker ?? null;
   boardTaskActivityService = taskActivityService ?? null;
   boardTaskActivityDetailService = taskActivityDetailService ?? null;
@@ -454,6 +534,7 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_GET_TASK_CHANGE_PRESENCE, handleGetTaskChangePresence);
   ipcMain.handle(TEAM_SET_CHANGE_PRESENCE_TRACKING, handleSetChangePresenceTracking);
   ipcMain.handle(TEAM_SET_PROJECT_BRANCH_TRACKING, handleSetProjectBranchTracking);
+  ipcMain.handle(TEAM_SET_TASK_LOG_STREAM_TRACKING, handleSetTaskLogStreamTracking);
   ipcMain.handle(TEAM_SET_TOOL_ACTIVITY_TRACKING, handleSetToolActivityTracking);
   ipcMain.handle(TEAM_GET_CLAUDE_LOGS, handleGetClaudeLogs);
   ipcMain.handle(TEAM_PREPARE_PROVISIONING, handlePrepareProvisioning);
@@ -463,6 +544,7 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_CANCEL_PROVISIONING, handleCancelProvisioning);
   ipcMain.handle(TEAM_SEND_MESSAGE, handleSendMessage);
   ipcMain.handle(TEAM_GET_MESSAGES_PAGE, handleGetMessagesPage);
+  ipcMain.handle(TEAM_GET_MEMBER_ACTIVITY_META, handleGetMemberActivityMeta);
   ipcMain.handle(TEAM_CREATE_TASK, handleCreateTask);
   ipcMain.handle(TEAM_REQUEST_REVIEW, handleRequestReview);
   ipcMain.handle(TEAM_UPDATE_KANBAN, handleUpdateKanban);
@@ -482,6 +564,7 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_GET_LOGS_FOR_TASK, handleGetLogsForTask);
   ipcMain.handle(TEAM_GET_TASK_ACTIVITY, handleGetTaskActivity);
   ipcMain.handle(TEAM_GET_TASK_ACTIVITY_DETAIL, handleGetTaskActivityDetail);
+  ipcMain.handle(TEAM_GET_TASK_LOG_STREAM_SUMMARY, handleGetTaskLogStreamSummary);
   ipcMain.handle(TEAM_GET_TASK_LOG_STREAM, handleGetTaskLogStream);
   ipcMain.handle(TEAM_GET_TASK_EXACT_LOG_SUMMARIES, handleGetTaskExactLogSummaries);
   ipcMain.handle(TEAM_GET_TASK_EXACT_LOG_DETAIL, handleGetTaskExactLogDetail);
@@ -501,6 +584,8 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_LEAD_ACTIVITY, handleLeadActivity);
   ipcMain.handle(TEAM_LEAD_CONTEXT, handleLeadContext);
   ipcMain.handle(TEAM_MEMBER_SPAWN_STATUSES, handleMemberSpawnStatuses);
+  ipcMain.handle(TEAM_GET_AGENT_RUNTIME, handleGetAgentRuntime);
+  ipcMain.handle(TEAM_RESTART_MEMBER, handleRestartMember);
   ipcMain.handle(TEAM_SOFT_DELETE_TASK, handleSoftDeleteTask);
   ipcMain.handle(TEAM_RESTORE_TASK, handleRestoreTask);
   ipcMain.handle(TEAM_GET_DELETED_TASKS, handleGetDeletedTasks);
@@ -526,6 +611,7 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_GET_TASK_CHANGE_PRESENCE);
   ipcMain.removeHandler(TEAM_SET_CHANGE_PRESENCE_TRACKING);
   ipcMain.removeHandler(TEAM_SET_PROJECT_BRANCH_TRACKING);
+  ipcMain.removeHandler(TEAM_SET_TASK_LOG_STREAM_TRACKING);
   ipcMain.removeHandler(TEAM_SET_TOOL_ACTIVITY_TRACKING);
   ipcMain.removeHandler(TEAM_GET_CLAUDE_LOGS);
   ipcMain.removeHandler(TEAM_PREPARE_PROVISIONING);
@@ -535,6 +621,7 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_CANCEL_PROVISIONING);
   ipcMain.removeHandler(TEAM_SEND_MESSAGE);
   ipcMain.removeHandler(TEAM_GET_MESSAGES_PAGE);
+  ipcMain.removeHandler(TEAM_GET_MEMBER_ACTIVITY_META);
   ipcMain.removeHandler(TEAM_CREATE_TASK);
   ipcMain.removeHandler(TEAM_REQUEST_REVIEW);
   ipcMain.removeHandler(TEAM_UPDATE_KANBAN);
@@ -554,6 +641,7 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_GET_LOGS_FOR_TASK);
   ipcMain.removeHandler(TEAM_GET_TASK_ACTIVITY);
   ipcMain.removeHandler(TEAM_GET_TASK_ACTIVITY_DETAIL);
+  ipcMain.removeHandler(TEAM_GET_TASK_LOG_STREAM_SUMMARY);
   ipcMain.removeHandler(TEAM_GET_TASK_LOG_STREAM);
   ipcMain.removeHandler(TEAM_GET_TASK_EXACT_LOG_SUMMARIES);
   ipcMain.removeHandler(TEAM_GET_TASK_EXACT_LOG_DETAIL);
@@ -573,6 +661,8 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_LEAD_ACTIVITY);
   ipcMain.removeHandler(TEAM_LEAD_CONTEXT);
   ipcMain.removeHandler(TEAM_MEMBER_SPAWN_STATUSES);
+  ipcMain.removeHandler(TEAM_GET_AGENT_RUNTIME);
+  ipcMain.removeHandler(TEAM_RESTART_MEMBER);
   ipcMain.removeHandler(TEAM_SOFT_DELETE_TASK);
   ipcMain.removeHandler(TEAM_RESTORE_TASK);
   ipcMain.removeHandler(TEAM_GET_DELETED_TASKS);
@@ -610,6 +700,13 @@ function getTeammateToolTracker(): TeammateToolTracker {
     throw new Error('Teammate tool tracker is not initialized');
   }
   return teammateToolTracker;
+}
+
+function getTeamLogSourceTracker(): TeamLogSourceTracker {
+  if (!teamLogSourceTracker) {
+    throw new Error('Team log source tracker is not initialized');
+  }
+  return teamLogSourceTracker;
 }
 
 function getBranchStatusService(): BranchStatusService {
@@ -702,14 +799,14 @@ async function handleListTeams(_event: IpcMainInvokeEvent): Promise<IpcResult<Te
 async function handleGetData(
   _event: IpcMainInvokeEvent,
   teamName: unknown
-): Promise<IpcResult<TeamData>> {
+): Promise<IpcResult<TeamViewSnapshot>> {
   const validated = validateTeamName(teamName);
   if (!validated.valid) {
     return { success: false, error: validated.error ?? 'Invalid teamName' };
   }
   const tn = validated.value!;
   const startedAt = Date.now();
-  let data: TeamData;
+  let data: TeamViewSnapshot;
   setCurrentMainOp('team:getData');
   try {
     // Prefer worker thread to keep main event loop responsive
@@ -721,9 +818,11 @@ async function handleGetData(
         logger.warn(
           `[teams:getData] worker failed, falling back: ${workerErr instanceof Error ? workerErr.message : workerErr}`
         );
+        noteHeavyTeamDataWorkerFallback('teams:getData');
         data = await getTeamDataService().getTeamData(tn);
       }
     } else {
+      noteHeavyTeamDataWorkerFallback('teams:getData');
       data = await getTeamDataService().getTeamData(tn);
     }
   } catch (error) {
@@ -759,95 +858,52 @@ async function handleGetData(
   }
   const provisioning = getTeamProvisioningService();
   const isAlive = provisioning.isTeamAlive(tn);
+  const currentLeadSessionId = provisioning.getCurrentLeadSessionId(tn);
 
   const displayName = data.config.name || tn;
   const projectPath = data.config.projectPath;
-
   const live = provisioning.getLiveLeadProcessMessages(tn);
+  const durableMessages = Array.isArray((data as { messages?: unknown }).messages)
+    ? ((data as { messages?: typeof live }).messages ?? [])
+    : [];
+
   if (live.length === 0) {
-    checkRateLimitMessages(data.messages, tn, displayName, projectPath);
-    checkApiErrorMessages(data.messages, tn, displayName, projectPath);
+    if (durableMessages.length > 0) {
+      checkRateLimitMessages(
+        durableMessages,
+        tn,
+        displayName,
+        projectPath,
+        isAlive,
+        currentLeadSessionId
+      );
+      checkApiErrorMessages(durableMessages, tn, displayName, projectPath);
+    } else {
+      scanTeamMessageNotifications(live, tn, displayName, projectPath);
+    }
     return { success: true, data: { ...data, isAlive } };
   }
 
-  const normalizeText = (text: string): string => text.trim().replace(/\r\n/g, '\n');
-  const isLeadThoughtLike = (msg: { source?: unknown; to?: string }): boolean =>
-    !msg.to && (msg.source === 'lead_process' || msg.source === 'lead_session');
-  const getLeadThoughtFingerprint = (msg: {
-    from: string;
-    text: string;
-    leadSessionId?: string;
-  }): string => `${msg.leadSessionId ?? ''}\0${msg.from}\0${normalizeText(msg.text)}`;
-
-  // Collect fingerprints only for thought-like lead messages. Include leadSessionId so a
-  // repeated thought in a new session does not get collapsed into an old session's history.
-  const existingTextFingerprints = new Set<string>();
-  for (const msg of data.messages) {
-    if (typeof msg.from !== 'string' || typeof msg.text !== 'string') continue;
-    if (!isLeadThoughtLike(msg)) continue;
-    existingTextFingerprints.add(getLeadThoughtFingerprint(msg));
+  let merged = mergeLiveLeadProcessMessages(durableMessages, live);
+  if (durableMessages.length >= 50) {
+    try {
+      const newestPage = await teamDataService.getMessagesPage(tn, {
+        limit: 50,
+        liveMessages: live,
+      });
+      merged = newestPage.messages;
+    } catch (error) {
+      logger.warn(
+        `[teams:getData] failed to rebuild newest merged messages for ${tn}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
-  const keyFor = (m: {
-    messageId?: string;
-    timestamp: string;
-    from: string;
-    text: string;
-  }): string => {
-    if (typeof m.messageId === 'string' && m.messageId.trim().length > 0) {
-      return m.messageId;
-    }
-    return `${m.timestamp}\0${m.from}\0${(m.text ?? '').slice(0, 80)}`;
-  };
-
-  // Text-based fingerprints for live lead thoughts to catch duplicates with different
-  // messageIds inside the same session (e.g. lead-turn-* re-emits).
-  const leadProcessTextFingerprints = new Set<string>();
-
-  // Content-based dedup for SendMessage captures: Claude Code CLI and our
-  // persistInboxMessage both write to inboxes/{member}.json, producing two entries
-  // with identical content but different messageIds. Track content fingerprints
-  // (from+to+text) with timestamps to collapse them within a 5-second window.
-  const contentSeen = new Map<string, number>(); // fingerprint → timestamp ms
-
-  const merged: typeof data.messages = [];
-  const seen = new Set<string>();
-  for (const msg of [...data.messages, ...live]) {
-    if ((msg as { source?: unknown }).source === 'lead_process' && !msg.to) {
-      const fp = getLeadThoughtFingerprint(msg);
-      // Skip if the same thought already exists in persisted history for the same session.
-      if (existingTextFingerprints.has(fp)) {
-        continue;
-      }
-      // Dedup live lead_process thoughts with the same text in the same session.
-      if (leadProcessTextFingerprints.has(fp)) {
-        continue;
-      }
-      leadProcessTextFingerprints.add(fp);
-    }
-
-    // Content dedup for directed messages (SendMessage captures):
-    // same from+to+text within 5 seconds = duplicate from CLI + our persist.
-    if (typeof msg.to === 'string' && msg.to.trim().length > 0) {
-      const contentFp = `${msg.from}\0${msg.to}\0${(msg.text ?? '').replace(/\s+/g, ' ').slice(0, 100)}`;
-      const msgMs = Date.parse(msg.timestamp);
-      const existingMs = contentSeen.get(contentFp);
-      if (existingMs !== undefined && Math.abs(msgMs - existingMs) <= 5000) {
-        continue; // duplicate within 5s window — skip
-      }
-      contentSeen.set(contentFp, msgMs);
-    }
-
-    const key = keyFor(msg);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(msg);
-  }
-  merged.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
-
-  checkRateLimitMessages(merged, tn, displayName, projectPath);
+  checkRateLimitMessages(merged, tn, displayName, projectPath, isAlive, currentLeadSessionId);
   checkApiErrorMessages(merged, tn, displayName, projectPath);
-  return { success: true, data: { ...data, isAlive, messages: merged } };
+  return { success: true, data: { ...data, isAlive } };
 }
 
 async function handleGetTaskChangePresence(
@@ -917,6 +973,28 @@ async function handleSetToolActivityTracking(
   });
 }
 
+async function handleSetTaskLogStreamTracking(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  enabled: unknown
+): Promise<IpcResult<void>> {
+  const validated = validateTeamName(teamName);
+  if (!validated.valid) {
+    return { success: false, error: validated.error ?? 'Invalid teamName' };
+  }
+  if (typeof enabled !== 'boolean') {
+    return { success: false, error: 'enabled must be a boolean' };
+  }
+
+  return wrapTeamHandler('setTaskLogStreamTracking', async () => {
+    if (enabled) {
+      await getTeamLogSourceTracker().enableTracking(validated.value!, 'task_log_stream');
+      return;
+    }
+    await getTeamLogSourceTracker().disableTracking(validated.value!, 'task_log_stream');
+  });
+}
+
 async function handleDeleteTeam(
   _event: IpcMainInvokeEvent,
   teamName: unknown
@@ -926,6 +1004,7 @@ async function handleDeleteTeam(
     return { success: false, error: validated.error ?? 'Invalid teamName' };
   }
   return wrapTeamHandler('deleteTeam', async () => {
+    getAutoResumeService().cancelPendingAutoResume(validated.value!);
     getTeamProvisioningService().stopTeam(validated.value!);
     await getTeamDataService().deleteTeam(validated.value!);
   });
@@ -951,6 +1030,7 @@ async function handlePermanentlyDeleteTeam(
     return { success: false, error: validated.error ?? 'Invalid teamName' };
   }
   return wrapTeamHandler('permanentlyDeleteTeam', async () => {
+    getAutoResumeService().cancelPendingAutoResume(validated.value!);
     await getTeamDataService().permanentlyDeleteTeam(validated.value!);
     // Clean up app-owned data (attachments, task-attachments) that lives outside ~/.claude/
     const appData = getAppDataPath();
@@ -1724,16 +1804,89 @@ async function handleGetMessagesPage(
     return { success: false, error: vTeam.error ?? 'Invalid teamName' };
   }
   const opts = (options && typeof options === 'object' ? options : {}) as {
-    beforeTimestamp?: string;
+    cursor?: string | null;
     limit?: number;
   };
   const limit = Math.min(Math.max(1, opts.limit ?? 50), 200);
-  const beforeTimestamp =
-    typeof opts.beforeTimestamp === 'string' ? opts.beforeTimestamp : undefined;
+  const cursor =
+    typeof opts.cursor === 'string' ? opts.cursor : opts.cursor === null ? null : undefined;
 
   return wrapTeamHandler('getMessagesPage', async () => {
-    const service = getTeamDataService();
-    return service.getMessagesPage(vTeam.value!, { beforeTimestamp, limit });
+    let page: MessagesPage;
+    const notificationContext = await getTeamDataService().getTeamNotificationContext(vTeam.value!);
+    const liveMessages =
+      cursor == null ? getTeamProvisioningService().getLiveLeadProcessMessages(vTeam.value!) : [];
+
+    if (liveMessages.length > 0) {
+      page = await getTeamDataService().getMessagesPage(vTeam.value!, {
+        cursor,
+        limit,
+        liveMessages,
+      });
+      scanTeamMessageNotifications(
+        page.messages,
+        vTeam.value!,
+        notificationContext.displayName,
+        notificationContext.projectPath
+      );
+      return page;
+    }
+
+    const worker = getTeamDataWorkerClient();
+    if (worker.isAvailable()) {
+      try {
+        page = await worker.getMessagesPage(vTeam.value!, { cursor, limit });
+        scanTeamMessageNotifications(
+          page.messages,
+          vTeam.value!,
+          notificationContext.displayName,
+          notificationContext.projectPath
+        );
+        return page;
+      } catch (workerErr) {
+        logger.warn(
+          `[teams:getMessagesPage] worker failed, falling back: ${
+            workerErr instanceof Error ? workerErr.message : workerErr
+          }`
+        );
+      }
+    }
+    noteHeavyTeamDataWorkerFallback('teams:getMessagesPage');
+    page = await getTeamDataService().getMessagesPage(vTeam.value!, { cursor, limit });
+    scanTeamMessageNotifications(
+      page.messages,
+      vTeam.value!,
+      notificationContext.displayName,
+      notificationContext.projectPath
+    );
+    return page;
+  });
+}
+
+async function handleGetMemberActivityMeta(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown
+): Promise<IpcResult<TeamMemberActivityMeta>> {
+  const vTeam = validateTeamName(teamName);
+  if (!vTeam.valid) {
+    return { success: false, error: vTeam.error ?? 'Invalid teamName' };
+  }
+
+  return wrapTeamHandler('getMemberActivityMeta', async () => {
+    const worker = getTeamDataWorkerClient();
+    if (worker.isAvailable()) {
+      try {
+        return await worker.getMemberActivityMeta(vTeam.value!);
+      } catch (workerErr) {
+        logger.warn(
+          `[teams:getMemberActivityMeta] worker failed, falling back: ${
+            workerErr instanceof Error ? workerErr.message : workerErr
+          }`
+        );
+      }
+    }
+    noteHeavyTeamDataWorkerFallback('teams:getMemberActivityMeta');
+    return getTeamDataService().getMemberActivityMeta(vTeam.value!);
   });
 }
 
@@ -2603,6 +2756,24 @@ async function handleGetTaskLogStream(
   );
 }
 
+async function handleGetTaskLogStreamSummary(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  taskId: unknown
+): Promise<IpcResult<BoardTaskLogStreamSummary>> {
+  const vTeam = validateTeamName(teamName);
+  if (!vTeam.valid) {
+    return { success: false, error: vTeam.error ?? 'Invalid teamName' };
+  }
+  const vTask = validateTaskId(taskId);
+  if (!vTask.valid) {
+    return { success: false, error: vTask.error ?? 'Invalid taskId' };
+  }
+  return wrapTeamHandler('getTaskLogStreamSummary', () =>
+    getBoardTaskLogStreamService().getTaskLogStreamSummary(vTeam.value!, vTask.value!)
+  );
+}
+
 async function handleGetTaskExactLogSummaries(
   _event: IpcMainInvokeEvent,
   teamName: unknown,
@@ -2723,6 +2894,37 @@ async function handleMemberSpawnStatuses(
   );
 }
 
+async function handleGetAgentRuntime(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown
+): Promise<IpcResult<TeamAgentRuntimeSnapshot>> {
+  const validated = validateTeamName(teamName);
+  if (!validated.valid) {
+    return { success: false, error: validated.error ?? 'Invalid teamName' };
+  }
+  return wrapTeamHandler('getAgentRuntime', async () =>
+    getTeamProvisioningService().getTeamAgentRuntimeSnapshot(validated.value!)
+  );
+}
+
+async function handleRestartMember(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  memberName: unknown
+): Promise<IpcResult<void>> {
+  const validatedTeamName = validateTeamName(teamName);
+  if (!validatedTeamName.valid) {
+    return { success: false, error: validatedTeamName.error ?? 'Invalid teamName' };
+  }
+  const validatedMemberName = validateMemberName(memberName);
+  if (!validatedMemberName.valid) {
+    return { success: false, error: validatedMemberName.error ?? 'Invalid memberName' };
+  }
+  return wrapTeamHandler('restartMember', async () =>
+    getTeamProvisioningService().restartMember(validatedTeamName.value!, validatedMemberName.value!)
+  );
+}
+
 async function handleStopTeam(
   _event: IpcMainInvokeEvent,
   teamName: unknown
@@ -2733,6 +2935,7 @@ async function handleStopTeam(
   }
   return wrapTeamHandler('stop', async () => {
     addMainBreadcrumb('team', 'stop', { teamName: validated.value! });
+    getAutoResumeService().cancelPendingAutoResume(validated.value!);
     getTeamProvisioningService().stopTeam(validated.value!);
   });
 }

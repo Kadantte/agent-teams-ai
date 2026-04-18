@@ -32,6 +32,118 @@ import { TeamProvisioningService } from '@main/services/team/TeamProvisioningSer
 import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 
+function getRealAgentTeamsMcpLaunchSpec(): { command: string; args: string[] } {
+  const workspaceRoot = process.cwd();
+  const distEntry = path.join(workspaceRoot, 'mcp-server', 'dist', 'index.js');
+  if (fs.existsSync(distEntry)) {
+    return {
+      command: process.execPath,
+      args: [distEntry],
+    };
+  }
+
+  return {
+    command: path.join(
+      workspaceRoot,
+      'node_modules',
+      '.bin',
+      process.platform === 'win32' ? 'tsx.cmd' : 'tsx'
+    ),
+    args: [path.join(workspaceRoot, 'mcp-server', 'src', 'index.ts')],
+  };
+}
+
+function writeMcpConfig(
+  targetDir: string,
+  serverConfig: Record<string, { command: string; args: string[] }>
+): string {
+  const configPath = path.join(targetDir, `agent-teams-mcp-${Date.now()}.json`);
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        mcpServers: serverConfig,
+      },
+      null,
+      2
+    ),
+    'utf8'
+  );
+  return configPath;
+}
+
+function writeMockMcpServer(
+  targetDir: string,
+  variant: 'missing-member-briefing' | 'member-briefing-error'
+): string {
+  const scriptPath = path.join(targetDir, `mock-mcp-${variant}.js`);
+  const tools =
+    variant === 'missing-member-briefing'
+      ? [{ name: 'task_create' }]
+      : [{ name: 'member_briefing' }];
+  const toolCallResult =
+    variant === 'member-briefing-error'
+      ? {
+          content: [{ type: 'text', text: 'mock member_briefing failure' }],
+          isError: true,
+        }
+      : {
+          content: [{ type: 'text', text: 'ok' }],
+          isError: false,
+        };
+
+  fs.writeFileSync(
+    scriptPath,
+    `'use strict';
+let buffer = '';
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const newlineIndex = buffer.indexOf('\\n');
+    if (newlineIndex === -1) break;
+    const line = buffer.slice(0, newlineIndex).trim();
+    buffer = buffer.slice(newlineIndex + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.method === 'initialize') {
+      send({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: {
+          serverInfo: { name: 'mock-agent-teams-mcp', version: '1.0.0' },
+          capabilities: {},
+        },
+      });
+      continue;
+    }
+    if (message.method === 'tools/list') {
+      send({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: { tools: ${JSON.stringify(tools)} },
+      });
+      continue;
+    }
+    if (message.method === 'tools/call') {
+      send({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: ${JSON.stringify(toolCallResult)},
+      });
+    }
+  }
+});
+`,
+    'utf8'
+  );
+
+  return scriptPath;
+}
+
 describe('TeamProvisioningService prepare/auth behavior', () => {
   let tempRoot = '';
 
@@ -55,7 +167,12 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
+    fs.rmSync(tempRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
   });
 
   it('does not create missing directories during prepareForProvisioning', async () => {
@@ -289,7 +406,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     });
     vi.spyOn(svc as any, 'spawnProbe').mockRejectedValue(
       new Error(
-        'Timeout running: claude -p Output only the single word PONG. --output-format text --model gpt-5.3-codex --max-turns 1 --no-session-persistence'
+        'Timeout running: orchestrator-cli -p Output only the single word PONG. --output-format text --model gpt-5.3-codex --max-turns 1 --no-session-persistence'
       )
     );
 
@@ -302,6 +419,26 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     expect(result.ready).toBe(true);
     expect(result.warnings).toContain(
       'Selected model gpt-5.3-codex could not be verified. Model verification timed out'
+    );
+  });
+
+  it('surfaces preflight timeouts with the orchestrator-cli label', async () => {
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'getCachedOrProbeResult').mockResolvedValue({
+      claudePath: '/fake/claude',
+      authSource: 'codex_runtime',
+      warning:
+        'Preflight check for `orchestrator-cli -p` did not complete. Proceeding anyway. Details: Timeout running: orchestrator-cli -p Output only the single word PONG. --output-format text --model gpt-5.4-mini --max-turns 1 --no-session-persistence',
+    });
+
+    const result = await svc.prepareForProvisioning(tempRoot, {
+      forceFresh: true,
+      providerId: 'codex',
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.warnings).toContain(
+      'Preflight check for `orchestrator-cli -p` did not complete. Proceeding anyway. Details: Timeout running: orchestrator-cli -p Output only the single word PONG. --output-format text --model gpt-5.4-mini --max-turns 1 --no-session-persistence'
     );
   });
 
@@ -505,6 +642,68 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     );
   });
 
+  it('preserves a requested 1M Anthropic window when runtime logs strip the [1m] suffix', () => {
+    const svc = new TeamProvisioningService();
+    const run = {
+      request: {
+        providerId: 'anthropic',
+        model: 'opus[1m]',
+        limitContext: false,
+      },
+      leadContextUsage: null,
+    } as any;
+
+    (svc as any).updateLeadContextUsageFromUsage(
+      run,
+      {
+        input_tokens: 12,
+        cache_creation_input_tokens: 34,
+        cache_read_input_tokens: 56,
+        output_tokens: 7,
+      },
+      'claude-opus-4-6'
+    );
+
+    expect(run.leadContextUsage).toMatchObject({
+      promptInputTokens: 102,
+      outputTokens: 7,
+      contextUsedTokens: 109,
+      contextWindowTokens: 1_000_000,
+      promptInputSource: 'anthropic_usage',
+    });
+  });
+
+  it('preserves a limited 200K Anthropic window when runtime logs strip the [1m] suffix', () => {
+    const svc = new TeamProvisioningService();
+    const run = {
+      request: {
+        providerId: 'anthropic',
+        model: 'opus',
+        limitContext: true,
+      },
+      leadContextUsage: null,
+    } as any;
+
+    (svc as any).updateLeadContextUsageFromUsage(
+      run,
+      {
+        input_tokens: 12,
+        cache_creation_input_tokens: 34,
+        cache_read_input_tokens: 56,
+        output_tokens: 7,
+      },
+      'claude-opus-4-6'
+    );
+
+    expect(run.leadContextUsage).toMatchObject({
+      promptInputTokens: 102,
+      outputTokens: 7,
+      contextUsedTokens: 109,
+      contextWindowTokens: 200_000,
+      promptInputSource: 'anthropic_usage',
+    });
+  });
+
   it('emits a lead-message refresh after provisioning reaches ready', async () => {
     const svc = new TeamProvisioningService();
     const emitter = vi.fn();
@@ -563,5 +762,57 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
         detail: 'lead-session-sync',
       })
     );
+  });
+
+  it('validates the generated agent-teams MCP server directly over stdio', async () => {
+    const svc = new TeamProvisioningService();
+    const configPath = writeMcpConfig(tempRoot, {
+      'agent-teams': getRealAgentTeamsMcpLaunchSpec(),
+    });
+
+    await expect(
+      (svc as any).validateAgentTeamsMcpRuntime('/fake/claude', tempRoot, process.env, configPath)
+    ).resolves.toBeUndefined();
+  });
+
+  it('fails validation when the generated MCP config has no agent-teams entry', async () => {
+    const svc = new TeamProvisioningService();
+    const configPath = writeMcpConfig(tempRoot, {
+      unrelated: getRealAgentTeamsMcpLaunchSpec(),
+    });
+
+    await expect(
+      (svc as any).validateAgentTeamsMcpRuntime('/fake/claude', tempRoot, process.env, configPath)
+    ).rejects.toThrow('does not contain an "agent-teams" server entry');
+  });
+
+  it('fails validation when tools/list does not include member_briefing', async () => {
+    const svc = new TeamProvisioningService();
+    const mockServerPath = writeMockMcpServer(tempRoot, 'missing-member-briefing');
+    const configPath = writeMcpConfig(tempRoot, {
+      'agent-teams': {
+        command: process.execPath,
+        args: [mockServerPath],
+      },
+    });
+
+    await expect(
+      (svc as any).validateAgentTeamsMcpRuntime('/fake/claude', tempRoot, process.env, configPath)
+    ).rejects.toThrow('tools/list did not include member_briefing');
+  });
+
+  it('fails validation when member_briefing itself returns an MCP error', async () => {
+    const svc = new TeamProvisioningService();
+    const mockServerPath = writeMockMcpServer(tempRoot, 'member-briefing-error');
+    const configPath = writeMcpConfig(tempRoot, {
+      'agent-teams': {
+        command: process.execPath,
+        args: [mockServerPath],
+      },
+    });
+
+    await expect(
+      (svc as any).validateAgentTeamsMcpRuntime('/fake/claude', tempRoot, process.env, configPath)
+    ).rejects.toThrow('mock member_briefing failure');
   });
 });

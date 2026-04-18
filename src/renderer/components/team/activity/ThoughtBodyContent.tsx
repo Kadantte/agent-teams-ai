@@ -4,17 +4,16 @@ import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer
 import { CopyButton } from '@renderer/components/common/CopyButton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { CARD_ICON_MUTED, CARD_TEXT_LIGHT } from '@renderer/constants/cssVariables';
-import { linkifyAllMentionsInMarkdown } from '@renderer/utils/mentionLinkify';
 import {
   areStringArraysEqual,
   areStringMapsEqual,
   areThoughtMessagesEquivalentForRender,
 } from '@renderer/utils/messageRenderEquality';
-import { linkifyTaskIdsInMarkdown, parseTaskLinkHref } from '@renderer/utils/taskReferenceUtils';
+import { parseTaskLinkHref } from '@renderer/utils/taskReferenceUtils';
 import { isApiErrorMessage } from '@shared/utils/apiErrorDetector';
-import { stripTeammateMessageBlocks } from '@shared/utils/inboxNoise';
 import { Reply } from 'lucide-react';
 
+import { buildThoughtDisplayContent } from './activityMarkdown';
 import { formatTimeWithSec, ToolSummaryTooltipContent } from './LeadThoughtsGroup';
 
 import type { InboxMessage } from '@shared/types';
@@ -42,17 +41,10 @@ export const ThoughtBodyContent = memo(
     onTeamClick,
   }: ThoughtBodyContentProps): JSX.Element {
     const displayContent = useMemo(() => {
-      // Strip leaked protocol XML (<teammate-message> blocks) before rendering
-      let text = stripTeammateMessageBlocks(thought.text).replace(/\n/g, '  \n');
-      text = linkifyTaskIdsInMarkdown(text, thought.taskRefs);
-      if ((memberColorMap && memberColorMap.size > 0) || teamNames.length > 0) {
-        text = linkifyAllMentionsInMarkdown(
-          text,
-          (memberColorMap ?? new Map()) as Map<string, string>,
-          teamNames
-        );
-      }
-      return text;
+      return buildThoughtDisplayContent(thought, memberColorMap, teamNames, {
+        preserveLineBreaks: true,
+        stripAgentOnlyBlocks: true,
+      });
     }, [thought.text, thought.taskRefs, memberColorMap, teamNames]);
 
     const handleTaskLinkClick = useCallback(

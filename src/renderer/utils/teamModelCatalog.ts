@@ -1,3 +1,4 @@
+import { parseModelString } from '@shared/utils/modelParser';
 import {
   filterVisibleProviderRuntimeModels,
   GPT_5_1_CODEX_MINI_UI_DISABLED_MODEL,
@@ -39,15 +40,40 @@ const TEAM_PROVIDER_LABELS: Record<SupportedProviderId, string> = {
   gemini: 'Gemini',
 };
 
-const TEAM_MODEL_LABEL_OVERRIDES: Record<string, string> = {
-  default: 'Default',
-  opus: 'Opus 4.6',
+const ANTHROPIC_ALIAS_LABELS = {
+  opus: 'Opus 4.7',
   sonnet: 'Sonnet 4.6',
   haiku: 'Haiku 4.5',
+} as const;
+
+const ANTHROPIC_VISIBLE_MODEL_FALLBACKS = ['claude-opus-4-7', 'claude-opus-4-7[1m]'] as const;
+
+const ANTHROPIC_MODEL_ORDER = [
+  'haiku',
+  'claude-haiku-4-5-20251001',
+  'claude-haiku-4-5',
+  'opus',
+  'opus[1m]',
+  'claude-opus-4-7',
+  'claude-opus-4-7[1m]',
+  'claude-opus-4-6',
+  'claude-opus-4-6[1m]',
+  'sonnet',
+  'sonnet[1m]',
+  'claude-sonnet-4-6',
+  'claude-sonnet-4-6[1m]',
+] as const;
+
+const TEAM_MODEL_LABEL_OVERRIDES: Record<string, string> = {
+  default: 'Default',
+  ...ANTHROPIC_ALIAS_LABELS,
+  'claude-opus-4-7': 'Opus 4.7',
+  'claude-opus-4-7[1m]': 'Opus 4.7 (1M)',
   'claude-sonnet-4-6': 'Sonnet 4.6',
   'claude-sonnet-4-6[1m]': 'Sonnet 4.6 (1M)',
   'claude-opus-4-6': 'Opus 4.6',
   'claude-opus-4-6[1m]': 'Opus 4.6 (1M)',
+  'claude-haiku-4-5': 'Haiku 4.5',
   'claude-haiku-4-5-20251001': 'Haiku 4.5',
   'gpt-5.4': 'GPT-5.4',
   'gpt-5.4-mini': 'GPT-5.4 Mini',
@@ -66,7 +92,8 @@ const TEAM_PROVIDER_MODEL_OPTIONS: Record<SupportedProviderId, readonly TeamProv
   {
     anthropic: [
       { value: '', label: 'Default', badgeLabel: 'Default' },
-      { value: 'opus', label: 'Opus 4.6', badgeLabel: 'Opus 4.6' },
+      { value: 'opus', label: 'Opus 4.7', badgeLabel: 'Opus 4.7' },
+      { value: 'claude-opus-4-6', label: 'Opus 4.6', badgeLabel: 'Opus 4.6' },
       { value: 'sonnet', label: 'Sonnet 4.6', badgeLabel: 'Sonnet 4.6' },
       { value: 'haiku', label: 'Haiku 4.5', badgeLabel: 'Haiku 4.5' },
     ],
@@ -109,9 +136,7 @@ const TEAM_PROVIDER_MODEL_OPTIONS: Record<SupportedProviderId, readonly TeamProv
   };
 
 const TEAM_PROVIDER_MODEL_ORDER: Record<SupportedProviderId, Map<string, number>> = {
-  anthropic: new Map(
-    TEAM_PROVIDER_MODEL_OPTIONS.anthropic.map((option, index) => [option.value, index])
-  ),
+  anthropic: new Map(ANTHROPIC_MODEL_ORDER.map((model, index) => [model, index])),
   codex: new Map(TEAM_PROVIDER_MODEL_OPTIONS.codex.map((option, index) => [option.value, index])),
   gemini: new Map(TEAM_PROVIDER_MODEL_OPTIONS.gemini.map((option, index) => [option.value, index])),
 };
@@ -133,6 +158,73 @@ export function getTeamProviderModelOptions(
   return TEAM_PROVIDER_MODEL_OPTIONS[providerId];
 }
 
+function splitOneMillionContextSuffix(model: string): {
+  baseModel: string;
+  hasOneMillion: boolean;
+} {
+  const hasOneMillion = /\[1m\]$/i.test(model);
+  return {
+    baseModel: model.replace(/\[1m\]$/i, ''),
+    hasOneMillion,
+  };
+}
+
+function formatParsedClaudeModelLabel(model: string): string | null {
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const { baseModel, hasOneMillion } = splitOneMillionContextSuffix(trimmed);
+  const parsedModel = parseModelString(baseModel);
+  if (!parsedModel) {
+    return null;
+  }
+
+  const familyLabel = parsedModel.family.charAt(0).toUpperCase() + parsedModel.family.slice(1);
+  const versionLabel =
+    parsedModel.minorVersion == null
+      ? `${parsedModel.majorVersion}`
+      : `${parsedModel.majorVersion}.${parsedModel.minorVersion}`;
+
+  return `${familyLabel} ${versionLabel}${hasOneMillion ? ' (1M)' : ''}`;
+}
+
+const SUPPORTED_ANTHROPIC_TEAM_MODELS = new Set<string>([
+  'opus',
+  'opus[1m]',
+  'sonnet',
+  'sonnet[1m]',
+  'haiku',
+  'claude-opus-4-7',
+  'claude-opus-4-7[1m]',
+  'claude-opus-4-6',
+  'claude-opus-4-6[1m]',
+  'claude-sonnet-4-6',
+  'claude-sonnet-4-6[1m]',
+  'claude-haiku-4-5',
+  'claude-haiku-4-5-20251001',
+]);
+
+export function isSupportedAnthropicTeamModel(model: string | undefined): boolean {
+  const trimmed = model?.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  return SUPPORTED_ANTHROPIC_TEAM_MODELS.has(trimmed);
+}
+
+export function isAnthropicHaikuTeamModel(model: string | undefined): boolean {
+  const trimmed = model?.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  const { baseModel } = splitOneMillionContextSuffix(trimmed);
+  return baseModel === 'haiku' || baseModel.startsWith('claude-haiku-');
+}
+
 export function getTeamProviderLabel(
   providerId: SupportedProviderId | undefined
 ): string | undefined {
@@ -147,7 +239,13 @@ export function getTeamModelLabel(model: string | undefined): string | undefined
   if (!trimmed) {
     return undefined;
   }
-  return TEAM_MODEL_LABEL_OVERRIDES[trimmed] ?? trimmed;
+
+  const overrideLabel = TEAM_MODEL_LABEL_OVERRIDES[trimmed];
+  if (overrideLabel) {
+    return overrideLabel;
+  }
+
+  return formatParsedClaudeModelLabel(trimmed) ?? trimmed;
 }
 
 export function getTeamModelBadgeLabel(
@@ -165,6 +263,10 @@ export function getTeamModelBadgeLabel(
   }
 
   if (providerId === 'anthropic') {
+    const anthropicLabel = getTeamModelLabel(trimmed);
+    if (anthropicLabel && anthropicLabel !== trimmed) {
+      return anthropicLabel;
+    }
     return trimmed.replace(/^claude-/, '');
   }
   if (providerId === 'codex') {
@@ -245,6 +347,17 @@ function isRuntimeHiddenTeamModel(
   );
 }
 
+function getSupplementalVisibleModels(
+  providerId: SupportedProviderId,
+  models: readonly string[]
+): readonly string[] {
+  if (providerId !== 'anthropic') {
+    return models;
+  }
+
+  return [...models, ...ANTHROPIC_VISIBLE_MODEL_FALLBACKS];
+}
+
 export function getVisibleTeamProviderModels(
   providerId: SupportedProviderId,
   models: readonly string[],
@@ -252,7 +365,7 @@ export function getVisibleTeamProviderModels(
 ): string[] {
   return sortTeamProviderModels(
     providerId,
-    filterVisibleProviderRuntimeModels(providerId, models)
+    filterVisibleProviderRuntimeModels(providerId, getSupplementalVisibleModels(providerId, models))
   ).filter((model) => !isRuntimeHiddenTeamModel(providerId, model, providerStatus));
 }
 

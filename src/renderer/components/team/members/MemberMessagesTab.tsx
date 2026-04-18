@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { buildInlineActivityEntries } from '@features/agent-graph/renderer';
-import { api } from '@renderer/api';
 import { ActivityItem } from '@renderer/components/team/activity/ActivityItem';
 import {
   buildMessageContext,
@@ -10,17 +8,18 @@ import {
 import { MessageExpandDialog } from '@renderer/components/team/activity/MessageExpandDialog';
 import { Button } from '@renderer/components/ui/button';
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
-import { mergeTeamMessages } from '@renderer/utils/mergeTeamMessages';
-import { filterTeamMessages } from '@renderer/utils/teamMessageFiltering';
+import { useStore } from '@renderer/store';
+import { selectMemberMessagesForTeamMember } from '@renderer/store/slices/teamSlice';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
-import { isLeadMember } from '@shared/utils/leadDetection';
+import { useShallow } from 'zustand/react/shallow';
+
+import { buildMemberActivityEntries } from './memberActivityEntries';
 
 import type { MemberActivityFilter } from './memberDetailTypes';
 import type { TimelineItem } from '@renderer/components/team/activity/LeadThoughtsGroup';
-import type { InboxMessage, ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
+import type { ResolvedTeamMember, TeamTaskWithKanban } from '@shared/types';
 
 interface MemberMessagesTabProps {
-  messages: InboxMessage[];
   teamName: string;
   memberName: string;
   members: ResolvedTeamMember[];
@@ -31,7 +30,6 @@ interface MemberMessagesTabProps {
 }
 
 const MAX_MESSAGES = 100;
-const MEMBER_MESSAGES_PAGE_SIZE = 50;
 const FILTER_OPTIONS: readonly { value: MemberActivityFilter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'messages', label: 'Messages' },
@@ -39,7 +37,6 @@ const FILTER_OPTIONS: readonly { value: MemberActivityFilter; label: string }[] 
 ];
 
 export const MemberMessagesTab = ({
-  messages,
   teamName,
   memberName,
   members,
@@ -48,20 +45,16 @@ export const MemberMessagesTab = ({
   onCreateTask,
   onTaskClick,
 }: MemberMessagesTabProps): React.JSX.Element => {
-  const [pagedMessages, setPagedMessages] = useState<InboxMessage[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [activityFilter, setActivityFilter] = useState<MemberActivityFilter>(initialFilter);
   const [expandedItem, setExpandedItem] = useState<TimelineItem | null>(null);
-  const { readSet } = useTeamMessagesRead(teamName);
-  const leadId = `lead:${teamName}`;
-  const leadName = useMemo(
-    () => members.find((candidate) => isLeadMember(candidate))?.name ?? `${teamName}-lead`,
-    [members, teamName]
+  const { messages, messagesState, loadOlderTeamMessages } = useStore(
+    useShallow((s) => ({
+      messages: selectMemberMessagesForTeamMember(s, teamName, memberName),
+      messagesState: teamName ? s.teamMessagesByName[teamName] : undefined,
+      loadOlderTeamMessages: s.loadOlderTeamMessages,
+    }))
   );
-  const ownerNodeId = memberName === leadName ? leadId : `member:${teamName}:${memberName}`;
-  const ownerNodeIds = useMemo(() => new Set([leadId, ownerNodeId]), [leadId, ownerNodeId]);
+  const { readSet } = useTeamMessagesRead(teamName);
   const taskMap = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const messageContext = useMemo(() => buildMessageContext(members), [members]);
 
@@ -69,106 +62,45 @@ export const MemberMessagesTab = ({
     setActivityFilter(initialFilter);
   }, [initialFilter, memberName, teamName]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setPagedMessages([]);
-    setNextCursor(null);
-    setHasMore(false);
-    setLoading(true);
-
-    void (async () => {
-      try {
-        const page = await api.teams.getMessagesPage(teamName, {
-          limit: MEMBER_MESSAGES_PAGE_SIZE,
-        });
-        if (cancelled) return;
-        const memberPageMessages = page.messages.filter(
-          (message) => message.from === memberName || message.to === memberName
-        );
-        setPagedMessages(memberPageMessages);
-        setNextCursor(page.nextCursor);
-        setHasMore(page.hasMore);
-      } catch {
-        if (!cancelled) {
-          setPagedMessages([]);
-          setNextCursor(null);
-          setHasMore(false);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [teamName, memberName]);
-
   const loadOlderMessages = useCallback(async () => {
-    if (!nextCursor || loading) return;
-    setLoading(true);
-    try {
-      const page = await api.teams.getMessagesPage(teamName, {
-        beforeTimestamp: nextCursor,
-        limit: MEMBER_MESSAGES_PAGE_SIZE,
-      });
-      const memberPageMessages = page.messages.filter(
-        (message) => message.from === memberName || message.to === memberName
-      );
-      setPagedMessages((prev) => mergeTeamMessages(prev, memberPageMessages));
-      setNextCursor(page.nextCursor);
-      setHasMore(page.hasMore);
-    } catch {
-      // best-effort
-    } finally {
-      setLoading(false);
+    if (!messagesState?.hasMore || messagesState.loadingHead || messagesState.loadingOlder) {
+      return;
     }
-  }, [teamName, memberName, nextCursor, loading]);
+    await loadOlderTeamMessages(teamName);
+  }, [loadOlderTeamMessages, messagesState, teamName]);
 
-  const effectiveMessages = useMemo(
-    () => mergeTeamMessages(messages, pagedMessages),
-    [messages, pagedMessages]
-  );
-
-  const filteredMessages = useMemo(
-    () =>
-      filterTeamMessages(effectiveMessages, {
-        timeWindow: null,
-        filter: { from: new Set(), to: new Set(), showNoise: true },
-        searchQuery: '',
-      }),
-    [effectiveMessages]
-  );
+  const loading = (messagesState?.loadingHead ?? false) || (messagesState?.loadingOlder ?? false);
+  const loadingOlderMessages = messagesState?.loadingOlder ?? false;
+  const hasMore = messagesState?.hasMore ?? false;
 
   const activityEntries = useMemo(() => {
-    const entriesByOwner = buildInlineActivityEntries({
-      data: {
-        members,
-        tasks,
-        messages: filteredMessages,
-      },
+    return buildMemberActivityEntries({
       teamName,
-      leadId,
-      leadName,
-      ownerNodeIds,
+      memberName,
+      members,
+      tasks,
+      messages,
     });
-    return (entriesByOwner.get(ownerNodeId) ?? []).slice(0, MAX_MESSAGES);
-  }, [filteredMessages, leadId, leadName, members, ownerNodeId, ownerNodeIds, tasks, teamName]);
+  }, [memberName, members, messages, tasks, teamName]);
+  const visibleActivityEntries = useMemo(
+    () => activityEntries.slice(0, MAX_MESSAGES),
+    [activityEntries]
+  );
 
   const displayEntries = useMemo(() => {
     switch (activityFilter) {
       case 'messages':
-        return activityEntries.filter(
+        return visibleActivityEntries.filter(
           (entry) => entry.message.messageKind !== 'task_comment_notification'
         );
       case 'comments':
-        return activityEntries.filter(
+        return visibleActivityEntries.filter(
           (entry) => entry.message.messageKind === 'task_comment_notification'
         );
       default:
-        return activityEntries;
+        return visibleActivityEntries;
     }
-  }, [activityEntries, activityFilter]);
+  }, [activityFilter, visibleActivityEntries]);
 
   const expandedItemsByKey = useMemo(() => {
     const items = new Map<string, TimelineItem>();
@@ -198,7 +130,8 @@ export const MemberMessagesTab = ({
     [onTaskClick, taskMap, tasks]
   );
 
-  const emptyStateText = loading
+  const initialPageLoading = loading && activityEntries.length === 0;
+  const emptyStateText = initialPageLoading
     ? 'Loading activity...'
     : activityFilter === 'comments'
       ? 'No comments for this member'
@@ -206,9 +139,10 @@ export const MemberMessagesTab = ({
         ? hasMore
           ? 'No loaded messages for this member yet'
           : 'No messages with this member'
-        : 'No activity with this member';
-  const canLoadOlderMessages =
-    hasMore && activityFilter !== 'comments' && displayEntries.length > 0;
+        : hasMore
+          ? 'No loaded activity for this member yet'
+          : 'No activity with this member';
+  const canLoadOlderMessages = hasMore && activityFilter !== 'comments';
 
   return (
     <div className="space-y-3">
@@ -289,10 +223,11 @@ export const MemberMessagesTab = ({
               variant="ghost"
               size="sm"
               className="text-xs"
-              disabled={loading}
+              aria-busy={loadingOlderMessages}
+              disabled={loadingOlderMessages}
               onClick={() => void loadOlderMessages()}
             >
-              {loading ? 'Loading...' : 'Load older messages'}
+              Load older messages
             </Button>
           </div>
         )}

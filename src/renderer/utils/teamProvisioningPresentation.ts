@@ -8,7 +8,6 @@ import {
 import type {
   MemberSpawnStatusEntry,
   MemberSpawnStatusesSnapshot,
-  ResolvedTeamMember,
   TeamProvisioningProgress,
 } from '@shared/types';
 
@@ -16,6 +15,17 @@ type MemberSpawnStatusCollection =
   | Record<string, MemberSpawnStatusEntry>
   | Map<string, MemberSpawnStatusEntry>
   | undefined;
+
+interface ProvisioningMemberLike {
+  name: string;
+  removedAt?: number;
+  agentType?: string;
+  status?: string;
+  currentTaskId?: string | null;
+  taskCount?: number;
+  lastActiveAt?: string | null;
+  messageCount?: number;
+}
 
 interface FailedSpawnDetail {
   name: string;
@@ -138,7 +148,7 @@ export function buildTeamProvisioningPresentation({
   memberSpawnSnapshot,
 }: {
   progress: TeamProvisioningProgress | null | undefined;
-  members: readonly ResolvedTeamMember[];
+  members: readonly ProvisioningMemberLike[];
   memberSpawnStatuses?: MemberSpawnStatusCollection;
   memberSpawnSnapshot?: Pick<MemberSpawnStatusesSnapshot, 'expectedMembers' | 'summary'>;
 }): TeamProvisioningPresentation | null {

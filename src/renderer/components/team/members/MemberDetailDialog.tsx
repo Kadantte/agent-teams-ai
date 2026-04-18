@@ -1,16 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import {
-  buildGraphMemberNodeIdForMember,
-  buildInlineActivityEntries,
-} from '@features/agent-graph/renderer';
 import { Button } from '@renderer/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from '@renderer/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
 import { useMemberStats } from '@renderer/hooks/useMemberStats';
+import { useStore } from '@renderer/store';
+import { selectMemberMessagesForTeamMember } from '@renderer/store/slices/teamSlice';
+import { resolveMemberRuntimeSummary } from '@renderer/utils/memberRuntimeSummary';
 import { isLeadMember } from '@shared/utils/leadDetection';
-import { BarChart3, FileText, ListPlus, MessageSquare, UserMinus } from 'lucide-react';
+import {
+  BarChart3,
+  FileText,
+  ListPlus,
+  Loader2,
+  MessageSquare,
+  RotateCcw,
+  UserMinus,
+} from 'lucide-react';
 
+import { buildMemberActivityEntries } from './memberActivityEntries';
 import { MemberDetailHeader } from './MemberDetailHeader';
 import { MemberDetailStats } from './MemberDetailStats';
 import { type MemberActivityFilter, type MemberDetailTab } from './memberDetailTypes';
@@ -19,11 +27,12 @@ import { MemberMessagesTab } from './MemberMessagesTab';
 import { MemberStatsTab } from './MemberStatsTab';
 import { MemberTasksTab } from './MemberTasksTab';
 
+import type { TeamLaunchParams } from '@renderer/store/slices/teamSlice';
 import type {
-  InboxMessage,
   LeadActivityState,
   MemberSpawnStatusEntry,
   ResolvedTeamMember,
+  TeamAgentRuntimeEntry,
   TeamTaskWithKanban,
 } from '@shared/types';
 
@@ -33,7 +42,6 @@ interface MemberDetailDialogProps {
   teamName: string;
   members: ResolvedTeamMember[];
   tasks: TeamTaskWithKanban[];
-  messages: InboxMessage[];
   initialTab?: MemberDetailTab;
   initialActivityFilter?: MemberActivityFilter;
   isTeamAlive?: boolean;
@@ -41,11 +49,14 @@ interface MemberDetailDialogProps {
   isLaunchSettling?: boolean;
   leadActivity?: LeadActivityState;
   spawnEntry?: MemberSpawnStatusEntry;
+  runtimeEntry?: TeamAgentRuntimeEntry;
+  launchParams?: TeamLaunchParams;
   onClose: () => void;
   onSendMessage: () => void;
   onAssignTask: () => void;
   onTaskClick: (task: TeamTaskWithKanban) => void;
   onRemoveMember?: () => void;
+  onRestartMember?: (memberName: string) => Promise<void> | void;
   onUpdateRole?: (memberName: string, role: string | undefined) => Promise<void> | void;
   updatingRole?: boolean;
   onViewMemberChanges?: (memberName: string, filePath?: string) => void;
@@ -57,7 +68,6 @@ export const MemberDetailDialog = ({
   teamName,
   members,
   tasks,
-  messages,
   initialTab = 'tasks',
   initialActivityFilter = 'all',
   isTeamAlive,
@@ -65,11 +75,14 @@ export const MemberDetailDialog = ({
   isLaunchSettling,
   leadActivity,
   spawnEntry,
+  runtimeEntry,
+  launchParams,
   onClose,
   onSendMessage,
   onAssignTask,
   onTaskClick,
   onRemoveMember,
+  onRestartMember,
   onUpdateRole,
   updatingRole,
   onViewMemberChanges,
@@ -78,33 +91,20 @@ export const MemberDetailDialog = ({
     () => (member ? tasks.filter((t) => t.owner === member.name) : []),
     [tasks, member]
   );
-
-  const seedMemberMessages = useMemo(
-    () => (member ? messages.filter((m) => m.from === member.name || m.to === member.name) : []),
-    [messages, member]
+  const memberMessages = useStore((state) =>
+    selectMemberMessagesForTeamMember(state, teamName, member?.name ?? null)
   );
-  const memberMessages = seedMemberMessages;
   const memberActivityCount = useMemo(() => {
     if (!member) {
       return 0;
     }
-    const leadId = `lead:${teamName}`;
-    const leadName =
-      members.find((candidate) => isLeadMember(candidate))?.name ?? `${teamName}-lead`;
-    const ownerNodeId =
-      member.name === leadName ? leadId : buildGraphMemberNodeIdForMember(teamName, member);
-    const entries = buildInlineActivityEntries({
-      data: {
-        members,
-        tasks,
-        messages: memberMessages,
-      },
+    return buildMemberActivityEntries({
       teamName,
-      leadId,
-      leadName,
-      ownerNodeIds: new Set([leadId, ownerNodeId]),
-    });
-    return (entries.get(ownerNodeId) ?? []).length;
+      memberName: member.name,
+      members,
+      tasks,
+      messages: memberMessages,
+    }).length;
   }, [member, memberMessages, members, tasks, teamName]);
 
   const inProgressTasks = useMemo(
@@ -118,12 +118,24 @@ export const MemberDetailDialog = ({
   );
 
   const [activeTab, setActiveTab] = useState<MemberDetailTab>(initialTab);
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
+
+  const runtimeSummary = useMemo(
+    () =>
+      member
+        ? resolveMemberRuntimeSummary(member, launchParams, spawnEntry, runtimeEntry)
+        : undefined,
+    [launchParams, member, runtimeEntry, spawnEntry]
+  );
 
   useEffect(() => {
     if (!open || !member) {
       return;
     }
     setActiveTab(initialTab);
+    setRestartError(null);
+    setRestarting(false);
   }, [initialTab, member, open]);
 
   const {
@@ -143,6 +155,7 @@ export const MemberDetailDialog = ({
           <DialogHeader className="shrink-0">
             <MemberDetailHeader
               member={member}
+              runtimeSummary={runtimeSummary}
               isTeamAlive={isTeamAlive}
               isTeamProvisioning={isTeamProvisioning}
               leadActivity={isLeadMember(member) ? leadActivity : undefined}
@@ -206,7 +219,6 @@ export const MemberDetailDialog = ({
           </TabsContent>
           <TabsContent value="activity">
             <MemberMessagesTab
-              messages={memberMessages}
               teamName={teamName}
               memberName={member.name}
               members={members}
@@ -232,12 +244,52 @@ export const MemberDetailDialog = ({
         </Tabs>
 
         <DialogFooter>
+          {restartError ? (
+            <div className="mr-auto text-xs text-red-400">{restartError}</div>
+          ) : runtimeEntry?.pid ? (
+            <div className="mr-auto text-xs text-[var(--color-text-muted)]">
+              PID {runtimeEntry.pid}
+            </div>
+          ) : (
+            <div className="mr-auto" />
+          )}
           {member.removedAt ? (
             <span className="text-xs text-[var(--color-text-muted)]">
               Removed {new Date(member.removedAt).toLocaleDateString()}
             </span>
           ) : (
             <>
+              {onRestartMember &&
+                !isLeadMember(member) &&
+                (isTeamAlive || isTeamProvisioning) &&
+                runtimeEntry?.restartable !== false && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={restarting}
+                    onClick={async () => {
+                      setRestartError(null);
+                      setRestarting(true);
+                      try {
+                        await onRestartMember(member.name);
+                      } catch (error) {
+                        setRestartError(
+                          error instanceof Error ? error.message : 'Failed to restart member'
+                        );
+                      } finally {
+                        setRestarting(false);
+                      }
+                    }}
+                  >
+                    {restarting ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <RotateCcw size={14} />
+                    )}
+                    Restart
+                  </Button>
+                )}
               <Button variant="outline" size="sm" className="gap-1.5" onClick={onSendMessage}>
                 <MessageSquare size={14} />
                 Send Message

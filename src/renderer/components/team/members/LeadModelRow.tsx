@@ -13,6 +13,7 @@ import { Label } from '@renderer/components/ui/label';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
+import { isAnthropicHaikuTeamModel } from '@renderer/utils/teamModelCatalog';
 import { getMemberColorByName } from '@shared/constants/memberColors';
 import { AlertTriangle, ChevronDown, ChevronRight, Info } from 'lucide-react';
 
@@ -151,7 +152,7 @@ export const LeadModelRow = ({
               id="lead-limit-context"
               checked={limitContext}
               onCheckedChange={onLimitContextChange}
-              disabled={model === 'haiku'}
+              disabled={isAnthropicHaikuTeamModel(model)}
             />
           ) : null}
           <div className="flex items-start gap-2 rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2">

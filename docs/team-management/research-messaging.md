@@ -55,7 +55,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 const client = new Anthropic();
 const response = await client.messages.create({
-  model: 'claude-opus-4-6',
+  model: 'claude-opus-4-7',
   messages: [{ role: 'user', content: 'Send message to teammate...' }],
   tools: [/* SendMessage, TaskUpdate, etc. */]
 });

@@ -36,7 +36,10 @@ import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
-import { isTeamProvisioningActive } from '@renderer/store/slices/teamSlice';
+import {
+  isTeamProvisioningActive,
+  selectResolvedMembersForTeamName,
+} from '@renderer/store/slices/teamSlice';
 import {
   isGeminiUiFrozen,
   normalizeCreateLaunchProviderForUi,
@@ -45,12 +48,9 @@ import { normalizePath } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import {
   getTeamModelSelectionError,
-  normalizeTeamModelForUi,
+  normalizeExplicitTeamModelForUi,
 } from '@renderer/utils/teamModelAvailability';
-import {
-  getTeamProviderLabel as getCatalogTeamProviderLabel,
-  normalizeTeamModelForUi as normalizeCatalogTeamModelForUi,
-} from '@renderer/utils/teamModelCatalog';
+import { getTeamProviderLabel as getCatalogTeamProviderLabel } from '@renderer/utils/teamModelCatalog';
 import { DEFAULT_PROVIDER_MODEL_SELECTION } from '@shared/utils/providerModelSelection';
 import { isTeamProviderId, normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 import {
@@ -72,7 +72,9 @@ import { EffortLevelSelector } from './EffortLevelSelector';
 import { resolveLaunchDialogPrefill } from './launchDialogPrefill';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
 import { ProjectPathSelector } from './ProjectPathSelector';
+import { buildProviderPrepareModelCacheKey } from './providerPrepareCacheKey';
 import {
+  buildReusableProviderPrepareModelResults,
   getProviderPrepareCachedSnapshot,
   type ProviderPrepareDiagnosticsModelResult,
   runProviderPrepareDiagnostics,
@@ -108,14 +110,6 @@ import type {
   TeamProviderId,
   UpdateSchedulePatch,
 } from '@shared/types';
-
-function buildPrepareModelCacheKey(
-  cwd: string,
-  providerId: TeamProviderId,
-  backendSummary: string | null | undefined
-): string {
-  return `${cwd}::${providerId}::${backendSummary ?? ''}`;
-}
 
 function alignProvisioningChecks(
   existingChecks: ProvisioningProviderCheck[],
@@ -195,7 +189,7 @@ function getStoredTeamModel(providerId: TeamProviderId): string {
   if (stored === null) {
     return providerId === 'anthropic' ? 'opus' : '';
   }
-  return normalizeCatalogTeamModelForUi(providerId, stored === '__default__' ? '' : stored);
+  return normalizeExplicitTeamModelForUi(providerId, stored === '__default__' ? '' : stored);
 }
 
 function getProviderLabel(providerId: TeamProviderId): string {
@@ -319,7 +313,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const [prepareWarnings, setPrepareWarnings] = useState<string[]>([]);
   const [prepareChecks, setPrepareChecks] = useState<ProvisioningProviderCheck[]>([]);
   const prepareRequestSeqRef = useRef(0);
-  const storeMembers = useStore((s) => s.selectedTeamData?.members ?? []);
+  const storeMembers = useStore((s) => selectResolvedMembersForTeamName(s, s.selectedTeamName));
   const previousLaunchParams = useStore((s) =>
     effectiveTeamName ? s.launchParamsByTeam[effectiveTeamName] : undefined
   );
@@ -467,7 +461,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   };
 
   const setSelectedModel = (value: string): void => {
-    const normalizedValue = normalizeTeamModelForUi(selectedProviderId, value);
+    const normalizedValue = normalizeExplicitTeamModelForUi(selectedProviderId, value);
     setSelectedModelRaw(normalizedValue);
     localStorage.setItem(`team:lastSelectedModel:${selectedProviderId}`, normalizedValue);
   };
@@ -932,7 +926,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       const providerPlans = selectedMemberProviders.map((providerId) => {
         const selectedModelChecks = selectedModelChecksByProvider.get(providerId) ?? [];
         const backendSummary = runtimeBackendSummaryByProviderRef.current.get(providerId) ?? null;
-        const cacheKey = buildPrepareModelCacheKey(effectiveCwd, providerId, backendSummary);
+        const cacheKey = buildProviderPrepareModelCacheKey({
+          cwd: effectiveCwd,
+          providerId,
+          backendSummary,
+          limitContext,
+        });
         const cachedModelResultsById = prepareModelResultsCacheRef.current.get(cacheKey) ?? {};
         const cachedSnapshot = getProviderPrepareCachedSnapshot({
           providerId,
@@ -1000,7 +999,10 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
           } else if (plan.prepResult.status === 'notes') {
             anyNotes = true;
           }
-          prepareModelResultsCacheRef.current.set(plan.cacheKey, plan.prepResult.modelResultsById);
+          prepareModelResultsCacheRef.current.set(
+            plan.cacheKey,
+            buildReusableProviderPrepareModelResults(plan.prepResult.modelResultsById)
+          );
           checks = updateProviderCheck(checks, plan.providerId, {
             status: plan.prepResult.status,
             backendSummary: plan.backendSummary,

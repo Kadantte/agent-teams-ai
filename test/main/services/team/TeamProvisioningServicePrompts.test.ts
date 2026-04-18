@@ -41,6 +41,7 @@ vi.mock('@main/utils/pathDecoder', async (importOriginal) => {
 
 import {
   buildAddMemberSpawnMessage,
+  buildRestartMemberSpawnMessage,
   TeamProvisioningService,
 } from '@main/services/team/TeamProvisioningService';
 import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
@@ -216,6 +217,9 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     expect(prompt).toContain('Do NOT start implementation in this turn.');
     expect(prompt).toContain('Use this turn only to refresh context, review the current board snapshot, and confirm you are ready.');
     expect(prompt).toContain(
+      'Do NOT create, assign, or delegate any new task in this turn. If the board is empty, stay silent and wait for a fresh user instruction.'
+    );
+    expect(prompt).toContain(
       'review_request already notifies the reviewer, so do NOT send a second manual SendMessage for the same review request'
     );
     expect(prompt).toContain(
@@ -274,6 +278,21 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     ]);
 
     await svc.cancelProvisioning(runId);
+  });
+
+  it('restart teammate message keeps the exact teammate identity and avoids duplicate semantics', () => {
+    const message = buildRestartMemberSpawnMessage('forge-labs', 'Forge Labs', 'lead', {
+      name: 'alice',
+      role: 'Reviewer',
+      providerId: 'codex',
+      model: 'gpt-5.4-mini',
+      effort: 'medium',
+    });
+
+    expect(message).toContain('Teammate "alice" with role "Reviewer" was restarted from the UI.');
+    expect(message).toContain('team_name="forge-labs", name="alice"');
+    expect(message).toContain('provider="codex", model="gpt-5.4-mini", effort="medium"');
+    expect(message).toContain('This is a restart of an existing persistent teammate, not a new teammate.');
   });
 
   it('createTeam materializes an explicit Codex default model for teammates before bootstrap spawn', async () => {
@@ -359,6 +378,20 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     );
     expect(prompt).toContain(
       'If you are the reviewer for task #X, call review_start on #X first, then review_approve or review_request_changes on #X itself.'
+    );
+  });
+
+  it('add-member spawn prompt explicitly forbids no-task bootstrap chatter', () => {
+    const prompt = buildAddMemberSpawnMessage('my-team', 'My Team', 'team-lead', {
+      name: 'alice',
+      role: 'developer',
+    });
+
+    expect(prompt).toContain(
+      'If bootstrap succeeded and you have no task, produce ZERO assistant text for that turn and end it immediately after the successful tool result.'
+    );
+    expect(prompt).toContain(
+      'Do NOT ask the user or the lead to send you a task ID, task description, or "next task" right after bootstrap.'
     );
   });
 
@@ -473,7 +506,10 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     const prompt = extractPromptFromBootstrapFile();
     expect(prompt).toContain('This reconnect/bootstrap step has already been completed deterministically by the runtime.');
     expect(prompt).toContain('Do NOT use Agent to spawn or restore teammates.');
-    expect(prompt).toContain('Use this turn only to refresh context, review the current board snapshot, and prepare the next delegation step.');
+    expect(prompt).toContain('Use this turn only to refresh context and review the current board snapshot.');
+    expect(prompt).toContain(
+      'Do NOT create, assign, or delegate any new task in this turn. If the board is empty, stay silent and wait for a fresh user instruction.'
+    );
     expect(prompt).toContain('DELEGATION-FIRST (behavior rule for ALL future turns):');
     expect(prompt).toContain(`AGENT_BLOCK_OPEN is exactly: ${AGENT_BLOCK_OPEN}`);
     expect(prompt).toContain(`AGENT_BLOCK_CLOSE is exactly: ${AGENT_BLOCK_CLOSE}`);
@@ -496,7 +532,6 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     expect(prompt).toContain(
       'Correct flow: finish implementation on #X -> task_complete #X -> review_request #X -> reviewer runs review_start #X -> reviewer runs review_approve or review_request_changes on #X.'
     );
-
     await svc.cancelProvisioning(runId);
   });
 

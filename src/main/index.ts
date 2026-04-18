@@ -1,5 +1,5 @@
 /**
- * Main process entry point for Claude Agent Teams UI.
+ * Main process entry point for Agent Teams UI.
  *
  * Responsibilities:
  * - Initialize Electron app and main window
@@ -88,6 +88,7 @@ import {
 } from './services/extensions';
 import { startEventLoopLagMonitor } from './services/infrastructure/EventLoopLagMonitor';
 import { HttpServer } from './services/infrastructure/HttpServer';
+import { clearAutoResumeService } from './services/team/AutoResumeService';
 import {
   buildTeamControlApiBaseUrl,
   clearTeamControlApiState,
@@ -563,6 +564,13 @@ function wireFileWatcherEvents(context: ServiceContext): void {
       const teamName = row.teamName.trim();
       const detail = typeof row.detail === 'string' ? row.detail : '';
 
+      if (
+        teamDataService &&
+        (row.type === 'inbox' || row.type === 'lead-message' || row.type === 'config')
+      ) {
+        teamDataService.invalidateMessageFeed(teamName);
+      }
+
       // --- Inbox change events: relay to lead + native OS notifications ---
       if (row.type === 'inbox') {
         if (reconcileScheduler) {
@@ -905,6 +913,12 @@ async function initializeServices(): Promise<void> {
   });
 
   const forwardTeamChange = (event: TeamChangeEvent): void => {
+    if (
+      teamDataService &&
+      (event.type === 'inbox' || event.type === 'lead-message' || event.type === 'config')
+    ) {
+      teamDataService.invalidateMessageFeed(event.teamName);
+    }
     safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
     httpServer?.broadcast('team-change', event);
   };
@@ -964,6 +978,7 @@ async function initializeServices(): Promise<void> {
     boardTaskExactLogsService,
     boardTaskExactLogDetailService,
     teammateToolTracker ?? undefined,
+    teamLogSourceTracker,
     branchStatusService ?? undefined,
     {
       rewire: rewireContextEvents,
@@ -1069,6 +1084,11 @@ async function startHttpServer(
  */
 function shutdownServices(): void {
   logger.info('Shutting down services...');
+
+  // Clear pending auto-resume timers before anything else — otherwise the
+  // dangling setTimeout handles keep the event loop alive past shutdown and
+  // may fire against a torn-down provisioning service.
+  clearAutoResumeService();
 
   // Kill all team CLI processes via SIGKILL BEFORE anything else.
   // This must happen before the OS closes stdin pipes (on app exit),
@@ -1212,7 +1232,7 @@ function createWindow(): void {
     backgroundColor: '#1a1a1a',
     ...(useNativeTitleBar ? {} : { titleBarStyle: 'hidden' as const }),
     ...(isMac && { trafficLightPosition: getTrafficLightPositionForZoom(1) }),
-    title: 'Claude Agent Teams UI',
+    title: 'Agent Teams UI',
   });
   markRendererUnavailable(mainWindow);
 

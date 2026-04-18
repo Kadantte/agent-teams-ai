@@ -268,10 +268,6 @@ export const KanbanTaskCard = memo(
               onViewChanges!(task.id);
             }}
           />
-        ) : canDisplay && task.changePresence === 'no_changes' ? (
-          <span className="inline-flex h-6 shrink-0 items-center rounded-full border border-[var(--color-border)] px-2 text-[10px] text-[var(--color-text-muted)]">
-            No changes
-          </span>
         ) : null}
         <UnreadCommentsBadge unreadCount={unreadCount} totalCount={task.comments?.length ?? 0} />
         {onDeleteTask ? (

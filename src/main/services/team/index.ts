@@ -1,3 +1,9 @@
+export {
+  AutoResumeService,
+  clearAutoResumeService,
+  getAutoResumeService,
+  initializeAutoResumeService,
+} from './AutoResumeService';
 export { BranchStatusService } from './BranchStatusService';
 export { CascadeGuard } from './CascadeGuard';
 export { ChangeExtractorService } from './ChangeExtractorService';

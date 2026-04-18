@@ -2,22 +2,33 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { create } from 'zustand';
 
 import {
+  __getTeamScopedTransientStateForTests,
   __resetTeamSliceModuleStateForTests,
   createTeamSlice,
+  getActiveTeamPendingReplyWaits,
+  hasActiveTeamPendingReplyWait,
   getCurrentProvisioningProgressForTeam,
+  selectMemberMessagesForTeamMember,
+  selectResolvedMemberForTeamName,
+  selectResolvedMembersForTeamName,
 } from '../../../src/renderer/store/slices/teamSlice';
 
 const hoisted = vi.hoisted(() => ({
   list: vi.fn(),
   getData: vi.fn(),
+  getMessagesPage: vi.fn(),
+  getMemberActivityMeta: vi.fn(),
   createTeam: vi.fn(),
+  launchTeam: vi.fn(),
   getProvisioningStatus: vi.fn(),
   getMemberSpawnStatuses: vi.fn(),
+  getTeamAgentRuntime: vi.fn(),
   cancelProvisioning: vi.fn(),
   deleteTeam: vi.fn(),
   restoreTeam: vi.fn(),
   permanentlyDeleteTeam: vi.fn(),
   sendMessage: vi.fn(),
+  restartMember: vi.fn(),
   requestReview: vi.fn(),
   updateKanban: vi.fn(),
   invalidateTaskChangeSummaries: vi.fn(),
@@ -29,14 +40,19 @@ vi.mock('@renderer/api', () => ({
     teams: {
       list: hoisted.list,
       getData: hoisted.getData,
+      getMessagesPage: hoisted.getMessagesPage,
+      getMemberActivityMeta: hoisted.getMemberActivityMeta,
       createTeam: hoisted.createTeam,
+      launchTeam: hoisted.launchTeam,
       getProvisioningStatus: hoisted.getProvisioningStatus,
       getMemberSpawnStatuses: hoisted.getMemberSpawnStatuses,
+      getTeamAgentRuntime: hoisted.getTeamAgentRuntime,
       cancelProvisioning: hoisted.cancelProvisioning,
       deleteTeam: hoisted.deleteTeam,
       restoreTeam: hoisted.restoreTeam,
       permanentlyDeleteTeam: hoisted.permanentlyDeleteTeam,
       sendMessage: hoisted.sendMessage,
+      restartMember: hoisted.restartMember,
       requestReview: hoisted.requestReview,
       updateKanban: hoisted.updateKanban,
       onProvisioningProgress: hoisted.onProvisioningProgress,
@@ -87,6 +103,28 @@ function createSliceStore() {
   }));
 }
 
+function createTeamSnapshot(
+  overrides: Record<string, unknown> = {}
+): {
+  teamName: string;
+  config: { name: string; members?: unknown[]; projectPath?: string };
+  tasks: unknown[];
+  members: unknown[];
+  kanbanState: { teamName: string; reviewers: unknown[]; tasks: Record<string, unknown> };
+  processes: unknown[];
+  isAlive?: boolean;
+} {
+  return {
+    teamName: 'my-team',
+    config: { name: 'My Team' },
+    tasks: [],
+    members: [],
+    kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+    processes: [],
+    ...overrides,
+  };
+}
+
 function createMemberSpawnStatus(overrides: Record<string, unknown> = {}) {
   return {
     status: 'online',
@@ -125,24 +163,60 @@ function createMemberSpawnSnapshot(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createDeferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function createRuntimeSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    teamName: 'my-team',
+    updatedAt: '2026-03-12T10:00:00.000Z',
+    runId: 'runtime-run',
+    members: {
+      alice: {
+        memberName: 'alice',
+        alive: true,
+        restartable: true,
+        backendType: 'tmux',
+        pid: 4242,
+        runtimeModel: 'gpt-5.4-mini',
+        rssBytes: 256 * 1024 * 1024,
+        updatedAt: '2026-03-12T10:00:00.000Z',
+      },
+    },
+    ...overrides,
+  };
+}
+
 describe('teamSlice actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     __resetTeamSliceModuleStateForTests();
     hoisted.list.mockResolvedValue([]);
-    hoisted.getData.mockResolvedValue({
-      teamName: 'my-team',
-      config: { name: 'My Team' },
-      tasks: [],
-      members: [],
+    hoisted.getData.mockResolvedValue(createTeamSnapshot());
+    hoisted.getMessagesPage.mockResolvedValue({
       messages: [],
-      kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
-      processes: [],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-1',
+    });
+    hoisted.getMemberActivityMeta.mockResolvedValue({
+      teamName: 'my-team',
+      computedAt: '2026-03-12T10:00:00.000Z',
+      members: {},
+      feedRevision: 'rev-1',
     });
     hoisted.sendMessage.mockResolvedValue({ deliveredToInbox: true, messageId: 'm1' });
     hoisted.requestReview.mockResolvedValue(undefined);
     hoisted.updateKanban.mockResolvedValue(undefined);
     hoisted.createTeam.mockResolvedValue({ runId: 'run-1' });
+    hoisted.launchTeam.mockResolvedValue({ runId: 'run-1' });
     hoisted.invalidateTaskChangeSummaries.mockResolvedValue(undefined);
     hoisted.getProvisioningStatus.mockResolvedValue({
       runId: 'run-1',
@@ -153,10 +227,12 @@ describe('teamSlice actions', () => {
       updatedAt: new Date().toISOString(),
     });
     hoisted.getMemberSpawnStatuses.mockResolvedValue({ statuses: {}, runId: null });
+    hoisted.getTeamAgentRuntime.mockResolvedValue(createRuntimeSnapshot({ runId: null, members: {} }));
     hoisted.cancelProvisioning.mockResolvedValue(undefined);
     hoisted.deleteTeam.mockResolvedValue(undefined);
     hoisted.restoreTeam.mockResolvedValue(undefined);
     hoisted.permanentlyDeleteTeam.mockResolvedValue(undefined);
+    hoisted.restartMember.mockResolvedValue(undefined);
   });
 
   it('maps inbox verify failure to user-friendly text', async () => {
@@ -534,6 +610,899 @@ describe('teamSlice actions', () => {
     expect(updateTabLabel).toHaveBeenCalledWith('graph-tab', 'Northstar Graph');
   });
 
+  it('clears stale selectedTeamData immediately when selecting an uncached team', async () => {
+    const store = createSliceStore();
+    const nextTeamData = createDeferredPromise<ReturnType<typeof createTeamSnapshot>>();
+
+    store.setState({
+      selectedTeamName: 'alpha-team',
+      selectedTeamData: createTeamSnapshot({
+        teamName: 'alpha-team',
+        config: { name: 'Alpha Team' },
+      }),
+    });
+
+    hoisted.getData.mockImplementationOnce(async () => nextTeamData.promise);
+
+    const selectPromise = store.getState().selectTeam('beta-team');
+
+    expect(store.getState().selectedTeamName).toBe('beta-team');
+    expect(store.getState().selectedTeamLoading).toBe(true);
+    expect(store.getState().selectedTeamData).toBeNull();
+
+    nextTeamData.resolve(
+      createTeamSnapshot({
+        teamName: 'beta-team',
+        config: { name: 'Beta Team' },
+      })
+    );
+    await selectPromise;
+
+    expect(store.getState().selectedTeamData?.teamName).toBe('beta-team');
+  });
+
+  it('repoints selectedTeamData to the cached snapshot immediately on team switch', async () => {
+    const store = createSliceStore();
+    const nextTeamData = createDeferredPromise<ReturnType<typeof createTeamSnapshot>>();
+    const cachedBeta = createTeamSnapshot({
+      teamName: 'beta-team',
+      config: { name: 'Beta Team' },
+    });
+
+    store.setState({
+      selectedTeamName: 'alpha-team',
+      selectedTeamData: createTeamSnapshot({
+        teamName: 'alpha-team',
+        config: { name: 'Alpha Team' },
+      }),
+      teamDataCacheByName: {
+        'beta-team': cachedBeta,
+      },
+    });
+
+    hoisted.getData.mockImplementationOnce(async () => nextTeamData.promise);
+
+    const selectPromise = store.getState().selectTeam('beta-team');
+
+    expect(store.getState().selectedTeamName).toBe('beta-team');
+    expect(store.getState().selectedTeamData).toBe(cachedBeta);
+
+    nextTeamData.resolve(cachedBeta);
+    await selectPromise;
+
+    expect(store.getState().selectedTeamData).toBe(cachedBeta);
+  });
+
+  it('distinguishes historical feed changes from visible head changes in refreshTeamMessagesHead', async () => {
+    const store = createSliceStore();
+    const existingMessages = [
+      {
+        from: 'team-lead',
+        text: 'Stable head',
+        timestamp: '2026-03-20T08:00:00.000Z',
+        read: true,
+        source: 'lead_session',
+        messageId: 'msg-1',
+      },
+    ];
+
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: existingMessages,
+          optimisticMessages: [],
+          feedRevision: 'rev-1',
+          nextCursor: 'cursor-1',
+          hasMore: true,
+          lastFetchedAt: 123,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+    });
+
+    hoisted.getMessagesPage.mockResolvedValueOnce({
+      messages: existingMessages.map((message) => ({ ...message })),
+      nextCursor: 'cursor-1',
+      hasMore: true,
+      feedRevision: 'rev-2',
+    });
+
+    const result = await store.getState().refreshTeamMessagesHead('my-team');
+    const nextEntry = store.getState().teamMessagesByName['my-team'];
+
+    expect(result).toEqual({
+      feedChanged: true,
+      headChanged: false,
+      feedRevision: 'rev-2',
+    });
+    expect(nextEntry?.canonicalMessages).toBe(existingMessages);
+    expect(nextEntry?.feedRevision).toBe('rev-2');
+    expect(nextEntry?.nextCursor).toBe('cursor-1');
+    expect(nextEntry?.hasMore).toBe(true);
+  });
+
+  it('keeps loaded older tail when head refresh updates only the visible top slice', async () => {
+    const store = createSliceStore();
+    const existingMessages = [
+      {
+        from: 'team-lead',
+        text: 'Head 2',
+        timestamp: '2026-03-20T08:00:03.000Z',
+        read: true,
+        source: 'lead_session',
+        messageId: 'msg-4',
+      },
+      {
+        from: 'alice',
+        text: 'Head 1',
+        timestamp: '2026-03-20T08:00:02.000Z',
+        read: true,
+        source: 'inbox',
+        messageId: 'msg-3',
+      },
+      {
+        from: 'bob',
+        text: 'Older 1',
+        timestamp: '2026-03-20T08:00:01.000Z',
+        read: true,
+        source: 'inbox',
+        messageId: 'msg-2',
+      },
+      {
+        from: 'carol',
+        text: 'Older 2',
+        timestamp: '2026-03-20T08:00:00.000Z',
+        read: true,
+        source: 'inbox',
+        messageId: 'msg-1',
+      },
+    ];
+
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: existingMessages,
+          optimisticMessages: [],
+          feedRevision: 'rev-1',
+          nextCursor: 'cursor-tail',
+          hasMore: true,
+          lastFetchedAt: 123,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+    });
+
+    hoisted.getMessagesPage.mockResolvedValueOnce({
+      messages: [
+        {
+          from: 'team-lead',
+          text: 'Fresh head',
+          timestamp: '2026-03-20T08:00:04.000Z',
+          read: true,
+          source: 'lead_session',
+          messageId: 'msg-5',
+        },
+        existingMessages[0],
+        existingMessages[1],
+      ],
+      nextCursor: 'cursor-head',
+      hasMore: true,
+      feedRevision: 'rev-2',
+    });
+
+    const result = await store.getState().refreshTeamMessagesHead('my-team');
+    const nextEntry = store.getState().teamMessagesByName['my-team'];
+
+    expect(result).toEqual({
+      feedChanged: true,
+      headChanged: true,
+      feedRevision: 'rev-2',
+    });
+    expect(
+      nextEntry?.canonicalMessages.map((message: { messageId?: string }) => message.messageId)
+    ).toEqual([
+      'msg-5',
+      'msg-4',
+      'msg-3',
+      'msg-2',
+      'msg-1',
+    ]);
+    expect(nextEntry?.nextCursor).toBe('cursor-tail');
+    expect(nextEntry?.hasMore).toBe(true);
+  });
+
+  it('single-flights concurrent head refreshes and runs one fresh follow-up pass', async () => {
+    const store = createSliceStore();
+    const firstRequest = createDeferredPromise<{
+      messages: Array<{
+        from: string;
+        text: string;
+        timestamp: string;
+        read: boolean;
+        source: string;
+        messageId: string;
+      }>;
+      nextCursor: string | null;
+      hasMore: boolean;
+      feedRevision: string;
+    }>();
+
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [],
+          optimisticMessages: [],
+          feedRevision: null,
+          nextCursor: null,
+          hasMore: false,
+          lastFetchedAt: 0,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: false,
+        },
+      },
+    });
+
+    hoisted.getMessagesPage
+      .mockImplementationOnce(() => firstRequest.promise)
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            from: 'team-lead',
+            text: 'Newest head',
+            timestamp: '2026-03-20T08:00:01.000Z',
+            read: true,
+            source: 'lead_session',
+            messageId: 'msg-2',
+          },
+        ],
+        nextCursor: 'cursor-2',
+        hasMore: true,
+        feedRevision: 'rev-2',
+      });
+
+    const p1 = store.getState().refreshTeamMessagesHead('my-team');
+    const p2 = store.getState().refreshTeamMessagesHead('my-team');
+
+    expect(hoisted.getMessagesPage).toHaveBeenCalledTimes(1);
+
+    firstRequest.resolve({
+      messages: [
+        {
+          from: 'team-lead',
+          text: 'Old head',
+          timestamp: '2026-03-20T08:00:00.000Z',
+          read: true,
+          source: 'lead_session',
+          messageId: 'msg-1',
+        },
+      ],
+      nextCursor: 'cursor-1',
+      hasMore: true,
+      feedRevision: 'rev-1',
+    });
+
+    await p1;
+    await p2;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(hoisted.getMessagesPage).toHaveBeenCalledTimes(2);
+    expect(store.getState().teamMessagesByName['my-team']).toMatchObject({
+      feedRevision: 'rev-2',
+      nextCursor: 'cursor-2',
+      hasMore: true,
+      loadingHead: false,
+      headHydrated: true,
+    });
+    expect(store.getState().teamMessagesByName['my-team']?.canonicalMessages[0]?.messageId).toBe(
+      'msg-2'
+    );
+  });
+
+  it('serializes head refresh behind an in-flight older-page load', async () => {
+    const store = createSliceStore();
+    const olderRequest = createDeferredPromise<{
+      messages: Array<{
+        from: string;
+        text: string;
+        timestamp: string;
+        read: boolean;
+        source: string;
+        messageId: string;
+      }>;
+      nextCursor: string | null;
+      hasMore: boolean;
+      feedRevision: string;
+    }>();
+
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [
+            {
+              from: 'team-lead',
+              text: 'Head 1',
+              timestamp: '2026-03-20T08:00:02.000Z',
+              read: true,
+              source: 'lead_session',
+              messageId: 'msg-3',
+            },
+            {
+              from: 'alice',
+              text: 'Head 0',
+              timestamp: '2026-03-20T08:00:01.000Z',
+              read: true,
+              source: 'inbox',
+              messageId: 'msg-2',
+            },
+          ],
+          optimisticMessages: [],
+          feedRevision: 'rev-1',
+          nextCursor: 'cursor-older',
+          hasMore: true,
+          lastFetchedAt: 123,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+    });
+
+    hoisted.getMessagesPage
+      .mockImplementationOnce(() => olderRequest.promise)
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            from: 'team-lead',
+            text: 'Fresh head',
+            timestamp: '2026-03-20T08:00:03.000Z',
+            read: true,
+            source: 'lead_session',
+            messageId: 'msg-4',
+          },
+          {
+            from: 'team-lead',
+            text: 'Head 1',
+            timestamp: '2026-03-20T08:00:02.000Z',
+            read: true,
+            source: 'lead_session',
+            messageId: 'msg-3',
+          },
+        ],
+        nextCursor: 'cursor-head',
+        hasMore: true,
+        feedRevision: 'rev-2',
+      });
+
+    const olderPromise = store.getState().loadOlderTeamMessages('my-team');
+    const headPromise = store.getState().refreshTeamMessagesHead('my-team');
+
+    expect(hoisted.getMessagesPage).toHaveBeenCalledTimes(1);
+    expect(hoisted.getMessagesPage.mock.calls[0]).toEqual([
+      'my-team',
+      { cursor: 'cursor-older', limit: 50 },
+    ]);
+
+    olderRequest.resolve({
+      messages: [
+        {
+          from: 'bob',
+          text: 'Older tail',
+          timestamp: '2026-03-20T08:00:00.000Z',
+          read: true,
+          source: 'inbox',
+          messageId: 'msg-1',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-1',
+    });
+
+    await olderPromise;
+    await headPromise;
+
+    expect(hoisted.getMessagesPage).toHaveBeenCalledTimes(2);
+    expect(hoisted.getMessagesPage.mock.calls[1]).toEqual(['my-team', { limit: 50 }]);
+    expect(
+      store
+        .getState()
+        .teamMessagesByName['my-team']?.canonicalMessages.map(
+          (message: { messageId?: string }) => message.messageId
+        )
+    ).toEqual(['msg-4', 'msg-3', 'msg-2', 'msg-1']);
+  });
+
+  it('drops a queued head refresh behind an older-page load when launch invalidates the team epoch', async () => {
+    const store = createSliceStore();
+    const olderRequest = createDeferredPromise<{
+      messages: Array<{
+        from: string;
+        text: string;
+        timestamp: string;
+        read: boolean;
+        source: string;
+        messageId: string;
+      }>;
+      nextCursor: string | null;
+      hasMore: boolean;
+      feedRevision: string;
+    }>();
+
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [
+            {
+              from: 'team-lead',
+              text: 'Head 1',
+              timestamp: '2026-03-20T08:00:02.000Z',
+              read: true,
+              source: 'lead_session',
+              messageId: 'msg-3',
+            },
+            {
+              from: 'alice',
+              text: 'Head 0',
+              timestamp: '2026-03-20T08:00:01.000Z',
+              read: true,
+              source: 'inbox',
+              messageId: 'msg-2',
+            },
+          ],
+          optimisticMessages: [],
+          feedRevision: 'rev-1',
+          nextCursor: 'cursor-older',
+          hasMore: true,
+          lastFetchedAt: 123,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+    });
+
+    hoisted.getMessagesPage.mockImplementationOnce(() => olderRequest.promise);
+
+    const olderPromise = store.getState().loadOlderTeamMessages('my-team');
+    const queuedHeadPromise = store.getState().refreshTeamMessagesHead('my-team');
+
+    await Promise.resolve();
+    await store.getState().launchTeam({
+      teamName: 'my-team',
+      cwd: '/tmp/project',
+    });
+
+    olderRequest.resolve({
+      messages: [
+        {
+          from: 'bob',
+          text: 'Older tail',
+          timestamp: '2026-03-20T08:00:00.000Z',
+          read: true,
+          source: 'inbox',
+          messageId: 'msg-1',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-1',
+    });
+
+    await olderPromise;
+    await expect(queuedHeadPromise).resolves.toEqual({
+      feedChanged: false,
+      headChanged: false,
+      feedRevision: null,
+    });
+
+    expect(hoisted.getMessagesPage).toHaveBeenCalledTimes(1);
+    expect(store.getState().teamMessagesByName['my-team']?.feedRevision).toBe('rev-1');
+  });
+
+  it('does not continue an older-page fetch with a stale cursor after launch invalidates while waiting for head refresh', async () => {
+    const store = createSliceStore();
+    const headRequest = createDeferredPromise<{
+      messages: Array<{
+        from: string;
+        text: string;
+        timestamp: string;
+        read: boolean;
+        source: string;
+        messageId: string;
+      }>;
+      nextCursor: string | null;
+      hasMore: boolean;
+      feedRevision: string;
+    }>();
+
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [
+            {
+              from: 'team-lead',
+              text: 'Head 1',
+              timestamp: '2026-03-20T08:00:02.000Z',
+              read: true,
+              source: 'lead_session',
+              messageId: 'msg-3',
+            },
+          ],
+          optimisticMessages: [],
+          feedRevision: 'rev-1',
+          nextCursor: 'cursor-older',
+          hasMore: true,
+          lastFetchedAt: 123,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+    });
+
+    hoisted.getMessagesPage.mockImplementationOnce(() => headRequest.promise);
+
+    const headPromise = store.getState().refreshTeamMessagesHead('my-team');
+    const olderPromise = store.getState().loadOlderTeamMessages('my-team');
+
+    await Promise.resolve();
+    await store.getState().launchTeam({
+      teamName: 'my-team',
+      cwd: '/tmp/project',
+    });
+
+    headRequest.resolve({
+      messages: [
+        {
+          from: 'team-lead',
+          text: 'Fresh head',
+          timestamp: '2026-03-20T08:00:03.000Z',
+          read: true,
+          source: 'lead_session',
+          messageId: 'msg-4',
+        },
+      ],
+      nextCursor: 'cursor-head',
+      hasMore: true,
+      feedRevision: 'rev-2',
+    });
+
+    await headPromise;
+    await olderPromise;
+
+    expect(hoisted.getMessagesPage).toHaveBeenCalledTimes(1);
+    expect(store.getState().teamMessagesByName['my-team']?.feedRevision).toBe('rev-1');
+    expect(store.getState().teamMessagesByName['my-team']?.loadingOlder).toBe(false);
+  });
+
+  it('schedules pending-reply refresh through store-owned timers', async () => {
+    vi.useFakeTimers();
+    try {
+      const store = createSliceStore();
+      const refreshTeamMessagesHeadSpy = vi
+        .spyOn(store.getState(), 'refreshTeamMessagesHead')
+        .mockResolvedValue({
+          feedChanged: true,
+          headChanged: true,
+          feedRevision: 'rev-2',
+        });
+      const refreshMemberActivityMetaSpy = vi
+        .spyOn(store.getState(), 'refreshMemberActivityMeta')
+        .mockResolvedValue(undefined);
+
+      store.getState().syncTeamPendingReplyRefresh('my-team', 'tab-a', true, 1_000);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(refreshTeamMessagesHeadSpy).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(refreshTeamMessagesHeadSpy).toHaveBeenCalledTimes(1);
+      expect(refreshMemberActivityMetaSpy).toHaveBeenCalledTimes(1);
+
+      store.getState().syncTeamPendingReplyRefresh('my-team', 'tab-a', true, 1_000);
+      store.getState().syncTeamPendingReplyRefresh('my-team', 'tab-a', false);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(refreshTeamMessagesHeadSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps pending-reply refresh ownership active while another source still waits for the same team', () => {
+    const store = createSliceStore();
+
+    store.getState().syncTeamPendingReplyRefresh('my-team', 'tab-a', true, 1_000);
+    store.getState().syncTeamPendingReplyRefresh('my-team', 'tab-b', true, 1_000);
+    store.getState().syncTeamPendingReplyRefresh('my-team', 'tab-b', false);
+
+    expect(hasActiveTeamPendingReplyWait('my-team')).toBe(true);
+    expect(getActiveTeamPendingReplyWaits()).toEqual(new Set(['my-team']));
+
+    store.getState().syncTeamPendingReplyRefresh('my-team', 'tab-a', false);
+
+    expect(hasActiveTeamPendingReplyWait('my-team')).toBe(false);
+    expect(getActiveTeamPendingReplyWaits().size).toBe(0);
+  });
+
+  it('single-flights concurrent member activity refreshes and re-fetches after feed revision changes', async () => {
+    const store = createSliceStore();
+    const firstRequest = createDeferredPromise<{
+      teamName: string;
+      computedAt: string;
+      members: Record<string, unknown>;
+      feedRevision: string;
+    }>();
+
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [],
+          optimisticMessages: [],
+          feedRevision: 'rev-1',
+          nextCursor: null,
+          hasMore: false,
+          lastFetchedAt: 0,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+      memberActivityMetaByTeam: {},
+    });
+
+    hoisted.getMemberActivityMeta
+      .mockImplementationOnce(() => firstRequest.promise)
+      .mockResolvedValueOnce({
+        teamName: 'my-team',
+        computedAt: '2026-03-12T10:00:01.000Z',
+        members: {
+          alice: {
+            memberName: 'alice',
+            lastAuthoredMessageAt: '2026-03-12T10:00:01.000Z',
+            messageCountExact: 3,
+            latestAuthoredMessageSignalsTermination: false,
+          },
+        },
+        feedRevision: 'rev-2',
+      });
+
+    const p1 = store.getState().refreshMemberActivityMeta('my-team');
+
+    store.setState((state: any) => ({
+      teamMessagesByName: {
+        ...state.teamMessagesByName,
+        'my-team': {
+          ...state.teamMessagesByName['my-team'],
+          feedRevision: 'rev-2',
+        },
+      },
+    }));
+
+    const p2 = store.getState().refreshMemberActivityMeta('my-team');
+
+    expect(hoisted.getMemberActivityMeta).toHaveBeenCalledTimes(1);
+
+    firstRequest.resolve({
+      teamName: 'my-team',
+      computedAt: '2026-03-12T10:00:00.000Z',
+      members: {
+        alice: {
+          memberName: 'alice',
+          lastAuthoredMessageAt: '2026-03-12T10:00:00.000Z',
+          messageCountExact: 2,
+          latestAuthoredMessageSignalsTermination: false,
+        },
+      },
+      feedRevision: 'rev-1',
+    });
+
+    await p1;
+    await p2;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(hoisted.getMemberActivityMeta).toHaveBeenCalledTimes(2);
+    expect(store.getState().memberActivityMetaByTeam['my-team']).toMatchObject({
+      feedRevision: 'rev-2',
+      members: {
+        alice: {
+          messageCountExact: 3,
+        },
+      },
+    });
+  });
+
+  it('reuses member activity facts and resolved member refs when only meta wrapper fields change', async () => {
+    const store = createSliceStore();
+    const initialMetaMembers = {
+      alice: {
+        memberName: 'alice',
+        lastAuthoredMessageAt: '2026-03-12T10:00:00.000Z',
+        messageCountExact: 2,
+        latestAuthoredMessageSignalsTermination: false,
+      },
+    };
+
+    store.setState({
+      selectedTeamName: 'my-team',
+      selectedTeamData: createTeamSnapshot({
+        members: [
+          {
+            name: 'alice',
+            currentTaskId: null,
+            taskCount: 0,
+          },
+        ],
+      }),
+      teamDataCacheByName: {
+        'my-team': createTeamSnapshot({
+          members: [
+            {
+              name: 'alice',
+              currentTaskId: null,
+              taskCount: 0,
+            },
+          ],
+        }),
+      },
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [],
+          optimisticMessages: [],
+          feedRevision: 'rev-2',
+          nextCursor: null,
+          hasMore: false,
+          lastFetchedAt: 0,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+      memberActivityMetaByTeam: {
+        'my-team': {
+          teamName: 'my-team',
+          computedAt: '2026-03-12T10:00:00.000Z',
+          members: initialMetaMembers,
+          feedRevision: 'rev-1',
+        },
+      },
+      leadActivityByTeam: {
+        'my-team': 'active',
+      },
+      leadContextByTeam: {
+        'my-team': {
+          currentTokens: 12,
+          contextWindow: 100,
+          percent: 12,
+          updatedAt: '2026-03-12T10:00:00.000Z',
+        },
+      },
+      memberSpawnStatusesByTeam: {
+        'my-team': {
+          alice: createMemberSpawnStatus(),
+        },
+      },
+      memberSpawnSnapshotsByTeam: {
+        'my-team': createMemberSpawnSnapshot(),
+      },
+    });
+
+    const initialResolvedMembers = selectResolvedMembersForTeamName(store.getState(), 'my-team');
+
+    hoisted.getMemberActivityMeta.mockResolvedValueOnce({
+      teamName: 'my-team',
+      computedAt: '2026-03-12T10:00:05.000Z',
+      members: {
+        alice: {
+          memberName: 'alice',
+          lastAuthoredMessageAt: '2026-03-12T10:00:00.000Z',
+          messageCountExact: 2,
+          latestAuthoredMessageSignalsTermination: false,
+        },
+      },
+      feedRevision: 'rev-2',
+    });
+
+    await store.getState().refreshMemberActivityMeta('my-team');
+
+    const nextMeta = store.getState().memberActivityMetaByTeam['my-team'];
+    const nextResolvedMembers = selectResolvedMembersForTeamName(store.getState(), 'my-team');
+
+    expect(nextMeta?.feedRevision).toBe('rev-2');
+    expect(nextMeta?.members).toBe(initialMetaMembers);
+    expect(nextResolvedMembers).toBe(initialResolvedMembers);
+  });
+
+  it('memoizes team-scoped member messages selectors over the merged message feed', () => {
+    const store = createSliceStore();
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [
+            {
+              from: 'team-lead',
+              to: 'alice',
+              text: 'Ping Alice',
+              summary: 'Ping Alice',
+              timestamp: '2026-03-12T10:00:00.000Z',
+              read: false,
+              messageId: 'msg-1',
+            },
+            {
+              from: 'team-lead',
+              to: 'bob',
+              text: 'Ping Bob',
+              summary: 'Ping Bob',
+              timestamp: '2026-03-12T10:00:01.000Z',
+              read: false,
+              messageId: 'msg-2',
+            },
+          ],
+          optimisticMessages: [],
+          feedRevision: 'rev-1',
+          nextCursor: null,
+          hasMore: false,
+          lastFetchedAt: 0,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+    });
+
+    const first = selectMemberMessagesForTeamMember(store.getState(), 'my-team', 'alice');
+    const second = selectMemberMessagesForTeamMember(store.getState(), 'my-team', 'alice');
+
+    expect(first).toBe(second);
+    expect(first.map((message) => message.messageId)).toEqual(['msg-1']);
+
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [
+            {
+              from: 'team-lead',
+              to: 'alice',
+              text: 'Ping Alice',
+              summary: 'Ping Alice',
+              timestamp: '2026-03-12T10:00:00.000Z',
+              read: false,
+              messageId: 'msg-1',
+            },
+            {
+              from: 'alice',
+              to: 'team-lead',
+              text: 'Reply from Alice',
+              summary: 'Reply from Alice',
+              timestamp: '2026-03-12T10:00:02.000Z',
+              read: false,
+              messageId: 'msg-3',
+            },
+          ],
+          optimisticMessages: [],
+          feedRevision: 'rev-2',
+          nextCursor: null,
+          hasMore: false,
+          lastFetchedAt: 1,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+    });
+
+    const third = selectMemberMessagesForTeamMember(store.getState(), 'my-team', 'alice');
+    expect(third).not.toBe(first);
+    expect(third.map((message) => message.messageId)).toEqual(['msg-3', 'msg-1']);
+  });
+
   it('removes non-selected team cache entries on permanent delete', async () => {
     const store = createSliceStore();
     store.setState({
@@ -543,7 +1512,6 @@ describe('teamSlice actions', () => {
         config: { name: 'Other Team' },
         tasks: [],
         members: [],
-        messages: [],
         kanbanState: { teamName: 'other-team', reviewers: [], tasks: {} },
         processes: [],
       },
@@ -553,7 +1521,6 @@ describe('teamSlice actions', () => {
           config: { name: 'My Team' },
           tasks: [],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
           processes: [],
         },
@@ -562,7 +1529,6 @@ describe('teamSlice actions', () => {
           config: { name: 'Other Team' },
           tasks: [],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'other-team', reviewers: [], tasks: {} },
           processes: [],
         },
@@ -585,7 +1551,6 @@ describe('teamSlice actions', () => {
         config: { name: 'My Team' },
         tasks: [],
         members: [],
-        messages: [],
         kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
         processes: [],
       },
@@ -595,7 +1560,6 @@ describe('teamSlice actions', () => {
           config: { name: 'My Team' },
           tasks: [],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
           processes: [],
         },
@@ -619,7 +1583,6 @@ describe('teamSlice actions', () => {
           config: { name: 'My Team' },
           tasks: [],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
           processes: [],
         },
@@ -630,6 +1593,845 @@ describe('teamSlice actions', () => {
 
     expect(hoisted.restoreTeam).toHaveBeenCalledWith('my-team');
     expect(store.getState().teamDataCacheByName['my-team']).toBeUndefined();
+  });
+
+  it('clears team-scoped selector and transient caches on delete and restore flows', async () => {
+    const store = createSliceStore();
+    const message = {
+      from: 'alice',
+      to: 'team-lead',
+      text: 'hello',
+      timestamp: '2026-03-12T10:00:00.000Z',
+      messageId: 'm-1',
+      source: 'inbox' as const,
+    };
+
+    store.setState({
+      selectedTeamName: 'my-team',
+      selectedTeamData: createTeamSnapshot({
+        members: [
+          {
+            name: 'alice',
+            role: 'developer',
+            currentTaskId: null,
+          },
+        ],
+      }),
+      teamDataCacheByName: {
+        'my-team': createTeamSnapshot({
+          members: [
+            {
+              name: 'alice',
+              role: 'developer',
+              currentTaskId: null,
+            },
+          ],
+        }),
+      },
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [message],
+          optimisticMessages: [],
+          nextCursor: null,
+          hasMore: false,
+          feedRevision: 'rev-1',
+          lastFetchedAt: Date.now(),
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+      memberActivityMetaByTeam: {
+        'my-team': {
+          teamName: 'my-team',
+          computedAt: '2026-03-12T10:00:00.000Z',
+          feedRevision: 'rev-1',
+          members: {
+            alice: {
+              memberName: 'alice',
+              lastAuthoredMessageAt: '2026-03-12T10:00:00.000Z',
+              messageCountExact: 1,
+              latestAuthoredMessageSignalsTermination: false,
+            },
+          },
+        },
+      },
+    });
+
+    selectResolvedMembersForTeamName(store.getState(), 'my-team');
+    selectResolvedMemberForTeamName(store.getState(), 'my-team', 'alice');
+    selectMemberMessagesForTeamMember(store.getState(), 'my-team', 'alice');
+
+    await store.getState().refreshTeamData('my-team', { withDedup: false });
+    store.getState().syncTeamPendingReplyRefresh('my-team', 'test-source', true);
+
+    expect(__getTeamScopedTransientStateForTests('my-team')).toMatchObject({
+      hasResolvedMembersSelector: true,
+      resolvedMemberSelectorCount: 1,
+      hasMergedMessagesSelector: true,
+      memberMessagesSelectorCount: 1,
+      hasLastResolvedTeamDataRefresh: true,
+    });
+
+    await store.getState().deleteTeam('my-team');
+
+    expect(__getTeamScopedTransientStateForTests('my-team')).toEqual({
+      hasResolvedMembersSelector: false,
+      resolvedMemberSelectorCount: 0,
+      hasMergedMessagesSelector: false,
+      memberMessagesSelectorCount: 0,
+      hasPendingFreshTeamDataRefresh: false,
+      hasQueuedHeadRefreshAfterOlder: false,
+      hasPendingFreshMessagesHeadRefresh: false,
+      hasPendingFreshMemberActivityMetaRefresh: false,
+      hasLastResolvedTeamDataRefresh: false,
+      hasCurrentLocalStateEpoch: true,
+      hasMemberSpawnStatusesIpcBackoff: false,
+      hasTeamRefreshBurstDiagnostics: false,
+      hasMemberSpawnUiEqualLastWarn: false,
+    });
+    expect(store.getState().leadActivityByTeam['my-team']).toBeUndefined();
+    expect(store.getState().leadContextByTeam['my-team']).toBeUndefined();
+    expect(store.getState().memberSpawnStatusesByTeam['my-team']).toBeUndefined();
+    expect(store.getState().memberSpawnSnapshotsByTeam['my-team']).toBeUndefined();
+
+    store.setState({
+      teamDataCacheByName: {
+        'my-team': createTeamSnapshot({
+          members: [
+            {
+              name: 'alice',
+              role: 'developer',
+              currentTaskId: null,
+            },
+          ],
+        }),
+      },
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [message],
+          optimisticMessages: [],
+          nextCursor: null,
+          hasMore: false,
+          feedRevision: 'rev-1',
+          lastFetchedAt: Date.now(),
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+      memberActivityMetaByTeam: {
+        'my-team': {
+          teamName: 'my-team',
+          computedAt: '2026-03-12T10:00:00.000Z',
+          feedRevision: 'rev-1',
+          members: {
+            alice: {
+              memberName: 'alice',
+              lastAuthoredMessageAt: '2026-03-12T10:00:00.000Z',
+              messageCountExact: 1,
+              latestAuthoredMessageSignalsTermination: false,
+            },
+          },
+        },
+      },
+      leadActivityByTeam: {
+        'my-team': 'active',
+      },
+      leadContextByTeam: {
+        'my-team': {
+          currentTokens: 12,
+          contextWindow: 100,
+          percent: 12,
+          updatedAt: '2026-03-12T10:00:00.000Z',
+        },
+      },
+      memberSpawnStatusesByTeam: {
+        'my-team': {
+          alice: createMemberSpawnStatus(),
+        },
+      },
+      memberSpawnSnapshotsByTeam: {
+        'my-team': createMemberSpawnSnapshot(),
+      },
+    });
+    selectResolvedMembersForTeamName(store.getState(), 'my-team');
+    selectResolvedMemberForTeamName(store.getState(), 'my-team', 'alice');
+    selectMemberMessagesForTeamMember(store.getState(), 'my-team', 'alice');
+
+    expect(__getTeamScopedTransientStateForTests('my-team')).toMatchObject({
+      hasResolvedMembersSelector: true,
+      resolvedMemberSelectorCount: 1,
+      hasMergedMessagesSelector: true,
+      memberMessagesSelectorCount: 1,
+    });
+
+    await store.getState().restoreTeam('my-team');
+
+    expect(__getTeamScopedTransientStateForTests('my-team')).toEqual({
+      hasResolvedMembersSelector: false,
+      resolvedMemberSelectorCount: 0,
+      hasMergedMessagesSelector: false,
+      memberMessagesSelectorCount: 0,
+      hasPendingFreshTeamDataRefresh: false,
+      hasQueuedHeadRefreshAfterOlder: false,
+      hasPendingFreshMessagesHeadRefresh: false,
+      hasPendingFreshMemberActivityMetaRefresh: false,
+      hasLastResolvedTeamDataRefresh: false,
+      hasCurrentLocalStateEpoch: true,
+      hasMemberSpawnStatusesIpcBackoff: false,
+      hasTeamRefreshBurstDiagnostics: false,
+      hasMemberSpawnUiEqualLastWarn: false,
+    });
+    expect(store.getState().leadActivityByTeam['my-team']).toBeUndefined();
+    expect(store.getState().leadContextByTeam['my-team']).toBeUndefined();
+    expect(store.getState().memberSpawnStatusesByTeam['my-team']).toBeUndefined();
+    expect(store.getState().memberSpawnSnapshotsByTeam['my-team']).toBeUndefined();
+  });
+
+  it('ignores stale async team snapshot and message refreshes after delete invalidates the team', async () => {
+    const store = createSliceStore();
+    const deferredData = createDeferredPromise<ReturnType<typeof createTeamSnapshot>>();
+    const deferredMessages = createDeferredPromise<{
+      messages: Array<{
+        from: string;
+        text: string;
+        timestamp: string;
+        messageId: string;
+        source: 'inbox';
+      }>;
+      nextCursor: null;
+      hasMore: false;
+      feedRevision: string;
+    }>();
+    const deferredMeta = createDeferredPromise<{
+      teamName: string;
+      computedAt: string;
+      feedRevision: string;
+      members: Record<
+        string,
+        {
+          memberName: string;
+          lastAuthoredMessageAt: string | null;
+          messageCountExact: number;
+          latestAuthoredMessageSignalsTermination: boolean;
+        }
+      >;
+    }>();
+
+    hoisted.getData.mockImplementation(() => deferredData.promise);
+    hoisted.getMessagesPage.mockImplementation(() => deferredMessages.promise);
+    hoisted.getMemberActivityMeta.mockImplementation(() => deferredMeta.promise);
+
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [],
+          optimisticMessages: [],
+          nextCursor: null,
+          hasMore: false,
+          feedRevision: 'rev-0',
+          lastFetchedAt: Date.now(),
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+    });
+
+    const refreshDataPromise = store.getState().refreshTeamData('my-team', { withDedup: false });
+    const refreshMessagesPromise = store.getState().refreshTeamMessagesHead('my-team');
+    const refreshMetaPromise = store.getState().refreshMemberActivityMeta('my-team');
+
+    await Promise.resolve();
+    await store.getState().deleteTeam('my-team');
+
+    deferredData.resolve(
+      createTeamSnapshot({
+        members: [{ name: 'alice', role: 'developer', currentTaskId: null }],
+      })
+    );
+    deferredMessages.resolve({
+      messages: [
+        {
+          from: 'alice',
+          text: 'late-message',
+          timestamp: '2026-03-12T10:00:00.000Z',
+          messageId: 'late-1',
+          source: 'inbox',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-late',
+    });
+    deferredMeta.resolve({
+      teamName: 'my-team',
+      computedAt: '2026-03-12T10:00:00.000Z',
+      feedRevision: 'rev-late',
+      members: {
+        alice: {
+          memberName: 'alice',
+          lastAuthoredMessageAt: '2026-03-12T10:00:00.000Z',
+          messageCountExact: 1,
+          latestAuthoredMessageSignalsTermination: false,
+        },
+      },
+    });
+
+    await Promise.all([refreshDataPromise, refreshMessagesPromise, refreshMetaPromise]);
+
+    expect(store.getState().teamDataCacheByName['my-team']).toBeUndefined();
+    expect(store.getState().teamMessagesByName['my-team']).toBeUndefined();
+    expect(store.getState().memberActivityMetaByTeam['my-team']).toBeUndefined();
+  });
+
+  it('ignores stale async team refreshes after launch starts a new local epoch for the same team', async () => {
+    const store = createSliceStore();
+    const existingData = createTeamSnapshot({
+      config: { name: 'My Team Before Launch' },
+      members: [{ name: 'lead', role: 'lead', currentTaskId: null }],
+    });
+    const existingMeta: {
+      teamName: string;
+      computedAt: string;
+      feedRevision: string;
+      members: Record<
+        string,
+        {
+          memberName: string;
+          lastAuthoredMessageAt: string | null;
+          messageCountExact: number;
+          latestAuthoredMessageSignalsTermination: boolean;
+        }
+      >;
+    } = {
+      teamName: 'my-team',
+      computedAt: '2026-03-12T09:59:00.000Z',
+      feedRevision: 'rev-0',
+      members: {
+        lead: {
+          memberName: 'lead',
+          lastAuthoredMessageAt: '2026-03-12T09:59:00.000Z',
+          messageCountExact: 1,
+          latestAuthoredMessageSignalsTermination: false,
+        },
+      },
+    };
+    const deferredData = createDeferredPromise<ReturnType<typeof createTeamSnapshot>>();
+    const deferredMessages = createDeferredPromise<{
+      messages: Array<{
+        from: string;
+        text: string;
+        timestamp: string;
+        messageId: string;
+        source: 'inbox';
+      }>;
+      nextCursor: null;
+      hasMore: false;
+      feedRevision: string;
+    }>();
+    const deferredMeta = createDeferredPromise<typeof existingMeta>();
+
+    hoisted.getData.mockImplementation(() => deferredData.promise);
+    hoisted.getMessagesPage.mockImplementation(() => deferredMessages.promise);
+    hoisted.getMemberActivityMeta.mockImplementation(() => deferredMeta.promise);
+
+    store.setState({
+      selectedTeamName: 'my-team',
+      selectedTeamData: existingData,
+      teamDataCacheByName: {
+        'my-team': existingData,
+      },
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [],
+          optimisticMessages: [],
+          nextCursor: null,
+          hasMore: false,
+          feedRevision: 'rev-0',
+          lastFetchedAt: Date.now(),
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+      memberActivityMetaByTeam: {
+        'my-team': existingMeta,
+      },
+    });
+
+    const refreshDataPromise = store.getState().refreshTeamData('my-team', { withDedup: false });
+    const refreshMessagesPromise = store.getState().refreshTeamMessagesHead('my-team');
+    const refreshMetaPromise = store.getState().refreshMemberActivityMeta('my-team');
+
+    await Promise.resolve();
+    await store.getState().launchTeam({
+      teamName: 'my-team',
+      cwd: '/tmp/project',
+    });
+
+    expect(store.getState().teamMessagesByName['my-team']?.loadingHead).toBe(false);
+
+    deferredData.resolve(
+      createTeamSnapshot({
+        config: { name: 'My Team Stale After Launch' },
+        members: [{ name: 'alice', role: 'reviewer', currentTaskId: null }],
+      })
+    );
+    deferredMessages.resolve({
+      messages: [
+        {
+          from: 'alice',
+          text: 'stale-after-launch',
+          timestamp: '2026-03-12T10:00:00.000Z',
+          messageId: 'stale-after-launch-1',
+          source: 'inbox',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-stale-after-launch',
+    });
+    deferredMeta.resolve({
+      teamName: 'my-team',
+      computedAt: '2026-03-12T10:00:00.000Z',
+      feedRevision: 'rev-stale-after-launch',
+      members: {
+        alice: {
+          memberName: 'alice',
+          lastAuthoredMessageAt: '2026-03-12T10:00:00.000Z',
+          messageCountExact: 3,
+          latestAuthoredMessageSignalsTermination: false,
+        },
+      },
+    });
+
+    await Promise.all([refreshDataPromise, refreshMessagesPromise, refreshMetaPromise]);
+
+    expect(store.getState().selectedTeamData).toBe(existingData);
+    expect(store.getState().teamDataCacheByName['my-team']).toBe(existingData);
+    expect(store.getState().teamMessagesByName['my-team']?.feedRevision).toBe('rev-0');
+    expect(store.getState().memberActivityMetaByTeam['my-team']).toEqual(existingMeta);
+  });
+
+  it('clears stale selectedTeamLoading when launch invalidates an in-flight selectTeam request', async () => {
+    const store = createSliceStore();
+    const existingData = createTeamSnapshot({
+      config: { name: 'My Team Cached' },
+      members: [{ name: 'lead', role: 'lead', currentTaskId: null }],
+    });
+    const deferredData = createDeferredPromise<ReturnType<typeof createTeamSnapshot>>();
+
+    hoisted.getData.mockImplementationOnce(() => deferredData.promise);
+
+    store.setState({
+      teamDataCacheByName: {
+        'my-team': existingData,
+      },
+    });
+
+    const selectPromise = store.getState().selectTeam('my-team');
+    await Promise.resolve();
+
+    expect(store.getState().selectedTeamLoading).toBe(true);
+    expect(store.getState().selectedTeamData).toEqual(existingData);
+
+    await store.getState().launchTeam({
+      teamName: 'my-team',
+      cwd: '/tmp/project',
+    });
+
+    expect(store.getState().selectedTeamLoading).toBe(false);
+    expect(store.getState().selectedTeamError).toBeNull();
+    expect(store.getState().selectedTeamData).toEqual(existingData);
+
+    deferredData.resolve(
+      createTeamSnapshot({
+        config: { name: 'My Team Stale Select' },
+        members: [{ name: 'alice', role: 'reviewer', currentTaskId: null }],
+      })
+    );
+    await selectPromise;
+
+    expect(store.getState().selectedTeamLoading).toBe(false);
+    expect(store.getState().selectedTeamData).toEqual(existingData);
+  });
+
+  it('clears stale loadingOlder when launch invalidates an in-flight older messages request', async () => {
+    const store = createSliceStore();
+    const olderRequest = createDeferredPromise<{
+      messages: Array<{
+        from: string;
+        text: string;
+        timestamp: string;
+        read: boolean;
+        source: string;
+        messageId: string;
+      }>;
+      nextCursor: string | null;
+      hasMore: boolean;
+      feedRevision: string;
+    }>();
+
+    store.setState({
+      teamMessagesByName: {
+        'my-team': {
+          canonicalMessages: [],
+          optimisticMessages: [],
+          feedRevision: 'rev-1',
+          nextCursor: 'cursor-older',
+          hasMore: true,
+          lastFetchedAt: 123,
+          loadingHead: false,
+          loadingOlder: false,
+          headHydrated: true,
+        },
+      },
+    });
+
+    hoisted.getMessagesPage.mockImplementationOnce(() => olderRequest.promise);
+
+    const olderPromise = store.getState().loadOlderTeamMessages('my-team');
+    await Promise.resolve();
+    expect(store.getState().teamMessagesByName['my-team']?.loadingOlder).toBe(true);
+
+    await store.getState().launchTeam({
+      teamName: 'my-team',
+      cwd: '/tmp/project',
+    });
+
+    expect(store.getState().teamMessagesByName['my-team']?.loadingOlder).toBe(false);
+
+    olderRequest.resolve({
+      messages: [
+        {
+          from: 'bob',
+          text: 'Older tail',
+          timestamp: '2026-03-20T08:00:00.000Z',
+          read: true,
+          source: 'inbox',
+          messageId: 'msg-1',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-1',
+    });
+
+    await olderPromise;
+    expect(store.getState().teamMessagesByName['my-team']?.loadingOlder).toBe(false);
+  });
+
+  it('ignores stale refreshTeamData failures after launch starts a new local epoch', async () => {
+    const store = createSliceStore();
+    const existingData = createTeamSnapshot({
+      config: { name: 'My Team Stable' },
+      members: [{ name: 'lead', role: 'lead', currentTaskId: null }],
+    });
+    const deferredData = createDeferredPromise<ReturnType<typeof createTeamSnapshot>>();
+
+    hoisted.getData.mockImplementation(() => deferredData.promise);
+
+    store.setState({
+      selectedTeamName: 'my-team',
+      selectedTeamData: existingData,
+      teamDataCacheByName: {
+        'my-team': existingData,
+      },
+      selectedTeamError: null,
+    });
+
+    const refreshPromise = store.getState().refreshTeamData('my-team', { withDedup: false });
+    await Promise.resolve();
+    await store.getState().launchTeam({
+      teamName: 'my-team',
+      cwd: '/tmp/project',
+    });
+
+    deferredData.reject(new Error('TEAM_DRAFT'));
+    await refreshPromise;
+
+    expect(store.getState().selectedTeamData).toBe(existingData);
+    expect(store.getState().teamDataCacheByName['my-team']).toBe(existingData);
+    expect(store.getState().selectedTeamError).toBeNull();
+  });
+
+  it('keeps the newer messages-head request pinned when a stale pre-launch request settles', async () => {
+    const store = createSliceStore();
+    const deferredOld = createDeferredPromise<{
+      messages: Array<{
+        from: string;
+        text: string;
+        timestamp: string;
+        messageId: string;
+        source: 'inbox';
+      }>;
+      nextCursor: null;
+      hasMore: false;
+      feedRevision: string;
+    }>();
+    const deferredNew = createDeferredPromise<{
+      messages: Array<{
+        from: string;
+        text: string;
+        timestamp: string;
+        messageId: string;
+        source: 'inbox';
+      }>;
+      nextCursor: null;
+      hasMore: false;
+      feedRevision: string;
+    }>();
+
+    hoisted.getMessagesPage
+      .mockImplementationOnce(() => deferredOld.promise)
+      .mockImplementationOnce(() => deferredNew.promise);
+
+    const firstPromise = store.getState().refreshTeamMessagesHead('my-team');
+    await Promise.resolve();
+    await store.getState().launchTeam({
+      teamName: 'my-team',
+      cwd: '/tmp/project',
+    });
+
+    const secondPromise = store.getState().refreshTeamMessagesHead('my-team');
+    await Promise.resolve();
+
+    deferredOld.reject(new Error('stale head failed'));
+    await expect(firstPromise).resolves.toEqual({
+      feedChanged: false,
+      headChanged: false,
+      feedRevision: null,
+    });
+
+    expect(hoisted.getMessagesPage).toHaveBeenCalledTimes(2);
+
+    deferredNew.resolve({
+      messages: [
+        {
+          from: 'bob',
+          text: 'fresh-after-launch',
+          timestamp: '2026-03-12T10:00:01.000Z',
+          messageId: 'fresh-after-launch-1',
+          source: 'inbox',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-fresh-after-launch',
+    });
+
+    await secondPromise;
+
+    expect(store.getState().teamMessagesByName['my-team']?.feedRevision).toBe(
+      'rev-fresh-after-launch'
+    );
+  });
+
+  it('does not reuse a pre-delete in-flight team snapshot request after the same team is reselected', async () => {
+    const store = createSliceStore();
+    const deferredOld = createDeferredPromise<ReturnType<typeof createTeamSnapshot>>();
+    const freshSnapshot = createTeamSnapshot({
+      config: { name: 'My Team Reloaded' },
+      members: [{ name: 'bob', role: 'developer', currentTaskId: null }],
+    });
+
+    hoisted.getData
+      .mockImplementationOnce(() => deferredOld.promise)
+      .mockResolvedValueOnce(freshSnapshot);
+
+    const firstSelectPromise = store.getState().selectTeam('my-team');
+    await Promise.resolve();
+    await store.getState().deleteTeam('my-team');
+
+    const secondSelectPromise = store.getState().selectTeam('my-team');
+    await secondSelectPromise;
+
+    expect(hoisted.getData).toHaveBeenCalledTimes(2);
+    expect(store.getState().selectedTeamData).toEqual(freshSnapshot);
+
+    deferredOld.resolve(
+      createTeamSnapshot({
+        config: { name: 'My Team Stale' },
+        members: [{ name: 'alice', role: 'reviewer', currentTaskId: null }],
+      })
+    );
+    await firstSelectPromise;
+
+    expect(store.getState().selectedTeamData).toEqual(freshSnapshot);
+  });
+
+  it('does not reuse a pre-delete in-flight messages head request after the same team is reselected', async () => {
+    const store = createSliceStore();
+    const deferredOld = createDeferredPromise<{
+      messages: Array<{
+        from: string;
+        text: string;
+        timestamp: string;
+        messageId: string;
+        source: 'inbox';
+      }>;
+      nextCursor: null;
+      hasMore: false;
+      feedRevision: string;
+    }>();
+
+    hoisted.getMessagesPage
+      .mockImplementationOnce(() => deferredOld.promise)
+      .mockResolvedValueOnce({
+        messages: [
+          {
+            from: 'bob',
+            text: 'fresh-message',
+            timestamp: '2026-03-12T10:00:01.000Z',
+            messageId: 'fresh-1',
+            source: 'inbox',
+          },
+        ],
+        nextCursor: null,
+        hasMore: false,
+        feedRevision: 'rev-fresh',
+      });
+
+    const firstHeadPromise = store.getState().refreshTeamMessagesHead('my-team');
+    await Promise.resolve();
+    await store.getState().deleteTeam('my-team');
+
+    const secondHeadPromise = store.getState().refreshTeamMessagesHead('my-team');
+    await secondHeadPromise;
+
+    expect(hoisted.getMessagesPage).toHaveBeenCalledTimes(2);
+    expect(store.getState().teamMessagesByName['my-team']?.feedRevision).toBe('rev-fresh');
+    expect(store.getState().teamMessagesByName['my-team']?.canonicalMessages).toEqual([
+      {
+        from: 'bob',
+        text: 'fresh-message',
+        timestamp: '2026-03-12T10:00:01.000Z',
+        messageId: 'fresh-1',
+        source: 'inbox',
+      },
+    ]);
+
+    deferredOld.resolve({
+      messages: [
+        {
+          from: 'alice',
+          text: 'stale-message',
+          timestamp: '2026-03-12T10:00:00.000Z',
+          messageId: 'stale-1',
+          source: 'inbox',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-stale',
+    });
+    await firstHeadPromise;
+
+    expect(store.getState().teamMessagesByName['my-team']?.feedRevision).toBe('rev-fresh');
+  });
+
+  it('tombstones current progress runs when delete clears a team so late progress cannot resurrect it', async () => {
+    const store = createSliceStore();
+    store.setState({
+      provisioningRuns: {
+        'run-live': {
+          runId: 'run-live',
+          teamName: 'my-team',
+          state: 'assembling',
+          message: 'Live run',
+          startedAt: '2026-03-12T10:00:00.000Z',
+          updatedAt: '2026-03-12T10:00:00.000Z',
+        },
+      },
+      currentProvisioningRunIdByTeam: {
+        'my-team': 'run-live',
+      },
+      currentRuntimeRunIdByTeam: {
+        'my-team': 'run-live',
+      },
+      provisioningStartedAtFloorByTeam: {
+        'my-team': '2026-03-12T10:00:00.000Z',
+      },
+    });
+
+    await store.getState().deleteTeam('my-team');
+
+    expect(store.getState().ignoredProvisioningRunIds['run-live']).toBe('my-team');
+    expect(store.getState().ignoredRuntimeRunIds['run-live']).toBe('my-team');
+    expect(store.getState().provisioningStartedAtFloorByTeam['my-team']).toBeTruthy();
+
+    store.getState().onProvisioningProgress({
+      runId: 'run-live',
+      teamName: 'my-team',
+      state: 'ready',
+      message: 'Late zombie progress',
+      startedAt: '2026-03-12T10:00:00.000Z',
+      updatedAt: '2026-03-12T10:00:05.000Z',
+    });
+
+    expect(store.getState().provisioningRuns['run-live']).toBeUndefined();
+    expect(store.getState().currentProvisioningRunIdByTeam['my-team']).toBeUndefined();
+    expect(store.getState().currentRuntimeRunIdByTeam['my-team']).toBeUndefined();
+  });
+
+  it('stores runtime snapshots and suppresses semantic no-op refreshes', async () => {
+    const store = createSliceStore();
+    const snapshot = createRuntimeSnapshot();
+    hoisted.getTeamAgentRuntime.mockResolvedValue(snapshot);
+
+    await store.getState().fetchTeamAgentRuntime('my-team');
+    const firstSnapshot = store.getState().teamAgentRuntimeByTeam['my-team'];
+
+    expect(firstSnapshot).toEqual(snapshot);
+
+    hoisted.getTeamAgentRuntime.mockResolvedValue({
+      ...snapshot,
+      updatedAt: '2026-03-12T10:00:05.000Z',
+      members: {
+        alice: {
+          ...snapshot.members.alice,
+          updatedAt: '2026-03-12T10:00:05.000Z',
+        },
+      },
+    });
+
+    await store.getState().fetchTeamAgentRuntime('my-team');
+
+    expect(store.getState().teamAgentRuntimeByTeam['my-team']).toBe(firstSnapshot);
+  });
+
+  it('restartMember refreshes spawn statuses and runtime snapshot', async () => {
+    const store = createSliceStore();
+    hoisted.getMemberSpawnStatuses.mockResolvedValue({
+      statuses: {
+        alice: createMemberSpawnStatus({ status: 'spawning', launchState: 'starting' }),
+      },
+      runId: 'runtime-run',
+    });
+    hoisted.getTeamAgentRuntime.mockResolvedValue(createRuntimeSnapshot());
+
+    await store.getState().restartMember('my-team', 'alice');
+
+    expect(hoisted.restartMember).toHaveBeenCalledWith('my-team', 'alice');
+    expect(store.getState().memberSpawnStatusesByTeam['my-team']).toEqual({
+      alice: expect.objectContaining({ status: 'spawning', launchState: 'starting' }),
+    });
+    expect(store.getState().teamAgentRuntimeByTeam['my-team']).toEqual(createRuntimeSnapshot());
+  });
+
+  it('clears stale runtime snapshots on delete', async () => {
+    const store = createSliceStore();
+    store.setState({
+      teamAgentRuntimeByTeam: {
+        'my-team': createRuntimeSnapshot(),
+      },
+    });
+
+    await store.getState().deleteTeam('my-team');
+
+    expect(store.getState().teamAgentRuntimeByTeam['my-team']).toBeUndefined();
   });
 
   describe('refreshTeamData provisioning safety', () => {
@@ -643,7 +2445,6 @@ describe('teamSlice actions', () => {
           config: { name: 'My Team' },
           tasks: [],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
         },
         selectedTeamError: null,
@@ -668,7 +2469,6 @@ describe('teamSlice actions', () => {
         config: { name: 'My Team' },
         tasks: [],
         members: [],
-        messages: [{ from: 'lead', text: 'Hello', timestamp: '2026-01-01T00:00:00Z' }],
         kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
       };
       store.setState({
@@ -686,6 +2486,162 @@ describe('teamSlice actions', () => {
       expect(store.getState().selectedTeamData).toEqual(existingData);
     });
 
+  it('reuses the existing selectedTeamData ref on a semantic no-op refresh', async () => {
+      const store = createSliceStore();
+      const existingData = createTeamSnapshot({
+        tasks: [
+          {
+            id: 'task-1',
+            subject: 'Stable task',
+            status: 'pending',
+            createdAt: '2026-03-20T08:00:00.000Z',
+            updatedAt: '2026-03-20T08:00:00.000Z',
+          },
+        ],
+        members: [
+          {
+            name: 'alice',
+            currentTaskId: 'task-1',
+            taskCount: 1,
+          },
+        ],
+      });
+
+      store.setState({
+        selectedTeamName: 'my-team',
+        selectedTeamData: existingData,
+        teamDataCacheByName: {
+          'my-team': existingData,
+        },
+        selectedTeamError: 'stale error',
+      });
+
+      hoisted.getData.mockResolvedValue({
+        ...existingData,
+        tasks: existingData.tasks.map((task: any) => ({ ...task })),
+        members: existingData.members.map((member: any) => ({ ...member })),
+        kanbanState: {
+          ...existingData.kanbanState,
+          reviewers: [...existingData.kanbanState.reviewers],
+          tasks: { ...existingData.kanbanState.tasks },
+        },
+        processes: [...existingData.processes],
+      });
+
+      await store.getState().refreshTeamData('my-team');
+
+      expect(store.getState().selectedTeamData).toBe(existingData);
+      expect(store.getState().teamDataCacheByName['my-team']).toBe(existingData);
+      expect(store.getState().selectedTeamError).toBeNull();
+  });
+
+  it('memoizes focused resolved member selection against unrelated member activity churn', () => {
+    const aliceSnapshot = {
+      name: 'alice',
+      currentTaskId: null,
+      taskCount: 0,
+      role: 'Reviewer',
+    };
+    const bobSnapshot = {
+      name: 'bob',
+      currentTaskId: null,
+      taskCount: 0,
+      role: 'Builder',
+    };
+    const baseState = {
+      selectedTeamName: 'my-team',
+      selectedTeamData: null,
+      teamDataCacheByName: {
+        'my-team': createTeamSnapshot({
+          members: [aliceSnapshot, bobSnapshot],
+        }),
+      },
+      memberActivityMetaByTeam: {
+        'my-team': {
+          teamName: 'my-team',
+          computedAt: '2026-03-12T10:00:00.000Z',
+          feedRevision: 'rev-1',
+          members: {
+            alice: {
+              memberName: 'alice',
+              lastAuthoredMessageAt: '2026-03-12T10:00:00.000Z',
+              messageCountExact: 3,
+              latestAuthoredMessageSignalsTermination: false,
+            },
+            bob: {
+              memberName: 'bob',
+              lastAuthoredMessageAt: '2026-03-12T10:01:00.000Z',
+              messageCountExact: 1,
+              latestAuthoredMessageSignalsTermination: false,
+            },
+          },
+        },
+      },
+    };
+
+    const firstAlice = selectResolvedMemberForTeamName(baseState as never, 'my-team', 'alice');
+    const nextState = {
+      ...baseState,
+      memberActivityMetaByTeam: {
+        'my-team': {
+          ...baseState.memberActivityMetaByTeam['my-team'],
+          computedAt: '2026-03-12T10:02:00.000Z',
+          feedRevision: 'rev-2',
+          members: {
+            ...baseState.memberActivityMetaByTeam['my-team'].members,
+            bob: {
+              ...baseState.memberActivityMetaByTeam['my-team'].members.bob,
+              messageCountExact: 2,
+            },
+          },
+        },
+      },
+    };
+
+    const secondAlice = selectResolvedMemberForTeamName(nextState as never, 'my-team', 'alice');
+
+    expect(firstAlice).not.toBeNull();
+    expect(secondAlice).toBe(firstAlice);
+  });
+
+  it('re-canonicalizes selectedTeamData into the cache on a no-op refresh', async () => {
+      const store = createSliceStore();
+      const existingData = createTeamSnapshot({
+        tasks: [
+          {
+            id: 'task-1',
+            subject: 'Stable task',
+            status: 'pending',
+            createdAt: '2026-03-20T08:00:00.000Z',
+            updatedAt: '2026-03-20T08:00:00.000Z',
+          },
+        ],
+      });
+
+      store.setState({
+        selectedTeamName: 'my-team',
+        selectedTeamData: existingData,
+        teamDataCacheByName: {},
+      });
+
+      hoisted.getData.mockResolvedValue({
+        ...existingData,
+        tasks: existingData.tasks.map((task: any) => ({ ...task })),
+        members: existingData.members.map((member: any) => ({ ...member })),
+        kanbanState: {
+          ...existingData.kanbanState,
+          reviewers: [...existingData.kanbanState.reviewers],
+          tasks: { ...existingData.kanbanState.tasks },
+        },
+        processes: [...existingData.processes],
+      });
+
+      await store.getState().refreshTeamData('my-team');
+
+      expect(store.getState().teamDataCacheByName['my-team']).toBe(existingData);
+      expect(store.getState().selectedTeamData).toBe(existingData);
+    });
+
     it('clears non-selected cache on TEAM_DRAFT refresh failure', async () => {
       const store = createSliceStore();
       store.setState({
@@ -695,7 +2651,6 @@ describe('teamSlice actions', () => {
           config: { name: 'Other Team' },
           tasks: [],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'other-team', reviewers: [], tasks: {} },
           processes: [],
         },
@@ -705,7 +2660,6 @@ describe('teamSlice actions', () => {
             config: { name: 'My Team' },
             tasks: [],
             members: [],
-            messages: [],
             kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
             processes: [],
           },
@@ -729,7 +2683,6 @@ describe('teamSlice actions', () => {
           config: { name: 'Other Team' },
           tasks: [],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'other-team', reviewers: [], tasks: {} },
           processes: [],
         },
@@ -739,7 +2692,6 @@ describe('teamSlice actions', () => {
             config: { name: 'My Team' },
             tasks: [],
             members: [],
-            messages: [],
             kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
             processes: [],
           },
@@ -763,7 +2715,6 @@ describe('teamSlice actions', () => {
           config: { name: 'My Team' },
           tasks: [],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
         },
         selectedTeamError: 'Previous failure',
@@ -786,7 +2737,6 @@ describe('teamSlice actions', () => {
         config: { name: 'My Team' },
         tasks: [],
         members: [],
-        messages: [],
         kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
       };
       store.setState({
@@ -866,7 +2816,6 @@ describe('teamSlice actions', () => {
             },
           ],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
           processes: [],
         },
@@ -916,7 +2865,6 @@ describe('teamSlice actions', () => {
           },
         ],
         members: [],
-        messages: [],
         kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
         processes: [],
       });
@@ -951,7 +2899,6 @@ describe('teamSlice actions', () => {
             },
           ],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
           processes: [],
         },
@@ -976,7 +2923,6 @@ describe('teamSlice actions', () => {
           },
         ],
         members: [],
-        messages: [{ from: 'team-lead', text: 'Ping', timestamp: '2026-03-01T10:10:00.000Z' }],
         kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
         processes: [],
       });
@@ -1014,7 +2960,6 @@ describe('teamSlice actions', () => {
           config: { name: 'Other Team' },
           tasks: [],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'other-team', reviewers: [], tasks: {} },
           processes: [],
         },
@@ -1060,7 +3005,6 @@ describe('teamSlice actions', () => {
           config: { name: 'Other Team' },
           tasks: [],
           members: [],
-          messages: [],
           kanbanState: { teamName: 'other-team', reviewers: [], tasks: {} },
           processes: [],
         },
@@ -1539,7 +3483,7 @@ describe('teamSlice actions', () => {
       await store.getState().fetchMemberSpawnStatuses('my-team');
 
       expect(store.getState().currentRuntimeRunIdByTeam['my-team']).toBe('runtime-run');
-      expect(store.getState().ignoredRuntimeRunIds['runtime-old']).toBeUndefined();
+      expect(store.getState().ignoredRuntimeRunIds['runtime-old']).toBe('my-team');
       expect(store.getState().memberSpawnStatusesByTeam['my-team']).toBe(previousStatuses);
       expect(store.getState().memberSpawnSnapshotsByTeam['my-team']).toBe(previousSnapshot);
     });
@@ -1626,10 +3570,71 @@ describe('teamSlice actions', () => {
       });
 
       expect(store.getState().currentRuntimeRunIdByTeam['my-team']).toBe('run-1');
-      expect(store.getState().ignoredRuntimeRunIds['runtime-old']).toBeUndefined();
+      expect(store.getState().ignoredRuntimeRunIds['runtime-old']).toBe('my-team');
       expect(store.getState().activeToolsByTeam['my-team']).toBeUndefined();
       expect(store.getState().finishedVisibleByTeam['my-team']).toBeUndefined();
       expect(store.getState().toolHistoryByTeam['my-team']).toBeUndefined();
+    });
+
+    it('keeps tombstoned runtime ids ignored during createTeam startup before the new run is pinned', async () => {
+      const store = createSliceStore();
+      const createDeferred = createDeferredPromise<{ runId: string }>();
+      hoisted.createTeam.mockImplementation(() => createDeferred.promise);
+      store.setState({
+        currentRuntimeRunIdByTeam: {
+          'my-team': 'runtime-live',
+        },
+        ignoredRuntimeRunIds: {
+          'runtime-old': 'my-team',
+        },
+      });
+
+      const createPromise = store.getState().createTeam({
+        teamName: 'my-team',
+        cwd: '/tmp/project',
+        members: [],
+      });
+
+      await Promise.resolve();
+
+      expect(store.getState().currentRuntimeRunIdByTeam['my-team']).toBeUndefined();
+      expect(store.getState().ignoredRuntimeRunIds['runtime-old']).toBe('my-team');
+      expect(store.getState().ignoredRuntimeRunIds['runtime-live']).toBe('my-team');
+
+      hoisted.getMemberSpawnStatuses.mockResolvedValue(
+        createMemberSpawnSnapshot({
+          runId: 'runtime-old',
+        })
+      );
+
+      await store.getState().fetchMemberSpawnStatuses('my-team');
+
+      expect(store.getState().memberSpawnStatusesByTeam['my-team']).toBeUndefined();
+      expect(store.getState().memberSpawnSnapshotsByTeam['my-team']).toBeUndefined();
+
+      createDeferred.resolve({ runId: 'run-1' });
+      await createPromise;
+    });
+
+    it('keeps older tombstoned runtime ids after canonical provisioning progress arrives', () => {
+      const store = createSliceStore();
+      store.setState({
+        ignoredRuntimeRunIds: {
+          'runtime-old': 'my-team',
+        },
+      });
+
+      store.getState().onProvisioningProgress({
+        runId: 'run-current',
+        teamName: 'my-team',
+        state: 'assembling',
+        message: 'Current run',
+        startedAt: '2026-03-12T10:00:00.000Z',
+        updatedAt: '2026-03-12T10:00:01.000Z',
+      });
+
+      expect(store.getState().currentRuntimeRunIdByTeam['my-team']).toBe('run-current');
+      expect(store.getState().ignoredRuntimeRunIds['runtime-old']).toBe('my-team');
     });
 
     it('ignores tombstoned runtime spawn-status snapshots', async () => {

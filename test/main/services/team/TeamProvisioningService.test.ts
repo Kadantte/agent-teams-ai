@@ -24,6 +24,19 @@ vi.mock('@main/services/team/ClaudeBinaryResolver', () => ({
   ClaudeBinaryResolver: { resolve: vi.fn() },
 }));
 
+vi.mock('@features/tmux-installer/main', () => ({
+  killTmuxPaneForCurrentPlatformSync: vi.fn(),
+  listTmuxPanePidsForCurrentPlatform: vi.fn(async () => new Map()),
+  isTmuxRuntimeReadyForCurrentPlatform: vi.fn(async () => true),
+}));
+
+vi.mock('pidusage', () => {
+  const pidusageMock = vi.fn();
+  return {
+    default: pidusageMock,
+  };
+});
+
 vi.mock('@main/services/team/TeamTaskReader', () => ({
   TeamTaskReader: class {
     async getTasks() {
@@ -51,11 +64,18 @@ vi.mock('@main/utils/pathDecoder', async (importOriginal) => {
 });
 
 import { TeamProvisioningService } from '@main/services/team/TeamProvisioningService';
+import {
+  clearAutoResumeService,
+  getAutoResumeService,
+  initializeAutoResumeService,
+} from '@main/services/team/AutoResumeService';
 import { createPersistedLaunchSnapshot } from '@main/services/team/TeamLaunchStateEvaluator';
 import { getTeamLaunchStatePath } from '@main/services/team/TeamLaunchStateStore';
 import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
 import { spawnCli } from '@main/utils/childProcess';
 import { AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES } from 'agent-teams-controller';
+import { listTmuxPanePidsForCurrentPlatform } from '@features/tmux-installer/main';
+import pidusage from 'pidusage';
 
 function allowConsoleLogs() {
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -84,6 +104,18 @@ function createRunningChild() {
     stderr: new EventEmitter(),
     kill: vi.fn(),
   });
+}
+
+function createPidusageStat(pid: number, memory: number) {
+  return {
+    cpu: 0,
+    memory,
+    ppid: 1,
+    pid,
+    ctime: 0,
+    elapsed: 0,
+    timestamp: Date.now(),
+  };
 }
 
 function writeLaunchConfig(
@@ -143,6 +175,65 @@ function writeLaunchState(
   );
 }
 
+function createMemberSpawnStatusEntry(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    status: 'waiting',
+    launchState: 'runtime_pending_bootstrap',
+    error: undefined,
+    updatedAt: new Date().toISOString(),
+    runtimeAlive: false,
+    livenessSource: undefined,
+    bootstrapConfirmed: false,
+    hardFailure: false,
+    agentToolAccepted: true,
+    firstSpawnAcceptedAt: new Date().toISOString(),
+    lastHeartbeatAt: undefined,
+    ...overrides,
+  };
+}
+
+function createMemberSpawnRun(params?: {
+  runId?: string;
+  teamName?: string;
+  startedAt?: string;
+  expectedMembers?: string[];
+  memberSpawnStatuses?: Map<string, Record<string, unknown>>;
+  memberSpawnLeadInboxCursorByMember?: Map<string, { timestamp: string; messageId: string }>;
+}) {
+  const teamName = params?.teamName ?? 'member-spawn-team';
+  const expectedMembers = params?.expectedMembers ?? ['alice'];
+  const memberSpawnStatuses =
+    params?.memberSpawnStatuses ??
+    new Map([
+      [
+        expectedMembers[0]!,
+        createMemberSpawnStatusEntry({
+          firstSpawnAcceptedAt: new Date(Date.now() - 5_000).toISOString(),
+        }),
+      ],
+    ]);
+
+  return {
+    runId: params?.runId ?? 'run-member-spawn-1',
+    teamName,
+    startedAt: params?.startedAt ?? new Date(Date.now() - 60_000).toISOString(),
+    request: {
+      members: [],
+    },
+    expectedMembers,
+    memberSpawnStatuses,
+    memberSpawnToolUseIds: new Map(),
+    memberSpawnLeadInboxCursorByMember:
+      params?.memberSpawnLeadInboxCursorByMember ?? new Map(),
+    provisioningOutputParts: [],
+    activeToolCalls: new Map(),
+    isLaunch: false,
+    provisioningComplete: false,
+  } as any;
+}
+
 describe('TeamProvisioningService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -160,6 +251,7 @@ describe('TeamProvisioningService', () => {
   });
 
   afterEach(() => {
+    clearAutoResumeService();
     vi.useRealTimers();
     try {
       fs.rmSync(tempClaudeRoot, { recursive: true, force: true });
@@ -188,6 +280,100 @@ describe('TeamProvisioningService', () => {
       const svc = new TeamProvisioningService();
       await expect(svc.warmup()).resolves.not.toThrow();
       expect(spawnCli).toHaveBeenCalled();
+    });
+  });
+
+  describe('getTeamAgentRuntimeSnapshot', () => {
+    it('uses batched pidusage rss values for lead and teammates', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini' },
+          ],
+        })),
+      };
+      (svc as any).readPersistedRuntimeMembers = vi.fn(() => [
+        {
+          name: 'alice',
+          agentId: 'alice@runtime-team',
+          tmuxPaneId: '%1',
+          backendType: 'tmux',
+        },
+      ]);
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(listTmuxPanePidsForCurrentPlatform).mockResolvedValueOnce(new Map([['%1', 222]]));
+
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 123_000_000),
+        '222': createPidusageStat(222, 456_000_000),
+      } as any);
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(pidusage).toHaveBeenCalledWith([111, 222], { maxage: 0 });
+      expect(snapshot.members['team-lead']).toMatchObject({
+        pid: 111,
+        rssBytes: 123_000_000,
+        runtimeModel: 'gpt-5.4',
+      });
+      expect(snapshot.members.alice).toMatchObject({
+        pid: 222,
+        rssBytes: 456_000_000,
+        runtimeModel: 'gpt-5.4-mini',
+      });
+    });
+
+    it('falls back to per-pid pidusage reads when batched sampling fails', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini' },
+          ],
+        })),
+      };
+      (svc as any).readPersistedRuntimeMembers = vi.fn(() => [
+        {
+          name: 'alice',
+          agentId: 'alice@runtime-team',
+          tmuxPaneId: '%1',
+          backendType: 'tmux',
+        },
+      ]);
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(listTmuxPanePidsForCurrentPlatform).mockResolvedValueOnce(new Map([['%1', 222]]));
+
+      vi.mocked(pidusage)
+        .mockRejectedValueOnce(new Error('ps: process exited'))
+        .mockResolvedValueOnce(createPidusageStat(111, 123_000_000) as any)
+        .mockResolvedValueOnce(createPidusageStat(222, 456_000_000) as any);
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(pidusage).toHaveBeenNthCalledWith(1, [111, 222], { maxage: 0 });
+      expect(pidusage).toHaveBeenNthCalledWith(2, 111, { maxage: 0 });
+      expect(pidusage).toHaveBeenNthCalledWith(3, 222, { maxage: 0 });
+      expect(snapshot.members['team-lead']?.rssBytes).toBe(123_000_000);
+      expect(snapshot.members.alice?.rssBytes).toBe(456_000_000);
     });
   });
 
@@ -674,6 +860,141 @@ describe('TeamProvisioningService', () => {
     expect(launchArgs).toContain(leadSessionId);
   });
 
+  it('seeds the current lead session id immediately when launch resumes an existing session', async () => {
+    allowConsoleLogs();
+    const teamName = 'resume-seed-session-team';
+    const leadSessionId = 'lead-session-seeded';
+    writeLaunchConfig(teamName, tempClaudeRoot, leadSessionId, ['alice']);
+
+    vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+    const child = createRunningChild();
+    vi.mocked(spawnCli).mockReturnValue(child as any);
+
+    const svc = new TeamProvisioningService(undefined, undefined, undefined, undefined, {
+      writeConfigFile: vi.fn(async () => '/mock/mcp-config-launch.json'),
+      removeConfigFile: vi.fn(async () => {}),
+    } as any);
+    (svc as any).buildProvisioningEnv = vi.fn(async () => ({
+      env: { ANTHROPIC_API_KEY: 'test' },
+      authSource: 'anthropic_api_key',
+    }));
+    (svc as any).resolveLaunchExpectedMembers = vi.fn(async () => ({
+      members: [{ name: 'alice' }],
+      source: 'members-meta',
+      warning: undefined,
+    }));
+    (svc as any).normalizeTeamConfigForLaunch = vi.fn(async () => {});
+    (svc as any).assertConfigLeadOnlyForLaunch = vi.fn(async () => {});
+    (svc as any).updateConfigProjectPath = vi.fn(async () => {});
+    (svc as any).restorePrelaunchConfig = vi.fn(async () => {});
+    (svc as any).validateAgentTeamsMcpRuntime = vi.fn(async () => {});
+    (svc as any).persistLaunchStateSnapshot = vi.fn(async () => {});
+    (svc as any).startFilesystemMonitor = vi.fn();
+    (svc as any).pathExists = vi.fn(async (targetPath: string) =>
+      targetPath.endsWith(`${leadSessionId}.jsonl`)
+    );
+
+    const { runId } = await svc.launchTeam({ teamName, cwd: tempClaudeRoot }, () => {});
+
+    expect(svc.getCurrentLeadSessionId(teamName)).toBe(leadSessionId);
+
+    await svc.cancelProvisioning(runId);
+  });
+
+  it('clears stale team-scoped transient state before starting a new launch run', async () => {
+    allowConsoleLogs();
+    vi.useFakeTimers();
+
+    const teamName = 'launch-clears-stale-runtime-state';
+    const leadSessionId = 'lead-session-stale-state';
+    writeLaunchConfig(teamName, tempClaudeRoot, leadSessionId, ['alice']);
+
+    vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+    vi.mocked(spawnCli).mockImplementation(() => {
+      throw new Error('launch spawn EINVAL');
+    });
+
+    const svc = new TeamProvisioningService(undefined, undefined, undefined, undefined, {
+      writeConfigFile: vi.fn(async () => '/mock/mcp-config-launch.json'),
+      removeConfigFile: vi.fn(async () => {}),
+    } as any);
+    (svc as any).buildProvisioningEnv = vi.fn(async () => ({
+      env: { ANTHROPIC_API_KEY: 'test' },
+      authSource: 'anthropic_api_key',
+    }));
+    (svc as any).resolveLaunchExpectedMembers = vi.fn(async () => ({
+      members: [{ name: 'alice' }],
+      source: 'members-meta',
+      warning: undefined,
+    }));
+    (svc as any).normalizeTeamConfigForLaunch = vi.fn(async () => {});
+    (svc as any).assertConfigLeadOnlyForLaunch = vi.fn(async () => {});
+    (svc as any).updateConfigProjectPath = vi.fn(async () => {});
+    (svc as any).restorePrelaunchConfig = vi.fn(async () => {});
+    (svc as any).validateAgentTeamsMcpRuntime = vi.fn(async () => {});
+    (svc as any).pathExists = vi.fn(async (targetPath: string) =>
+      targetPath.endsWith(`${leadSessionId}.jsonl`)
+    );
+
+    const autoResumeProvisioning = {
+      getCurrentRunId: vi.fn(() => 'run-1' as string | null),
+      isTeamAlive: vi.fn(() => true),
+      sendMessageToTeam: vi.fn(async () => undefined),
+    };
+    initializeAutoResumeService(autoResumeProvisioning);
+
+    const configManagerModule = await import('@main/services/infrastructure/ConfigManager');
+    const configManager = configManagerModule.ConfigManager.getInstance();
+    const actualConfig = configManager.getConfig();
+    const getConfigSpy = vi.spyOn(configManager, 'getConfig').mockImplementation(
+      () =>
+        ({
+          ...actualConfig,
+          notifications: {
+            ...actualConfig.notifications,
+            autoResumeOnRateLimit: true,
+          },
+        }) as never
+    );
+
+    try {
+      getAutoResumeService().handleRateLimitMessage(
+        teamName,
+        "You've hit your limit. Resets in 5 minutes.",
+        new Date('2026-04-17T12:00:00.000Z')
+      );
+
+      (svc as any).relayedLeadInboxMessageIds.set(teamName, new Set(['stale-msg']));
+      (svc as any).liveLeadProcessMessages.set(teamName, [
+        {
+          from: 'team-lead',
+          text: 'Old transient message',
+          timestamp: '2026-04-17T12:00:00.000Z',
+          read: true,
+          source: 'lead_process',
+          messageId: 'lead-turn-old-run-1',
+        },
+      ]);
+      (svc as any).pendingTimeouts.set(
+        `same-team-deferred:${teamName}`,
+        setTimeout(() => undefined, 60_000)
+      );
+
+      await expect(svc.launchTeam({ teamName, cwd: tempClaudeRoot }, () => {})).rejects.toThrow(
+        'launch spawn EINVAL'
+      );
+
+      expect((svc as any).relayedLeadInboxMessageIds.has(teamName)).toBe(false);
+      expect((svc as any).liveLeadProcessMessages.has(teamName)).toBe(false);
+      expect((svc as any).pendingTimeouts.has(`same-team-deferred:${teamName}`)).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 30 * 1000 + 100);
+      expect(autoResumeProvisioning.sendMessageToTeam).not.toHaveBeenCalled();
+    } finally {
+      getConfigSpy.mockRestore();
+    }
+  });
+
   it('marks persisted bootstrap as failed when member transcript shows an unsupported model error', async () => {
     allowConsoleLogs();
     const teamName = 'zz-unit-bootstrap-unsupported-model';
@@ -919,4 +1240,311 @@ describe('TeamProvisioningService', () => {
     expect(result.statuses.jack?.hardFailureReason).toContain('requested model is not available');
     expect(result.teamLaunchState).toBe('partial_failure');
   });
+
+  it('does not reprocess already-seen teammate lead inbox messages', async () => {
+    const svc = new TeamProvisioningService();
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T09:00:00.000Z',
+      memberSpawnLeadInboxCursorByMember: new Map([
+        [
+          'alice',
+          {
+            timestamp: '2026-04-16T10:00:00.000Z',
+            messageId: 'msg-2',
+          },
+        ],
+      ]),
+    });
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: 'heartbeat',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        messageId: 'msg-1',
+        read: false,
+      },
+      {
+        from: 'alice',
+        text: 'heartbeat',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        messageId: 'msg-2',
+        read: false,
+      },
+    ]);
+
+    const applySignalSpy = vi.spyOn(svc as any, 'applyLeadInboxSpawnSignal');
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(applySignalSpy).not.toHaveBeenCalled();
+  });
+
+  it('processes an unseen teammate heartbeat on the first refresh', async () => {
+    const svc = new TeamProvisioningService();
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T09:00:00.000Z',
+    });
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: '{"type":"heartbeat","timestamp":"2026-04-16T10:00:00.000Z"}',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        messageId: 'msg-1',
+        read: false,
+      },
+    ]);
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(run.memberSpawnStatuses.get('alice')).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      bootstrapConfirmed: true,
+      hardFailure: false,
+      lastHeartbeatAt: '2026-04-16T10:00:00.000Z',
+    });
+    expect(run.memberSpawnLeadInboxCursorByMember.get('alice')).toEqual({
+      timestamp: '2026-04-16T10:00:00.000Z',
+      messageId: 'msg-1',
+    });
+  });
+
+  it('ignores teammate lead inbox signals that predate the current run', async () => {
+    const svc = new TeamProvisioningService();
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T10:00:00.000Z',
+    });
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: '{"type":"heartbeat","timestamp":"2026-04-16T09:59:59.000Z"}',
+        timestamp: '2026-04-16T09:59:59.000Z',
+        messageId: 'msg-early',
+        read: false,
+      },
+    ]);
+
+    const applySignalSpy = vi.spyOn(svc as any, 'applyLeadInboxSpawnSignal');
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(applySignalSpy).not.toHaveBeenCalled();
+    expect(run.memberSpawnLeadInboxCursorByMember.size).toBe(0);
+    expect(run.memberSpawnStatuses.get('alice')).toMatchObject({
+      status: 'waiting',
+      launchState: 'runtime_pending_bootstrap',
+      bootstrapConfirmed: false,
+    });
+  });
+
+  it('ignores an unseen older lead inbox signal without replaying older state', async () => {
+    const latestHeartbeatAt = '2026-04-16T10:05:00.000Z';
+    const existingEntry = createMemberSpawnStatusEntry({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      livenessSource: 'heartbeat',
+      bootstrapConfirmed: true,
+      lastHeartbeatAt: latestHeartbeatAt,
+    });
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T09:00:00.000Z',
+      memberSpawnStatuses: new Map([['alice', existingEntry]]),
+      memberSpawnLeadInboxCursorByMember: new Map([
+        [
+          'alice',
+          {
+            timestamp: latestHeartbeatAt,
+            messageId: 'msg-3',
+          },
+        ],
+      ]),
+    });
+    const svc = new TeamProvisioningService();
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: 'Bootstrap failed: unsupported model',
+        timestamp: '2026-04-16T10:04:00.000Z',
+        messageId: 'msg-2b',
+        read: false,
+      },
+      {
+        from: 'alice',
+        text: 'heartbeat',
+        timestamp: latestHeartbeatAt,
+        messageId: 'msg-3',
+        read: false,
+      },
+    ]);
+
+    const applySignalSpy = vi.spyOn(svc as any, 'applyLeadInboxSpawnSignal');
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(applySignalSpy).not.toHaveBeenCalled();
+    expect(run.memberSpawnStatuses.get('alice')).toBe(existingEntry);
+    expect(run.memberSpawnLeadInboxCursorByMember.get('alice')).toEqual({
+      timestamp: latestHeartbeatAt,
+      messageId: 'msg-3',
+    });
+  });
+
+  it('applies an unseen newer failure signal and transitions the member to failed_to_start', async () => {
+    const latestHeartbeatAt = '2026-04-16T10:00:00.000Z';
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T09:00:00.000Z',
+      memberSpawnStatuses: new Map([
+        [
+          'alice',
+          createMemberSpawnStatusEntry({
+            status: 'online',
+            launchState: 'confirmed_alive',
+            runtimeAlive: true,
+            livenessSource: 'heartbeat',
+            bootstrapConfirmed: true,
+            lastHeartbeatAt: latestHeartbeatAt,
+          }),
+        ],
+      ]),
+      memberSpawnLeadInboxCursorByMember: new Map([
+        [
+          'alice',
+          {
+            timestamp: latestHeartbeatAt,
+            messageId: 'msg-1',
+          },
+        ],
+      ]),
+    });
+    const svc = new TeamProvisioningService();
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: 'Bootstrap failed: unsupported model',
+        timestamp: '2026-04-16T10:01:00.000Z',
+        messageId: 'msg-2',
+        read: false,
+      },
+    ]);
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(run.memberSpawnStatuses.get('alice')).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'Bootstrap failed: unsupported model',
+    });
+    expect(run.memberSpawnLeadInboxCursorByMember.get('alice')).toEqual({
+      timestamp: '2026-04-16T10:01:00.000Z',
+      messageId: 'msg-2',
+    });
+  });
+
+  it('applies an unseen same-timestamp signal with a greater messageId and advances the cursor', async () => {
+    const run = createMemberSpawnRun({
+      startedAt: '2026-04-16T09:00:00.000Z',
+      memberSpawnLeadInboxCursorByMember: new Map([
+        [
+          'alice',
+          {
+            timestamp: '2026-04-16T10:00:00.000Z',
+            messageId: 'msg-2',
+          },
+        ],
+      ]),
+    });
+    const svc = new TeamProvisioningService();
+
+    vi.spyOn((svc as any).inboxReader, 'getMessagesFor').mockResolvedValue([
+      {
+        from: 'alice',
+        text: 'heartbeat',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        messageId: 'msg-2',
+        read: false,
+      },
+      {
+        from: 'alice',
+        text: 'heartbeat',
+        timestamp: '2026-04-16T10:00:00.000Z',
+        messageId: 'msg-3',
+        read: false,
+      },
+    ]);
+
+    const applySignalSpy = vi.spyOn(svc as any, 'applyLeadInboxSpawnSignal');
+
+    await (svc as any).refreshMemberSpawnStatusesFromLeadInbox(run);
+
+    expect(applySignalSpy).toHaveBeenCalledTimes(1);
+    expect(applySignalSpy).toHaveBeenCalledWith(
+      run,
+      'alice',
+      expect.objectContaining({ messageId: 'msg-3' })
+    );
+    expect(run.memberSpawnLeadInboxCursorByMember.get('alice')).toEqual({
+      timestamp: '2026-04-16T10:00:00.000Z',
+      messageId: 'msg-3',
+    });
+  });
+
+  it('does not bump lastHeartbeatAt for an equal heartbeat timestamp', () => {
+    const existingEntry = createMemberSpawnStatusEntry({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      livenessSource: 'heartbeat',
+      bootstrapConfirmed: true,
+      lastHeartbeatAt: '2026-04-16T10:00:00.000Z',
+    });
+    const run = createMemberSpawnRun({
+      memberSpawnStatuses: new Map([['alice', existingEntry]]),
+    });
+    const svc = new TeamProvisioningService();
+
+    (svc as any).setMemberSpawnStatus(
+      run,
+      'alice',
+      'online',
+      undefined,
+      'heartbeat',
+      '2026-04-16T10:00:00.000Z'
+    );
+
+    expect(run.memberSpawnStatuses.get('alice')).toBe(existingEntry);
+  });
+
+  it('does not bump lastHeartbeatAt for an older heartbeat timestamp', () => {
+    const existingEntry = createMemberSpawnStatusEntry({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      livenessSource: 'heartbeat',
+      bootstrapConfirmed: true,
+      lastHeartbeatAt: '2026-04-16T10:00:00.000Z',
+    });
+    const run = createMemberSpawnRun({
+      memberSpawnStatuses: new Map([['alice', existingEntry]]),
+    });
+    const svc = new TeamProvisioningService();
+
+    (svc as any).setMemberSpawnStatus(
+      run,
+      'alice',
+      'online',
+      undefined,
+      'heartbeat',
+      '2026-04-16T09:59:59.000Z'
+    );
+
+    expect(run.memberSpawnStatuses.get('alice')).toBe(existingEntry);
+  });
+
 });

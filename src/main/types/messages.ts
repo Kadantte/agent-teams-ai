@@ -1,5 +1,5 @@
 /**
- * Parsed message types and type guards for Claude Agent Teams UI.
+ * Parsed message types and type guards for Agent Teams UI.
  *
  * ParsedMessage is the application's internal representation after parsing
  * raw JSONL entries. This module also contains type guards for classifying
@@ -80,10 +80,14 @@ export interface ParsedMessage {
   // Metadata
   /** Current working directory when message was created */
   cwd?: string;
+  /** Root/session identifier from transcript */
+  sessionId?: string;
   /** Git branch context */
   gitBranch?: string;
   /** Agent ID for subagent messages */
   agentId?: string;
+  /** Human-readable agent/member name from transcript */
+  agentName?: string;
   /** Whether this is a sidechain message */
   isSidechain: boolean;
   /** Whether this is a meta message */

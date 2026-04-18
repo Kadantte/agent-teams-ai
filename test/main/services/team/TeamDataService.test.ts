@@ -1,18 +1,21 @@
+import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { setClaudeBasePathOverride } from '../../../../src/main/utils/pathDecoder';
+import { encodePath, setClaudeBasePathOverride } from '../../../../src/main/utils/pathDecoder';
+import { TeamConfigReader } from '../../../../src/main/services/team/TeamConfigReader';
 import { buildTaskChangePresenceDescriptor } from '../../../../src/main/services/team/taskChangePresenceUtils';
 import { TeamDataService } from '../../../../src/main/services/team/TeamDataService';
 
 import type {
   InboxMessage,
   KanbanState,
+  ResolvedTeamMember,
   TeamConfig,
-  TeamData,
+  TeamProcess,
   TeamTask,
   TeamTaskWithKanban,
 } from '../../../../src/shared/types/team';
@@ -79,6 +82,102 @@ async function createTempJsonlInNamedDir(
     'utf8'
   );
   return jsonlPath;
+}
+
+async function createResolverBackedLeadFixture(options?: {
+  teamName?: string;
+  staleProjectPath?: string;
+  actualProjectPath?: string;
+  leadSessionId?: string;
+  sessionHistory?: string[];
+  sessionFileId?: string;
+}): Promise<{
+  claudeRoot: string;
+  teamName: string;
+  configPath: string;
+  staleProjectPath: string;
+  actualProjectPath: string;
+  actualProjectDir: string;
+}> {
+  const teamName = options?.teamName ?? 'my-team';
+  const staleProjectPath = options?.staleProjectPath ?? '/Users/test/hookplex';
+  const actualProjectPath = options?.actualProjectPath ?? '/Users/test/plugin-kit-ai';
+  const leadSessionId = options?.leadSessionId ?? 'lead-1';
+  const sessionFileId = options?.sessionFileId ?? leadSessionId;
+  const claudeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'team-data-resolver-backed-'));
+  tempPaths.push(claudeRoot);
+  setClaudeBasePathOverride(claudeRoot);
+
+  await fs.mkdir(path.join(claudeRoot, 'teams', teamName), { recursive: true });
+  await fs.mkdir(path.join(claudeRoot, 'projects', encodePath(staleProjectPath)), {
+    recursive: true,
+  });
+
+  const configPath = path.join(claudeRoot, 'teams', teamName, 'config.json');
+  await fs.writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        name: 'My Team',
+        projectPath: staleProjectPath,
+        ...(leadSessionId ? { leadSessionId } : {}),
+        ...(options?.sessionHistory ? { sessionHistory: options.sessionHistory } : {}),
+        members: [{ name: 'team-lead', agentType: 'team-lead', cwd: actualProjectPath }],
+      },
+      null,
+      2
+    ),
+    'utf8'
+  );
+
+  const actualProjectDir = path.join(claudeRoot, 'projects', encodePath(actualProjectPath));
+  await fs.mkdir(actualProjectDir, { recursive: true });
+  await fs.writeFile(
+    path.join(actualProjectDir, `${sessionFileId}.jsonl`),
+    `${JSON.stringify({
+      teamName,
+      type: 'assistant',
+      timestamp: '2026-04-18T10:00:00.000Z',
+      cwd: actualProjectPath,
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: 'This is a sufficiently long lead thought recovered through the transcript resolver.',
+          },
+        ],
+      },
+    })}\n`,
+    'utf8'
+  );
+
+  return {
+    claudeRoot,
+    teamName,
+    configPath,
+    staleProjectPath,
+    actualProjectPath,
+    actualProjectDir,
+  };
+}
+
+function createResolverBackedService(): TeamDataService {
+  return new TeamDataService(
+    new TeamConfigReader(),
+    { getTasks: vi.fn(async () => []) } as never,
+    {
+      listInboxNames: vi.fn(async () => []),
+      getMessages: vi.fn(async () => []),
+    } as never,
+    {} as never,
+    {} as never,
+    { resolveMembers: vi.fn(() => []) } as never,
+    { getState: vi.fn(async () => ({ teamName: 'my-team', reviewers: [], tasks: {} })) } as never,
+    {} as never,
+    { getMembers: vi.fn(async () => []) } as never,
+    { readMessages: vi.fn(async () => []) } as never
+  );
 }
 
 function createLeadSessionCachingService(): TeamDataService {
@@ -240,10 +339,9 @@ function createGetTeamDataHarness(options: {
     config: TeamConfig,
     metaMembers: TeamConfig['members'],
     inboxNames: string[],
-    tasks: TeamTaskWithKanban[],
-    messages: InboxMessage[]
-  ) => TeamData['members'];
-  listProcesses?: () => TeamData['processes'];
+    tasks: TeamTaskWithKanban[]
+  ) => ResolvedTeamMember[];
+  listProcesses?: () => TeamProcess[];
   getMemberAdvisories?: () => Promise<Map<string, unknown>>;
 } = {}) {
   const getConfig = vi.fn(async () =>
@@ -351,7 +449,7 @@ function createGetTeamDataHarness(options: {
   };
 }
 
-function buildResolvedMember(name: string): TeamData['members'][number] {
+function buildResolvedMember(name: string): ResolvedTeamMember {
   return {
     name,
     status: 'unknown',
@@ -626,6 +724,39 @@ describe('TeamDataService', () => {
     expect(createTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({ projectPath: '/Users/dev/my-project' })
     );
+  });
+
+  it('returns lightweight notification context from config without hydrating team data', async () => {
+    const getConfig = vi.fn(async () => ({
+      name: 'My Team',
+      projectPath: '/Users/dev/my-project',
+      members: [],
+    }));
+
+    const service = new TeamDataService(
+      {
+        listTeams: vi.fn(),
+        getConfig,
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      (() => ({ processes: { listProcesses: vi.fn(() => []) } })) as never
+    );
+
+    const result = await service.getTeamNotificationContext('my-team');
+
+    expect(result).toEqual({
+      displayName: 'My Team',
+      projectPath: '/Users/dev/my-project',
+    });
+    expect(getConfig).toHaveBeenCalledWith('my-team');
   });
 
   it('creates task with status pending when startImmediately is false', async () => {
@@ -2437,8 +2568,8 @@ describe('TeamDataService', () => {
       } as never
     );
 
-    const data = await service.getTeamData('my-team');
-    const costResult = data.messages.find((message) => message.messageId === 'lead-thought-1');
+    const feed = await service.getMessageFeed('my-team');
+    const costResult = feed.messages.find((message) => message.messageId === 'lead-thought-1');
 
     expect(costResult).toMatchObject({
       messageKind: 'slash_command_result',
@@ -2507,8 +2638,8 @@ describe('TeamDataService', () => {
       } as never
     );
 
-    const data = await service.getTeamData('my-team');
-    const result = data.messages.find((message) => message.messageId === 'passive-idle-dup-1');
+    const feed = await service.getMessageFeed('my-team');
+    const result = feed.messages.find((message) => message.messageId === 'passive-idle-dup-1');
 
     expect(result).toBeDefined();
     expect(result?.source).not.toBe('lead_process');
@@ -2582,8 +2713,8 @@ describe('TeamDataService', () => {
       sentMessages: [userReplyRow],
     });
 
-    const data = await service.getTeamData('my-team');
-    const linked = data.messages.find((message) => message.messageId === 'passive-user-summary-1');
+    const feed = await service.getMessageFeed('my-team');
+    const linked = feed.messages.find((message) => message.messageId === 'passive-user-summary-1');
 
     expect(linked?.relayOfMessageId).toBe('user-reply-1');
     expect(passiveSummaryRow.relayOfMessageId).toBeUndefined();
@@ -2618,8 +2749,8 @@ describe('TeamDataService', () => {
       ],
     });
 
-    const data = await service.getTeamData('my-team');
-    const linked = data.messages.find(
+    const feed = await service.getMessageFeed('my-team');
+    const linked = feed.messages.find(
       (message) => message.messageId === 'passive-user-summary-contains-1'
     );
 
@@ -2655,8 +2786,8 @@ describe('TeamDataService', () => {
       ],
     });
 
-    const data = await service.getTeamData('my-team');
-    const linked = data.messages.find((message) => message.messageId === 'passive-user-summary-old-1');
+    const feed = await service.getMessageFeed('my-team');
+    const linked = feed.messages.find((message) => message.messageId === 'passive-user-summary-old-1');
 
     expect(linked?.relayOfMessageId).toBeUndefined();
   });
@@ -2690,8 +2821,8 @@ describe('TeamDataService', () => {
       ],
     });
 
-    const data = await service.getTeamData('my-team');
-    const linked = data.messages.find((message) => message.messageId === 'passive-bob-summary-1');
+    const feed = await service.getMessageFeed('my-team');
+    const linked = feed.messages.find((message) => message.messageId === 'passive-bob-summary-1');
 
     expect(linked?.relayOfMessageId).toBeUndefined();
   });
@@ -2725,8 +2856,8 @@ describe('TeamDataService', () => {
       ],
     });
 
-    const data = await service.getTeamData('my-team');
-    const linked = data.messages.find(
+    const feed = await service.getMessageFeed('my-team');
+    const linked = feed.messages.find(
       (message) => message.messageId === 'passive-user-summary-sender-1'
     );
 
@@ -2772,8 +2903,8 @@ describe('TeamDataService', () => {
       ],
     });
 
-    const data = await service.getTeamData('my-team');
-    const linked = data.messages.find(
+    const feed = await service.getMessageFeed('my-team');
+    const linked = feed.messages.find(
       (message) => message.messageId === 'passive-user-summary-ambiguous-1'
     );
 
@@ -3260,6 +3391,105 @@ describe('TeamDataService', () => {
     expect(secondSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('loads durable lead_session messages through the transcript resolver when projectPath is stale', async () => {
+    const fixture = await createResolverBackedLeadFixture();
+    const service = createResolverBackedService();
+
+    const feed = await service.getMessageFeed(fixture.teamName);
+    const persistedConfig = JSON.parse(await fs.readFile(fixture.configPath, 'utf8')) as TeamConfig;
+
+    expect(
+      feed.messages.find(
+        (message) =>
+          message.source === 'lead_session' &&
+          message.text.includes('recovered through the transcript resolver')
+      )
+    ).toBeTruthy();
+    expect(persistedConfig.projectPath).toBe(fixture.actualProjectPath);
+  });
+
+  it('still returns lead_session messages when projectPath repair persistence fails', async () => {
+    const fixture = await createResolverBackedLeadFixture();
+    const originalWriteFile = nodeFs.promises.writeFile.bind(nodeFs.promises);
+    const teamTmpPrefix = path.join(fixture.claudeRoot, 'teams', fixture.teamName, '.tmp.');
+
+    vi.spyOn(nodeFs.promises, 'writeFile').mockImplementation(
+      async (...args: Parameters<typeof nodeFs.promises.writeFile>) => {
+        const [targetPath] = args;
+        if (typeof targetPath === 'string' && targetPath.startsWith(teamTmpPrefix)) {
+          throw new Error('simulated atomic write failure');
+        }
+        return originalWriteFile(...args);
+      }
+    );
+
+    const service = createResolverBackedService();
+    const page = await service.getMessagesPage(fixture.teamName, { limit: 10 });
+    const persistedConfig = JSON.parse(await fs.readFile(fixture.configPath, 'utf8')) as TeamConfig;
+
+    expect(
+      page.messages.find(
+        (message) =>
+          message.source === 'lead_session' &&
+          message.text.includes('recovered through the transcript resolver')
+      )
+    ).toBeTruthy();
+    expect(persistedConfig.projectPath).toBe(fixture.staleProjectPath);
+  });
+
+  it('does not guess lead_session messages from resolver-discovered session ids when config has no leadSessionId or sessionHistory', async () => {
+    const fixture = await createResolverBackedLeadFixture({
+      leadSessionId: undefined,
+      sessionFileId: 'lead-discovered',
+    });
+    const service = createResolverBackedService();
+
+    const page = await service.getMessagesPage(fixture.teamName, { limit: 10 });
+
+    expect(page.messages.some((message) => message.source === 'lead_session')).toBe(false);
+  });
+
+  it('does not mix resolver-discovered non-lead session ids into durable lead_session messages when config already knows the lead session', async () => {
+    const fixture = await createResolverBackedLeadFixture();
+    await fs.writeFile(
+      path.join(fixture.actualProjectDir, 'member-1.jsonl'),
+      `${JSON.stringify({
+        teamName: fixture.teamName,
+        type: 'assistant',
+        timestamp: '2026-04-18T10:05:00.000Z',
+        cwd: fixture.actualProjectPath,
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Member bootstrap noise that should never appear as a lead_session thought in the team activity timeline.',
+            },
+          ],
+        },
+      })}\n`,
+      'utf8'
+    );
+    const service = createResolverBackedService();
+
+    const page = await service.getMessagesPage(fixture.teamName, { limit: 20 });
+    const leadSessionMessages = page.messages.filter((message) => message.source === 'lead_session');
+
+    expect(
+      leadSessionMessages.some((message) =>
+        message.text.includes('recovered through the transcript resolver')
+      )
+    ).toBe(true);
+    expect(
+      leadSessionMessages.some((message) =>
+        message.text.includes('Member bootstrap noise that should never appear')
+      )
+    ).toBe(false);
+    expect(new Set(leadSessionMessages.map((message) => message.leadSessionId))).toEqual(
+      new Set(['lead-1'])
+    );
+  });
+
   it('fails fast when config is missing before any read-phase step starts', async () => {
     const harness = createGetTeamDataHarness({
       config: null,
@@ -3281,8 +3511,6 @@ describe('TeamDataService', () => {
   it('starts light reads immediately, bounds heavy reads, and keeps processes outside the parallel phase', async () => {
     const order: string[] = [];
     const tasksDeferred = createDeferred<TeamTask[]>();
-    const messagesDeferred = createDeferred<InboxMessage[]>();
-    const leadTextsDeferred = createDeferred<InboxMessage[]>();
 
     const harness = createGetTeamDataHarness({
       getTasks: async () => {
@@ -3293,10 +3521,6 @@ describe('TeamDataService', () => {
         order.push('inboxNames:start');
         return [];
       },
-      getMessages: async () => {
-        order.push('messages:start');
-        return messagesDeferred.promise;
-      },
       getMembers: async () => {
         order.push('meta:start');
         return [];
@@ -3304,10 +3528,6 @@ describe('TeamDataService', () => {
       getState: async () => {
         order.push('kanban:start');
         return { teamName: 'my-team', reviewers: [], tasks: {} };
-      },
-      readMessages: async () => {
-        order.push('sent:start');
-        return [];
       },
       resolveMembers: () => {
         order.push('resolveMembers');
@@ -3330,39 +3550,21 @@ describe('TeamDataService', () => {
       },
     });
 
-    vi.spyOn(harness.service as never, 'extractLeadSessionTexts' as never).mockImplementation(
-      async () => {
-        order.push('leadTexts:start');
-        return leadTextsDeferred.promise;
-      }
-    );
-
     const pending = harness.service.getTeamData('my-team');
     await flushMicrotasks();
 
     expect(order).toEqual(
       expect.arrayContaining([
         'inboxNames:start',
-        'sent:start',
         'meta:start',
         'kanban:start',
         'tasks:start',
-        'messages:start',
       ])
     );
-    expect(order).not.toContain('leadTexts:start');
     expect(order).not.toContain('processes:start');
+    expect(order).not.toContain('leadTexts:start');
 
     tasksDeferred.resolve([]);
-    await flushMicrotasks();
-
-    expect(order).toContain('leadTexts:start');
-    expect(order.indexOf('tasks:start')).toBeLessThan(order.indexOf('messages:start'));
-    expect(order.indexOf('messages:start')).toBeLessThan(order.indexOf('leadTexts:start'));
-    expect(order).not.toContain('processes:start');
-
-    messagesDeferred.resolve([]);
-    leadTextsDeferred.resolve([]);
 
     const data = await pending;
 
@@ -3372,7 +3574,7 @@ describe('TeamDataService', () => {
         pid: 101,
       }),
     ]);
-    expect(order.indexOf('leadTexts:start')).toBeLessThan(order.indexOf('processes:start'));
+    expect(order).not.toContain('leadTexts:start');
     expect(order.indexOf('resolveMembers')).toBeLessThan(order.indexOf('processes:start'));
   });
 
@@ -3417,47 +3619,64 @@ describe('TeamDataService', () => {
     );
   });
 
+  it('surfaces isAlive in the structural snapshot from live process state', async () => {
+    const aliveHarness = createGetTeamDataHarness({
+      listProcesses: () =>
+        [
+          {
+            id: 'proc-1',
+            label: 'Lead',
+            pid: 101,
+            registeredAt: '2026-04-09T10:00:00.000Z',
+          },
+        ] satisfies TeamProcess[],
+    });
+    const offlineHarness = createGetTeamDataHarness({
+      listProcesses: () =>
+        [
+          {
+            id: 'proc-1',
+            label: 'Lead',
+            pid: 101,
+            registeredAt: '2026-04-09T10:00:00.000Z',
+            stoppedAt: '2026-04-09T10:05:00.000Z',
+          },
+        ] satisfies TeamProcess[],
+    });
+
+    const aliveData = await aliveHarness.service.getTeamData('my-team');
+    const offlineData = await offlineHarness.service.getTeamData('my-team');
+
+    expect(aliveData.isAlive).toBe(true);
+    expect(offlineData.isAlive).toBe(false);
+  });
+
   it('keeps warning order deterministic even when read failures settle out of order', async () => {
     const tasksDeferred = createDeferred<TeamTask[]>();
     const inboxDeferred = createDeferred<string[]>();
-    const messagesDeferred = createDeferred<InboxMessage[]>();
-    const leadTextsDeferred = createDeferred<InboxMessage[]>();
-    const sentDeferred = createDeferred<InboxMessage[]>();
     const metaDeferred = createDeferred<TeamConfig['members']>();
     const kanbanDeferred = createDeferred<KanbanState>();
 
     const harness = createGetTeamDataHarness({
       getTasks: async () => tasksDeferred.promise,
       listInboxNames: async () => inboxDeferred.promise,
-      getMessages: async () => messagesDeferred.promise,
       getMembers: async () => metaDeferred.promise,
       getState: async () => kanbanDeferred.promise,
-      readMessages: async () => sentDeferred.promise,
     });
-
-    vi.spyOn(harness.service as never, 'extractLeadSessionTexts' as never).mockImplementation(
-      async () => leadTextsDeferred.promise
-    );
 
     const pending = harness.service.getTeamData('my-team');
     await flushMicrotasks();
 
-    sentDeferred.reject(new Error('sent failed'));
     kanbanDeferred.reject(new Error('kanban failed'));
     tasksDeferred.reject(new Error('tasks failed'));
     metaDeferred.reject(new Error('meta failed'));
     inboxDeferred.reject(new Error('inbox failed'));
-    leadTextsDeferred.reject(new Error('lead failed'));
-    messagesDeferred.reject(new Error('messages failed'));
 
     const data = await pending;
 
     expect(data.warnings).toEqual([
       'Tasks failed to load',
       'Inboxes failed to load',
-      'Messages failed to load',
-      'Lead session texts failed to load',
-      'Sent messages failed to load',
       'Member metadata failed to load',
       'Kanban state failed to load',
     ]);
@@ -3501,9 +3720,9 @@ describe('TeamDataService', () => {
       },
     ]);
 
-    const data = await harness.service.getTeamData('my-team');
+    const feed = await harness.service.getMessageFeed('my-team');
 
-    expect(data.messages.map((message) => message.messageId)).toEqual(['sent-1', 'lead-1', 'inbox-1']);
+    expect(feed.messages.map((message) => message.messageId)).toEqual(['sent-1', 'lead-1', 'inbox-1']);
   });
 
   it('preserves assembled messages and resolver inputs when inbox messages fail', async () => {
@@ -3552,11 +3771,10 @@ describe('TeamDataService', () => {
     ]);
 
     const data = await harness.service.getTeamData('my-team');
+    const feed = await harness.service.getMessageFeed('my-team');
 
-    expect(data.warnings).toEqual(
-      expect.arrayContaining(['Messages failed to load', 'Kanban state failed to load'])
-    );
-    expect(data.messages.map((message) => message.messageId)).toEqual(['sent-1', 'lead-1']);
+    expect(data.warnings).toEqual(expect.arrayContaining(['Kanban state failed to load']));
+    expect(feed.messages.map((message) => message.messageId)).toEqual(['sent-1', 'lead-1']);
     expect(resolveMembersSpy).toHaveBeenCalledWith(
       buildDefaultTeamConfig(),
       metaMembers,
@@ -3566,10 +3784,6 @@ describe('TeamDataService', () => {
           id: 'task-1',
           subject: 'Investigate rollout',
         }),
-      ],
-      [
-        expect.objectContaining({ messageId: 'sent-1' }),
-        expect.objectContaining({ messageId: 'lead-1' }),
       ]
     );
   });
@@ -3608,15 +3822,10 @@ describe('TeamDataService', () => {
   it('degrades a queued heavy sync throw to warning and still completes the snapshot', async () => {
     const order: string[] = [];
     const tasksDeferred = createDeferred<TeamTask[]>();
-    const messagesDeferred = createDeferred<InboxMessage[]>();
     const harness = createGetTeamDataHarness({
       getTasks: async () => {
         order.push('tasks:start');
         return tasksDeferred.promise;
-      },
-      getMessages: async () => {
-        order.push('messages:start');
-        return messagesDeferred.promise;
       },
       listProcesses: () => {
         order.push('processes:start');
@@ -3635,14 +3844,9 @@ describe('TeamDataService', () => {
     expect(order).not.toContain('leadTexts:start');
 
     tasksDeferred.resolve([]);
-    await flushMicrotasks();
-
-    expect(order).toContain('leadTexts:start');
-
-    messagesDeferred.resolve([]);
     const data = await pending;
 
-    expect(data.warnings).toEqual(expect.arrayContaining(['Lead session texts failed to load']));
+    expect(data.warnings ?? []).not.toContain('Lead session texts failed to load');
     expect(order).toContain('processes:start');
   });
 
@@ -3780,7 +3984,7 @@ describe('TeamDataService', () => {
       expect(page1.hasMore).toBe(true);
 
       const page2 = await service.getMessagesPage('my-team', {
-        beforeTimestamp: page1.nextCursor!,
+        cursor: page1.nextCursor!,
         limit: 10,
       });
       // Should get the remaining 2 messages, not lose the one with same timestamp
@@ -3812,6 +4016,125 @@ describe('TeamDataService', () => {
       const page = await service.getMessagesPage('my-team', { limit: 10 });
       const result = page.messages.find((m) => m.messageId === 'resp1');
       expect(result?.messageKind).toBe('slash_command_result');
+    });
+
+    it('normalizes stable effective message ids before pagination and cursoring', async () => {
+      const msgs = [
+        {
+          from: 'alice',
+          text: 'same-ts-a',
+          timestamp: '2026-01-01T00:00:02.000Z',
+          source: 'inbox' as const,
+        },
+        {
+          from: 'bob',
+          text: 'same-ts-b',
+          timestamp: '2026-01-01T00:00:02.000Z',
+          source: 'inbox' as const,
+        },
+        {
+          from: 'carol',
+          text: 'older',
+          timestamp: '2026-01-01T00:00:01.000Z',
+          source: 'inbox' as const,
+        },
+      ];
+      const service = createPaginationService(msgs);
+
+      const page1 = await service.getMessagesPage('my-team', { limit: 1 });
+      const page2 = await service.getMessagesPage('my-team', {
+        cursor: page1.nextCursor!,
+        limit: 10,
+      });
+
+      expect(page1.messages[0]?.messageId).toMatch(/^inbox-/);
+      expect(page1.nextCursor).toContain(page1.messages[0]!.messageId!);
+      expect(page2.messages.every((message) => Boolean(message.messageId))).toBe(true);
+      expect(new Set([...page1.messages, ...page2.messages].map((message) => message.messageId)).size).toBe(3);
+    });
+
+    it('dedups newest-page live overlay against durable lead thoughts that already paged off the first page', async () => {
+      const fillerMessages = Array.from({ length: 55 }, (_, index) => ({
+        from: 'alice',
+        text: `filler-${index}`,
+        timestamp: `2026-01-01T00:00:${String(10 + index).padStart(2, '0')}.000Z`,
+        messageId: `filler-${index}`,
+        source: 'inbox' as const,
+      }));
+      const durableThought = {
+        from: 'team-lead',
+        text: 'Hello there',
+        timestamp: '2026-01-01T00:00:01.000Z',
+        messageId: 'durable-thought',
+        source: 'lead_session' as const,
+        leadSessionId: 'lead-1',
+      };
+      const service = createPaginationService([...fillerMessages, durableThought]);
+
+      const page = await service.getMessagesPage('my-team', {
+        limit: 50,
+        liveMessages: [
+          {
+            from: 'team-lead',
+            text: 'Hello there',
+            timestamp: '2026-01-01T00:01:30.000Z',
+            read: true,
+            source: 'lead_process',
+            messageId: 'live-thought',
+            leadSessionId: 'lead-1',
+          },
+        ],
+      });
+
+      expect(page.messages).toHaveLength(50);
+      expect(page.messages.some((message) => message.messageId === 'live-thought')).toBe(false);
+      expect(page.messages.some((message) => message.messageId === 'durable-thought')).toBe(false);
+    });
+
+    it('does not skip durable rows when live overlay fills the newest page', async () => {
+      const msgs = [
+        {
+          from: 'alice',
+          text: 'durable-newest',
+          timestamp: '2026-01-01T00:00:02.000Z',
+          messageId: 'durable-2',
+          source: 'inbox' as const,
+        },
+        {
+          from: 'alice',
+          text: 'durable-older',
+          timestamp: '2026-01-01T00:00:01.000Z',
+          messageId: 'durable-1',
+          source: 'inbox' as const,
+        },
+      ];
+      const service = createPaginationService(msgs);
+
+      const page1 = await service.getMessagesPage('my-team', {
+        limit: 1,
+        liveMessages: [
+          {
+            from: 'team-lead',
+            text: 'live-thought',
+            timestamp: '2026-01-01T00:00:03.000Z',
+            read: true,
+            source: 'lead_process',
+            messageId: 'live-1',
+            leadSessionId: 'lead-1',
+          },
+        ],
+      });
+
+      expect(page1.messages.map((message) => message.messageId)).toEqual(['live-1']);
+      expect(page1.hasMore).toBe(true);
+      expect(page1.nextCursor).toBe('2026-01-01T00:00:03.000Z|live-1');
+
+      const page2 = await service.getMessagesPage('my-team', {
+        limit: 10,
+        cursor: page1.nextCursor!,
+      });
+
+      expect(page2.messages.map((message) => message.messageId)).toEqual(['durable-2', 'durable-1']);
     });
   });
 });

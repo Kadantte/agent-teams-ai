@@ -471,7 +471,7 @@ export class TmuxWslService {
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', POWERSHELL_FEATURE_QUERY],
       6_000
     );
-    if (!result || result.exitCode !== 0 || !result.stdout.trim()) {
+    if (result?.exitCode !== 0 || !result.stdout.trim()) {
       return null;
     }
 

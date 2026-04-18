@@ -1,16 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { TeamGraphAdapter } from '@features/agent-graph/renderer/adapters/TeamGraphAdapter';
+import {
+  TeamGraphAdapter,
+  type TeamGraphData,
+} from '@features/agent-graph/renderer/adapters/TeamGraphAdapter';
 
-import type { InboxMessage, TeamData, TeamTaskWithKanban } from '@shared/types/team';
+import type { InboxMessage, TeamTaskWithKanban } from '@shared/types/team';
 import type { GraphDataPort } from '@claude-teams/agent-graph';
 
 function createBaseTeamData(
-  overrides?: Partial<TeamData> & {
+  overrides?: Partial<TeamGraphData> & {
     tasks?: TeamTaskWithKanban[];
     messages?: InboxMessage[];
   }
-): TeamData {
+): TeamGraphData {
+  const { messages, ...restOverrides } = overrides ?? {};
   return {
     teamName: 'my-team',
     config: {
@@ -46,11 +50,11 @@ function createBaseTeamData(
       },
     ],
     tasks: [],
-    messages: [],
+    messageFeed: messages ?? [],
     kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
     processes: [],
     isAlive: true,
-    ...overrides,
+    ...restOverrides,
   };
 }
 
@@ -711,6 +715,63 @@ describe('TeamGraphAdapter particles', () => {
       'inbox_message',
       'task_comment',
     ]);
+  });
+
+  it('maps lead-owned tasks onto the lead board without routing unknown owners to lead', () => {
+    const adapter = TeamGraphAdapter.create();
+
+    const graph = adapter.adapt(
+      createBaseTeamData({
+        config: {
+          name: 'My Team',
+          members: [{ name: 'olivia', agentType: 'lead' }, { name: 'alice' }],
+          projectPath: '/repo',
+        },
+        members: [
+          {
+            name: 'olivia',
+            status: 'active',
+            currentTaskId: null,
+            taskCount: 1,
+            lastActiveAt: null,
+            messageCount: 0,
+            agentType: 'lead',
+          },
+          {
+            name: 'alice',
+            status: 'active',
+            currentTaskId: null,
+            taskCount: 1,
+            lastActiveAt: null,
+            messageCount: 0,
+          },
+        ],
+        tasks: [
+          {
+            id: 'lead-task',
+            displayId: '#11',
+            subject: 'Lead summary',
+            owner: 'olivia',
+            status: 'in_progress',
+            comments: [],
+            reviewState: 'none',
+          } as TeamTaskWithKanban,
+          {
+            id: 'unknown-task',
+            displayId: '#12',
+            subject: 'Unknown owner',
+            owner: 'ghost',
+            status: 'in_progress',
+            comments: [],
+            reviewState: 'none',
+          } as TeamTaskWithKanban,
+        ],
+      }),
+      'my-team'
+    );
+
+    expect(findNode(graph, 'task:my-team:lead-task')?.ownerId).toBe('lead:my-team');
+    expect(findNode(graph, 'task:my-team:unknown-task')?.ownerId).toBeNull();
   });
 
   it('builds member activity feeds from inbox messages in newest-first order', () => {

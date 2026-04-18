@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Sheet, type SheetRef } from 'react-modal-sheet';
 
-import { api } from '@renderer/api';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
@@ -9,11 +8,10 @@ import { useStableTeamMentionMeta } from '@renderer/hooks/useStableTeamMentionMe
 import { useTeamMessagesExpanded } from '@renderer/hooks/useTeamMessagesExpanded';
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
 import { useStore } from '@renderer/store';
-import { mergeTeamMessages } from '@renderer/utils/mergeTeamMessages';
+import { selectTeamMessages } from '@renderer/store/slices/teamSlice';
 import { filterTeamMessages } from '@renderer/utils/teamMessageFiltering';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import { shouldExcludeInboxTextFromReplyCandidates } from '@shared/utils/idleNotificationSemantics';
-import { createLogger } from '@shared/utils/logger';
 import {
   CheckCheck,
   ChevronsDownUp,
@@ -53,9 +51,6 @@ interface TimeWindow {
   end: number;
 }
 
-const logger = createLogger('Component:MessagesPanel');
-const MESSAGES_PANEL_FILTER_WARN_MS = 8;
-const MESSAGES_PANEL_EXPANDED_ITEM_WARN_MS = 6;
 const BOTTOM_SHEET_HEADER_HEIGHT = 40;
 const BOTTOM_SHEET_COLLAPSED_SNAP_INDEX = 1;
 const BOTTOM_SHEET_COMPOSER_SNAP_INDEX = 2;
@@ -70,8 +65,6 @@ interface MessagesPanelProps {
   members: ResolvedTeamMember[];
   /** All team tasks. */
   tasks: TeamTaskWithKanban[];
-  /** All raw messages from team data. */
-  messages: InboxMessage[];
   /** Whether the team is alive. */
   isTeamAlive?: boolean;
   /** Live lead activity status for the current team. */
@@ -80,8 +73,6 @@ interface MessagesPanelProps {
   leadContextUpdatedAt?: string;
   /** Time window for filtering. */
   timeWindow: TimeWindow | null;
-  /** Team session IDs for timeline. */
-  teamSessionIds: Set<string>;
   /** Current lead session ID. */
   currentLeadSessionId?: string;
   /** Pending replies tracker (shared with parent for MemberList). */
@@ -109,12 +100,10 @@ export const MessagesPanel = memo(function MessagesPanel({
   mountPoint,
   members,
   tasks,
-  messages,
   isTeamAlive,
   leadActivity,
   leadContextUpdatedAt,
   timeWindow,
-  teamSessionIds,
   currentLeadSessionId,
   pendingRepliesByMember,
   onPendingReplyChange,
@@ -133,6 +122,9 @@ export const MessagesPanel = memo(function MessagesPanel({
     lastSendMessageResult,
     teams,
     openTeamTab,
+    messages,
+    messagesState,
+    loadOlderTeamMessages,
   } = useStore(
     useShallow((s) => ({
       sendTeamMessage: s.sendTeamMessage,
@@ -142,79 +134,24 @@ export const MessagesPanel = memo(function MessagesPanel({
       lastSendMessageResult: s.lastSendMessageResult,
       teams: s.teams,
       openTeamTab: s.openTeamTab,
+      messages: selectTeamMessages(s, teamName),
+      messagesState: teamName ? s.teamMessagesByName[teamName] : undefined,
+      loadOlderTeamMessages: s.loadOlderTeamMessages,
     }))
   );
 
-  // ── Paginated message fetching ──
-  // Messages are now fetched via getMessagesPage API instead of coming
-  // from getTeamData. The `messages` prop is used as initial seed if non-empty.
-  const PAGE_SIZE = 50;
-  const [fetchedMessages, setFetchedMessages] = useState<InboxMessage[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [messagesLoading, setMessagesLoading] = useState(false);
-  const fetchIdRef = useRef(0);
-
-  // Initial fetch on mount or team change
-  useEffect(() => {
-    const id = ++fetchIdRef.current;
-    setMessagesLoading(true);
-    void (async () => {
-      try {
-        const page = await api.teams.getMessagesPage(teamName, { limit: PAGE_SIZE });
-        if (fetchIdRef.current !== id) return;
-        setFetchedMessages(page.messages);
-        setNextCursor(page.nextCursor);
-        setHasMore(page.hasMore);
-      } catch {
-        // Fallback: use prop messages if API fails
-        if (fetchIdRef.current === id && messages.length > 0) {
-          setFetchedMessages(messages);
-        }
-      } finally {
-        if (fetchIdRef.current === id) setMessagesLoading(false);
-      }
-    })();
-  }, [teamName]); // eslint-disable-line react-hooks/exhaustive-deps -- intentionally only on teamName change
-
-  // Auto-refresh: poll for NEW messages only (prepend to head).
-  // Does NOT touch nextCursor/hasMore — those belong to the "Load older" flow.
-  useEffect(() => {
-    if (!isTeamAlive && leadActivity !== 'active') return;
-    const interval = setInterval(async () => {
-      try {
-        const page = await api.teams.getMessagesPage(teamName, { limit: PAGE_SIZE });
-        setFetchedMessages((prev) => mergeTeamMessages(prev, page.messages));
-      } catch {
-        // best-effort
-      }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [teamName, isTeamAlive, leadActivity]);
-
   const loadOlderMessages = useCallback(async () => {
-    if (!nextCursor || messagesLoading) return;
-    setMessagesLoading(true);
-    try {
-      const page = await api.teams.getMessagesPage(teamName, {
-        beforeTimestamp: nextCursor,
-        limit: PAGE_SIZE,
-      });
-      setFetchedMessages((prev) => mergeTeamMessages(prev, page.messages));
-      setNextCursor(page.nextCursor);
-      setHasMore(page.hasMore);
-    } catch {
-      // best-effort
-    } finally {
-      setMessagesLoading(false);
+    if (!messagesState?.hasMore || messagesState.loadingHead || messagesState.loadingOlder) {
+      return;
     }
-  }, [teamName, nextCursor, messagesLoading]);
+    await loadOlderTeamMessages(teamName);
+  }, [loadOlderTeamMessages, messagesState, teamName]);
 
-  // Use fetched messages, fall back to prop messages during initial load
-  const effectiveMessages = useMemo(() => {
-    if (fetchedMessages.length === 0) return messages;
-    return mergeTeamMessages(fetchedMessages, messages);
-  }, [fetchedMessages, messages]);
+  const messagesLoading =
+    (messagesState?.loadingHead ?? false) || (messagesState?.loadingOlder ?? false);
+  const loadingOlderMessages = messagesState?.loadingOlder ?? false;
+  const hasMore = messagesState?.hasMore ?? false;
+  const effectiveMessages = messages;
 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null);
@@ -307,7 +244,7 @@ export const MessagesPanel = memo(function MessagesPanel({
     for (const [element, setHeight] of observedEntries) {
       if (!element) continue;
 
-      const updateHeight = () => {
+      const updateHeight = (): void => {
         const nextHeight = Math.ceil(element.getBoundingClientRect().height);
         if (nextHeight > 0) {
           setHeight(nextHeight);
@@ -329,41 +266,21 @@ export const MessagesPanel = memo(function MessagesPanel({
   }, [position, mountPoint]);
 
   const filteredMessages = useMemo(() => {
-    const startedAt = performance.now();
-    const result = filterTeamMessages(effectiveMessages, {
+    return filterTeamMessages(effectiveMessages, {
       timeWindow,
       filter: messagesFilter,
       searchQuery: messagesSearchQuery,
     });
-    const ms = performance.now() - startedAt;
-    if (ms >= MESSAGES_PANEL_FILTER_WARN_MS) {
-      logger.warn(
-        `[perf] filter team=${teamName} stage=messages ms=${ms.toFixed(1)} input=${effectiveMessages.length} output=${result.length} searchLen=${messagesSearchQuery.trim().length} noise=${
-          messagesFilter.showNoise ? 'on' : 'off'
-        }`
-      );
-    }
-    return result;
-  }, [effectiveMessages, messagesFilter, messagesSearchQuery, teamName, timeWindow]);
+  }, [effectiveMessages, messagesFilter, messagesSearchQuery, timeWindow]);
 
   const activityTimelineMessages = useMemo(() => {
-    const startedAt = performance.now();
-    const result = filterTeamMessages(effectiveMessages, {
+    return filterTeamMessages(effectiveMessages, {
       includePassiveIdlePeerSummariesWhenNoiseHidden: true,
       timeWindow,
       filter: messagesFilter,
       searchQuery: messagesSearchQuery,
     });
-    const ms = performance.now() - startedAt;
-    if (ms >= MESSAGES_PANEL_FILTER_WARN_MS) {
-      logger.warn(
-        `[perf] filter team=${teamName} stage=timeline ms=${ms.toFixed(1)} input=${effectiveMessages.length} output=${result.length} searchLen=${messagesSearchQuery.trim().length} noise=${
-          messagesFilter.showNoise ? 'on' : 'off'
-        }`
-      );
-    }
-    return result;
-  }, [effectiveMessages, messagesFilter, messagesSearchQuery, teamName, timeWindow]);
+  }, [effectiveMessages, messagesFilter, messagesSearchQuery, timeWindow]);
 
   const replyCandidateMessages = useMemo(
     () =>
@@ -377,33 +294,21 @@ export const MessagesPanel = memo(function MessagesPanel({
 
   // Resolve the expanded item from filtered messages
   const expandedItem = useMemo<TimelineItem | null>(() => {
-    const startedAt = performance.now();
-    if (!expandedItemKey) return null;
+    if (!expandedItemKey) {
+      return null;
+    }
     if (!expandedItemKey.startsWith('thoughts-')) {
       const msg = activityTimelineMessages.find((m) => toMessageKey(m) === expandedItemKey);
-      const result: TimelineItem | null = msg ? { type: 'message', message: msg } : null;
-      const ms = performance.now() - startedAt;
-      if (ms >= MESSAGES_PANEL_EXPANDED_ITEM_WARN_MS) {
-        logger.warn(
-          `[perf] expandedItem team=${teamName} ms=${ms.toFixed(1)} mode=message timelineMessages=${activityTimelineMessages.length}`
-        );
-      }
-      return result;
+      return msg ? { type: 'message', message: msg } : null;
     }
     const allItems = groupTimelineItems(activityTimelineMessages);
-    const result =
+    return (
       allItems.find(
         (item) =>
           item.type === 'lead-thoughts' && getThoughtGroupKey(item.group) === expandedItemKey
-      ) ?? null;
-    const ms = performance.now() - startedAt;
-    if (ms >= MESSAGES_PANEL_EXPANDED_ITEM_WARN_MS) {
-      logger.warn(
-        `[perf] expandedItem team=${teamName} ms=${ms.toFixed(1)} mode=thoughts timelineMessages=${activityTimelineMessages.length} groups=${allItems.length}`
-      );
-    }
-    return result;
-  }, [expandedItemKey, activityTimelineMessages, teamName]);
+      ) ?? null
+    );
+  }, [expandedItemKey, activityTimelineMessages]);
 
   // Auto-clear stale expanded key
   useEffect(() => {
@@ -661,7 +566,6 @@ export const MessagesPanel = memo(function MessagesPanel({
         allCollapsed={messagesCollapsed}
         expandOverrides={expandedSet}
         onToggleExpandOverride={toggleExpandOverride}
-        teamSessionIds={teamSessionIds}
         currentLeadSessionId={currentLeadSessionId}
         isTeamAlive={isTeamAlive}
         leadActivity={leadActivity}
@@ -684,10 +588,11 @@ export const MessagesPanel = memo(function MessagesPanel({
             variant="ghost"
             size="sm"
             className="text-xs text-text-muted"
-            disabled={messagesLoading}
+            aria-busy={loadingOlderMessages}
+            disabled={loadingOlderMessages}
             onClick={() => void loadOlderMessages()}
           >
-            {messagesLoading ? 'Loading...' : 'Load older messages'}
+            Load older messages
           </Button>
         </div>
       )}
@@ -846,7 +751,6 @@ export const MessagesPanel = memo(function MessagesPanel({
             allCollapsed={messagesCollapsed}
             expandOverrides={expandedSet}
             onToggleExpandOverride={toggleExpandOverride}
-            teamSessionIds={teamSessionIds}
             currentLeadSessionId={currentLeadSessionId}
             isTeamAlive={isTeamAlive}
             leadActivity={leadActivity}
@@ -869,10 +773,11 @@ export const MessagesPanel = memo(function MessagesPanel({
                 variant="ghost"
                 size="sm"
                 className="text-xs text-text-muted"
-                disabled={messagesLoading}
+                aria-busy={loadingOlderMessages}
+                disabled={loadingOlderMessages}
                 onClick={() => void loadOlderMessages()}
               >
-                {messagesLoading ? 'Loading...' : 'Load older messages'}
+                Load older messages
               </Button>
             </div>
           )}
@@ -1132,7 +1037,6 @@ export const MessagesPanel = memo(function MessagesPanel({
                   allCollapsed={messagesCollapsed}
                   expandOverrides={expandedSet}
                   onToggleExpandOverride={toggleExpandOverride}
-                  teamSessionIds={teamSessionIds}
                   currentLeadSessionId={currentLeadSessionId}
                   isTeamAlive={isTeamAlive}
                   leadActivity={leadActivity}
@@ -1155,10 +1059,11 @@ export const MessagesPanel = memo(function MessagesPanel({
                       variant="ghost"
                       size="sm"
                       className="text-xs text-text-muted"
-                      disabled={messagesLoading}
+                      aria-busy={loadingOlderMessages}
+                      disabled={loadingOlderMessages}
                       onClick={() => void loadOlderMessages()}
                     >
-                      {messagesLoading ? 'Loading...' : 'Load older messages'}
+                      Load older messages
                     </Button>
                   </div>
                 )}

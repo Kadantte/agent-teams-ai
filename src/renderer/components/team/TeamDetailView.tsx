@@ -1,4 +1,14 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { api } from '@renderer/api';
 import { SessionContextPanel } from '@renderer/components/chat/SessionContextPanel/index';
@@ -23,9 +33,12 @@ import { useStore } from '@renderer/store';
 import {
   getCurrentProvisioningProgressForTeam,
   isTeamProvisioningActive,
+  selectResolvedMemberForTeamName,
+  selectResolvedMembersForTeamName,
+  selectTeamMemberSnapshotsForName,
 } from '@renderer/store/slices/teamSlice';
 import { createChipFromSelection } from '@renderer/utils/chipUtils';
-import { formatPercentOfTotal, sumContextInjectionTokens } from '@renderer/utils/contextMath';
+import { sumContextInjectionTokens } from '@renderer/utils/contextMath';
 import { formatProjectPath } from '@renderer/utils/pathDisplay';
 import { buildTaskCountsByOwner, normalizePath } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
@@ -35,6 +48,7 @@ import {
   type TaskChangeRequestOptions,
 } from '@renderer/utils/taskChangeRequest';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
+import { deriveContextMetrics } from '@shared/utils/contextMetrics';
 import { isLeadAgentType, isLeadMember } from '@shared/utils/leadDetection';
 import { createLogger } from '@shared/utils/logger';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
@@ -111,9 +125,11 @@ import type {
   MemberSpawnStatusEntry,
   ResolvedTeamMember,
   TaskRef,
+  TeamAgentRuntimeEntry,
   TeamTaskWithKanban,
 } from '@shared/types';
 import type { EditorSelectionAction } from '@shared/types/editor';
+import type { ContextUsageLike } from '@shared/utils/contextMetrics';
 
 interface TeamDetailViewProps {
   teamName: string;
@@ -286,7 +302,7 @@ type TeamMemberListBridgeProps = Omit<
 };
 type TeamMemberDetailDialogBridgeProps = Omit<
   ComponentProps<typeof MemberDetailDialog>,
-  'leadActivity' | 'spawnEntry'
+  'leadActivity' | 'spawnEntry' | 'runtimeEntry'
 >;
 type TeamSidebarRailBridgeProps = Omit<
   ComponentProps<typeof TeamSidebarRail>,
@@ -324,6 +340,17 @@ function buildMemberSpawnStatusMap(
   return map.size > 0 ? map : undefined;
 }
 
+function buildTeamAgentRuntimeMap(
+  runtimeSnapshot: Record<string, TeamAgentRuntimeEntry> | undefined
+): Map<string, TeamAgentRuntimeEntry> | undefined {
+  if (!runtimeSnapshot) {
+    return undefined;
+  }
+
+  const map = new Map<string, TeamAgentRuntimeEntry>(Object.entries(runtimeSnapshot));
+  return map.size > 0 ? map : undefined;
+}
+
 const TeamSpawnStatusWatcher = memo(function TeamSpawnStatusWatcher({
   teamName,
   isTeamProvisioning,
@@ -355,6 +382,54 @@ const TeamSpawnStatusWatcher = memo(function TeamSpawnStatusWatcher({
     isTeamProvisioning,
     leadActivity,
     memberSpawnStatuses,
+    teamName,
+  ]);
+
+  return null;
+});
+
+const TEAM_AGENT_RUNTIME_REFRESH_MS = 5_000;
+
+const TeamAgentRuntimeWatcher = memo(function TeamAgentRuntimeWatcher({
+  teamName,
+  isTeamProvisioning,
+  isTeamAlive,
+  isThisTabActive,
+}: {
+  teamName: string;
+  isTeamProvisioning: boolean;
+  isTeamAlive?: boolean;
+  isThisTabActive: boolean;
+}): null {
+  const { leadActivity, fetchTeamAgentRuntime } = useStore(
+    useShallow((s) => ({
+      leadActivity: s.leadActivityByTeam[teamName],
+      fetchTeamAgentRuntime: s.fetchTeamAgentRuntime,
+    }))
+  );
+
+  useEffect(() => {
+    if (!isThisTabActive) return;
+    const shouldWatch =
+      isTeamProvisioning ||
+      isTeamAlive === true ||
+      leadActivity === 'active' ||
+      leadActivity === 'idle';
+    if (!shouldWatch) return;
+
+    void fetchTeamAgentRuntime(teamName);
+    const timer = window.setInterval(() => {
+      void fetchTeamAgentRuntime(teamName);
+    }, TEAM_AGENT_RUNTIME_REFRESH_MS);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [
+    fetchTeamAgentRuntime,
+    isTeamAlive,
+    isTeamProvisioning,
+    isThisTabActive,
+    leadActivity,
     teamName,
   ]);
 
@@ -445,6 +520,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
 }: LeadContextBridgeProps): React.JSX.Element | null {
   const {
     leadTabData,
+    leadContextSnapshot,
     isContextPanelVisible,
     selectedContextPhase,
     setContextPanelVisibleForTab,
@@ -453,6 +529,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
   } = useStore(
     useShallow((s) => ({
       leadTabData: tabId ? (s.tabSessionData[tabId] ?? null) : null,
+      leadContextSnapshot: s.leadContextByTeam[teamName] ?? null,
       isContextPanelVisible: tabId ? (s.tabUIStates.get(tabId)?.showContextPanel ?? false) : false,
       selectedContextPhase: tabId ? (s.tabUIStates.get(tabId)?.selectedContextPhase ?? null) : null,
       setContextPanelVisibleForTab: s.setContextPanelVisibleForTab,
@@ -491,9 +568,13 @@ const LeadContextBridge = memo(function LeadContextBridge({
     const total = processes.reduce((sum, p) => sum + (p.metrics.costUsd ?? 0), 0);
     return total > 0 ? total : undefined;
   }, [leadSessionDetail?.processes]);
-  const { allContextInjections, lastAiGroupTotalTokens } = useMemo(() => {
+  const { allContextInjections, lastAssistantUsage, lastAssistantModelName } = useMemo(() => {
     if (!leadSessionLoaded || !leadSessionContextStats || !leadConversation?.items.length) {
-      return { allContextInjections: [] as ContextInjection[], lastAiGroupTotalTokens: undefined };
+      return {
+        allContextInjections: [] as ContextInjection[],
+        lastAssistantUsage: null as ContextUsageLike | null,
+        lastAssistantModelName: undefined as string | undefined,
+      };
     }
 
     const effectivePhase = selectedContextPhase;
@@ -511,7 +592,8 @@ const LeadContextBridge = memo(function LeadContextBridge({
       if (lastAiItem?.type !== 'ai') {
         return {
           allContextInjections: [] as ContextInjection[],
-          lastAiGroupTotalTokens: undefined,
+          lastAssistantUsage: null,
+          lastAssistantModelName: undefined,
         };
       }
       targetAiGroupId = lastAiItem.group.id;
@@ -520,7 +602,8 @@ const LeadContextBridge = memo(function LeadContextBridge({
     const stats = leadSessionContextStats.get(targetAiGroupId);
     const injections = stats?.accumulatedInjections ?? [];
 
-    let totalTokens: number | undefined;
+    let lastUsage: ContextUsageLike | null = null;
+    let lastModelName: string | undefined;
     const targetItem = leadConversation.items.find(
       (item) => item.type === 'ai' && item.group.id === targetAiGroupId
     );
@@ -529,18 +612,18 @@ const LeadContextBridge = memo(function LeadContextBridge({
       for (let i = responses.length - 1; i >= 0; i--) {
         const msg = responses[i];
         if (msg.type === 'assistant' && msg.usage) {
-          const usage = msg.usage;
-          totalTokens =
-            (usage.input_tokens ?? 0) +
-            (usage.output_tokens ?? 0) +
-            (usage.cache_read_input_tokens ?? 0) +
-            (usage.cache_creation_input_tokens ?? 0);
+          lastUsage = msg.usage;
+          lastModelName = msg.model;
           break;
         }
       }
     }
 
-    return { allContextInjections: injections, lastAiGroupTotalTokens: totalTokens };
+    return {
+      allContextInjections: injections,
+      lastAssistantUsage: lastUsage,
+      lastAssistantModelName: lastModelName,
+    };
   }, [
     leadConversation,
     leadSessionContextStats,
@@ -552,10 +635,26 @@ const LeadContextBridge = memo(function LeadContextBridge({
     () => sumContextInjectionTokens(allContextInjections),
     [allContextInjections]
   );
-  const visibleContextPercentLabel = useMemo(
-    () => formatPercentOfTotal(visibleContextTokens, lastAiGroupTotalTokens),
-    [visibleContextTokens, lastAiGroupTotalTokens]
+  const contextMetrics = useMemo(
+    () =>
+      deriveContextMetrics({
+        usage: lastAssistantUsage,
+        modelName: lastAssistantModelName,
+        contextWindowTokens: leadContextSnapshot?.contextWindowTokens ?? null,
+        visibleContextTokens,
+      }),
+    [
+      lastAssistantModelName,
+      lastAssistantUsage,
+      leadContextSnapshot?.contextWindowTokens,
+      visibleContextTokens,
+    ]
   );
+  const contextUsedPercentLabel = useMemo(() => {
+    const percent =
+      contextMetrics.contextUsedPercentOfContextWindow ?? leadContextSnapshot?.contextUsedPercent;
+    return percent === null || percent === undefined ? null : `${percent.toFixed(1)}%`;
+  }, [contextMetrics.contextUsedPercentOfContextWindow, leadContextSnapshot?.contextUsedPercent]);
 
   if (!leadSessionId) {
     return null;
@@ -570,7 +669,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
               injections={allContextInjections}
               onClose={() => setContextPanelVisible(false)}
               projectRoot={leadSessionDetail?.session?.projectPath ?? fallbackProjectRoot}
-              totalSessionTokens={lastAiGroupTotalTokens}
+              contextMetrics={contextMetrics}
               sessionMetrics={leadSessionDetail?.metrics}
               subagentCostUsd={leadSubagentCostUsd}
               phaseInfo={leadSessionPhaseInfo ?? undefined}
@@ -585,7 +684,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
             >
               <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--color-text)]">Visible Context</p>
+                  <p className="text-sm font-medium text-[var(--color-text)]">Context</p>
                   <p className="text-[10px] text-[var(--color-text-muted)]">
                     {leadSessionLoading ? 'Loading…' : 'No session loaded'}
                   </p>
@@ -644,7 +743,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
                 : leadSessionId
           }
         >
-          {visibleContextPercentLabel ?? 'Context'}
+          {contextUsedPercentLabel ?? 'Context'}
         </button>
       </div>
     </>
@@ -655,17 +754,23 @@ const TeamMemberListBridge = memo(function TeamMemberListBridge({
   teamName,
   ...props
 }: TeamMemberListBridgeProps): React.JSX.Element {
-  const { leadActivity, progress, memberSpawnStatuses, memberSpawnSnapshot } = useStore(
-    useShallow((s) => ({
-      leadActivity: s.leadActivityByTeam[teamName],
-      progress: getCurrentProvisioningProgressForTeam(s, teamName),
-      memberSpawnStatuses: s.memberSpawnStatusesByTeam[teamName],
-      memberSpawnSnapshot: s.memberSpawnSnapshotsByTeam[teamName],
-    }))
-  );
+  const { leadActivity, progress, memberSpawnStatuses, memberSpawnSnapshot, runtimeSnapshot } =
+    useStore(
+      useShallow((s) => ({
+        leadActivity: s.leadActivityByTeam[teamName],
+        progress: getCurrentProvisioningProgressForTeam(s, teamName),
+        memberSpawnStatuses: s.memberSpawnStatusesByTeam[teamName],
+        memberSpawnSnapshot: s.memberSpawnSnapshotsByTeam[teamName],
+        runtimeSnapshot: s.teamAgentRuntimeByTeam[teamName],
+      }))
+    );
   const memberSpawnStatusMap = useMemo(
     () => buildMemberSpawnStatusMap(memberSpawnStatuses),
     [memberSpawnStatuses]
+  );
+  const memberRuntimeMap = useMemo(
+    () => buildTeamAgentRuntimeMap(runtimeSnapshot?.members),
+    [runtimeSnapshot?.members]
   );
   const isLaunchSettling = useMemo(() => {
     if (progress?.state !== 'ready') {
@@ -685,6 +790,7 @@ const TeamMemberListBridge = memo(function TeamMemberListBridge({
       {...props}
       leadActivity={leadActivity}
       memberSpawnStatuses={memberSpawnStatusMap}
+      memberRuntimeEntries={memberRuntimeMap}
       isLaunchSettling={isLaunchSettling}
     />
   );
@@ -740,19 +846,23 @@ const TeamMemberDetailDialogBridge = memo(function TeamMemberDetailDialogBridge(
 }: TeamMemberDetailDialogBridgeProps): React.JSX.Element | null {
   const {
     leadActivity,
+    liveMember,
     progress,
-    members: launchMembers,
+    launchMembers,
     memberSpawnStatuses,
     memberSpawnSnapshot,
     spawnEntry,
+    runtimeEntry,
   } = useStore(
     useShallow((s) => ({
       leadActivity: s.leadActivityByTeam[teamName],
+      liveMember: member ? selectResolvedMemberForTeamName(s, teamName, member.name) : null,
       progress: getCurrentProvisioningProgressForTeam(s, teamName),
-      members: s.selectedTeamName === teamName ? (s.selectedTeamData?.members ?? []) : [],
+      launchMembers: selectTeamMemberSnapshotsForName(s, teamName),
       memberSpawnStatuses: s.memberSpawnStatusesByTeam[teamName],
       memberSpawnSnapshot: s.memberSpawnSnapshotsByTeam[teamName],
       spawnEntry: member ? s.memberSpawnStatusesByTeam[teamName]?.[member.name] : undefined,
+      runtimeEntry: member ? s.teamAgentRuntimeByTeam[teamName]?.members[member.name] : undefined,
     }))
   );
   const isLaunchSettling = useMemo(() => {
@@ -772,10 +882,11 @@ const TeamMemberDetailDialogBridge = memo(function TeamMemberDetailDialogBridge(
     <MemberDetailDialog
       {...props}
       teamName={teamName}
-      member={member}
+      member={liveMember ?? member}
       isLaunchSettling={isLaunchSettling}
       leadActivity={leadActivity}
       spawnEntry={spawnEntry}
+      runtimeEntry={runtimeEntry}
     />
   );
 });
@@ -821,7 +932,6 @@ export const TeamDetailView = ({
   );
   const provisioningBannerRef = useRef<HTMLDivElement>(null);
   const wasProvisioningRef = useRef(false);
-  const pendingReplyRefreshTimerRef = useRef<number | null>(null);
   const handleOpenGraphTab = useCallback(() => {
     const state = useStore.getState();
     const displayName = state.teamByName[teamName]?.displayName ?? teamName;
@@ -898,7 +1008,7 @@ export const TeamDetailView = ({
         initialActivityFilter,
       } = (e as CustomEvent).detail ?? {};
       if (tn !== teamName || !data) return;
-      const member = data.members.find((m: { name: string }) => m.name === memberName);
+      const member = members.find((m: { name: string }) => m.name === memberName);
       if (member) {
         setSelectedMember(member);
         setSelectedMemberView({
@@ -1059,6 +1169,7 @@ export const TeamDetailView = ({
 
   const {
     data,
+    members,
     loading,
     error,
     projects,
@@ -1081,6 +1192,7 @@ export const TeamDetailView = ({
     lastSendMessageResult,
     reviewActionError,
     addMember,
+    restartMember,
     removeMember,
     updateMemberRole,
     launchTeam,
@@ -1088,6 +1200,7 @@ export const TeamDetailView = ({
     clearProvisioningError,
     isTeamProvisioning,
     refreshTeamData,
+    syncTeamPendingReplyRefresh,
     kanbanFilterQuery,
     clearKanbanFilter,
     softDeleteTask,
@@ -1126,6 +1239,7 @@ export const TeamDetailView = ({
       lastSendMessageResult: s.lastSendMessageResult,
       reviewActionError: s.reviewActionError,
       addMember: s.addMember,
+      restartMember: s.restartMember,
       removeMember: s.removeMember,
       updateMemberRole: s.updateMemberRole,
       launchTeam: s.launchTeam,
@@ -1133,9 +1247,11 @@ export const TeamDetailView = ({
       clearProvisioningError: s.clearProvisioningError,
       isTeamProvisioning: teamName ? isTeamProvisioningActive(s, teamName) : false,
       data: s.selectedTeamName === teamName ? s.selectedTeamData : null,
+      members: selectResolvedMembersForTeamName(s, teamName),
       loading: s.selectedTeamName === teamName ? s.selectedTeamLoading : false,
       error: s.selectedTeamName === teamName ? s.selectedTeamError : null,
       refreshTeamData: s.refreshTeamData,
+      syncTeamPendingReplyRefresh: s.syncTeamPendingReplyRefresh,
       kanbanFilterQuery: s.kanbanFilterQuery,
       clearKanbanFilter: s.clearKanbanFilter,
       softDeleteTask: s.softDeleteTask,
@@ -1169,13 +1285,12 @@ export const TeamDetailView = ({
     diagnostic.count += 1;
 
     const commitMs = performance.now() - renderStartedAtRef.current;
-    const messagesCount = data?.messages.length ?? 0;
     const tasksCount = data?.tasks.length ?? 0;
-    const membersCount = data?.members.length ?? 0;
+    const membersCount = members.length;
     const processesCount = data?.processes.length ?? 0;
     const shouldWarnSlow = commitMs >= TEAM_DETAIL_COMMIT_WARN_MS;
     const shouldWarnBurst = diagnostic.count >= TEAM_DETAIL_RENDER_BURST_WARN_COUNT;
-    const shouldWarnLarge = messagesCount >= 150 || tasksCount >= 80;
+    const shouldWarnLarge = tasksCount >= 80;
 
     if (
       (shouldWarnSlow || shouldWarnBurst || shouldWarnLarge) &&
@@ -1187,7 +1302,7 @@ export const TeamDetailView = ({
           now - diagnostic.windowStartedAt
         } activeTab=${isThisTabActive ? 'yes' : 'no'} paneFocused=${isPaneFocused ? 'yes' : 'no'} loading=${
           loading ? 'yes' : 'no'
-        } messages=${messagesCount} tasks=${tasksCount} members=${membersCount} processes=${processesCount} panel=${messagesPanelMode}`
+        } tasks=${tasksCount} members=${membersCount} processes=${processesCount} panel=${messagesPanelMode}`
       );
     }
   });
@@ -1301,36 +1416,34 @@ export const TeamDetailView = ({
   );
 
   const leadSessionId = data?.config.leadSessionId ?? null;
+  const pendingReplyRefreshSourceId = useId();
   const sessionHistoryKey = useMemo(
     () => (data?.config.sessionHistory ?? []).join('|'),
     [data?.config.sessionHistory]
   );
 
   // Keep team message state fresh while we are explicitly waiting for a reply.
-  // Use a delayed single-shot refresh instead of a tight polling loop so we
-  // don't keep rewriting the whole team snapshot every 2 seconds.
+  // This stays enabled even for hidden mounted tabs, because the waiting state
+  // is renderer-local and should keep its lightweight polling until resolved.
   useEffect(() => {
-    if (pendingReplyRefreshTimerRef.current != null) {
-      window.clearTimeout(pendingReplyRefreshTimerRef.current);
-      pendingReplyRefreshTimerRef.current = null;
-    }
-
-    if (!isThisTabActive) return;
-    if (!data?.isAlive) return;
-    if (Object.keys(pendingRepliesByMember).length === 0) return;
-
-    pendingReplyRefreshTimerRef.current = window.setTimeout(() => {
-      pendingReplyRefreshTimerRef.current = null;
-      void refreshTeamData(teamName, { withDedup: true });
-    }, TEAM_PENDING_REPLY_REFRESH_DELAY_MS);
+    const hasPendingReplies = Object.keys(pendingRepliesByMember).length > 0;
+    syncTeamPendingReplyRefresh(
+      teamName,
+      pendingReplyRefreshSourceId,
+      Boolean(data?.isAlive) && hasPendingReplies,
+      TEAM_PENDING_REPLY_REFRESH_DELAY_MS
+    );
 
     return () => {
-      if (pendingReplyRefreshTimerRef.current != null) {
-        window.clearTimeout(pendingReplyRefreshTimerRef.current);
-        pendingReplyRefreshTimerRef.current = null;
-      }
+      syncTeamPendingReplyRefresh(teamName, pendingReplyRefreshSourceId, false);
     };
-  }, [isThisTabActive, data, pendingRepliesByMember, refreshTeamData, teamName]);
+  }, [
+    data?.isAlive,
+    pendingRepliesByMember,
+    pendingReplyRefreshSourceId,
+    syncTeamPendingReplyRefresh,
+    teamName,
+  ]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -1364,9 +1477,9 @@ export const TeamDetailView = ({
   // Live git branch tracking for the lead project and member worktrees
   const teamProjectPath = data?.config.projectPath?.trim() ?? null;
   const leadProjectPath = useMemo(() => {
-    const explicitLeadPath = data?.members.find((member) => isLeadMember(member))?.cwd?.trim();
+    const explicitLeadPath = members.find((member) => isLeadMember(member))?.cwd?.trim();
     return explicitLeadPath && explicitLeadPath.length > 0 ? explicitLeadPath : teamProjectPath;
-  }, [data?.members, teamProjectPath]);
+  }, [members, teamProjectPath]);
   const branchSyncPaths = useMemo(() => {
     const uniquePaths = new Map<string, string>();
     const addPath = (candidate: string | null | undefined): void => {
@@ -1378,12 +1491,12 @@ export const TeamDetailView = ({
     };
 
     addPath(leadProjectPath);
-    for (const member of data?.members ?? []) {
+    for (const member of members) {
       addPath(member.cwd);
     }
 
     return Array.from(uniquePaths.values());
-  }, [data?.members, leadProjectPath]);
+  }, [members, leadProjectPath]);
   useBranchSync(branchSyncPaths, { live: true });
   const trackedBranches = useStore(
     useShallow((s) =>
@@ -1401,7 +1514,7 @@ export const TeamDetailView = ({
   const membersWithLiveBranches = useMemo(() => {
     if (!data) return [];
 
-    return data.members.map((member) => {
+    return members.map((member) => {
       const memberPath = member.cwd?.trim();
       const nextGitBranch =
         memberPath && !isLeadMember(member) && leadBranch !== null
@@ -1423,7 +1536,7 @@ export const TeamDetailView = ({
       }
       return nextMember;
     });
-  }, [data, leadBranch, trackedBranches]);
+  }, [leadBranch, members, trackedBranches]);
 
   // Filter sessions to team-only using sessionHistory + leadSessionId
   const teamSessionIds = useMemo(() => {
@@ -1787,7 +1900,6 @@ export const TeamDetailView = ({
       mountPoint: messagesPanelMountPoint,
       members: activeMembers,
       tasks: data?.tasks ?? [],
-      messages: data?.messages ?? [],
       isTeamAlive: data?.isAlive,
       timeWindow,
       teamSessionIds,
@@ -1805,7 +1917,6 @@ export const TeamDetailView = ({
       activeMembers,
       data?.config.leadSessionId,
       data?.isAlive,
-      data?.messages,
       data?.tasks,
       handleCreateTaskFromMessage,
       handleOpenTask,
@@ -1835,6 +1946,14 @@ export const TeamDetailView = ({
       teamName={teamName}
       isTeamProvisioning={isTeamProvisioning}
       isTeamAlive={data?.isAlive}
+    />
+  );
+  const teamAgentRuntimeWatcher = (
+    <TeamAgentRuntimeWatcher
+      teamName={teamName}
+      isTeamProvisioning={isTeamProvisioning}
+      isTeamAlive={data?.isAlive}
+      isThisTabActive={isThisTabActive}
     />
   );
   const leadContextWatcher = (
@@ -2482,7 +2601,7 @@ export const TeamDetailView = ({
                 open={requestChangesTaskId !== null}
                 teamName={teamName}
                 taskId={requestChangesTaskId}
-                members={data?.members ?? []}
+                members={members}
                 onCancel={() => setRequestChangesTaskId(null)}
                 onSubmit={(comment, taskRefs) => {
                   if (!requestChangesTaskId) {
@@ -2509,11 +2628,11 @@ export const TeamDetailView = ({
                 teamName={teamName}
                 members={membersWithLiveBranches}
                 tasks={data.tasks}
-                messages={data.messages}
                 initialTab={selectedMemberView?.initialTab}
                 initialActivityFilter={selectedMemberView?.initialActivityFilter}
                 isTeamAlive={data.isAlive}
                 isTeamProvisioning={isTeamProvisioning}
+                launchParams={launchParams}
                 onClose={closeSelectedMemberDialog}
                 onSendMessage={() => {
                   const name = selectedMember?.name ?? '';
@@ -2529,6 +2648,7 @@ export const TeamDetailView = ({
                   closeSelectedMemberDialog();
                   openCreateTaskDialog('', '', name);
                 }}
+                onRestartMember={(memberName) => restartMember(teamName, memberName)}
                 onTaskClick={(task) => {
                   closeSelectedMemberDialog();
                   setSelectedTask(task);
@@ -2858,7 +2978,7 @@ export const TeamDetailView = ({
                 if (task) setSelectedTask(task);
               }}
               onOpenMemberProfile={(memberName, options) => {
-                const member = data.members.find((m) => m.name === memberName);
+                const member = members.find((m) => m.name === memberName);
                 if (member) {
                   setSelectedMember(member);
                   setSelectedMemberView({
@@ -2877,6 +2997,7 @@ export const TeamDetailView = ({
   return (
     <>
       {spawnStatusWatcher}
+      {teamAgentRuntimeWatcher}
       {leadContextWatcher}
       {renderBody()}
     </>

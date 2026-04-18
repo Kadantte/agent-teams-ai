@@ -45,6 +45,7 @@ import type {
   BoardTaskExactLogDetailResult,
   BoardTaskExactLogSummariesResponse,
   BoardTaskLogStreamResponse,
+  BoardTaskLogStreamSummary,
   CreateTaskRequest,
   CrossTeamMessage,
   CrossTeamSendRequest,
@@ -64,6 +65,7 @@ import type {
   TaskAttachmentMeta,
   TaskChangePresenceState,
   TaskComment,
+  TeamAgentRuntimeSnapshot,
   TeamChangeEvent,
   TeamClaudeLogsQuery,
   TeamClaudeLogsResponse,
@@ -71,9 +73,9 @@ import type {
   TeamCreateConfigRequest,
   TeamCreateRequest,
   TeamCreateResponse,
-  TeamData,
   TeamLaunchRequest,
   TeamLaunchResponse,
+  TeamMemberActivityMeta,
   TeamMessageNotificationData,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
@@ -81,6 +83,7 @@ import type {
   TeamTask,
   TeamTaskStatus,
   TeamUpdateConfigRequest,
+  TeamViewSnapshot,
   ToolApprovalEvent,
   ToolApprovalFileContent,
   ToolApprovalSettings,
@@ -425,10 +428,11 @@ export interface HttpServerAPI {
 
 export interface TeamsAPI {
   list: () => Promise<TeamSummary[]>;
-  getData: (teamName: string) => Promise<TeamData>;
+  getData: (teamName: string) => Promise<TeamViewSnapshot>;
   getTaskChangePresence: (teamName: string) => Promise<Record<string, TaskChangePresenceState>>;
   setChangePresenceTracking: (teamName: string, enabled: boolean) => Promise<void>;
   setToolActivityTracking: (teamName: string, enabled: boolean) => Promise<void>;
+  setTaskLogStreamTracking: (teamName: string, enabled: boolean) => Promise<void>;
   getClaudeLogs: (teamName: string, query?: TeamClaudeLogsQuery) => Promise<TeamClaudeLogsResponse>;
   deleteTeam: (teamName: string) => Promise<void>;
   restoreTeam: (teamName: string) => Promise<void>;
@@ -448,8 +452,9 @@ export interface TeamsAPI {
   sendMessage: (teamName: string, request: SendMessageRequest) => Promise<SendMessageResult>;
   getMessagesPage: (
     teamName: string,
-    options?: { beforeTimestamp?: string; limit?: number }
+    options?: { cursor?: string | null; limit?: number }
   ) => Promise<MessagesPage>;
+  getMemberActivityMeta: (teamName: string) => Promise<TeamMemberActivityMeta>;
   createTask: (teamName: string, request: CreateTaskRequest) => Promise<TeamTask>;
   requestReview: (teamName: string, taskId: string) => Promise<void>;
   updateKanban: (teamName: string, taskId: string, patch: UpdateKanbanPatch) => Promise<void>;
@@ -491,6 +496,7 @@ export interface TeamsAPI {
     taskId: string,
     activityId: string
   ) => Promise<BoardTaskActivityDetailResult>;
+  getTaskLogStreamSummary: (teamName: string, taskId: string) => Promise<BoardTaskLogStreamSummary>;
   getTaskLogStream: (teamName: string, taskId: string) => Promise<BoardTaskLogStreamResponse>;
   getTaskExactLogSummaries: (
     teamName: string,
@@ -531,6 +537,8 @@ export interface TeamsAPI {
   getLeadActivity: (teamName: string) => Promise<LeadActivitySnapshot>;
   getLeadContext: (teamName: string) => Promise<LeadContextUsageSnapshot>;
   getMemberSpawnStatuses: (teamName: string) => Promise<MemberSpawnStatusesSnapshot>;
+  getTeamAgentRuntime: (teamName: string) => Promise<TeamAgentRuntimeSnapshot>;
+  restartMember: (teamName: string, memberName: string) => Promise<void>;
   softDeleteTask: (teamName: string, taskId: string) => Promise<void>;
   restoreTask: (teamName: string, taskId: string) => Promise<void>;
   getDeletedTasks: (teamName: string) => Promise<TeamTask[]>;

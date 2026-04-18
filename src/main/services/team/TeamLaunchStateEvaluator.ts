@@ -223,8 +223,7 @@ export function createPersistedLaunchSnapshot(params: {
     for (const name of expectedMembers) {
       const member = members[name];
       if (
-        member &&
-        member.launchState === 'starting' &&
+        member?.launchState === 'starting' &&
         !member.agentToolAccepted &&
         !member.runtimeAlive &&
         !member.bootstrapConfirmed &&

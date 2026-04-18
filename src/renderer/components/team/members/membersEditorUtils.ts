@@ -2,9 +2,7 @@ import { CUSTOM_ROLE, NO_ROLE, PRESET_ROLES } from '@renderer/constants/teamRole
 import { serializeChipsWithText } from '@renderer/types/inlineChip';
 import { normalizeCreateLaunchProviderForUi } from '@renderer/utils/geminiUiFreeze';
 import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
-import { normalizeTeamModelForUi } from '@renderer/utils/teamModelAvailability';
-import { normalizeTeamModelForUi as normalizeCatalogTeamModelForUi } from '@renderer/utils/teamModelCatalog';
-import { extractProviderScopedBaseModel } from '@renderer/utils/teamModelContext';
+import { normalizeExplicitTeamModelForUi } from '@renderer/utils/teamModelAvailability';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 
@@ -34,7 +32,6 @@ function newDraftId(): string {
 
 export function createMemberDraft(initial?: Partial<MemberDraft>): MemberDraft {
   const providerId = initial?.providerId;
-  const normalizedModel = extractProviderScopedBaseModel(initial?.model ?? '', providerId) ?? '';
   return {
     id: initial?.id ?? newDraftId(),
     name: initial?.name ?? '',
@@ -42,7 +39,7 @@ export function createMemberDraft(initial?: Partial<MemberDraft>): MemberDraft {
     customRole: initial?.customRole ?? '',
     workflow: initial?.workflow,
     providerId,
-    model: normalizeCatalogTeamModelForUi(providerId, normalizedModel),
+    model: normalizeExplicitTeamModelForUi(providerId, initial?.model ?? ''),
     effort: initial?.effort,
     removedAt: initial?.removedAt,
   };
@@ -221,7 +218,7 @@ export function buildMembersFromDrafts(members: MemberDraft[]): TeamProvisioning
       }
       const model = member.model?.trim();
       if (model) {
-        result.model = normalizeTeamModelForUi(providerId, model);
+        result.model = normalizeExplicitTeamModelForUi(providerId, model);
       }
       const effort = normalizeDraftEffort(member.effort);
       if (effort) {

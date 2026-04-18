@@ -1,6 +1,6 @@
 import { Badge } from '@renderer/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
-import { getTeamColorSet, getThemedBadge, scaleColorAlpha } from '@renderer/constants/teamColors';
+import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import {
@@ -101,6 +101,7 @@ export const MemberCard = ({
   const completed = taskCounts?.completed ?? 0;
   const totalTasks = pending + inProgress + completed;
   const progressPercent = totalTasks > 0 ? Math.round((completed / totalTasks) * 100) : 0;
+  const roleLabel = formatAgentRole(member.role) ?? formatAgentRole(member.agentType);
   const activityTask = currentTask ?? reviewTask ?? null;
   const activityTitle = currentTask
     ? `Current task: #${deriveTaskDisplayId(currentTask.id)}`
@@ -111,7 +112,8 @@ export const MemberCard = ({
     !isRemoved &&
     presenceLabel === 'starting' &&
     spawnLaunchState !== 'failed_to_start' &&
-    !activityTask;
+    !activityTask &&
+    !runtimeSummary;
   const showStartingBadge = !isRemoved && presenceLabel === 'starting' && !activityTask;
   const showRuntimeAdvisoryBadge =
     !isRemoved &&
@@ -119,18 +121,14 @@ export const MemberCard = ({
     !showStartingBadge &&
     spawnStatus !== 'error' &&
     (Boolean(activityTask) || !isAwaitingReply);
-  const cardTint = scaleColorAlpha(getThemedBadge(colors, isLight), 0.5);
 
   return (
     <div
       className={`rounded transition-opacity duration-300 ${isRemoved ? 'opacity-50' : ''} ${spawnCardClass}`}
     >
       <div
-        className="group relative cursor-pointer rounded px-2 py-1.5"
-        style={{
-          borderLeft: `3px solid ${colors.border}`,
-          background: `linear-gradient(to right, ${cardTint}, transparent)`,
-        }}
+        className="group relative cursor-pointer rounded py-1.5"
+        style={undefined}
         title={activityTitle}
         role="button"
         tabIndex={0}
@@ -145,19 +143,27 @@ export const MemberCard = ({
         <div className="pointer-events-none absolute inset-0 rounded transition-colors group-hover:bg-white/5" />
         <div className="flex items-center gap-2.5">
           <div className="relative shrink-0">
-            <img
-              src={agentAvatarUrl(member.name)}
-              alt={member.name}
-              className="size-7 rounded-full bg-[var(--color-surface-raised)]"
-              loading="lazy"
-            />
+            <div
+              className="rounded-full border-2 p-[1px]"
+              style={{
+                borderColor: colors.border,
+                boxShadow: isLight ? 'none' : `0 0 0 1px ${colors.badge}`,
+              }}
+            >
+              <img
+                src={agentAvatarUrl(member.name)}
+                alt={member.name}
+                className="size-7 rounded-full bg-[var(--color-surface-raised)]"
+                loading="lazy"
+              />
+            </div>
             <span
               className={`absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-[var(--color-surface)] ${dotClass}`}
               aria-label={presenceLabel}
             />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-1.5 truncate text-sm">
+            <div className="flex min-w-0 items-center gap-1.5 text-sm">
               <span className="shrink-0 font-medium text-[var(--color-text)]">
                 {displayMemberName(member.name)}
               </span>
@@ -209,20 +215,16 @@ export const MemberCard = ({
                   style={{ backgroundColor: 'var(--skeleton-base)' }}
                 />
               </div>
-            ) : runtimeSummary ? (
-              <div className="mt-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
-                {runtimeSummary}
+            ) : runtimeSummary || roleLabel ? (
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] font-medium text-[var(--color-text-muted)]">
+                {runtimeSummary ? <span className="min-w-0 truncate">{runtimeSummary}</span> : null}
+                {runtimeSummary && roleLabel ? (
+                  <span className="shrink-0 opacity-60">•</span>
+                ) : null}
+                {roleLabel ? <span className="shrink-0">{roleLabel}</span> : null}
               </div>
             ) : null}
           </div>
-          {(() => {
-            const roleLabel = formatAgentRole(member.role) ?? formatAgentRole(member.agentType);
-            return roleLabel ? (
-              <span className="hidden shrink-0 text-xs text-[var(--color-text-muted)] sm:inline">
-                {roleLabel}
-              </span>
-            ) : null;
-          })()}
           {showStartingBadge ? (
             <span className="flex shrink-0 items-center gap-1">
               <Loader2

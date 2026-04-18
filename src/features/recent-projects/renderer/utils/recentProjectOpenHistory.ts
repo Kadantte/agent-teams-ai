@@ -157,7 +157,7 @@ function resolveHistoryOpenedAt(lookup: HistoryLookup, projectPath: string): num
   }
 
   const foldedMatch = lookup.folded.get(foldHistoryPath(normalizedPath));
-  if (!foldedMatch || foldedMatch.exactPaths.size !== 1) {
+  if (foldedMatch?.exactPaths.size !== 1) {
     return 0;
   }
 

@@ -48,8 +48,6 @@ interface TokenUsageDisplayProps {
   totalPhases?: number;
   /** Optional USD cost for this usage */
   costUsd?: number;
-  /** Context window size (e.g., 200000 or 1000000). When provided, shows "X% context used" instead of "X% of input". */
-  contextWindowSize?: number;
 }
 
 /**
@@ -59,27 +57,22 @@ interface TokenUsageDisplayProps {
 const SessionContextSection = ({
   contextStats,
   totalInputTokens,
-  contextWindowSize,
 }: Readonly<{
   contextStats: ContextStats;
   totalInputTokens: number;
-  contextWindowSize?: number;
 }>): React.JSX.Element => {
   const [expanded, setExpanded] = useState(false);
 
   const { tokensByCategory } = contextStats;
 
   // contextStats.totalEstimatedTokens already includes all categories (CLAUDE.md, @files,
-  // tool outputs, thinking+text, task coordination, user messages) — no manual adjustment needed.
-  // Show context window usage % when contextWindowSize is available (more useful),
-  // otherwise fall back to visible context / total input ratio.
+  // tool outputs, thinking+text, task coordination, user messages) - no manual adjustment needed.
+  // Visible Context is always shown as a share of prompt-side input tokens so this section
+  // stays aligned with the unified context contract instead of silently switching semantics.
   const contextPercent =
-    contextWindowSize && contextWindowSize > 0
-      ? Math.min((totalInputTokens / contextWindowSize) * 100, 100).toFixed(1)
-      : totalInputTokens > 0
-        ? Math.min((contextStats.totalEstimatedTokens / totalInputTokens) * 100, 100).toFixed(1)
-        : '0.0';
-  const contextLabel = contextWindowSize ? 'of context' : 'of input';
+    totalInputTokens > 0
+      ? Math.min((contextStats.totalEstimatedTokens / totalInputTokens) * 100, 100).toFixed(1)
+      : '0.0';
 
   // Count accumulated injections by category
   const claudeMdCount = contextStats.accumulatedInjections.filter(
@@ -152,7 +145,7 @@ const SessionContextSection = ({
           className="whitespace-nowrap text-[10px] tabular-nums"
           style={{ color: COLOR_TEXT_MUTED }}
         >
-          {formatTokens(contextStats.totalEstimatedTokens)} ({contextPercent}% {contextLabel})
+          {formatTokens(contextStats.totalEstimatedTokens)} ({contextPercent}% of prompt input)
         </span>
       </div>
 
@@ -261,10 +254,9 @@ export const TokenUsageDisplay = ({
   phaseNumber,
   totalPhases,
   costUsd,
-  contextWindowSize,
 }: Readonly<TokenUsageDisplayProps>): React.JSX.Element => {
   const totalTokens = inputTokens + cacheReadTokens + cacheCreationTokens + outputTokens;
-  // Total input tokens only (without output) — used as denominator for visible context %
+  // Total prompt-side tokens only (without output) - used as denominator for visible context %
   const totalInputTokens = inputTokens + cacheReadTokens + cacheCreationTokens;
   const formattedTotal = formatTokens(totalTokens);
 
@@ -540,7 +532,6 @@ export const TokenUsageDisplay = ({
                   <SessionContextSection
                     contextStats={contextStats}
                     totalInputTokens={totalInputTokens}
-                    contextWindowSize={contextWindowSize}
                   />
                 )}
 

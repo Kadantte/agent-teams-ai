@@ -71,9 +71,20 @@ interface MarkdownViewerProps {
   onTeamClick?: (teamName: string) => void;
 }
 
+interface CompactMarkdownPreviewProps {
+  content: string;
+  className?: string;
+  /** Optional precomputed team color map to avoid subscribing to the full team list. */
+  teamColorByName?: ReadonlyMap<string, string>;
+  /** Optional team click handler to avoid subscribing to store in leaf renderers. */
+  onTeamClick?: (teamName: string) => void;
+}
+
 const EMPTY_TEAMS: { teamName?: string; displayName?: string; color?: string }[] = [];
 const EMPTY_TEAM_COLOR_MAP = new Map<string, string>();
 const NOOP_TEAM_CLICK = (): void => undefined;
+
+type ViewerMarkdownMode = 'default' | 'compact-preview';
 
 // =============================================================================
 // Helpers
@@ -322,53 +333,89 @@ function createViewerMarkdownComponents(
   isLight = false,
   teamColorByName: ReadonlyMap<string, string> = new Map(),
   onTeamClick?: (teamName: string) => void,
-  copyCodeBlocks: boolean = false
+  copyCodeBlocks: boolean = false,
+  mode: ViewerMarkdownMode = 'default'
 ): Components {
   const hl = (children: React.ReactNode): React.ReactNode =>
     searchCtx ? highlightSearchInChildren(children, searchCtx) : children;
+  const isCompactPreview = mode === 'compact-preview';
+
+  const renderCompactInline = (
+    children: React.ReactNode,
+    className: string,
+    style: React.CSSProperties
+  ): React.ReactElement => (
+    <span className={className} style={style}>
+      {hl(children)}{' '}
+    </span>
+  );
 
   return {
     // Headings
-    h1: ({ children }) => (
-      <h1 className="mb-2 mt-4 text-xl font-semibold first:mt-0" style={{ color: PROSE_HEADING }}>
-        {hl(children)}
-      </h1>
-    ),
-    h2: ({ children }) => (
-      <h2 className="mb-2 mt-4 text-lg font-semibold first:mt-0" style={{ color: PROSE_HEADING }}>
-        {hl(children)}
-      </h2>
-    ),
-    h3: ({ children }) => (
-      <h3 className="mb-2 mt-3 text-base font-semibold first:mt-0" style={{ color: PROSE_HEADING }}>
-        {hl(children)}
-      </h3>
-    ),
-    h4: ({ children }) => (
-      <h4 className="mb-1 mt-3 text-sm font-semibold first:mt-0" style={{ color: PROSE_HEADING }}>
-        {hl(children)}
-      </h4>
-    ),
-    h5: ({ children }) => (
-      <h5 className="mb-1 mt-2 text-sm font-medium first:mt-0" style={{ color: PROSE_HEADING }}>
-        {hl(children)}
-      </h5>
-    ),
-    h6: ({ children }) => (
-      <h6 className="mb-1 mt-2 text-xs font-medium first:mt-0" style={{ color: PROSE_HEADING }}>
-        {hl(children)}
-      </h6>
-    ),
+    h1: ({ children }) =>
+      isCompactPreview ? (
+        renderCompactInline(children, 'font-semibold', { color: PROSE_HEADING })
+      ) : (
+        <h1 className="mb-2 mt-4 text-xl font-semibold first:mt-0" style={{ color: PROSE_HEADING }}>
+          {hl(children)}
+        </h1>
+      ),
+    h2: ({ children }) =>
+      isCompactPreview ? (
+        renderCompactInline(children, 'font-semibold', { color: PROSE_HEADING })
+      ) : (
+        <h2 className="mb-2 mt-4 text-lg font-semibold first:mt-0" style={{ color: PROSE_HEADING }}>
+          {hl(children)}
+        </h2>
+      ),
+    h3: ({ children }) =>
+      isCompactPreview ? (
+        renderCompactInline(children, 'font-semibold', { color: PROSE_HEADING })
+      ) : (
+        <h3
+          className="mb-2 mt-3 text-base font-semibold first:mt-0"
+          style={{ color: PROSE_HEADING }}
+        >
+          {hl(children)}
+        </h3>
+      ),
+    h4: ({ children }) =>
+      isCompactPreview ? (
+        renderCompactInline(children, 'font-semibold', { color: PROSE_HEADING })
+      ) : (
+        <h4 className="mb-1 mt-3 text-sm font-semibold first:mt-0" style={{ color: PROSE_HEADING }}>
+          {hl(children)}
+        </h4>
+      ),
+    h5: ({ children }) =>
+      isCompactPreview ? (
+        renderCompactInline(children, 'font-medium', { color: PROSE_HEADING })
+      ) : (
+        <h5 className="mb-1 mt-2 text-sm font-medium first:mt-0" style={{ color: PROSE_HEADING }}>
+          {hl(children)}
+        </h5>
+      ),
+    h6: ({ children }) =>
+      isCompactPreview ? (
+        renderCompactInline(children, 'font-medium', { color: PROSE_HEADING })
+      ) : (
+        <h6 className="mb-1 mt-2 text-xs font-medium first:mt-0" style={{ color: PROSE_HEADING }}>
+          {hl(children)}
+        </h6>
+      ),
 
     // Paragraphs
-    p: ({ children }) => (
-      <p
-        className="my-2 text-sm leading-relaxed first:mt-0 last:mb-0"
-        style={{ color: PROSE_BODY }}
-      >
-        {hl(children)}
-      </p>
-    ),
+    p: ({ children }) =>
+      isCompactPreview ? (
+        renderCompactInline(children, '', { color: PROSE_BODY })
+      ) : (
+        <p
+          className="my-2 text-sm leading-relaxed first:mt-0 last:mb-0"
+          style={{ color: PROSE_BODY }}
+        >
+          {hl(children)}
+        </p>
+      ),
 
     // Links — inline element, no hl(); parent block element's hl() descends here
     // task:// links render with TaskTooltip + are clickable via ancestor onClickCapture
@@ -570,6 +617,20 @@ function createViewerMarkdownComponents(
 
     // Code blocks — intercept mermaid diagrams at the pre level
     pre: ({ children, node }) => {
+      if (isCompactPreview) {
+        const compactText = extractTextFromReactNode(children).trim();
+        return (
+          <code
+            className="break-all rounded px-1.5 py-0.5 font-mono text-xs"
+            style={{
+              backgroundColor: PROSE_CODE_BG,
+              color: PROSE_CODE_TEXT,
+            }}
+          >
+            {compactText}
+          </code>
+        );
+      }
       // Check if this pre contains a mermaid code block
       const codeEl = node?.children?.[0];
       if (codeEl && 'tagName' in codeEl && codeEl.tagName === 'code' && 'properties' in codeEl) {
@@ -596,74 +657,107 @@ function createViewerMarkdownComponents(
     },
 
     // Blockquotes
-    blockquote: ({ children }) => (
-      <blockquote
-        className="my-3 border-l-4 pl-4 italic"
-        style={{
-          borderColor: PROSE_BLOCKQUOTE_BORDER,
-          color: PROSE_MUTED,
-        }}
-      >
-        {hl(children)}
-      </blockquote>
-    ),
+    blockquote: ({ children }) =>
+      isCompactPreview ? (
+        renderCompactInline(children, 'italic', { color: PROSE_MUTED })
+      ) : (
+        <blockquote
+          className="my-3 border-l-4 pl-4 italic"
+          style={{
+            borderColor: PROSE_BLOCKQUOTE_BORDER,
+            color: PROSE_MUTED,
+          }}
+        >
+          {hl(children)}
+        </blockquote>
+      ),
 
     // Lists
-    ul: ({ children }) => (
-      <ul className="my-2 list-disc space-y-1 pl-5" style={{ color: PROSE_BODY }}>
-        {children}
-      </ul>
-    ),
-    ol: ({ children }) => (
-      <ol className="my-2 list-decimal space-y-1 pl-5" style={{ color: PROSE_BODY }}>
-        {children}
-      </ol>
-    ),
-    li: ({ children }) => (
-      <li className="text-sm" style={{ color: PROSE_BODY }}>
-        {hl(children)}
-      </li>
-    ),
+    ul: ({ children }) =>
+      isCompactPreview ? (
+        <span>{children}</span>
+      ) : (
+        <ul className="my-2 list-disc space-y-1 pl-5" style={{ color: PROSE_BODY }}>
+          {children}
+        </ul>
+      ),
+    ol: ({ children }) =>
+      isCompactPreview ? (
+        <span>{children}</span>
+      ) : (
+        <ol className="my-2 list-decimal space-y-1 pl-5" style={{ color: PROSE_BODY }}>
+          {children}
+        </ol>
+      ),
+    li: ({ children }) =>
+      isCompactPreview ? (
+        <span className="inline" style={{ color: PROSE_BODY }}>
+          • {hl(children)}{' '}
+        </span>
+      ) : (
+        <li className="text-sm" style={{ color: PROSE_BODY }}>
+          {hl(children)}
+        </li>
+      ),
 
     // Tables
-    table: ({ children }) => (
-      <div className="my-3 overflow-x-auto">
-        <table
-          className="min-w-full border-collapse text-sm"
-          style={{ borderColor: PROSE_TABLE_BORDER }}
+    table: ({ children }) =>
+      isCompactPreview ? (
+        <span>{children}</span>
+      ) : (
+        <div className="my-3 overflow-x-auto">
+          <table
+            className="min-w-full border-collapse text-sm"
+            style={{ borderColor: PROSE_TABLE_BORDER }}
+          >
+            {children}
+          </table>
+        </div>
+      ),
+    thead: ({ children }) =>
+      isCompactPreview ? (
+        <span>{children}</span>
+      ) : (
+        <thead style={{ backgroundColor: PROSE_TABLE_HEADER_BG }}>{children}</thead>
+      ),
+    th: ({ children }) =>
+      isCompactPreview ? (
+        renderCompactInline(children, 'font-semibold', { color: PROSE_HEADING })
+      ) : (
+        <th
+          className="px-3 py-2 text-left font-semibold"
+          style={{
+            border: `1px solid ${PROSE_TABLE_BORDER}`,
+            color: PROSE_HEADING,
+          }}
         >
-          {children}
-        </table>
-      </div>
-    ),
-    thead: ({ children }) => (
-      <thead style={{ backgroundColor: PROSE_TABLE_HEADER_BG }}>{children}</thead>
-    ),
-    th: ({ children }) => (
-      <th
-        className="px-3 py-2 text-left font-semibold"
-        style={{
-          border: `1px solid ${PROSE_TABLE_BORDER}`,
-          color: PROSE_HEADING,
-        }}
-      >
-        {hl(children)}
-      </th>
-    ),
-    td: ({ children }) => (
-      <td
-        className="px-3 py-2"
-        style={{
-          border: `1px solid ${PROSE_TABLE_BORDER}`,
-          color: PROSE_BODY,
-        }}
-      >
-        {hl(children)}
-      </td>
-    ),
+          {hl(children)}
+        </th>
+      ),
+    td: ({ children }) =>
+      isCompactPreview ? (
+        renderCompactInline(children, '', { color: PROSE_BODY })
+      ) : (
+        <td
+          className="px-3 py-2"
+          style={{
+            border: `1px solid ${PROSE_TABLE_BORDER}`,
+            color: PROSE_BODY,
+          }}
+        >
+          {hl(children)}
+        </td>
+      ),
 
     // Horizontal rule
-    hr: () => <hr className="my-4" style={{ borderColor: PROSE_TABLE_BORDER }} />,
+    hr: () =>
+      isCompactPreview ? (
+        <span className="mx-1" style={{ color: PROSE_TABLE_BORDER }}>
+          ·
+        </span>
+      ) : (
+        <hr className="my-4" style={{ borderColor: PROSE_TABLE_BORDER }} />
+      ),
   };
 }
 
@@ -678,6 +772,78 @@ const LARGE_PREVIEW_CHARS = 30_000;
 // =============================================================================
 // Component
 // =============================================================================
+
+function useResolvedViewerTeamContext(
+  providedTeamColorByName?: ReadonlyMap<string, string>,
+  providedOnTeamClick?: (teamName: string) => void
+): {
+  teamColorByName: ReadonlyMap<string, string>;
+  onTeamClick?: (teamName: string) => void;
+} {
+  const teams = useStore(useShallow((s) => (providedTeamColorByName ? EMPTY_TEAMS : s.teams)));
+  const openTeamTab = useStore((s) => (providedOnTeamClick ? NOOP_TEAM_CLICK : s.openTeamTab));
+
+  const fallbackTeamColorByName = React.useMemo(() => {
+    const result = new Map<string, string>();
+    for (const team of teams) {
+      if (team.teamName) {
+        result.set(team.teamName, team.color ?? '');
+      }
+      if (team.displayName) {
+        result.set(team.displayName, team.color ?? '');
+      }
+    }
+    return result;
+  }, [teams]);
+
+  return {
+    teamColorByName: providedTeamColorByName ?? fallbackTeamColorByName ?? EMPTY_TEAM_COLOR_MAP,
+    onTeamClick: providedOnTeamClick ?? openTeamTab,
+  };
+}
+
+export const CompactMarkdownPreview: React.FC<CompactMarkdownPreviewProps> = React.memo(
+  function CompactMarkdownPreview({
+    content,
+    className = '',
+    teamColorByName: providedTeamColorByName,
+    onTeamClick: providedOnTeamClick,
+  }) {
+    const { isLight } = useTheme();
+    const { teamColorByName, onTeamClick } = useResolvedViewerTeamContext(
+      providedTeamColorByName,
+      providedOnTeamClick
+    );
+
+    const components = React.useMemo(
+      () =>
+        createViewerMarkdownComponents(
+          null,
+          isLight,
+          teamColorByName,
+          onTeamClick,
+          false,
+          'compact-preview'
+        ),
+      [isLight, onTeamClick, teamColorByName]
+    );
+
+    return (
+      <div className={`min-w-0 overflow-hidden ${className}`}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={REHYPE_PLUGINS_NO_HIGHLIGHT}
+          components={components}
+          urlTransform={allowCustomProtocols}
+          allowElement={isAllowedElement}
+          unwrapDisallowed
+        >
+          {content}
+        </ReactMarkdown>
+      </div>
+    );
+  }
+);
 
 export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
   content,
@@ -695,24 +861,10 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({
   const [showRaw, setShowRaw] = React.useState(false);
   const [rawLimit, setRawLimit] = React.useState(LARGE_PREVIEW_CHARS);
   const { isLight } = useTheme();
-  const teams = useStore(useShallow((s) => (providedTeamColorByName ? EMPTY_TEAMS : s.teams)));
-  const openTeamTab = useStore((s) => (providedOnTeamClick ? NOOP_TEAM_CLICK : s.openTeamTab));
-
-  const fallbackTeamColorByName = React.useMemo(() => {
-    const result = new Map<string, string>();
-    for (const team of teams) {
-      if (team.teamName) {
-        result.set(team.teamName, team.color ?? '');
-      }
-      if (team.displayName) {
-        result.set(team.displayName, team.color ?? '');
-      }
-    }
-    return result;
-  }, [teams]);
-  const teamColorByName =
-    providedTeamColorByName ?? fallbackTeamColorByName ?? EMPTY_TEAM_COLOR_MAP;
-  const onTeamClick = providedOnTeamClick ?? openTeamTab;
+  const { teamColorByName, onTeamClick } = useResolvedViewerTeamContext(
+    providedTeamColorByName,
+    providedOnTeamClick
+  );
 
   const isTooLarge = content.length > MAX_MARKDOWN_CHARS;
   const disableHighlight = content.length > DISABLE_HIGHLIGHT_CHARS;

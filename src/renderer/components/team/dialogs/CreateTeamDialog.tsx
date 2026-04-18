@@ -43,12 +43,9 @@ import {
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import {
   getTeamModelSelectionError,
-  normalizeTeamModelForUi,
+  normalizeExplicitTeamModelForUi,
 } from '@renderer/utils/teamModelAvailability';
-import {
-  getTeamProviderLabel as getCatalogTeamProviderLabel,
-  normalizeTeamModelForUi as normalizeCatalogTeamModelForUi,
-} from '@renderer/utils/teamModelCatalog';
+import { getTeamProviderLabel as getCatalogTeamProviderLabel } from '@renderer/utils/teamModelCatalog';
 import { DEFAULT_PROVIDER_MODEL_SELECTION } from '@shared/utils/providerModelSelection';
 import { isTeamProviderId, normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
@@ -56,7 +53,9 @@ import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 import { AdvancedCliSection } from './AdvancedCliSection';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
 import { ProjectPathSelector } from './ProjectPathSelector';
+import { buildProviderPrepareModelCacheKey } from './providerPrepareCacheKey';
 import {
+  buildReusableProviderPrepareModelResults,
   getProviderPrepareCachedSnapshot,
   type ProviderPrepareDiagnosticsModelResult,
   runProviderPrepareDiagnostics,
@@ -111,7 +110,7 @@ function getStoredTeamModel(providerId: TeamProviderId): string {
   if (stored === null) {
     return providerId === 'anthropic' ? 'opus' : '';
   }
-  return normalizeCatalogTeamModelForUi(providerId, stored === '__default__' ? '' : stored);
+  return normalizeExplicitTeamModelForUi(providerId, stored === '__default__' ? '' : stored);
 }
 
 function isEphemeralRenderedProjectPath(projectPath: string | null | undefined): boolean {
@@ -125,14 +124,6 @@ function isEphemeralRenderedProjectPath(projectPath: string | null | undefined):
 
 function getProviderLabel(providerId: TeamProviderId): string {
   return getCatalogTeamProviderLabel(providerId) ?? 'Anthropic';
-}
-
-function buildPrepareModelCacheKey(
-  cwd: string,
-  providerId: TeamProviderId,
-  backendSummary: string | null | undefined
-): string {
-  return `${cwd}::${providerId}::${backendSummary ?? ''}`;
 }
 
 function alignProvisioningChecks(
@@ -408,7 +399,7 @@ export const CreateTeamDialog = ({
   }, [advancedKey]);
 
   const setSelectedModel = (value: string): void => {
-    const normalizedValue = normalizeTeamModelForUi(selectedProviderId, value);
+    const normalizedValue = normalizeExplicitTeamModelForUi(selectedProviderId, value);
     setSelectedModelRaw(normalizedValue);
     localStorage.setItem(`team:lastSelectedModel:${selectedProviderId}`, normalizedValue);
   };
@@ -646,7 +637,12 @@ export const CreateTeamDialog = ({
             return Array.from(next);
           })();
           const backendSummary = runtimeBackendSummaryByProviderRef.current.get(providerId) ?? null;
-          const cacheKey = buildPrepareModelCacheKey(effectiveCwd, providerId, backendSummary);
+          const cacheKey = buildProviderPrepareModelCacheKey({
+            cwd: effectiveCwd,
+            providerId,
+            backendSummary,
+            limitContext,
+          });
           const cachedModelResultsById = prepareModelResultsCacheRef.current.get(cacheKey) ?? {};
           const cachedSnapshot = getProviderPrepareCachedSnapshot({
             providerId,
@@ -716,7 +712,7 @@ export const CreateTeamDialog = ({
             }
             prepareModelResultsCacheRef.current.set(
               plan.cacheKey,
-              plan.prepResult.modelResultsById
+              buildReusableProviderPrepareModelResults(plan.prepResult.modelResultsById)
             );
             checks = updateProviderCheck(checks, plan.providerId, {
               status: plan.prepResult.status,

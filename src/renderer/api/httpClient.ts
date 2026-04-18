@@ -14,6 +14,7 @@ import type {
   BoardTaskExactLogDetailResult,
   BoardTaskExactLogSummariesResponse,
   BoardTaskLogStreamResponse,
+  BoardTaskLogStreamSummary,
   ClaudeMdFileInfo,
   ClaudeRootFolderSelection,
   ClaudeRootInfo,
@@ -58,15 +59,16 @@ import type {
   TeamClaudeLogsResponse,
   TeamCreateRequest,
   TeamCreateResponse,
-  TeamData,
   TeamLaunchRequest,
   TeamLaunchResponse,
+  TeamMemberActivityMeta,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
   TeamsAPI,
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
+  TeamViewSnapshot,
   TmuxAPI,
   TmuxStatus,
   TriggerTestResult,
@@ -677,7 +679,7 @@ export class HttpAPIClient implements ElectronAPI {
       console.warn('[HttpAPIClient] teams API is not available in browser mode');
       return [];
     },
-    getData: async (_teamName: string): Promise<TeamData> => {
+    getData: async (_teamName: string): Promise<TeamViewSnapshot> => {
       throw new Error('Teams detail is not available in browser mode');
     },
     getTaskChangePresence: async (): Promise<
@@ -686,6 +688,9 @@ export class HttpAPIClient implements ElectronAPI {
       return {};
     },
     setChangePresenceTracking: async (): Promise<void> => {
+      // Not available in browser mode — no-op.
+    },
+    setTaskLogStreamTracking: async (): Promise<void> => {
       // Not available in browser mode — no-op.
     },
     setToolActivityTracking: async (): Promise<void> => {
@@ -742,7 +747,15 @@ export class HttpAPIClient implements ElectronAPI {
       throw new Error('Team messaging is not available in browser mode');
     },
     getMessagesPage: async () => {
-      return { messages: [], nextCursor: null, hasMore: false };
+      return { messages: [], nextCursor: null, hasMore: false, feedRevision: 'empty' };
+    },
+    getMemberActivityMeta: async (_teamName: string): Promise<TeamMemberActivityMeta> => {
+      return {
+        teamName: _teamName,
+        computedAt: new Date(0).toISOString(),
+        members: {},
+        feedRevision: 'empty',
+      };
     },
     createTask: async (_teamName: string, _request: CreateTaskRequest): Promise<TeamTask> => {
       throw new Error('Team task creation is not available in browser mode');
@@ -824,6 +837,10 @@ export class HttpAPIClient implements ElectronAPI {
       console.warn('[HttpAPIClient] getTaskActivityDetail is not available in browser mode');
       return { status: 'missing' };
     },
+    getTaskLogStreamSummary: async (): Promise<BoardTaskLogStreamSummary> => {
+      console.warn('[HttpAPIClient] getTaskLogStreamSummary is not available in browser mode');
+      return { segmentCount: 0 };
+    },
     getTaskLogStream: async (): Promise<BoardTaskLogStreamResponse> => {
       console.warn('[HttpAPIClient] getTaskLogStream is not available in browser mode');
       return {
@@ -904,6 +921,17 @@ export class HttpAPIClient implements ElectronAPI {
     },
     getMemberSpawnStatuses: async () => {
       return { statuses: {}, runId: null };
+    },
+    getTeamAgentRuntime: async (teamName: string) => {
+      return {
+        teamName,
+        updatedAt: new Date().toISOString(),
+        runId: null,
+        members: {},
+      };
+    },
+    restartMember: async (): Promise<void> => {
+      throw new Error('Member restart is not available in browser mode');
     },
     softDeleteTask: async (_teamName: string, _taskId: string): Promise<void> => {
       // Not available via HTTP client — no-op

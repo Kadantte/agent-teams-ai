@@ -39,6 +39,14 @@ export interface ProviderPrepareDiagnosticsResult {
   modelResultsById: Record<string, ProviderPrepareDiagnosticsModelResult>;
 }
 
+export function buildReusableProviderPrepareModelResults(
+  modelResultsById: Record<string, ProviderPrepareDiagnosticsModelResult>
+): Record<string, ProviderPrepareDiagnosticsModelResult> {
+  return Object.fromEntries(
+    Object.entries(modelResultsById).filter(([, result]) => result.status !== 'notes')
+  );
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -187,6 +195,29 @@ function getResultReason(modelId: string, result: TeamProvisioningPrepareResult)
   return null;
 }
 
+function getModelScopedEntries(modelId: string, result: TeamProvisioningPrepareResult): string[] {
+  const escapedModelId = escapeRegExp(modelId);
+  const scopedPattern = new RegExp(`^Selected model ${escapedModelId}\\b`, 'i');
+  return [...(result.details ?? []), ...(result.warnings ?? []), result.message]
+    .map((entry) => entry?.trim() ?? '')
+    .filter(Boolean)
+    .filter((entry) => scopedPattern.test(entry));
+}
+
+function getScopedModelReason(modelId: string, entries: string[]): string | null {
+  for (const entry of entries) {
+    const stripped = stripSelectedModelPrefix(modelId, entry);
+    if (!stripped) {
+      continue;
+    }
+    const normalized = normalizeModelReason(stripped);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
 function buildModelFailureLine(
   providerId: TeamProviderId,
   modelId: string,
@@ -199,6 +230,116 @@ function buildModelFailureLine(
 
 function createRuntimeDetailLines(result: TeamProvisioningPrepareResult): string[] {
   return [...(result.details ?? []), ...(result.warnings ?? [])];
+}
+
+function extractTimedOutPreflightProbeModelId(detail: string): string | null {
+  const trimmed = detail.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (
+    !trimmed.toLowerCase().includes('preflight check for `') ||
+    !trimmed.toLowerCase().includes('-p` did not complete')
+  ) {
+    return null;
+  }
+  const match = /--model\s+([^\s]+)/i.exec(trimmed);
+  return match?.[1]?.trim() || null;
+}
+
+function suppressSupersededRuntimeWarnings(params: {
+  runtimeDetailLines: string[];
+  runtimeWarnings: string[];
+  modelResultsById: Map<string, ProviderPrepareDiagnosticsModelResult>;
+}): {
+  runtimeDetailLines: string[];
+  runtimeWarnings: string[];
+} {
+  const suppressedEntries = new Set<string>();
+
+  for (const warning of params.runtimeWarnings) {
+    const probedModelId = extractTimedOutPreflightProbeModelId(warning);
+    if (!probedModelId) {
+      continue;
+    }
+    if (params.modelResultsById.get(probedModelId)?.status !== 'ready') {
+      continue;
+    }
+    suppressedEntries.add(warning);
+  }
+
+  return {
+    runtimeDetailLines: params.runtimeDetailLines.filter(
+      (detail) => !suppressedEntries.has(detail)
+    ),
+    runtimeWarnings: params.runtimeWarnings.filter((warning) => !suppressedEntries.has(warning)),
+  };
+}
+
+function resolveModelResultFromBatch(
+  providerId: TeamProviderId,
+  modelId: string,
+  result: TeamProvisioningPrepareResult,
+  isOnlyModel: boolean
+): ProviderPrepareDiagnosticsModelResult {
+  const modelScopedEntries = getModelScopedEntries(modelId, result);
+  const normalizedReason =
+    getScopedModelReason(modelId, modelScopedEntries) ??
+    (isOnlyModel ? normalizeModelReason(result.message) : null);
+
+  const hasVerifiedLine = modelScopedEntries.some((entry) =>
+    /selected model .* verified for launch\./i.test(entry)
+  );
+  if (hasVerifiedLine) {
+    return {
+      status: 'ready',
+      line: buildModelSuccessLine(providerId, modelId),
+      warningLine: null,
+    };
+  }
+
+  const hasUnavailableLine = modelScopedEntries.some((entry) =>
+    /selected model .* is unavailable\./i.test(entry)
+  );
+  if (hasUnavailableLine || (!result.ready && isOnlyModel)) {
+    return {
+      status: 'failed',
+      line: buildModelFailureLine(providerId, modelId, 'unavailable', normalizedReason),
+      warningLine: null,
+    };
+  }
+
+  const hasVerificationWarningLine = modelScopedEntries.some((entry) =>
+    /selected model .* could not be verified\./i.test(entry)
+  );
+  if (hasVerificationWarningLine || ((result.warnings?.length ?? 0) > 0 && isOnlyModel)) {
+    const line = buildModelFailureLine(providerId, modelId, 'check failed', normalizedReason);
+    return {
+      status: 'notes',
+      line,
+      warningLine: line,
+    };
+  }
+
+  if (result.ready) {
+    return {
+      status: 'ready',
+      line: buildModelSuccessLine(providerId, modelId),
+      warningLine: null,
+    };
+  }
+
+  const line = buildModelFailureLine(
+    providerId,
+    modelId,
+    'check failed',
+    normalizedReason ?? 'Model verification failed'
+  );
+  return {
+    status: 'notes',
+    line,
+    warningLine: line,
+  };
 }
 
 export async function runProviderPrepareDiagnostics({
@@ -254,7 +395,7 @@ export async function runProviderPrepareDiagnostics({
   const modelLines = new Map<string, string>();
   let completedCount = 0;
   let hasFailure = false;
-  let hasNotes = runtimeWarnings.length > 0;
+  let hasNotes = false;
   const modelWarnings: string[] = [];
 
   for (const modelId of orderedModelIds) {
@@ -289,73 +430,64 @@ export async function runProviderPrepareDiagnostics({
 
   emitProgress();
 
-  await Promise.all(
-    orderedModelIds
-      .filter((modelId) => !modelResultsById.has(modelId))
-      .map(async (modelId) => {
-        try {
-          const modelResult = await prepareProvisioning(
-            cwd,
-            providerId,
-            [providerId],
-            [modelId],
-            limitContext
-          );
-          if (!modelResult.ready) {
-            hasFailure = true;
-            const line = buildModelFailureLine(
-              providerId,
-              modelId,
-              'unavailable',
-              getResultReason(modelId, modelResult) ?? normalizeModelReason(modelResult.message)
-            );
-            modelLines.set(modelId, line);
-            modelResultsById.set(modelId, {
-              status: 'failed',
-              line,
-              warningLine: null,
-            });
-          } else if ((modelResult.warnings?.length ?? 0) > 0) {
-            hasNotes = true;
-            const reason = getResultReason(modelId, modelResult);
-            const line = buildModelFailureLine(providerId, modelId, 'check failed', reason);
-            modelLines.set(modelId, line);
-            modelWarnings.push(line);
-            modelResultsById.set(modelId, {
-              status: 'notes',
-              line,
-              warningLine: line,
-            });
-          } else {
-            const line = buildModelSuccessLine(providerId, modelId);
-            modelLines.set(modelId, line);
-            modelResultsById.set(modelId, {
-              status: 'ready',
-              line,
-              warningLine: null,
-            });
-          }
-        } catch (error) {
-          hasNotes = true;
-          const reason = normalizeModelReason(
-            error instanceof Error ? error.message.trim() : String(error).trim()
-          );
-          const line = buildModelFailureLine(providerId, modelId, 'check failed', reason || null);
-          modelLines.set(modelId, line);
-          modelWarnings.push(line);
-          modelResultsById.set(modelId, {
-            status: 'notes',
-            line,
-            warningLine: line,
-          });
-        } finally {
-          completedCount += 1;
-          emitProgress();
-        }
-      })
-  );
+  const uncachedModelIds = orderedModelIds.filter((modelId) => !modelResultsById.has(modelId));
+  if (uncachedModelIds.length > 0) {
+    try {
+      const batchedModelResult = await prepareProvisioning(
+        cwd,
+        providerId,
+        [providerId],
+        uncachedModelIds,
+        limitContext
+      );
 
-  const dedupedWarnings = Array.from(new Set([...runtimeWarnings, ...modelWarnings]));
+      for (const modelId of uncachedModelIds) {
+        const resolvedResult = resolveModelResultFromBatch(
+          providerId,
+          modelId,
+          batchedModelResult,
+          uncachedModelIds.length === 1
+        );
+        modelLines.set(modelId, resolvedResult.line);
+        modelResultsById.set(modelId, resolvedResult);
+        if (resolvedResult.status === 'failed') {
+          hasFailure = true;
+        } else if (resolvedResult.status === 'notes') {
+          hasNotes = true;
+        }
+        if (resolvedResult.warningLine) {
+          modelWarnings.push(resolvedResult.warningLine);
+        }
+      }
+    } catch (error) {
+      hasNotes = true;
+      const reason = normalizeModelReason(
+        error instanceof Error ? error.message.trim() : String(error).trim()
+      );
+      for (const modelId of uncachedModelIds) {
+        const line = buildModelFailureLine(providerId, modelId, 'check failed', reason || null);
+        modelLines.set(modelId, line);
+        modelWarnings.push(line);
+        modelResultsById.set(modelId, {
+          status: 'notes',
+          line,
+          warningLine: line,
+        });
+      }
+    } finally {
+      completedCount += uncachedModelIds.length;
+      emitProgress();
+    }
+  }
+
+  const filteredRuntime = suppressSupersededRuntimeWarnings({
+    runtimeDetailLines,
+    runtimeWarnings,
+    modelResultsById,
+  });
+  const dedupedWarnings = Array.from(
+    new Set([...filteredRuntime.runtimeWarnings, ...modelWarnings])
+  );
   const selectedModelResultsById = Object.fromEntries(
     orderedModelIds
       .map((modelId) => [modelId, modelResultsById.get(modelId)] as const)
@@ -365,9 +497,9 @@ export async function runProviderPrepareDiagnostics({
   );
 
   return {
-    status: hasFailure ? 'failed' : hasNotes ? 'notes' : 'ready',
+    status: hasFailure ? 'failed' : hasNotes || dedupedWarnings.length > 0 ? 'notes' : 'ready',
     details: [
-      ...runtimeDetailLines,
+      ...filteredRuntime.runtimeDetailLines,
       ...orderedModelIds.map((modelId) => modelLines.get(modelId) ?? ''),
     ],
     warnings: dedupedWarnings,

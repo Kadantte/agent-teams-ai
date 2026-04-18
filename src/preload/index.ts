@@ -127,6 +127,7 @@ import {
   TEAM_GET_DATA,
   TEAM_GET_DELETED_TASKS,
   TEAM_GET_LOGS_FOR_TASK,
+  TEAM_GET_MEMBER_ACTIVITY_META,
   TEAM_GET_MEMBER_LOGS,
   TEAM_GET_MEMBER_STATS,
   TEAM_GET_MESSAGES_PAGE,
@@ -139,12 +140,14 @@ import {
   TEAM_GET_TASK_EXACT_LOG_DETAIL,
   TEAM_GET_TASK_EXACT_LOG_SUMMARIES,
   TEAM_GET_TASK_LOG_STREAM,
+  TEAM_GET_TASK_LOG_STREAM_SUMMARY,
   TEAM_KILL_PROCESS,
   TEAM_LAUNCH,
   TEAM_LEAD_ACTIVITY,
   TEAM_LEAD_CONTEXT,
   TEAM_LIST,
   TEAM_MEMBER_SPAWN_STATUSES,
+  TEAM_GET_AGENT_RUNTIME,
   TEAM_PERMANENTLY_DELETE,
   TEAM_PREPARE_PROVISIONING,
   TEAM_PROCESS_ALIVE,
@@ -156,11 +159,13 @@ import {
   TEAM_REMOVE_TASK_RELATIONSHIP,
   TEAM_REPLACE_MEMBERS,
   TEAM_REQUEST_REVIEW,
+  TEAM_RESTART_MEMBER,
   TEAM_RESTORE,
   TEAM_RESTORE_TASK,
   TEAM_SAVE_TASK_ATTACHMENT,
   TEAM_SEND_MESSAGE,
   TEAM_SET_CHANGE_PRESENCE_TRACKING,
+  TEAM_SET_TASK_LOG_STREAM_TRACKING,
   TEAM_SET_PROJECT_BRANCH_TRACKING,
   TEAM_SET_TASK_CLARIFICATION,
   TEAM_SET_TOOL_ACTIVITY_TRACKING,
@@ -240,6 +245,7 @@ import type {
   BoardTaskExactLogDetailResult,
   BoardTaskExactLogSummariesResponse,
   BoardTaskLogStreamResponse,
+  BoardTaskLogStreamSummary,
   ChangeStats,
   ClaudeRootFolderSelection,
   ClaudeRootInfo,
@@ -264,6 +270,7 @@ import type {
   LeadContextUsageSnapshot,
   MemberFullStats,
   MemberLogSummary,
+  TeamAgentRuntimeSnapshot,
   MemberSpawnStatusesSnapshot,
   MessagesPage,
   NotificationTrigger,
@@ -293,9 +300,9 @@ import type {
   TeamCreateConfigRequest,
   TeamCreateRequest,
   TeamCreateResponse,
-  TeamData,
   TeamLaunchRequest,
   TeamLaunchResponse,
+  TeamMemberActivityMeta,
   TeamMessageNotificationData,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
@@ -303,6 +310,7 @@ import type {
   TeamTask,
   TeamTaskStatus,
   TeamUpdateConfigRequest,
+  TeamViewSnapshot,
   ToolApprovalEvent,
   ToolApprovalFileContent,
   ToolApprovalSettings,
@@ -823,7 +831,7 @@ const electronAPI: ElectronAPI = {
       return invokeIpcWithResult<TeamSummary[]>(TEAM_LIST);
     },
     getData: async (teamName: string) => {
-      return invokeIpcWithResult<TeamData>(TEAM_GET_DATA, teamName);
+      return invokeIpcWithResult<TeamViewSnapshot>(TEAM_GET_DATA, teamName);
     },
     getTaskChangePresence: async (teamName: string) => {
       return invokeIpcWithResult<Record<string, TaskChangePresenceState>>(
@@ -833,6 +841,9 @@ const electronAPI: ElectronAPI = {
     },
     setChangePresenceTracking: async (teamName: string, enabled: boolean) => {
       return invokeIpcWithResult<void>(TEAM_SET_CHANGE_PRESENCE_TRACKING, teamName, enabled);
+    },
+    setTaskLogStreamTracking: async (teamName: string, enabled: boolean) => {
+      return invokeIpcWithResult<void>(TEAM_SET_TASK_LOG_STREAM_TRACKING, teamName, enabled);
     },
     setToolActivityTracking: async (teamName: string, enabled: boolean) => {
       return invokeIpcWithResult<void>(TEAM_SET_TOOL_ACTIVITY_TRACKING, teamName, enabled);
@@ -888,9 +899,12 @@ const electronAPI: ElectronAPI = {
     },
     getMessagesPage: async (
       teamName: string,
-      options?: { beforeTimestamp?: string; limit?: number }
+      options?: { cursor?: string | null; limit?: number }
     ) => {
       return invokeIpcWithResult<MessagesPage>(TEAM_GET_MESSAGES_PAGE, teamName, options);
+    },
+    getMemberActivityMeta: async (teamName: string) => {
+      return invokeIpcWithResult<TeamMemberActivityMeta>(TEAM_GET_MEMBER_ACTIVITY_META, teamName);
     },
     createTask: async (teamName: string, request: CreateTaskRequest) => {
       return invokeIpcWithResult<TeamTask>(TEAM_CREATE_TASK, teamName, request);
@@ -986,6 +1000,13 @@ const electronAPI: ElectronAPI = {
         activityId
       );
     },
+    getTaskLogStreamSummary: async (teamName: string, taskId: string) => {
+      return invokeIpcWithResult<BoardTaskLogStreamSummary>(
+        TEAM_GET_TASK_LOG_STREAM_SUMMARY,
+        teamName,
+        taskId
+      );
+    },
     getTaskLogStream: async (teamName: string, taskId: string) => {
       return invokeIpcWithResult<BoardTaskLogStreamResponse>(
         TEAM_GET_TASK_LOG_STREAM,
@@ -1058,6 +1079,12 @@ const electronAPI: ElectronAPI = {
     },
     getMemberSpawnStatuses: async (teamName: string) => {
       return invokeIpcWithResult<MemberSpawnStatusesSnapshot>(TEAM_MEMBER_SPAWN_STATUSES, teamName);
+    },
+    getTeamAgentRuntime: async (teamName: string) => {
+      return invokeIpcWithResult<TeamAgentRuntimeSnapshot>(TEAM_GET_AGENT_RUNTIME, teamName);
+    },
+    restartMember: async (teamName: string, memberName: string) => {
+      return invokeIpcWithResult<void>(TEAM_RESTART_MEMBER, teamName, memberName);
     },
     softDeleteTask: async (teamName: string, taskId: string) => {
       return invokeIpcWithResult<void>(TEAM_SOFT_DELETE_TASK, teamName, taskId);

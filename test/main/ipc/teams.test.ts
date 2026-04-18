@@ -1,5 +1,5 @@
 import * as os from 'os';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   BoardTaskActivityDetailResult,
   BoardTaskActivityEntry,
@@ -7,12 +7,14 @@ import type {
   BoardTaskExactLogDetailResult,
   BoardTaskExactLogSummariesResponse,
   InboxMessage,
+  MessagesPage,
+  TeamViewSnapshot,
   TeamCreateRequest,
   TeamProvisioningProgress,
 } from '@shared/types/team';
 
 vi.mock('electron', () => ({
-  app: { getLocale: vi.fn(() => 'en'), getPath: vi.fn(() => '/tmp') },
+  app: { getLocale: vi.fn(() => 'en'), getPath: vi.fn(() => '/tmp'), isPackaged: false },
   Notification: Object.assign(vi.fn(), { isSupported: vi.fn(() => false) }),
   BrowserWindow: { getAllWindows: vi.fn(() => []) },
 }));
@@ -34,6 +36,8 @@ const { mockTeamDataWorkerClient } = vi.hoisted(() => ({
   mockTeamDataWorkerClient: {
     isAvailable: vi.fn(),
     getTeamData: vi.fn(),
+    getMessagesPage: vi.fn(),
+    getMemberActivityMeta: vi.fn(),
     findLogsForTask: vi.fn(),
   },
 }));
@@ -62,6 +66,8 @@ import {
   TEAM_CREATE_TASK,
   TEAM_DELETE_TEAM,
   TEAM_GET_DATA,
+  TEAM_GET_MEMBER_ACTIVITY_META,
+  TEAM_GET_MESSAGES_PAGE,
   TEAM_LAUNCH,
   TEAM_LIST,
   TEAM_PREPARE_PROVISIONING,
@@ -116,6 +122,7 @@ import {
   registerTeamHandlers,
   removeTeamHandlers,
 } from '../../../src/main/ipc/teams';
+import { ConfigManager } from '../../../src/main/services/infrastructure/ConfigManager';
 
 describe('ipc teams handlers', () => {
   const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
@@ -130,18 +137,38 @@ describe('ipc teams handlers', () => {
 
   const service = {
     listTeams: vi.fn(async () => [{ teamName: 'my-team', displayName: 'My Team' }]),
-    getTeamData: vi.fn(async () => ({
+    getTeamData: vi.fn(async (): Promise<TeamViewSnapshot & { messages?: InboxMessage[] }> => ({
       teamName: 'my-team',
       config: { name: 'My Team' },
       tasks: [],
       members: [],
-      messages: [] as InboxMessage[],
       kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
       processes: [],
+    })),
+    getMessageFeed: vi.fn(async () => ({
+      teamName: 'my-team',
+      feedRevision: 'rev-1',
+      messages: [] as InboxMessage[],
+    })),
+    getMessagesPage: vi.fn(async (..._args: unknown[]): Promise<MessagesPage> => ({
+      messages: [] as InboxMessage[],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-1',
+    })),
+    getMemberActivityMeta: vi.fn(async () => ({
+      teamName: 'my-team',
+      computedAt: '2026-03-12T10:00:00.000Z',
+      members: {},
+      feedRevision: 'rev-1',
     })),
     getTaskChangePresence: vi.fn(async () => ({ 'task-1': 'has_changes' })),
     reconcileTeamArtifacts: vi.fn(async () => undefined),
     setTaskChangePresenceTracking: vi.fn(() => undefined),
+    getTeamNotificationContext: vi.fn(async () => ({
+      displayName: 'My Team',
+      projectPath: '/tmp/project',
+    })),
     deleteTeam: vi.fn(async () => undefined),
     getLeadMemberName: vi.fn(async () => 'team-lead'),
     getTeamDisplayName: vi.fn(async () => 'My Team'),
@@ -192,10 +219,12 @@ describe('ipc teams handlers', () => {
     launchTeam: vi.fn(async () => ({ runId: 'run-2' })),
     sendMessageToTeam: vi.fn(async () => undefined),
     isTeamAlive: vi.fn(() => true),
+    getCurrentRunId: vi.fn(() => 'run-2' as string | null),
     pushLiveLeadProcessMessage: vi.fn(),
     relayLeadInboxMessages: vi.fn(async () => 0),
     relayMemberInboxMessages: vi.fn(async () => 0),
     getLiveLeadProcessMessages: vi.fn(() => [] as InboxMessage[]),
+    getCurrentLeadSessionId: vi.fn(() => null as string | null),
     getAliveTeams: vi.fn(() => ['my-team']),
     getLeadActivityState: vi.fn(() => 'idle'),
     stopTeam: vi.fn(() => undefined),
@@ -231,10 +260,13 @@ describe('ipc teams handlers', () => {
     mockGetMembersMeta.mockResolvedValue([]);
     mockTeamDataWorkerClient.isAvailable.mockReturnValue(false);
     mockTeamDataWorkerClient.getTeamData.mockReset();
+    mockTeamDataWorkerClient.getMessagesPage.mockReset();
+    mockTeamDataWorkerClient.getMemberActivityMeta.mockReset();
     mockTeamDataWorkerClient.findLogsForTask.mockReset();
     initializeTeamHandlers(
       service as never,
       provisioningService as never,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -249,9 +281,15 @@ describe('ipc teams handlers', () => {
     registerTeamHandlers(ipcMain as never);
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('registers all expected handlers', () => {
     expect(handlers.has(TEAM_LIST)).toBe(true);
     expect(handlers.has(TEAM_GET_DATA)).toBe(true);
+    expect(handlers.has(TEAM_GET_MESSAGES_PAGE)).toBe(true);
+    expect(handlers.has(TEAM_GET_MEMBER_ACTIVITY_META)).toBe(true);
     expect(handlers.has(TEAM_GET_TASK_CHANGE_PRESENCE)).toBe(true);
     expect(handlers.has(TEAM_SET_CHANGE_PRESENCE_TRACKING)).toBe(true);
     expect(handlers.has(TEAM_DELETE_TEAM)).toBe(true);
@@ -580,7 +618,6 @@ describe('ipc teams handlers', () => {
       config: { name: 'My Team' },
       tasks: [],
       members: [],
-      messages: [] as InboxMessage[],
       kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
       processes: [],
     });
@@ -759,24 +796,7 @@ describe('ipc teams handlers', () => {
     });
   });
 
-  it('dedups live lead replies when lead_session already has same text', async () => {
-    service.getTeamData.mockResolvedValueOnce({
-      teamName: 'my-team',
-      config: { name: 'My Team' },
-      tasks: [],
-      members: [],
-      messages: [
-        {
-          from: 'team-lead',
-          text: 'Hello there',
-          timestamp: '2026-02-23T10:00:00.000Z',
-          read: true,
-          source: 'lead_session' as const,
-        },
-      ],
-      kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
-      processes: [],
-    });
+  it('keeps TEAM_GET_DATA structural and does not expose message transport', async () => {
     provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce([
       {
         from: 'team-lead',
@@ -791,59 +811,789 @@ describe('ipc teams handlers', () => {
     const getDataHandler = handlers.get(TEAM_GET_DATA)!;
     const result = (await getDataHandler({} as never, 'my-team')) as {
       success: boolean;
-      data: { messages: { source?: string }[] };
+      data: Record<string, unknown>;
     };
     expect(result.success).toBe(true);
-    const sources = result.data.messages.map((m) => m.source);
-    expect(sources.filter((s) => s === 'lead_process')).toHaveLength(0);
-    expect(sources.filter((s) => s === 'lead_session')).toHaveLength(1);
+    expect(result.data.teamName).toBe('my-team');
+    expect(result.data).not.toHaveProperty('messages');
+    expect(service.getMessageFeed).not.toHaveBeenCalled();
   });
 
-  it('merges early live messages before durable lead_session backfill exists', async () => {
-    // Simulate: team just became readable but lead_session JSONL hasn't been written yet.
-    // Only live in-memory messages exist from the provisioning process.
+  it('falls back TEAM_GET_DATA to the main thread in packaged runtime when worker is unavailable', async () => {
+    const electron = await import('electron');
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(false);
+    (electron.app as { isPackaged: boolean }).isPackaged = true;
+
+    const handler = handlers.get(TEAM_GET_DATA)!;
+    const result = (await handler({} as never, 'my-team')) as {
+      success: boolean;
+      data?: { teamName: string };
+    };
+
+    expect(result.success).toBe(true);
+    expect(result.data?.teamName).toBe('my-team');
+    expect(service.getTeamData).toHaveBeenCalledWith('my-team');
+    vi.mocked(console.error).mockClear();
+
+    (electron.app as { isPackaged: boolean }).isPackaged = false;
+  });
+
+  it('does not let a live duplicate of the same session rate-limit reply delay auto-resume', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-17T12:00:30.000Z'));
+    const configManager = ConfigManager.getInstance();
+    const actualConfig = configManager.getConfig();
+    const getConfigSpy = vi.spyOn(configManager, 'getConfig').mockImplementation(
+      () =>
+        ({
+          ...actualConfig,
+          notifications: {
+            ...actualConfig.notifications,
+            autoResumeOnRateLimit: true,
+          },
+        }) as never
+    );
+
+    try {
+      provisioningService.isTeamAlive.mockReturnValue(true);
+      provisioningService.getCurrentLeadSessionId.mockReturnValue('sess-123');
+      provisioningService.sendMessageToTeam.mockResolvedValue(undefined);
+      service.getTeamData.mockResolvedValueOnce({
+        teamName: 'my-team',
+        config: { name: 'My Team' },
+        tasks: [],
+        members: [],
+        messages: [
+          {
+            from: 'team-lead',
+            text: "You've hit your limit. Resets in 5 minutes.",
+            timestamp: '2026-04-17T12:00:00.000Z',
+            read: true,
+            source: 'lead_session' as const,
+            messageId: 'persisted-rate-limit-1',
+            leadSessionId: 'sess-123',
+          },
+        ],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        processes: [],
+      });
+      provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce([
+        {
+          from: 'team-lead',
+          text: "You've hit your limit. Resets in 5 minutes.",
+          timestamp: '2026-04-17T12:00:02.000Z',
+          read: true,
+          source: 'lead_process' as const,
+          messageId: 'live-rate-limit-1',
+          leadSessionId: 'sess-123',
+        },
+      ]);
+
+      const getDataHandler = handlers.get(TEAM_GET_DATA)!;
+      const result = (await getDataHandler({} as never, 'my-team')) as {
+        success: boolean;
+        data: { messages?: InboxMessage[] };
+      };
+
+      expect(result.success).toBe(true);
+      expect(result.data.messages).toEqual([
+        expect.objectContaining({
+          source: 'lead_session',
+          messageId: 'persisted-rate-limit-1',
+        }),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(4 * 60 * 1000 + 59 * 1000);
+      expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(provisioningService.sendMessageToTeam).toHaveBeenCalledTimes(1);
+    } finally {
+      getConfigSpy.mockRestore();
+    }
+  });
+
+  it('uses the team-data worker for TEAM_GET_MESSAGES_PAGE when available', async () => {
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
+    mockTeamDataWorkerClient.getMessagesPage.mockResolvedValueOnce({
+      messages: [
+        {
+          from: 'team-lead',
+          text: 'Hello there',
+          timestamp: '2026-02-23T10:00:01.000Z',
+          read: true,
+          source: 'lead_session' as const,
+          messageId: 'msg-1',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-worker',
+    });
+
+    const handler = handlers.get(TEAM_GET_MESSAGES_PAGE)!;
+    const result = (await handler({} as never, 'my-team', {
+      limit: 50,
+    })) as { success: boolean; data: { feedRevision: string } };
+
+    expect(result.success).toBe(true);
+    expect(result.data.feedRevision).toBe('rev-worker');
+    expect(mockTeamDataWorkerClient.getMessagesPage).toHaveBeenCalledWith('my-team', {
+      cursor: undefined,
+      limit: 50,
+    });
+    expect(service.getMessagesPage).not.toHaveBeenCalled();
+  });
+
+  it('scans rate-limit notifications from message-page results without hydrating TEAM_GET_DATA feed', async () => {
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
+    mockTeamDataWorkerClient.getMessagesPage.mockResolvedValueOnce({
+      messages: [
+        {
+          from: 'team-lead',
+          text: "You've hit your limit. Please wait a bit before retrying.",
+          timestamp: '2026-02-23T10:00:01.000Z',
+          read: true,
+          source: 'lead_session' as const,
+          messageId: 'msg-rate-limit-1',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-worker',
+    });
+
+    const handler = handlers.get(TEAM_GET_MESSAGES_PAGE)!;
+    const result = (await handler({} as never, 'my-team', {
+      limit: 50,
+    })) as { success: boolean; data: { feedRevision: string } };
+
+    expect(result.success).toBe(true);
+    expect(result.data.feedRevision).toBe('rev-worker');
+    expect(mockAddTeamNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamEventType: 'rate_limit',
+        teamName: 'my-team',
+        teamDisplayName: 'My Team',
+        from: 'team-lead',
+        dedupeKey: 'rate-limit:my-team:msg-rate-limit-1',
+      })
+    );
+    expect(service.getMessageFeed).not.toHaveBeenCalled();
+  });
+
+  it('falls back TEAM_GET_MESSAGES_PAGE to the main thread in packaged runtime when worker is unavailable', async () => {
+    const electron = await import('electron');
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(false);
+    (electron.app as { isPackaged: boolean }).isPackaged = true;
+
+    const handler = handlers.get(TEAM_GET_MESSAGES_PAGE)!;
+    const result = (await handler({} as never, 'my-team', {
+      limit: 50,
+    })) as { success: boolean; data?: { feedRevision: string } };
+
+    expect(result.success).toBe(true);
+    expect(result.data?.feedRevision).toBe('rev-1');
+    expect(service.getMessagesPage).toHaveBeenCalledWith('my-team', {
+      cursor: undefined,
+      limit: 50,
+    });
+    vi.mocked(console.error).mockClear();
+
+    (electron.app as { isPackaged: boolean }).isPackaged = false;
+  });
+
+  it('uses the team-data worker for TEAM_GET_MEMBER_ACTIVITY_META when available', async () => {
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
+    mockTeamDataWorkerClient.getMemberActivityMeta.mockResolvedValueOnce({
+      teamName: 'my-team',
+      computedAt: '2026-03-12T10:00:00.000Z',
+      members: {
+        alice: {
+          memberName: 'alice',
+          lastAuthoredMessageAt: '2026-03-12T10:00:00.000Z',
+          messageCountExact: 4,
+          latestAuthoredMessageSignalsTermination: false,
+        },
+      },
+      feedRevision: 'rev-worker',
+    });
+
+    const handler = handlers.get(TEAM_GET_MEMBER_ACTIVITY_META)!;
+    const result = (await handler({} as never, 'my-team')) as {
+      success: boolean;
+      data: { feedRevision: string };
+    };
+
+    expect(result.success).toBe(true);
+    expect(result.data.feedRevision).toBe('rev-worker');
+    expect(mockTeamDataWorkerClient.getMemberActivityMeta).toHaveBeenCalledWith('my-team');
+    expect(service.getMemberActivityMeta).not.toHaveBeenCalled();
+  });
+
+  it('falls back TEAM_GET_MEMBER_ACTIVITY_META to the main thread in packaged runtime when worker is unavailable', async () => {
+    const electron = await import('electron');
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(false);
+    (electron.app as { isPackaged: boolean }).isPackaged = true;
+
+    const handler = handlers.get(TEAM_GET_MEMBER_ACTIVITY_META)!;
+    const result = (await handler({} as never, 'my-team')) as {
+      success: boolean;
+      data?: { feedRevision: string };
+    };
+
+    expect(result.success).toBe(true);
+    expect(result.data?.feedRevision).toBe('rev-1');
+    expect(service.getMemberActivityMeta).toHaveBeenCalledWith('my-team');
+    vi.mocked(console.error).mockClear();
+
+    (electron.app as { isPackaged: boolean }).isPackaged = false;
+  });
+
+  it('rebuilds only the remaining auto-resume delay from persisted rate-limit history', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-17T12:02:00.000Z'));
+    const configManager = ConfigManager.getInstance();
+    const actualConfig = configManager.getConfig();
+    const getConfigSpy = vi.spyOn(configManager, 'getConfig').mockImplementation(
+      () =>
+        ({
+          ...actualConfig,
+          notifications: {
+            ...actualConfig.notifications,
+            autoResumeOnRateLimit: true,
+          },
+        }) as never
+    );
+
+    try {
+      provisioningService.isTeamAlive.mockReturnValue(true);
+      provisioningService.getCurrentLeadSessionId.mockReturnValue('sess-live');
+      provisioningService.sendMessageToTeam.mockResolvedValue(undefined);
+      service.getTeamData.mockResolvedValueOnce({
+        teamName: 'my-team',
+        config: { name: 'My Team' },
+        tasks: [],
+        members: [],
+        messages: [
+          {
+            from: 'team-lead',
+            text: "You've hit your limit. Resets in 5 minutes.",
+            timestamp: '2026-04-17T12:00:00.000Z',
+            read: true,
+            source: 'lead_session' as const,
+            leadSessionId: 'sess-live',
+            messageId: 'rate-limit-1',
+          },
+        ],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        processes: [],
+      });
+
+      const getDataHandler = handlers.get(TEAM_GET_DATA)!;
+      const result = (await getDataHandler({} as never, 'my-team')) as {
+        success: boolean;
+        data: { messages: { source?: string; text: string }[] };
+      };
+
+      expect(result.success).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 29 * 1000);
+      expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(provisioningService.sendMessageToTeam).toHaveBeenCalledTimes(1);
+    } finally {
+      getConfigSpy.mockRestore();
+    }
+  });
+
+  it('can schedule auto-resume when the setting is enabled after an earlier history scan', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-17T12:02:00.000Z'));
+    const configManager = ConfigManager.getInstance();
+    const actualConfig = configManager.getConfig();
+    let autoResumeEnabled = false;
+    const getConfigSpy = vi.spyOn(configManager, 'getConfig').mockImplementation(
+      () =>
+        ({
+          ...actualConfig,
+          notifications: {
+            ...actualConfig.notifications,
+            autoResumeOnRateLimit: autoResumeEnabled,
+          },
+        }) as never
+    );
+
+    try {
+      provisioningService.isTeamAlive.mockReturnValue(true);
+      provisioningService.getCurrentLeadSessionId.mockReturnValue('sess-live');
+      provisioningService.sendMessageToTeam.mockResolvedValue(undefined);
+      service.getTeamData.mockResolvedValue({
+        teamName: 'my-team',
+        config: { name: 'My Team' },
+        tasks: [],
+        members: [],
+        messages: [
+          {
+            from: 'team-lead',
+            text: "You've hit your limit. Resets in 5 minutes.",
+            timestamp: '2026-04-17T12:00:00.000Z',
+            read: true,
+            source: 'lead_session' as const,
+            leadSessionId: 'sess-live',
+            messageId: 'rate-limit-enable-later',
+          },
+        ],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        processes: [],
+      });
+
+      const getDataHandler = handlers.get(TEAM_GET_DATA)!;
+
+      const firstResult = (await getDataHandler({} as never, 'my-team')) as {
+        success: boolean;
+      };
+      expect(firstResult.success).toBe(true);
+      expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+
+      autoResumeEnabled = true;
+
+      const secondResult = (await getDataHandler({} as never, 'my-team')) as {
+        success: boolean;
+      };
+      expect(secondResult.success).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 29 * 1000);
+      expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(provisioningService.sendMessageToTeam).toHaveBeenCalledTimes(1);
+    } finally {
+      getConfigSpy.mockRestore();
+    }
+  });
+
+  it('retries a previously over-ceiling history message once it becomes schedulable', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-17T00:00:00.000Z'));
+    const configManager = ConfigManager.getInstance();
+    const actualConfig = configManager.getConfig();
+    const getConfigSpy = vi.spyOn(configManager, 'getConfig').mockImplementation(
+      () =>
+        ({
+          ...actualConfig,
+          notifications: {
+            ...actualConfig.notifications,
+            autoResumeOnRateLimit: true,
+          },
+        }) as never
+    );
+
+    try {
+      provisioningService.isTeamAlive.mockReturnValue(true);
+      provisioningService.getCurrentLeadSessionId.mockReturnValue('sess-live');
+      provisioningService.sendMessageToTeam.mockResolvedValue(undefined);
+      service.getTeamData.mockResolvedValue({
+        teamName: 'my-team',
+        config: { name: 'My Team' },
+        tasks: [],
+        members: [],
+        messages: [
+          {
+            from: 'team-lead',
+            text: "You've hit your limit. Resets at 12:20 UTC.",
+            timestamp: '2026-04-17T00:00:00.000Z',
+            read: true,
+            source: 'lead_session' as const,
+            leadSessionId: 'sess-live',
+            messageId: 'rate-limit-over-ceiling',
+          },
+        ],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        processes: [],
+      });
+
+      const getDataHandler = handlers.get(TEAM_GET_DATA)!;
+
+      const firstResult = (await getDataHandler({} as never, 'my-team')) as {
+        success: boolean;
+      };
+      expect(firstResult.success).toBe(true);
+      expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+
+      vi.setSystemTime(new Date('2026-04-17T12:20:00.000Z'));
+
+      const secondResult = (await getDataHandler({} as never, 'my-team')) as {
+        success: boolean;
+      };
+      expect(secondResult.success).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(29 * 1000);
+      expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(provisioningService.sendMessageToTeam).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+      getConfigSpy.mockRestore();
+    }
+  });
+
+  it('does not rebuild auto-resume from persisted history while the team is offline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-17T12:02:00.000Z'));
+    const configManager = ConfigManager.getInstance();
+    const actualConfig = configManager.getConfig();
+    const getConfigSpy = vi.spyOn(configManager, 'getConfig').mockImplementation(
+      () =>
+        ({
+          ...actualConfig,
+          notifications: {
+            ...actualConfig.notifications,
+            autoResumeOnRateLimit: true,
+          },
+        }) as never
+    );
+
+    try {
+      provisioningService.isTeamAlive.mockReturnValue(false);
+      provisioningService.sendMessageToTeam.mockResolvedValue(undefined);
+      service.getTeamData.mockResolvedValue({
+        teamName: 'my-team',
+        config: { name: 'My Team' },
+        tasks: [],
+        members: [],
+        messages: [
+          {
+            from: 'team-lead',
+            text: "You've hit your limit. Resets in 5 minutes.",
+            timestamp: '2026-04-17T12:00:00.000Z',
+            read: true,
+            source: 'lead_session' as const,
+            messageId: 'rate-limit-offline-history',
+          },
+        ],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        processes: [],
+      });
+
+      const getDataHandler = handlers.get(TEAM_GET_DATA)!;
+      const result = (await getDataHandler({} as never, 'my-team')) as {
+        success: boolean;
+      };
+      expect(result.success).toBe(true);
+
+      // Simulate the user manually starting a fresh run later; stale persisted history
+      // should not have armed an auto-resume timer while the team was offline.
+      provisioningService.isTeamAlive.mockReturnValue(true);
+
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 31 * 1000);
+      expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+    } finally {
+      getConfigSpy.mockRestore();
+    }
+  });
+
+  it('does not rebuild auto-resume from an older lead session after the team was manually restarted', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-17T12:02:00.000Z'));
+    const configManager = ConfigManager.getInstance();
+    const actualConfig = configManager.getConfig();
+    const getConfigSpy = vi.spyOn(configManager, 'getConfig').mockImplementation(
+      () =>
+        ({
+          ...actualConfig,
+          notifications: {
+            ...actualConfig.notifications,
+            autoResumeOnRateLimit: true,
+          },
+        }) as never
+    );
+
+    try {
+      provisioningService.isTeamAlive.mockReturnValue(true);
+      provisioningService.getCurrentLeadSessionId.mockReturnValue('sess-new');
+      provisioningService.sendMessageToTeam.mockResolvedValue(undefined);
+      service.getTeamData.mockResolvedValue({
+        teamName: 'my-team',
+        config: { name: 'My Team' },
+        tasks: [],
+        members: [],
+        messages: [
+          {
+            from: 'team-lead',
+            text: "You've hit your limit. Resets in 5 minutes.",
+            timestamp: '2026-04-17T12:00:00.000Z',
+            read: true,
+            source: 'lead_session' as const,
+            leadSessionId: 'sess-old',
+            messageId: 'rate-limit-old-session',
+          },
+        ],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        processes: [],
+      });
+
+      const getDataHandler = handlers.get(TEAM_GET_DATA)!;
+      const result = (await getDataHandler({} as never, 'my-team')) as {
+        success: boolean;
+      };
+      expect(result.success).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 31 * 1000);
+      expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+    } finally {
+      getConfigSpy.mockRestore();
+    }
+  });
+
+  it('does not arm lead auto-resume from a teammate inbox rate-limit message', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-17T12:02:00.000Z'));
+    const configManager = ConfigManager.getInstance();
+    const actualConfig = configManager.getConfig();
+    const getConfigSpy = vi.spyOn(configManager, 'getConfig').mockImplementation(
+      () =>
+        ({
+          ...actualConfig,
+          notifications: {
+            ...actualConfig.notifications,
+            autoResumeOnRateLimit: true,
+          },
+        }) as never
+    );
+
+    try {
+      provisioningService.isTeamAlive.mockReturnValue(true);
+      provisioningService.getCurrentLeadSessionId.mockReturnValue('sess-live');
+      provisioningService.sendMessageToTeam.mockResolvedValue(undefined);
+      service.getTeamData.mockResolvedValue({
+        teamName: 'my-team',
+        config: { name: 'My Team' },
+        tasks: [],
+        members: [],
+        messages: [
+          {
+            from: 'alice',
+            to: 'team-lead',
+            text: "You've hit your limit. Resets in 5 minutes.",
+            timestamp: '2026-04-17T12:00:00.000Z',
+            read: false,
+            messageId: 'member-rate-limit-1',
+          },
+        ],
+        kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+        processes: [],
+      });
+
+      const getDataHandler = handlers.get(TEAM_GET_DATA)!;
+      const result = (await getDataHandler({} as never, 'my-team')) as {
+        success: boolean;
+      };
+      expect(result.success).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 31 * 1000);
+      expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+    } finally {
+      getConfigSpy.mockRestore();
+    }
+  });
+
+  it('rebuilds capped newest messages through getMessagesPage so live duplicates do not leak back in', async () => {
     service.getTeamData.mockResolvedValueOnce({
       teamName: 'my-team',
       config: { name: 'My Team' },
       tasks: [],
       members: [],
-      messages: [], // No durable messages yet
+      messages: Array.from({ length: 50 }, (_, index) => ({
+        from: 'alice',
+        text: `filler-${index}`,
+        timestamp: `2026-02-23T10:${String(index).padStart(2, '0')}:00.000Z`,
+        read: true,
+        source: 'inbox' as const,
+        messageId: `durable-${index}`,
+      })),
       kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
       processes: [],
+    });
+    service.getMessagesPage.mockResolvedValueOnce({
+      messages: [
+        {
+          from: 'alice',
+          text: 'filler-0',
+          timestamp: '2026-02-23T10:00:00.000Z',
+          read: true,
+          source: 'inbox' as const,
+          messageId: 'durable-0',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-1',
     });
     provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce([
       {
         from: 'team-lead',
-        text: 'Команда создана. Запускаю тиммейтов.',
-        timestamp: '2026-02-23T10:00:00.000Z',
+        text: 'Already persisted thought',
+        timestamp: '2026-02-23T11:00:00.000Z',
         read: true,
         source: 'lead_process' as const,
-        messageId: 'lead-turn-run-1-1',
-      },
-      {
-        from: 'team-lead',
-        text: 'All teammates online!',
-        timestamp: '2026-02-23T10:00:01.000Z',
-        read: true,
-        source: 'lead_process' as const,
-        messageId: 'lead-turn-run-1-2',
-        to: 'user',
+        messageId: 'live-dup',
+        leadSessionId: 'lead-1',
       },
     ]);
 
     const getDataHandler = handlers.get(TEAM_GET_DATA)!;
     const result = (await getDataHandler({} as never, 'my-team')) as {
       success: boolean;
-      data: { messages: { source?: string; text: string }[] };
+      data: { messages?: InboxMessage[] };
     };
+
     expect(result.success).toBe(true);
-    // Both live messages should appear since there's no durable backfill yet
-    // Sorted by timestamp descending (newest first)
+    expect(service.getMessagesPage).toHaveBeenCalledWith('my-team', {
+      limit: 50,
+      liveMessages: expect.arrayContaining([
+        expect.objectContaining({
+          messageId: 'live-dup',
+          source: 'lead_process',
+        }),
+      ]),
+    });
+    expect(result.data.messages).toHaveLength(50);
+  });
+
+  it('overlays live lead_process messages onto the newest messages page', async () => {
+    service.getMessagesPage.mockImplementationOnce(async (...args: unknown[]) => {
+      const { liveMessages = [] } = (args[1] ?? {}) as { liveMessages?: InboxMessage[] };
+      return {
+        messages: [
+          {
+            from: 'user',
+            text: 'Ping',
+            timestamp: '2026-02-23T10:00:00.000Z',
+            read: true,
+            source: 'user_sent' as const,
+            messageId: 'durable-1',
+          },
+          ...liveMessages,
+        ].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp)),
+        nextCursor: '2026-02-23T10:00:00.000Z|durable-1',
+        hasMore: true,
+        feedRevision: 'rev-1',
+      } satisfies MessagesPage;
+    });
+    provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce([
+      {
+        from: 'team-lead',
+        text: 'Команда поднята, приступаю к раздаче задач.',
+        timestamp: '2026-02-23T10:00:01.000Z',
+        read: true,
+        source: 'lead_process' as const,
+        messageId: 'live-1',
+      },
+    ]);
+
+    const result = (await handlers.get(TEAM_GET_MESSAGES_PAGE)!({} as never, 'my-team', {
+      limit: 20,
+    })) as {
+      success: boolean;
+      data: { messages: InboxMessage[]; nextCursor: string | null; hasMore: boolean };
+    };
+
+    expect(result.success).toBe(true);
     expect(result.data.messages).toHaveLength(2);
-    expect(result.data.messages[0].source).toBe('lead_process');
-    expect(result.data.messages[0].text).toBe('All teammates online!');
-    expect(result.data.messages[1].source).toBe('lead_process');
-    expect(result.data.messages[1].text).toBe('Команда создана. Запускаю тиммейтов.');
+    expect(result.data.messages[0]?.source).toBe('lead_process');
+    expect(result.data.messages[0]?.text).toBe('Команда поднята, приступаю к раздаче задач.');
+    expect(result.data.nextCursor).toBe('2026-02-23T10:00:00.000Z|durable-1');
+    expect(result.data.hasMore).toBe(true);
+    expect(service.getMessagesPage).toHaveBeenCalledWith('my-team', {
+      limit: 20,
+      cursor: undefined,
+      liveMessages: expect.arrayContaining([
+        expect.objectContaining({
+          source: 'lead_process',
+          messageId: 'live-1',
+        }),
+      ]),
+    });
+  });
+
+  it('dedups live lead thoughts on the newest messages page when durable lead_session already exists', async () => {
+    service.getMessagesPage.mockImplementationOnce(async (...args: unknown[]) => {
+      const { liveMessages = [] } = (args[1] ?? {}) as { liveMessages?: InboxMessage[] };
+      expect(liveMessages).toHaveLength(1);
+      return {
+        messages: [
+          {
+            from: 'team-lead',
+            text: 'Hello there',
+            timestamp: '2026-02-23T10:00:00.000Z',
+            read: true,
+            source: 'lead_session' as const,
+            leadSessionId: 'lead-1',
+            messageId: 'durable-1',
+          },
+        ],
+        nextCursor: null,
+        hasMore: false,
+        feedRevision: 'rev-1',
+      } satisfies MessagesPage;
+    });
+    provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce([
+      {
+        from: 'team-lead',
+        text: 'Hello there',
+        timestamp: '2026-02-23T10:00:01.000Z',
+        read: true,
+        source: 'lead_process' as const,
+        leadSessionId: 'lead-1',
+        messageId: 'live-1',
+      },
+    ]);
+
+    const result = (await handlers.get(TEAM_GET_MESSAGES_PAGE)!({} as never, 'my-team', {
+      limit: 20,
+    })) as {
+      success: boolean;
+      data: { messages: InboxMessage[] };
+    };
+
+    expect(result.success).toBe(true);
+    expect(result.data.messages).toHaveLength(1);
+    expect(result.data.messages[0]?.source).toBe('lead_session');
+  });
+
+  it('does not overlay live lead_process messages onto older paginated pages', async () => {
+    service.getMessagesPage.mockResolvedValueOnce({
+      messages: [
+        {
+          from: 'user',
+          text: 'Older durable message',
+          timestamp: '2026-02-23T09:59:00.000Z',
+          read: true,
+          source: 'user_sent' as const,
+          messageId: 'durable-older-1',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-1',
+    });
+
+    const result = (await handlers.get(TEAM_GET_MESSAGES_PAGE)!({} as never, 'my-team', {
+      limit: 20,
+      cursor: '2026-02-23T10:00:00.000Z|cursor',
+    })) as {
+      success: boolean;
+      data: { messages: InboxMessage[] };
+    };
+
+    expect(result.success).toBe(true);
+    expect(provisioningService.getLiveLeadProcessMessages).not.toHaveBeenCalled();
+    expect(result.data.messages).toHaveLength(1);
+    expect(result.data.messages[0]?.messageId).toBe('durable-older-1');
   });
 
   it('keeps TEAM_GET_DATA read-only and never triggers reconcile side effects', async () => {

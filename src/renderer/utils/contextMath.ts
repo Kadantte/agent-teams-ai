@@ -40,11 +40,15 @@ export interface RemainingContext {
  * Returns null if input data is unavailable.
  */
 export function computeRemainingContext(
-  totalInputTokens: number | undefined,
-  contextWindow: number = DEFAULT_CONTEXT_WINDOW
+  usedContextTokens: number | undefined,
+  contextWindow?: number
 ): RemainingContext | null {
-  if (totalInputTokens === undefined || totalInputTokens <= 0) return null;
-  const remainingPct = Math.max(((contextWindow - totalInputTokens) / contextWindow) * 100, 0);
+  if (usedContextTokens === undefined || usedContextTokens < 0) return null;
+  const resolvedContextWindow = contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  const remainingPct = Math.max(
+    ((resolvedContextWindow - usedContextTokens) / resolvedContextWindow) * 100,
+    0
+  );
   const urgency: ContextUrgency =
     remainingPct < 20 ? 'critical' : remainingPct < 40 ? 'warning' : 'normal';
   return { remainingPct, urgency };

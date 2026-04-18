@@ -9,8 +9,14 @@ import {
   useState,
 } from 'react';
 
+import { CompactMarkdownPreview } from '@renderer/components/chat/viewers/MarkdownViewer';
 import { MemberBadge } from '@renderer/components/team/MemberBadge';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@renderer/components/ui/tooltip';
 import {
   CARD_BG,
   CARD_BG_ZEBRA,
@@ -26,12 +32,14 @@ import {
   areThoughtMessagesEquivalentForRender,
 } from '@renderer/utils/messageRenderEquality';
 import { toMessageKey } from '@renderer/utils/teamMessageKey';
+import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { isApiErrorMessage } from '@shared/utils/apiErrorDetector';
 import { isThoughtProtocolNoise } from '@shared/utils/inboxNoise';
 import { extractMarkdownPlainText } from '@shared/utils/markdownTextSearch';
 import { formatToolSummary, parseToolSummary } from '@shared/utils/toolSummary';
 import { ChevronDown, ChevronRight, ChevronUp, Maximize2 } from 'lucide-react';
 
+import { buildThoughtDisplayContent } from './activityMarkdown';
 import {
   AnimatedHeightReveal,
   ENTRY_REVEAL_ANIMATION_MS,
@@ -582,18 +590,30 @@ const LeadThoughtsGroupRowComponent = ({
     return calls.length > 0 ? calls : undefined;
   }, [thoughts]);
 
-  // Extract text preview for header: use newest thought's text, fallback through group
-  const headerTextPreview = useMemo(() => {
+  // Reuse the same markdown preprocessing as the expanded thought body.
+  const compactPreviewMarkdown = useMemo(() => {
     // Try newest first (most relevant), then scan for any text
     for (const t of thoughts) {
       if (t.text && t.text.trim()) {
-        const plain = extractMarkdownPlainText(t.text);
-        const firstLine = plain.split('\n').find((l) => l.trim().length > 0) ?? '';
-        return firstLine.trim();
+        const stripped = stripAgentBlocks(t.text).trim();
+        if (stripped) {
+          return buildThoughtDisplayContent(t, memberColorMap, teamNames, {
+            preserveLineBreaks: false,
+            stripAgentOnlyBlocks: true,
+          })
+            .replace(/\n+/g, ' ')
+            .trim();
+        }
       }
     }
-    return null;
-  }, [thoughts]);
+    return totalToolSummary;
+  }, [memberColorMap, teamNames, thoughts, totalToolSummary]);
+  const compactPreviewTooltipText = useMemo(() => {
+    const normalized = extractMarkdownPlainText(compactPreviewMarkdown ?? '')
+      .replace(/\n+/g, ' ')
+      .trim();
+    return normalized || compactPreviewMarkdown;
+  }, [compactPreviewMarkdown]);
 
   // Detect if any thought in this group is an API error
   const hasApiError = useMemo(() => thoughts.some((t) => isApiErrorMessage(t.text)), [thoughts]);
@@ -756,7 +776,6 @@ const LeadThoughtsGroupRowComponent = ({
       ? formatTime(oldest.timestamp)
       : `${formatTime(oldest.timestamp)}–${formatTime(newest.timestamp)}`;
   const useCompactCollapsedHeader = compactHeader && !isBodyVisible;
-  const compactPreviewText = headerTextPreview ?? totalToolSummary;
 
   return (
     <AnimatedHeightReveal animate={isNew} containerRef={ref} style={{ overflowAnchor: 'none' }}>
@@ -829,14 +848,113 @@ const LeadThoughtsGroupRowComponent = ({
                   )}
                 </div>
               </div>
-              {compactPreviewText ? (
-                <div
-                  className="mt-1 min-w-0 truncate text-[11px]"
-                  style={{ color: headerTextPreview ? CARD_TEXT_LIGHT : CARD_ICON_MUTED }}
-                  title={compactPreviewText}
-                >
-                  {compactPreviewText}
+              {compactPreviewMarkdown ? (
+                <TooltipProvider delayDuration={1000}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div>
+                        <CompactMarkdownPreview
+                          content={compactPreviewMarkdown}
+                          className="mt-1 line-clamp-2 w-full min-w-0 max-w-full break-words text-[11px] leading-4"
+                          teamColorByName={teamColorByName}
+                          onTeamClick={onTeamClick}
+                        />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="bottom"
+                      align="start"
+                      className="max-w-sm whitespace-normal break-words"
+                    >
+                      {compactPreviewTooltipText}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : null}
+            </div>
+          ) : !isBodyVisible ? (
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                {canToggleBodyVisibility && !compactHeader ? (
+                  <ChevronRight
+                    className="size-3 shrink-0 transition-transform duration-150"
+                    style={{
+                      color: CARD_ICON_MUTED,
+                      transform: isBodyVisible ? 'rotate(90deg)' : undefined,
+                    }}
+                  />
+                ) : null}
+                {!compactHeader ? (
+                  <div className="relative shrink-0">
+                    <img
+                      src={agentAvatarUrl(leadName, 24)}
+                      alt=""
+                      className="size-5 rounded-full bg-[var(--color-surface-raised)]"
+                      loading="lazy"
+                    />
+                    <LiveThoughtStatusBadge
+                      canBeLive={canBeLive}
+                      isTeamAlive={isTeamAlive}
+                      leadActivity={leadActivity}
+                      leadContextUpdatedAt={leadContextUpdatedAt}
+                      newestTimestamp={newest.timestamp}
+                    />
+                  </div>
+                ) : null}
+                <MemberBadge name={leadName} color={memberColor} hideAvatar />
+                <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
+                  {thoughts.length} thoughts
+                </span>
+                <div className="relative ml-auto flex shrink-0 items-center">
+                  <span
+                    className={
+                      onExpand && expandItemKey
+                        ? 'text-[10px] transition-opacity group-hover:opacity-0'
+                        : 'text-[10px]'
+                    }
+                    style={{ color: CARD_ICON_MUTED }}
+                  >
+                    {timestampLabel}
+                  </span>
+                  {onExpand && expandItemKey && (
+                    <button
+                      type="button"
+                      aria-label="Expand thoughts"
+                      className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
+                      style={{ color: CARD_ICON_MUTED }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onExpand(expandItemKey);
+                      }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <Maximize2 size={12} />
+                    </button>
+                  )}
                 </div>
+              </div>
+              {compactPreviewMarkdown ? (
+                <TooltipProvider delayDuration={1000}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div>
+                        <CompactMarkdownPreview
+                          content={compactPreviewMarkdown}
+                          className="mt-1 line-clamp-2 w-full min-w-0 max-w-full break-words text-[11px] leading-4"
+                          teamColorByName={teamColorByName}
+                          onTeamClick={onTeamClick}
+                        />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="bottom"
+                      align="start"
+                      className="max-w-sm whitespace-normal break-words"
+                    >
+                      {compactPreviewTooltipText}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               ) : null}
             </div>
           ) : (
@@ -871,26 +989,7 @@ const LeadThoughtsGroupRowComponent = ({
               <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
                 {thoughts.length} thoughts
               </span>
-              {!isBodyVisible && headerTextPreview ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span
-                      className="min-w-0 flex-1 cursor-default truncate text-[10px]"
-                      style={{ color: CARD_TEXT_LIGHT }}
-                    >
-                      {headerTextPreview}
-                    </span>
-                  </TooltipTrigger>
-                  {totalToolSummary ? (
-                    <TooltipContent side="bottom" className="max-w-[420px] font-mono text-[11px]">
-                      <ToolSummaryTooltipContent
-                        toolCalls={allToolCalls}
-                        toolSummary={totalToolSummary}
-                      />
-                    </TooltipContent>
-                  ) : null}
-                </Tooltip>
-              ) : totalToolSummary ? (
+              {totalToolSummary ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="cursor-default text-[10px]" style={{ color: CARD_ICON_MUTED }}>

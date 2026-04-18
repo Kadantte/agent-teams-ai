@@ -219,6 +219,9 @@ export const TEAM_SET_CHANGE_PRESENCE_TRACKING = 'team:setChangePresenceTracking
 /** Enable or disable live teammate tool activity tracking for a visible team tab */
 export const TEAM_SET_TOOL_ACTIVITY_TRACKING = 'team:setToolActivityTracking';
 
+/** Enable or disable task log stream invalidation tracking for an open task log panel */
+export const TEAM_SET_TASK_LOG_STREAM_TRACKING = 'team:setTaskLogStreamTracking';
+
 /** Get buffered Claude CLI logs (paged, newest-first) */
 export const TEAM_GET_CLAUDE_LOGS = 'team:getClaudeLogs';
 
@@ -233,6 +236,9 @@ export const TEAM_SEND_MESSAGE = 'team:sendMessage';
 
 /** Paginated messages for timeline/messages panel */
 export const TEAM_GET_MESSAGES_PAGE = 'team:getMessagesPage';
+
+/** Lightweight message-derived member activity facts */
+export const TEAM_GET_MEMBER_ACTIVITY_META = 'team:getMemberActivityMeta';
 
 /** Request review for task */
 export const TEAM_REQUEST_REVIEW = 'team:requestReview';
@@ -310,6 +316,9 @@ export const TEAM_GET_TASK_ACTIVITY_DETAIL = 'team:getTaskActivityDetail';
 /** Get one task-scoped log stream derived from explicit board-task activity */
 export const TEAM_GET_TASK_LOG_STREAM = 'team:getTaskLogStream';
 
+/** Get lightweight task log stream summary for header badges/live counters */
+export const TEAM_GET_TASK_LOG_STREAM_SUMMARY = 'team:getTaskLogStreamSummary';
+
 /** Get exact task-log summaries derived from explicit board-task activity records */
 export const TEAM_GET_TASK_EXACT_LOG_SUMMARIES = 'team:getTaskExactLogSummaries';
 
@@ -369,6 +378,12 @@ export const TEAM_LEAD_CONTEXT = 'team:leadContext';
 
 /** Get per-member spawn statuses for a team */
 export const TEAM_MEMBER_SPAWN_STATUSES = 'team:memberSpawnStatuses';
+
+/** Get live per-agent runtime stats for a team */
+export const TEAM_GET_AGENT_RUNTIME = 'team:getAgentRuntime';
+
+/** Restart a specific teammate runtime */
+export const TEAM_RESTART_MEMBER = 'team:restartMember';
 
 /** Soft-delete a task (set status to 'deleted' with deletedAt timestamp) */
 export const TEAM_SOFT_DELETE_TASK = 'team:softDeleteTask';

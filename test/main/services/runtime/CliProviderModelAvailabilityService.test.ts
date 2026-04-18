@@ -74,7 +74,7 @@ describe('CliProviderModelAvailabilityService', () => {
     expect(execCliMock).toHaveBeenCalledTimes(2);
   });
 
-  it('marks unsupported models as unavailable with the runtime reason', async () => {
+  it('marks visible unsupported models as unavailable with the runtime reason', async () => {
     buildProviderAwareCliEnvMock.mockResolvedValue({
       env: { HOME: '/Users/tester' },
       connectionIssues: {},

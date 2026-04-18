@@ -342,6 +342,10 @@ export interface BoardTaskLogStreamResponse {
   segments: BoardTaskLogSegment[];
 }
 
+export interface BoardTaskLogStreamSummary {
+  segmentCount: number;
+}
+
 export interface TaskComment {
   id: string;
   author: string;
@@ -602,6 +606,11 @@ export interface MessagesPage {
   /** Opaque cursor string for fetching older messages. Null when no more pages. */
   nextCursor: string | null;
   hasMore: boolean;
+  /**
+   * Content-stable revision of the full normalized feed that produced this page.
+   * Changes only when the semantic message feed changes.
+   */
+  feedRevision: string;
 }
 
 export type AgentActionMode = 'do' | 'ask' | 'delegate';
@@ -729,12 +738,44 @@ export interface TeamProcess {
   stoppedAt?: string;
 }
 
-export interface TeamData {
+export interface TeamMemberSnapshot {
+  name: string;
+  agentId?: string;
+  currentTaskId: string | null;
+  taskCount: number;
+  color?: string;
+  agentType?: string;
+  role?: string;
+  workflow?: string;
+  providerId?: TeamProviderId;
+  model?: string;
+  effort?: EffortLevel;
+  cwd?: string;
+  /** Set only when member's git branch differs from the lead's branch. */
+  gitBranch?: string;
+  runtimeAdvisory?: MemberRuntimeAdvisory;
+  removedAt?: number;
+}
+
+export interface MemberActivityMetaEntry {
+  memberName: string;
+  lastAuthoredMessageAt: string | null;
+  messageCountExact: number;
+  latestAuthoredMessageSignalsTermination: boolean;
+}
+
+export interface TeamMemberActivityMeta {
+  teamName: string;
+  computedAt: string;
+  members: Record<string, MemberActivityMetaEntry>;
+  feedRevision: string;
+}
+
+export interface TeamViewSnapshot {
   teamName: string;
   config: TeamConfig;
   tasks: TeamTaskWithKanban[];
-  members: ResolvedTeamMember[];
-  messages: InboxMessage[];
+  members: TeamMemberSnapshot[];
   kanbanState: KanbanState;
   processes: TeamProcess[];
   warnings?: string[];
@@ -787,12 +828,22 @@ export interface LeadActivitySnapshot {
 }
 
 export interface LeadContextUsage {
-  /** Total tokens currently in context (input + cache_creation + cache_read) */
-  currentTokens: number;
+  /** Prompt-side tokens currently occupying the context window. */
+  promptInputTokens: number | null;
+  /** Tokens generated in the latest response. */
+  outputTokens: number | null;
+  /** Total occupied context window tokens (prompt input + output). */
+  contextUsedTokens: number | null;
   /** Model's context window size */
-  contextWindow: number;
-  /** Usage percentage (0-100) */
-  percent: number;
+  contextWindowTokens: number | null;
+  /** Context usage percentage (0-100) */
+  contextUsedPercent: number | null;
+  /** Which usage contract produced the prompt-side numbers. */
+  promptInputSource:
+    | 'anthropic_usage'
+    | 'openai_responses_usage'
+    | 'openai_chat_usage'
+    | 'unavailable';
   /** ISO timestamp of last update */
   updatedAt: string;
 }
@@ -860,11 +911,32 @@ export interface MemberSpawnStatusesSnapshot {
 
 export type MemberSpawnLivenessSource = 'heartbeat' | 'process';
 
+export type TeamAgentRuntimeBackendType = 'lead' | 'tmux' | 'iterm2' | 'in-process' | 'process';
+
+export interface TeamAgentRuntimeEntry {
+  memberName: string;
+  alive: boolean;
+  restartable: boolean;
+  backendType?: TeamAgentRuntimeBackendType;
+  pid?: number;
+  runtimeModel?: string;
+  rssBytes?: number;
+  updatedAt: string;
+}
+
+export interface TeamAgentRuntimeSnapshot {
+  teamName: string;
+  updatedAt: string;
+  runId: string | null;
+  members: Record<string, TeamAgentRuntimeEntry>;
+}
+
 export interface TeamChangeEvent {
   type:
     | 'config'
     | 'inbox'
     | 'log-source-change'
+    | 'task-log-change'
     | 'task'
     | 'lead-activity'
     | 'lead-context'
@@ -875,6 +947,7 @@ export interface TeamChangeEvent {
   teamName: string;
   runId?: string;
   detail?: string;
+  taskId?: string;
 }
 
 export interface ProjectBranchChangeEvent {

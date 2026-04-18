@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 
 import { useStore } from '@renderer/store';
+import { isTeamGraphSlotPersistenceDisabled } from '@renderer/store/slices/teamSlice';
 
 import { parseGraphMemberNodeId } from '../../core/domain/graphOwnerIdentity';
 
@@ -8,6 +9,7 @@ import type { GraphOwnerSlotAssignment } from '@claude-teams/agent-graph';
 
 export function useTeamGraphSurfaceActions(teamName: string): {
   openTeamPage: () => void;
+  resetOwnerSlotAssignmentsToDefaults: () => void;
   commitOwnerSlotDrop: (payload: {
     nodeId: string;
     assignment: GraphOwnerSlotAssignment;
@@ -17,6 +19,13 @@ export function useTeamGraphSurfaceActions(teamName: string): {
 } {
   const openTeamPage = useCallback(() => {
     useStore.getState().openTeamTab(teamName);
+  }, [teamName]);
+
+  const resetOwnerSlotAssignmentsToDefaults = useCallback(() => {
+    if (!isTeamGraphSlotPersistenceDisabled()) {
+      return;
+    }
+    useStore.getState().resetTeamGraphSlotAssignmentsToDefaults(teamName);
   }, [teamName]);
 
   const commitOwnerSlotDrop = useCallback(
@@ -51,6 +60,7 @@ export function useTeamGraphSurfaceActions(teamName: string): {
 
   return {
     openTeamPage,
+    resetOwnerSlotAssignmentsToDefaults,
     commitOwnerSlotDrop,
   };
 }

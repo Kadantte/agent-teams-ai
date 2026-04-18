@@ -161,7 +161,7 @@ function classifyFailedProbe(
 
 export class CliProviderModelAvailabilityService {
   private readonly cache = new Map<string, ProviderModelAvailabilityCacheEntry>();
-  private readonly queue: Array<() => void> = [];
+  private readonly queue: (() => void)[] = [];
   private activeProbeCount = 0;
 
   constructor(private readonly onUpdate?: ProviderAvailabilityUpdateHandler) {}

@@ -1,6 +1,9 @@
 import { extractToolCalls, extractToolResults } from '@main/utils/toolExtraction';
+import { isLeadMember as isLeadMemberCheck } from '@shared/utils/leadDetection';
 
+import { TeamTaskReader } from '../../TeamTaskReader';
 import { BoardTaskActivityRecordSource } from '../activity/BoardTaskActivityRecordSource';
+import { TeamTranscriptSourceLocator } from '../discovery/TeamTranscriptSourceLocator';
 import { BoardTaskExactLogChunkBuilder } from '../exact/BoardTaskExactLogChunkBuilder';
 import { BoardTaskExactLogDetailSelector } from '../exact/BoardTaskExactLogDetailSelector';
 import { BoardTaskExactLogStrictParser } from '../exact/BoardTaskExactLogStrictParser';
@@ -16,12 +19,15 @@ import type {
   BoardTaskLogParticipant,
   BoardTaskLogSegment,
   BoardTaskLogStreamResponse,
+  BoardTaskLogStreamSummary,
+  TeamTask,
 } from '@shared/types';
 
 interface StreamSlice {
   id: string;
   timestamp: string;
   filePath: string;
+  sortOrder?: number;
   participantKey: string;
   actor: BoardTaskLogActor;
   actionCategory?: BoardTaskActivityCategory;
@@ -37,6 +43,22 @@ interface MergedMessageAccumulator {
   toolUseResults: ToolUseResultData[];
 }
 
+interface TimeWindow {
+  startMs: number;
+  endMs: number | null;
+}
+
+interface StreamLayout {
+  participants: BoardTaskLogParticipant[];
+  visibleSlices: StreamSlice[];
+}
+
+const BOARD_MCP_TOOL_PREFIXES = ['mcp__agent-teams__', 'mcp__agent_teams__'] as const;
+const INFERRED_WINDOW_GRACE_BEFORE_MS = 30_000;
+const INFERRED_WINDOW_GRACE_AFTER_MS = 15_000;
+const INFERRED_RECORD_RANGE_BEFORE_MS = 5 * 60_000;
+const INFERRED_RECORD_RANGE_AFTER_MS = 60_000;
+
 function emptyResponse(): BoardTaskLogStreamResponse {
   return {
     participants: [],
@@ -45,8 +67,20 @@ function emptyResponse(): BoardTaskLogStreamResponse {
   };
 }
 
+function emptySummary(): BoardTaskLogStreamSummary {
+  return {
+    segmentCount: 0,
+  };
+}
+
 function normalizeMemberName(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function isBoardMcpToolName(toolName: string | undefined): boolean {
+  if (!toolName) return false;
+  const normalized = toolName.trim().toLowerCase();
+  return BOARD_MCP_TOOL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 function toStreamActor(detail: BoardTaskExactLogDetailCandidate['actor']): BoardTaskLogActor {
@@ -139,11 +173,44 @@ function extractBoardToolOutputText(
     return null;
   }
 
+  const normalizedToolName = toolName.trim().toLowerCase();
   const payload = parsedPayload as Record<string, unknown>;
-  if (toolName === 'task_add_comment' || toolName === 'task_get_comment') {
+  if (normalizedToolName === 'task_add_comment' || normalizedToolName === 'task_get_comment') {
     const comment = payload.comment as Record<string, unknown> | undefined;
     if (typeof comment?.text === 'string' && comment.text.trim().length > 0) {
       return comment.text;
+    }
+  }
+
+  if (normalizedToolName === 'sendmessage') {
+    const routing = payload.routing as Record<string, unknown> | undefined;
+    const deliveryMessage =
+      typeof payload.message === 'string' && payload.message.trim().length > 0
+        ? payload.message.trim()
+        : null;
+    const summary =
+      typeof routing?.summary === 'string' && routing.summary.trim().length > 0
+        ? routing.summary.trim()
+        : null;
+    const target =
+      typeof routing?.target === 'string' && routing.target.trim().length > 0
+        ? routing.target.trim()
+        : null;
+
+    if (deliveryMessage && summary) {
+      return `${deliveryMessage} - ${summary}`;
+    }
+    if (summary && target) {
+      return `Message sent to ${target} - ${summary}`;
+    }
+    if (summary) {
+      return summary;
+    }
+    if (deliveryMessage) {
+      return deliveryMessage;
+    }
+    if (target) {
+      return `Message sent to ${target}`;
     }
   }
 
@@ -267,12 +334,67 @@ function sanitizeToolResultContent(
   };
 }
 
+function sanitizeToolResultPayloadValue(
+  value: string | unknown[],
+  canonicalToolName?: string
+): string | unknown[] {
+  if (typeof value === 'string') {
+    const parsedPayload = parseJsonLikeString(value);
+    const extractedText = extractBoardToolOutputText(canonicalToolName, parsedPayload);
+    if (typeof extractedText === 'string') {
+      return extractedText;
+    }
+    return parsedPayload ? '' : value;
+  }
+
+  const jsonText = collectTextBlockText(value);
+  const parsedPayload = parseJsonLikeString(jsonText);
+  const extractedText = extractBoardToolOutputText(canonicalToolName, parsedPayload);
+  if (typeof extractedText === 'string') {
+    return extractedText;
+  }
+
+  const sanitizedChildren = value
+    .map((child) => {
+      if (
+        typeof child === 'object' &&
+        child !== null &&
+        'type' in child &&
+        child.type === 'text' &&
+        'text' in child &&
+        typeof child.text === 'string'
+      ) {
+        return looksLikeJsonPayload(child.text) ? null : { ...child };
+      }
+      return child;
+    })
+    .filter((child) => child !== null);
+
+  if (parsedPayload && sanitizedChildren.length === value.length) {
+    return '';
+  }
+
+  return sanitizedChildren.length > 0 ? sanitizedChildren : '';
+}
+
 function sanitizeJsonLikeToolResultPayloads(
   messages: ParsedMessage[],
   canonicalToolName?: string
 ): ParsedMessage[] {
   return messages.map((message) => {
     let nextMessage = message;
+    let toolResultsChanged = false;
+    const nextToolResults = message.toolResults.map((toolResult) => {
+      const nextContent = sanitizeToolResultPayloadValue(toolResult.content, canonicalToolName);
+      if (JSON.stringify(nextContent) !== JSON.stringify(toolResult.content)) {
+        toolResultsChanged = true;
+        return {
+          ...toolResult,
+          content: nextContent,
+        };
+      }
+      return toolResult;
+    });
 
     const rawToolUseResult = message.toolUseResult as unknown;
     if (
@@ -366,12 +488,20 @@ function sanitizeJsonLikeToolResultPayloads(
     });
 
     if (!changed) {
-      return nextMessage;
+      if (!toolResultsChanged) {
+        return nextMessage;
+      }
+
+      return {
+        ...nextMessage,
+        toolResults: nextToolResults,
+      };
     }
 
     return {
       ...nextMessage,
       content: nextContent,
+      toolResults: toolResultsChanged ? nextToolResults : nextMessage.toolResults,
     };
   });
 }
@@ -691,23 +821,382 @@ function buildSegmentId(participantKey: string, slices: StreamSlice[]): string {
   return `${participantKey}:${first?.id ?? 'start'}:${last?.id ?? 'end'}`;
 }
 
+function buildToolNameByUseId(
+  parsedMessagesByFile: Map<string, ParsedMessage[]>
+): Map<string, string> {
+  const toolNameByUseId = new Map<string, string>();
+
+  for (const messages of parsedMessagesByFile.values()) {
+    for (const message of messages) {
+      for (const toolCall of message.toolCalls) {
+        toolNameByUseId.set(toolCall.id, toolCall.name);
+      }
+    }
+  }
+
+  return toolNameByUseId;
+}
+
+function buildTaskTimeWindows(task: TeamTask, recordTimestamps: number[]): TimeWindow[] {
+  const windowsFromIntervals = (Array.isArray(task.workIntervals) ? task.workIntervals : [])
+    .map((interval) => {
+      const startedAt = Date.parse(interval.startedAt);
+      if (!Number.isFinite(startedAt)) {
+        return null;
+      }
+      const completedAt =
+        typeof interval.completedAt === 'string' ? Date.parse(interval.completedAt) : Number.NaN;
+      return {
+        startMs: startedAt - INFERRED_WINDOW_GRACE_BEFORE_MS,
+        endMs: Number.isFinite(completedAt) ? completedAt + INFERRED_WINDOW_GRACE_AFTER_MS : null,
+      };
+    })
+    .filter((window): window is TimeWindow => window !== null);
+
+  if (windowsFromIntervals.length > 0) {
+    return windowsFromIntervals;
+  }
+
+  const createdAtMs = typeof task.createdAt === 'string' ? Date.parse(task.createdAt) : Number.NaN;
+  const updatedAtMs = typeof task.updatedAt === 'string' ? Date.parse(task.updatedAt) : Number.NaN;
+  if (Number.isFinite(createdAtMs) || Number.isFinite(updatedAtMs)) {
+    const startMs = Number.isFinite(createdAtMs) ? createdAtMs : updatedAtMs;
+    return [
+      {
+        startMs: startMs - INFERRED_WINDOW_GRACE_BEFORE_MS,
+        endMs: Number.isFinite(updatedAtMs) ? updatedAtMs + INFERRED_WINDOW_GRACE_AFTER_MS : null,
+      },
+    ];
+  }
+
+  const finiteRecordTimestamps = recordTimestamps.filter((timestamp) => Number.isFinite(timestamp));
+  if (finiteRecordTimestamps.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      startMs: Math.min(...finiteRecordTimestamps) - INFERRED_RECORD_RANGE_BEFORE_MS,
+      endMs: Math.max(...finiteRecordTimestamps) + INFERRED_RECORD_RANGE_AFTER_MS,
+    },
+  ];
+}
+
+function isWithinTimeWindows(timestamp: Date, windows: TimeWindow[]): boolean {
+  const messageTime = timestamp.getTime();
+  if (!Number.isFinite(messageTime)) {
+    return false;
+  }
+  if (windows.length === 0) {
+    return true;
+  }
+
+  const now = Date.now();
+  return windows.some((window) => {
+    const endMs = window.endMs ?? now;
+    return messageTime >= window.startMs && messageTime <= endMs;
+  });
+}
+
+function collectExplicitMessageIds(records: { source: { messageUuid: string } }[]): Set<string> {
+  return new Set(records.map((record) => record.source.messageUuid));
+}
+
+function collectExplicitToolUseIds(
+  records: {
+    source: { toolUseId?: string };
+    action?: { toolUseId?: string };
+  }[]
+): Set<string> {
+  const toolUseIds = new Set<string>();
+
+  for (const record of records) {
+    const sourceToolUseId = record.source.toolUseId?.trim();
+    if (sourceToolUseId) {
+      toolUseIds.add(sourceToolUseId);
+    }
+
+    const actionToolUseId = record.action?.toolUseId?.trim();
+    if (actionToolUseId) {
+      toolUseIds.add(actionToolUseId);
+    }
+  }
+
+  return toolUseIds;
+}
+
+function collectAllowedMemberNames(
+  task: TeamTask,
+  records: { actor: { memberName?: string } }[]
+): Set<string> {
+  const allowedNames = new Set<string>();
+
+  if (typeof task.owner === 'string' && task.owner.trim().length > 0) {
+    allowedNames.add(normalizeMemberName(task.owner));
+  }
+
+  for (const record of records) {
+    if (typeof record.actor.memberName === 'string' && record.actor.memberName.trim().length > 0) {
+      allowedNames.add(normalizeMemberName(record.actor.memberName));
+    }
+  }
+
+  return allowedNames;
+}
+
+function extractMessageToolUseIds(message: ParsedMessage): Set<string> {
+  const toolUseIds = new Set<string>();
+
+  for (const toolCall of message.toolCalls) {
+    if (typeof toolCall.id === 'string' && toolCall.id.trim().length > 0) {
+      toolUseIds.add(toolCall.id.trim());
+    }
+  }
+
+  for (const toolResult of message.toolResults) {
+    if (typeof toolResult.toolUseId === 'string' && toolResult.toolUseId.trim().length > 0) {
+      toolUseIds.add(toolResult.toolUseId.trim());
+    }
+  }
+
+  if (typeof message.sourceToolUseID === 'string' && message.sourceToolUseID.trim().length > 0) {
+    toolUseIds.add(message.sourceToolUseID.trim());
+  }
+
+  return toolUseIds;
+}
+
+function messageHasNonBoardToolActivity(
+  message: ParsedMessage,
+  toolNameByUseId: Map<string, string>
+): boolean {
+  for (const toolCall of message.toolCalls) {
+    if (!isBoardMcpToolName(toolCall.name)) {
+      return true;
+    }
+  }
+
+  for (const toolResult of message.toolResults) {
+    if (!isBoardMcpToolName(toolNameByUseId.get(toolResult.toolUseId))) {
+      return true;
+    }
+  }
+
+  if (message.sourceToolUseID) {
+    const sourceToolName = toolNameByUseId.get(message.sourceToolUseID);
+    if (sourceToolName && !isBoardMcpToolName(sourceToolName)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function buildInferredActor(message: ParsedMessage, leadName: string): BoardTaskLogActor | null {
+  const sessionId = message.sessionId?.trim();
+  if (!sessionId) {
+    return null;
+  }
+
+  const memberName =
+    typeof message.agentName === 'string' && message.agentName.trim().length > 0
+      ? message.agentName.trim()
+      : undefined;
+
+  const isLead =
+    memberName != null && normalizeMemberName(memberName) === normalizeMemberName(leadName);
+
+  return {
+    ...(memberName ? { memberName } : {}),
+    role: isLead ? 'lead' : memberName ? 'member' : message.isSidechain ? 'member' : 'unknown',
+    sessionId,
+    ...(message.agentId ? { agentId: message.agentId } : {}),
+    isSidechain: message.isSidechain,
+  };
+}
+
+function compareSlices(left: StreamSlice, right: StreamSlice): number {
+  const leftTs = Date.parse(left.timestamp);
+  const rightTs = Date.parse(right.timestamp);
+  if (Number.isFinite(leftTs) && Number.isFinite(rightTs) && leftTs !== rightTs) {
+    return leftTs - rightTs;
+  }
+  if (left.filePath !== right.filePath) {
+    return left.filePath.localeCompare(right.filePath);
+  }
+  if ((left.sortOrder ?? 0) !== (right.sortOrder ?? 0)) {
+    return (left.sortOrder ?? 0) - (right.sortOrder ?? 0);
+  }
+  return left.id.localeCompare(right.id);
+}
+
+function buildOrderedParticipants(visibleSlices: StreamSlice[]): BoardTaskLogParticipant[] {
+  const participantsByKey = new Map<string, BoardTaskLogParticipant>();
+  const participantOrder: string[] = [];
+
+  for (const slice of visibleSlices) {
+    if (participantsByKey.has(slice.participantKey)) {
+      continue;
+    }
+    participantsByKey.set(
+      slice.participantKey,
+      buildParticipant(slice.actor, slice.participantKey)
+    );
+    participantOrder.push(slice.participantKey);
+  }
+
+  return participantOrder
+    .map((key) => participantsByKey.get(key))
+    .filter((participant): participant is BoardTaskLogParticipant => Boolean(participant))
+    .sort((left, right) => {
+      if (left.isLead && !right.isLead) return 1;
+      if (!left.isLead && right.isLead) return -1;
+      return participantOrder.indexOf(left.key) - participantOrder.indexOf(right.key);
+    });
+}
+
+function countSegmentsFromSlices(visibleSlices: StreamSlice[]): number {
+  if (visibleSlices.length === 0) {
+    return 0;
+  }
+
+  let segmentCount = 1;
+  for (let index = 1; index < visibleSlices.length; index += 1) {
+    if (visibleSlices[index]?.participantKey !== visibleSlices[index - 1]?.participantKey) {
+      segmentCount += 1;
+    }
+  }
+
+  return segmentCount;
+}
+
 export class BoardTaskLogStreamService {
   constructor(
     private readonly recordSource: BoardTaskActivityRecordSource = new BoardTaskActivityRecordSource(),
     private readonly summarySelector: BoardTaskExactLogSummarySelector = new BoardTaskExactLogSummarySelector(),
     private readonly strictParser: BoardTaskExactLogStrictParser = new BoardTaskExactLogStrictParser(),
     private readonly detailSelector: BoardTaskExactLogDetailSelector = new BoardTaskExactLogDetailSelector(),
-    private readonly chunkBuilder: BoardTaskExactLogChunkBuilder = new BoardTaskExactLogChunkBuilder()
+    private readonly chunkBuilder: BoardTaskExactLogChunkBuilder = new BoardTaskExactLogChunkBuilder(),
+    private readonly taskReader: TeamTaskReader = new TeamTaskReader(),
+    private readonly transcriptSourceLocator: TeamTranscriptSourceLocator = new TeamTranscriptSourceLocator()
   ) {}
 
-  async getTaskLogStream(teamName: string, taskId: string): Promise<BoardTaskLogStreamResponse> {
+  private async buildInferredExecutionSlices(
+    teamName: string,
+    taskId: string,
+    records: Awaited<ReturnType<BoardTaskActivityRecordSource['getTaskRecords']>>,
+    parsedMessagesByFile: Map<string, ParsedMessage[]>
+  ): Promise<StreamSlice[]> {
+    if (records.some((record) => record.linkKind === 'execution')) {
+      return [];
+    }
+
+    const [activeTasks, deletedTasks, transcriptContext] = await Promise.all([
+      this.taskReader.getTasks(teamName),
+      this.taskReader.getDeletedTasks(teamName),
+      this.transcriptSourceLocator.getContext(teamName),
+    ]);
+
+    const task = [...activeTasks, ...deletedTasks].find((candidate) => candidate.id === taskId);
+    if (!task) {
+      return [];
+    }
+
+    const transcriptFiles = transcriptContext?.transcriptFiles ?? [];
+    const missingFiles = transcriptFiles.filter((filePath) => !parsedMessagesByFile.has(filePath));
+    let mergedParsedMessagesByFile = parsedMessagesByFile;
+    if (missingFiles.length > 0) {
+      const additionalParsedMessages = await this.strictParser.parseFiles(missingFiles);
+      mergedParsedMessagesByFile = new Map([
+        ...parsedMessagesByFile.entries(),
+        ...additionalParsedMessages.entries(),
+      ]);
+    }
+
+    const toolNameByUseId = buildToolNameByUseId(mergedParsedMessagesByFile);
+    const recordTimestamps = records.map((record) => Date.parse(record.timestamp));
+    const taskTimeWindows = buildTaskTimeWindows(task, recordTimestamps);
+    if (taskTimeWindows.length === 0) {
+      return [];
+    }
+
+    const explicitMessageIds = collectExplicitMessageIds(records);
+    const explicitToolUseIds = collectExplicitToolUseIds(records);
+    const allowedMemberNames = collectAllowedMemberNames(task, records);
+    const leadName =
+      transcriptContext?.config.members
+        ?.find((member) => isLeadMemberCheck(member))
+        ?.name?.trim() || 'team-lead';
+
+    const inferredSlices: StreamSlice[] = [];
+    for (const [filePath, messages] of mergedParsedMessagesByFile.entries()) {
+      for (let index = 0; index < messages.length; index += 1) {
+        const message = messages[index];
+        if (explicitMessageIds.has(message.uuid)) {
+          continue;
+        }
+        if (!isWithinTimeWindows(message.timestamp, taskTimeWindows)) {
+          continue;
+        }
+
+        const actor = buildInferredActor(message, leadName);
+        if (!actor || !actor.memberName) {
+          continue;
+        }
+
+        if (
+          allowedMemberNames.size > 0 &&
+          !allowedMemberNames.has(normalizeMemberName(actor.memberName))
+        ) {
+          continue;
+        }
+
+        const messageToolUseIds = extractMessageToolUseIds(message);
+        if ([...messageToolUseIds].some((toolUseId) => explicitToolUseIds.has(toolUseId))) {
+          continue;
+        }
+        if (!messageHasNonBoardToolActivity(message, toolNameByUseId)) {
+          continue;
+        }
+
+        const inferredToolName = [...messageToolUseIds]
+          .map((toolUseId) => toolNameByUseId.get(toolUseId))
+          .find((toolName): toolName is string => typeof toolName === 'string');
+        const sanitizedMessages = sanitizeJsonLikeToolResultPayloads([message], inferredToolName);
+        const prunedMessages = pruneEmptyInternalToolResultMessages(sanitizedMessages);
+        if (prunedMessages.length === 0) {
+          continue;
+        }
+
+        inferredSlices.push({
+          id: `inferred:${filePath}:${message.uuid}`,
+          timestamp: message.timestamp.toISOString(),
+          filePath,
+          sortOrder: index,
+          participantKey: buildParticipantKey(actor),
+          actor,
+          filteredMessages: prunedMessages,
+        });
+      }
+    }
+
+    return inferredSlices.sort(compareSlices);
+  }
+
+  private async buildStreamLayout(teamName: string, taskId: string): Promise<StreamLayout> {
     if (!isBoardTaskExactLogsReadEnabled()) {
-      return emptyResponse();
+      return {
+        participants: [],
+        visibleSlices: [],
+      };
     }
 
     const records = await this.recordSource.getTaskRecords(teamName, taskId);
     if (records.length === 0) {
-      return emptyResponse();
+      return {
+        participants: [],
+        visibleSlices: [],
+      };
     }
 
     const fileVersionsByPath = await getBoardTaskExactLogFileVersions(
@@ -723,7 +1212,10 @@ export class BoardTaskLogStreamService {
       .sort(compareCandidates);
 
     if (candidates.length === 0) {
-      return emptyResponse();
+      return {
+        participants: [],
+        visibleSlices: [],
+      };
     }
 
     const parsedMessagesByFile = await this.strictParser.parseFiles(
@@ -762,6 +1254,7 @@ export class BoardTaskLogStreamService {
         id: detail.id,
         timestamp: detail.timestamp,
         filePath: detail.source.filePath,
+        sortOrder: detail.source.sourceOrder,
         participantKey: buildParticipantKey(actor),
         actor,
         actionCategory: candidate.actionCategory,
@@ -770,10 +1263,20 @@ export class BoardTaskLogStreamService {
     }
 
     if (slices.length === 0) {
-      return emptyResponse();
+      return {
+        participants: [],
+        visibleSlices: [],
+      };
     }
 
-    const deNoisedSlices = filterReadOnlySlices(slices);
+    const inferredExecutionSlices = await this.buildInferredExecutionSlices(
+      teamName,
+      taskId,
+      records,
+      parsedMessagesByFile
+    );
+    const combinedSlices = [...slices, ...inferredExecutionSlices].sort(compareSlices);
+    const deNoisedSlices = filterReadOnlySlices(combinedSlices);
 
     const namedParticipantSlices = deNoisedSlices.filter((slice) =>
       hasNamedParticipant(slice.actor)
@@ -781,27 +1284,31 @@ export class BoardTaskLogStreamService {
     const visibleSlices =
       namedParticipantSlices.length > 0 ? namedParticipantSlices : deNoisedSlices;
 
-    const participantsByKey = new Map<string, BoardTaskLogParticipant>();
-    const participantOrder: string[] = [];
-    for (const slice of visibleSlices) {
-      if (participantsByKey.has(slice.participantKey)) {
-        continue;
-      }
-      participantsByKey.set(
-        slice.participantKey,
-        buildParticipant(slice.actor, slice.participantKey)
-      );
-      participantOrder.push(slice.participantKey);
+    return {
+      participants: buildOrderedParticipants(visibleSlices),
+      visibleSlices,
+    };
+  }
+
+  async getTaskLogStreamSummary(
+    teamName: string,
+    taskId: string
+  ): Promise<BoardTaskLogStreamSummary> {
+    const layout = await this.buildStreamLayout(teamName, taskId);
+    if (layout.visibleSlices.length === 0) {
+      return emptySummary();
     }
 
-    const orderedParticipants = participantOrder
-      .map((key) => participantsByKey.get(key))
-      .filter((participant): participant is BoardTaskLogParticipant => Boolean(participant))
-      .sort((left, right) => {
-        if (left.isLead && !right.isLead) return 1;
-        if (!left.isLead && right.isLead) return -1;
-        return participantOrder.indexOf(left.key) - participantOrder.indexOf(right.key);
-      });
+    return {
+      segmentCount: countSegmentsFromSlices(layout.visibleSlices),
+    };
+  }
+
+  async getTaskLogStream(teamName: string, taskId: string): Promise<BoardTaskLogStreamResponse> {
+    const layout = await this.buildStreamLayout(teamName, taskId);
+    if (layout.visibleSlices.length === 0) {
+      return emptyResponse();
+    }
 
     const segments: BoardTaskLogSegment[] = [];
     let currentSegmentSlices: StreamSlice[] = [];
@@ -835,7 +1342,7 @@ export class BoardTaskLogStreamService {
       currentSegmentSlices = [];
     };
 
-    for (const slice of visibleSlices) {
+    for (const slice of layout.visibleSlices) {
       if (
         currentSegmentSlices.length > 0 &&
         currentSegmentSlices[0].participantKey !== slice.participantKey
@@ -846,11 +1353,11 @@ export class BoardTaskLogStreamService {
     }
     flushSegment();
 
-    const namedParticipants = orderedParticipants.filter((participant) => !participant.isLead);
+    const namedParticipants = layout.participants.filter((participant) => !participant.isLead);
     const defaultFilter = namedParticipants.length === 1 ? namedParticipants[0].key : 'all';
 
     return {
-      participants: orderedParticipants,
+      participants: layout.participants,
       defaultFilter,
       segments,
     };

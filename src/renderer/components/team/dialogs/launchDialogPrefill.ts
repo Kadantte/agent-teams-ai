@@ -1,5 +1,5 @@
 import { normalizeCreateLaunchProviderForUi } from '@renderer/utils/geminiUiFreeze';
-import { normalizeTeamModelForUi as normalizeCatalogTeamModelForUi } from '@renderer/utils/teamModelCatalog';
+import { normalizeExplicitTeamModelForUi } from '@renderer/utils/teamModelAvailability';
 import { extractProviderScopedBaseModel } from '@renderer/utils/teamModelContext';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
@@ -102,7 +102,7 @@ export function resolveLaunchDialogPrefill({
   return {
     providerId,
     model: matchingModel
-      ? normalizeCatalogTeamModelForUi(providerId, matchingModel)
+      ? normalizeExplicitTeamModelForUi(providerId, matchingModel)
       : getStoredModel(providerId),
     effort,
     limitContext,

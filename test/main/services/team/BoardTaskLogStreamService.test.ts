@@ -181,6 +181,63 @@ describe('BoardTaskLogStreamService', () => {
     expect(buildBundleChunks.mock.calls[0]?.[0]).toHaveLength(2);
   });
 
+  it('returns lightweight segment count without building stream chunks', async () => {
+    const tom = {
+      memberName: 'tom',
+      role: 'member' as const,
+      sessionId: 'session-tom',
+      agentId: 'agent-tom',
+      isSidechain: true,
+    };
+    const alice = {
+      memberName: 'alice',
+      role: 'member' as const,
+      sessionId: 'session-alice',
+      agentId: 'agent-alice',
+      isSidechain: true,
+    };
+    const candidates = [
+      makeCandidate('c1', '2026-04-12T16:00:00.000Z', tom, 'tool-1'),
+      makeCandidate('c2', '2026-04-12T16:01:00.000Z', tom, 'tool-2'),
+      makeCandidate('c3', '2026-04-12T16:02:00.000Z', alice, 'tool-3'),
+      makeCandidate('c4', '2026-04-12T16:03:00.000Z', tom, 'tool-4'),
+    ];
+
+    const recordSource = {
+      getTaskRecords: vi.fn(async () => candidates.flatMap((candidate) => candidate.records)),
+    };
+    const summarySelector = {
+      selectSummaries: vi.fn(() => candidates),
+    };
+    const strictParser = {
+      parseFiles: vi.fn(async () => new Map([['/tmp/task.jsonl', []]])),
+    };
+    const detailSelector = {
+      selectDetail: vi.fn(({ candidate }: { candidate: BoardTaskExactLogBundleCandidate }) => ({
+        id: candidate.id,
+        timestamp: candidate.timestamp,
+        actor: candidate.actor,
+        source: candidate.source,
+        records: candidate.records,
+        filteredMessages: [makeMessage(candidate.id, candidate.timestamp, candidate.id)],
+      })),
+    };
+    const buildBundleChunks = vi.fn((messages: ParsedMessage[]) => [{ id: messages[0]?.uuid }]);
+
+    const service = new BoardTaskLogStreamService(
+      recordSource as never,
+      summarySelector as never,
+      strictParser as never,
+      detailSelector as never,
+      { buildBundleChunks } as never,
+    );
+
+    await expect(service.getTaskLogStreamSummary('demo', 'task-a')).resolves.toEqual({
+      segmentCount: 3,
+    });
+    expect(buildBundleChunks).not.toHaveBeenCalled();
+  });
+
   it('merges duplicate message uuids inside one participant segment before chunk building', async () => {
     const tom = {
       memberName: 'tom',
@@ -629,5 +686,155 @@ describe('BoardTaskLogStreamService', () => {
       content: 'useful comment',
     });
     expect(toolResultMessage?.toolUseResult).toEqual({ toolUseId: 'tool-1', content: 'useful comment' });
+  });
+
+  it('sanitizes SendMessage json payloads into a concise human-readable result', async () => {
+    const bob = {
+      memberName: 'bob',
+      role: 'member' as const,
+      sessionId: 'session-bob',
+      agentId: 'agent-bob',
+      isSidechain: true,
+    };
+    const candidate = {
+      ...makeCandidate('c1', '2026-04-12T16:00:00.000Z', bob, 'tool-send'),
+      actionCategory: 'execution' as const,
+      canonicalToolName: 'SendMessage',
+    };
+
+    const recordSource = {
+      getTaskRecords: vi.fn(async () => candidate.records),
+    };
+    const summarySelector = {
+      selectSummaries: vi.fn(() => [candidate]),
+    };
+    const strictParser = {
+      parseFiles: vi.fn(async () => new Map([['/tmp/task.jsonl', []]])),
+    };
+    const detailSelector = {
+      selectDetail: vi.fn(() => ({
+        id: 'c1',
+        timestamp: '2026-04-12T16:00:00.000Z',
+        actor: bob,
+        source: {
+          filePath: '/tmp/task.jsonl',
+          messageUuid: 'assistant-send',
+          toolUseId: 'tool-send',
+          sourceOrder: 1,
+        },
+        records: candidate.records,
+        filteredMessages: [
+          {
+            uuid: 'assistant-send',
+            parentUuid: null,
+            type: 'assistant' as const,
+            timestamp: new Date('2026-04-12T16:00:00.000Z'),
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'tool-send',
+                name: 'SendMessage',
+                input: { to: 'team-lead', summary: '#abc done' },
+              } as never,
+            ],
+            toolCalls: [],
+            toolResults: [],
+            isSidechain: false,
+            isMeta: false,
+            isCompactSummary: false,
+          },
+          {
+            uuid: 'user-send-result',
+            parentUuid: 'assistant-send',
+            type: 'user' as const,
+            timestamp: new Date('2026-04-12T16:00:02.000Z'),
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'tool-send',
+                content: [
+                  {
+                    type: 'text',
+                    text: JSON.stringify({
+                      success: true,
+                      message: "Message sent to team-lead's inbox",
+                      routing: {
+                        target: '@team-lead',
+                        summary: '#abc done',
+                        content: 'Detailed body that should not leak into the preview.',
+                      },
+                    }),
+                  } as never,
+                ],
+              } as never,
+            ],
+            toolCalls: [],
+            toolResults: [
+              {
+                toolUseId: 'tool-send',
+                content: [
+                  {
+                    type: 'text',
+                    text: JSON.stringify({
+                      success: true,
+                      message: "Message sent to team-lead's inbox",
+                      routing: {
+                        target: '@team-lead',
+                        summary: '#abc done',
+                        content: 'Detailed body that should not leak into the preview.',
+                      },
+                    }),
+                  },
+                ],
+                isError: false,
+              },
+            ],
+            sourceToolUseID: 'tool-send',
+            sourceToolAssistantUUID: 'assistant-send',
+            toolUseResult: {
+              success: true,
+              message: "Message sent to team-lead's inbox",
+              routing: {
+                target: '@team-lead',
+                summary: '#abc done',
+                content: 'Detailed body that should not leak into the preview.',
+              },
+            },
+            isSidechain: false,
+            isMeta: false,
+            isCompactSummary: false,
+          },
+        ],
+      })),
+    };
+    const buildBundleChunks = vi.fn((messages: ParsedMessage[]) => [{ id: messages[0]?.uuid }]);
+
+    const service = new BoardTaskLogStreamService(
+      recordSource as never,
+      summarySelector as never,
+      strictParser as never,
+      detailSelector as never,
+      { buildBundleChunks } as never,
+    );
+
+    await service.getTaskLogStream('demo', 'task-a');
+
+    const mergedMessages = buildBundleChunks.mock.calls[0]?.[0] as ParsedMessage[];
+    const toolResultMessage = mergedMessages.find((message) => message.uuid === 'user-send-result');
+    const content = Array.isArray(toolResultMessage?.content) ? toolResultMessage.content : [];
+    expect(content[0]).toMatchObject({
+      type: 'tool_result',
+      tool_use_id: 'tool-send',
+      content: "Message sent to team-lead's inbox - #abc done",
+    });
+    expect(toolResultMessage?.toolResults).toEqual([
+      {
+        toolUseId: 'tool-send',
+        content: "Message sent to team-lead's inbox - #abc done",
+        isError: false,
+      },
+    ]);
   });
 });

@@ -1,12 +1,20 @@
 import { Fragment, memo, useCallback, useMemo } from 'react';
 
-import { MarkdownViewer } from '@renderer/components/chat/viewers/MarkdownViewer';
+import {
+  CompactMarkdownPreview,
+  MarkdownViewer,
+} from '@renderer/components/chat/viewers/MarkdownViewer';
 import { CopyButton } from '@renderer/components/common/CopyButton';
 import { AttachmentDisplay } from '@renderer/components/team/attachments/AttachmentDisplay';
 import { MemberBadge } from '@renderer/components/team/MemberBadge';
 import { TaskTooltip } from '@renderer/components/team/TaskTooltip';
 import { ExpandableContent } from '@renderer/components/ui/ExpandableContent';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@renderer/components/ui/tooltip';
 import {
   CARD_BG,
   CARD_BG_ZEBRA,
@@ -668,11 +676,8 @@ export const ActivityItem = memo(
     }, [message.timestamp]);
 
     const structured = parseStructuredAgentMessage(message.text);
-    const bootstrapDisplay = useMemo(() => getBootstrapPromptDisplay(message), [message]);
-    const bootstrapAcknowledgement = useMemo(
-      () => getBootstrapAcknowledgementDisplay(message),
-      [message]
-    );
+    const bootstrapDisplay = getBootstrapPromptDisplay(message);
+    const bootstrapAcknowledgement = getBootstrapAcknowledgementDisplay(message);
     // Only flag agent messages as rate-limited, not user's own quotes
     const rateLimited = message.from !== 'user' && isRateLimitMessage(message.text);
     // Highlight messages containing API errors
@@ -681,22 +686,16 @@ export const ActivityItem = memo(
     const isAuthError = isApiError && AUTH_ERROR_PATTERNS.some((p) => p.test(message.text));
     // Never collapse rate limit messages as noise — they must be visible
     const noiseLabel = structured && !rateLimited ? getNoiseLabel(structured) : null;
-    const idleSemantic = useMemo(() => classifyIdleNotification(message), [message]);
+    const idleSemantic = classifyIdleNotification(message);
 
     const systemLabel = !structured && !rateLimited ? getSystemMessageLabel(message.text) : null;
     const isManaged = collapseMode === 'managed';
     const isExpanded = isManaged ? !isCollapsed : true;
 
-    const parsedCrossTeamPrefix = useMemo(() => parseCrossTeamPrefix(message.text), [message.text]);
-    const qualifiedRecipient = useMemo(() => parseQualifiedRecipient(message.to), [message.to]);
-    const crossTeamSentTarget = useMemo(
-      () => getCrossTeamSentTarget(message.to, teamName, localMemberNames),
-      [message.to, teamName, localMemberNames]
-    );
-    const crossTeamSentMemberName = useMemo(
-      () => getCrossTeamSentMemberName(message.to),
-      [message.to]
-    );
+    const parsedCrossTeamPrefix = parseCrossTeamPrefix(message.text);
+    const qualifiedRecipient = parseQualifiedRecipient(message.to);
+    const crossTeamSentTarget = getCrossTeamSentTarget(message.to, teamName, localMemberNames);
+    const crossTeamSentMemberName = getCrossTeamSentMemberName(message.to);
     const isCrossTeam = message.source === CROSS_TEAM_SOURCE || parsedCrossTeamPrefix !== null;
     const isCrossTeamSent =
       message.source === CROSS_TEAM_SENT_SOURCE || crossTeamSentTarget !== null;
@@ -789,7 +788,7 @@ export const ActivityItem = memo(
       if (!isCrossTeamAny || !strippedText) return '';
       const oneLine = strippedText.replace(/\n+/g, ' ').trim();
       if (!oneLine) return '';
-      return oneLine.length > 80 ? oneLine.slice(0, 80) + '…' : oneLine;
+      return oneLine;
     }, [isCrossTeamAny, strippedText]);
 
     const rawSummary = useMemo(() => {
@@ -815,8 +814,7 @@ export const ActivityItem = memo(
       // Fallback: use the beginning of message text as preview for plain-text messages
       const plain = getSanitizedInboxMessageText(message).trim();
       if (!plain) return '';
-      const oneLine = plain.replace(/\n+/g, ' ');
-      return oneLine.length > 80 ? oneLine.slice(0, 80) + '…' : oneLine;
+      return plain.replace(/\n+/g, ' ');
     }, [
       crossTeamPreview,
       isSlashCommandMessage,
@@ -827,7 +825,47 @@ export const ActivityItem = memo(
       slashCommandMeta,
       structured,
     ]);
-    const summaryText = useMemo(() => extractMarkdownPlainText(rawSummary), [rawSummary]);
+    const summaryText = extractMarkdownPlainText(rawSummary);
+    const compactPreviewMarkdown = useMemo(() => {
+      if (idleSemantic?.hasPeerSummary && idleSemantic.peerSummary) {
+        return idleSemantic.peerSummary;
+      }
+      if (isSlashCommandResult && message.commandOutput) {
+        return message.summary || getCommandOutputSummary(message.text);
+      }
+      if (isSlashCommandMessage && slashCommandMeta) {
+        if (slashCommandMeta.args) {
+          const oneLine = slashCommandMeta.args.replace(/\n+/g, ' ').trim();
+          return `${slashCommandMeta.command} ${oneLine}`;
+        }
+        return slashCommandMeta.command;
+      }
+      if (crossTeamPreview) return crossTeamPreview;
+
+      const formattedDisplayText = displayText?.trim() ?? '';
+      if (formattedDisplayText) {
+        return formattedDisplayText;
+      }
+
+      return summaryText || rawSummary;
+    }, [
+      crossTeamPreview,
+      displayText,
+      idleSemantic,
+      isSlashCommandMessage,
+      isSlashCommandResult,
+      message,
+      message.commandOutput,
+      rawSummary,
+      slashCommandMeta,
+      summaryText,
+    ]);
+    const compactPreviewTooltipText = useMemo(() => {
+      const normalized = extractMarkdownPlainText(compactPreviewMarkdown)
+        .replace(/\n+/g, ' ')
+        .trim();
+      return normalized || compactPreviewMarkdown;
+    }, [compactPreviewMarkdown]);
     const commentTaskRef =
       message.messageKind === 'task_comment_notification' ? (message.taskRefs?.[0] ?? null) : null;
     const commentTaskDisplayId =
@@ -1187,13 +1225,109 @@ export const ActivityItem = memo(
                   )}
                 </div>
               </div>
-              <div
-                className="mt-1 min-w-0 truncate text-[11px]"
-                style={{ color: CARD_TEXT_LIGHT }}
-                title={summaryText || rawSummary}
-              >
-                {summaryContent}
+              <TooltipProvider delayDuration={1000}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div>
+                      <CompactMarkdownPreview
+                        content={compactPreviewMarkdown}
+                        className="mt-1 line-clamp-2 w-full min-w-0 max-w-full break-words text-[11px] leading-4"
+                        teamColorByName={teamColorByName}
+                        onTeamClick={onTeamClick}
+                      />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="bottom"
+                    align="start"
+                    className="max-w-sm whitespace-normal break-words"
+                  >
+                    {compactPreviewTooltipText}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          ) : !isExpanded ? (
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                {isUnread ? (
+                  <span
+                    className="size-2 shrink-0 rounded-full bg-blue-500"
+                    title="Unread"
+                    aria-hidden
+                  />
+                ) : null}
+                {showChevron ? (
+                  <ChevronRight
+                    className="size-3 shrink-0 transition-transform duration-150"
+                    style={{
+                      color: CARD_ICON_MUTED,
+                      transform: isExpanded ? 'rotate(90deg)' : undefined,
+                    }}
+                  />
+                ) : null}
+                {crossTeamOrigin ? (
+                  <CrossTeamTeamBadge teamName={crossTeamOrigin.teamName} onClick={onTeamClick} />
+                ) : null}
+                {senderBadge}
+                {!compactHeader && formattedRole && !isSlashCommandResult ? (
+                  <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
+                    {formattedRole}
+                  </span>
+                ) : null}
+                {messageTypeBadge}
+                {leadSourceBadge}
+                {statusBadge}
+                {recipientBadge}
+                <div className="relative ml-auto flex shrink-0 items-center">
+                  <span
+                    className={
+                      onExpand && expandItemKey
+                        ? 'text-[10px] transition-opacity group-hover:opacity-0'
+                        : 'text-[10px]'
+                    }
+                    style={{ color: CARD_ICON_MUTED }}
+                  >
+                    {timestamp}
+                  </span>
+                  {onExpand && expandItemKey && (
+                    <button
+                      type="button"
+                      aria-label="Expand message"
+                      className="absolute right-0 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 group-hover:opacity-100"
+                      style={{ color: CARD_ICON_MUTED }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onExpand(expandItemKey);
+                      }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <Maximize2 size={12} />
+                    </button>
+                  )}
+                </div>
               </div>
+              <TooltipProvider delayDuration={1000}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div>
+                      <CompactMarkdownPreview
+                        content={compactPreviewMarkdown}
+                        className="mt-1 line-clamp-2 w-full min-w-0 max-w-full break-words text-[11px] leading-4"
+                        teamColorByName={teamColorByName}
+                        onTeamClick={onTeamClick}
+                      />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="bottom"
+                    align="start"
+                    className="max-w-sm whitespace-normal break-words"
+                  >
+                    {compactPreviewTooltipText}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           ) : (
             <>

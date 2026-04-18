@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { ACTIVITY_LANE } from '@claude-teams/agent-graph';
-import { ActivityItem } from '@renderer/components/team/activity/ActivityItem';
-import {
-  buildMessageContext,
-  resolveMessageRenderProps,
-} from '@renderer/components/team/activity/activityMessageContext';
+import { buildMessageContext } from '@renderer/components/team/activity/activityMessageContext';
 import { MessageExpandDialog } from '@renderer/components/team/activity/MessageExpandDialog';
 import { useStableTeamMentionMeta } from '@renderer/hooks/useStableTeamMentionMeta';
 import { useTeamMessagesRead } from '@renderer/hooks/useTeamMessagesRead';
@@ -17,6 +13,8 @@ import {
   type InlineActivityEntry,
 } from '../../core/domain/buildInlineActivityEntries';
 import { useGraphActivityContext } from '../hooks/useGraphActivityContext';
+
+import { GraphActivityCard } from './GraphActivityCard';
 
 import type { GraphNode } from '@claude-teams/agent-graph';
 import type { TimelineItem } from '@renderer/components/team/activity/LeadThoughtsGroup';
@@ -77,6 +75,9 @@ export const GraphActivityHud = ({
   const connectorPathRefs = useRef(new Map<string, SVGPathElement | null>());
   const [expandedItem, setExpandedItem] = useState<TimelineItem | null>(null);
   const { teamData, teams } = useGraphActivityContext(teamName);
+  const teamSnapshot = teamData;
+  const members = teamData?.members ?? [];
+  const messages = teamData?.messageFeed ?? [];
 
   const ownerNodes = useMemo(
     () =>
@@ -87,21 +88,27 @@ export const GraphActivityHud = ({
     [nodes]
   );
   const leadNodeId = ownerNodes.find((node) => node.kind === 'lead')?.id ?? `lead:${teamName}`;
-  const leadName = teamData ? getGraphLeadMemberName(teamData, teamName) : `${teamName}-lead`;
+  const leadName = teamSnapshot
+    ? getGraphLeadMemberName({ members }, teamName)
+    : `${teamName}-lead`;
   const ownerNodeIds = useMemo(() => new Set(ownerNodes.map((node) => node.id)), [ownerNodes]);
   const entryMapByOwnerNodeId = useMemo(() => {
-    if (!teamData) {
+    if (!teamSnapshot) {
       return new Map<string, InlineActivityEntry[]>();
     }
     return buildInlineActivityEntries({
-      data: teamData,
+      data: {
+        members,
+        tasks: teamSnapshot.tasks,
+        messages,
+      },
       teamName,
       leadId: leadNodeId,
       leadName,
       ownerNodeIds,
     });
-  }, [leadName, leadNodeId, ownerNodeIds, teamData, teamName]);
-  const messageContext = useMemo(() => buildMessageContext(teamData?.members), [teamData?.members]);
+  }, [leadName, leadNodeId, members, messages, ownerNodeIds, teamName, teamSnapshot]);
+  const messageContext = useMemo(() => buildMessageContext(members), [members]);
   const { teamNames, teamColorByName } = useStableTeamMentionMeta(teams);
   const { readSet } = useTeamMessagesRead(teamName);
 
@@ -279,37 +286,9 @@ export const GraphActivityHud = ({
     visibleLanes,
   ]);
 
-  const expandedItemsByKey = useMemo(() => {
-    const items = new Map<string, TimelineItem>();
-    for (const lane of visibleLanes) {
-      for (const entry of lane.entries) {
-        const key = toMessageKey(entry.message);
-        items.set(key, { type: 'message', message: entry.message });
-      }
-    }
-    return items;
-  }, [visibleLanes]);
-
-  const handleExpandItem = useCallback(
-    (key: string) => {
-      const next = expandedItemsByKey.get(key);
-      if (next) {
-        setExpandedItem(next);
-      }
-    },
-    [expandedItemsByKey]
-  );
-
   const handleMessageClick = useCallback((item: TimelineItem) => {
     setExpandedItem(item);
   }, []);
-
-  const handleMemberNameClick = useCallback(
-    (memberName: string) => {
-      onOpenMemberProfile?.(memberName);
-    },
-    [onOpenMemberProfile]
-  );
 
   const handleMemberClick = useCallback(
     (member: ResolvedTeamMember) => {
@@ -381,7 +360,7 @@ export const GraphActivityHud = ({
     };
   }, [enabled, forwardWheelToGraph, visibleLanes]);
 
-  if (!enabled || !teamData || visibleLanes.length === 0) {
+  if (!enabled || !teamSnapshot || visibleLanes.length === 0) {
     return null;
   }
 
@@ -444,10 +423,6 @@ export const GraphActivityHud = ({
                         ) : null}
                         {lane.entries.map((entry, index) => {
                           const messageKey = toMessageKey(entry.message);
-                          const renderProps = resolveMessageRenderProps(
-                            entry.message,
-                            messageContext
-                          );
                           const timelineItem: TimelineItem = {
                             type: 'message',
                             message: entry.message,
@@ -468,26 +443,17 @@ export const GraphActivityHud = ({
                                 }
                               }}
                             >
-                              <ActivityItem
+                              <GraphActivityCard
                                 message={entry.message}
                                 teamName={teamName}
-                                compactHeader
-                                collapseMode="managed"
-                                isCollapsed
-                                canToggleCollapse={false}
-                                isUnread={isUnread}
-                                expandItemKey={messageKey}
-                                onExpand={handleExpandItem}
-                                memberRole={renderProps.memberRole}
-                                memberColor={renderProps.memberColor}
-                                recipientColor={renderProps.recipientColor}
-                                memberColorMap={messageContext.colorMap}
-                                localMemberNames={messageContext.localMemberNames}
-                                onMemberNameClick={handleMemberNameClick}
-                                onTaskIdClick={onOpenTaskDetail}
-                                zebraShade={index % 2 === 1}
+                                messageContext={messageContext}
                                 teamNames={teamNames}
                                 teamColorByName={teamColorByName}
+                                isUnread={isUnread}
+                                zebraShade={index % 2 === 1}
+                                onClick={() => handleMessageClick(timelineItem)}
+                                onOpenTaskDetail={onOpenTaskDetail}
+                                onOpenMemberProfile={onOpenMemberProfile}
                               />
                             </div>
                           );
@@ -521,7 +487,7 @@ export const GraphActivityHud = ({
           }
         }}
         teamName={teamName}
-        members={teamData.members}
+        members={members}
         onMemberClick={handleMemberClick}
         onTaskIdClick={onOpenTaskDetail}
         teamNames={teamNames}

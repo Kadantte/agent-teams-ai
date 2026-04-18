@@ -1,5 +1,5 @@
 /**
- * SessionContextHelpTooltip - Help tooltip explaining Visible Context vs Total Tokens.
+ * SessionContextHelpTooltip - Help tooltip explaining context metrics.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -116,64 +116,45 @@ export const SessionContextHelpTooltip = (): React.ReactElement => {
             <div style={arrowStyle} />
 
             <div className="space-y-3 text-xs">
-              {/* What is Visible Context */}
+              {/* Metric definitions */}
               <div>
                 <div className="mb-1 font-semibold" style={{ color: 'var(--color-text)' }}>
-                  What is Visible Context?
+                  Context Used
                 </div>
                 <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
-                  Tokens consumed by file reads, tool outputs, and configuration files (CLAUDE.md)
-                  that are injected into the conversation.
+                  Prompt input plus output tokens currently occupying the model&apos;s context
+                  window.
                 </p>
               </div>
 
-              {/* Difference with Total */}
               <div className="pt-2" style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
                 <div className="mb-1 font-semibold" style={{ color: 'var(--color-text)' }}>
-                  Total Context vs Visible Context
+                  Prompt Input
                 </div>
-                <div
-                  className="space-y-2"
-                  style={{ color: 'var(--color-text-secondary)', lineHeight: 1.5 }}
-                >
-                  <div className="flex">
-                    <span
-                      className="min-w-[74px] text-left"
-                      style={{ color: 'var(--color-text-muted)' }}
-                    >
-                      Total:
-                    </span>
-                    <span className="flex-1 leading-snug">
-                      Total tokens that are injected into the conversation
-                    </span>
-                  </div>
-                  <div className="flex">
-                    <span
-                      className="min-w-[74px] text-left"
-                      style={{ color: 'var(--color-text-muted)' }}
-                    >
-                      Visible:
-                    </span>
-                    <span className="flex-1 leading-snug">
-                      Subset of tokens that you can optimize &amp; debug
-                    </span>
-                  </div>
-                </div>
+                <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+                  Tokens sent to the model before generation. For Claude this includes `input_tokens
+                  + cache_creation_input_tokens + cache_read_input_tokens`.
+                </p>
               </div>
 
-              {/* Tips */}
               <div className="pt-2" style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
                 <div className="mb-1 font-semibold" style={{ color: 'var(--color-text)' }}>
-                  Optimization Tips
+                  Visible Context
                 </div>
-                <ul
-                  className="space-y-1 pl-3"
-                  style={{ color: 'var(--color-text-secondary)', lineHeight: 1.5 }}
-                >
-                  <li className="list-disc">Shorten large CLAUDE.md files</li>
-                  <li className="list-disc">Split large @-mentioned files</li>
-                  <li className="list-disc">Adjust MCP tool output verbosity</li>
-                </ul>
+                <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+                  The inspectable subset of prompt input: files, CLAUDE.md, tool outputs, user
+                  messages, and similar injections that you can optimize directly.
+                </p>
+              </div>
+
+              <div className="pt-2" style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
+                <div className="mb-1 font-semibold" style={{ color: 'var(--color-text)' }}>
+                  Availability
+                </div>
+                <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+                  If a provider runtime does not expose prompt-side usage yet, the panel shows
+                  metrics as unavailable instead of pretending they are zero.
+                </p>
               </div>
             </div>
           </div>,
