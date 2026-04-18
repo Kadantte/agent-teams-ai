@@ -115,9 +115,7 @@ export function useTeamGraphAdapter(teamName: string): GraphDataPort {
         const currentAssignment = slotAssignments[stableOwnerId];
         const defaultAssignment = defaultSeed.assignments[stableOwnerId];
         return (
-          currentAssignment &&
-          defaultAssignment &&
-          currentAssignment.ringIndex === defaultAssignment.ringIndex &&
+          currentAssignment?.ringIndex === defaultAssignment?.ringIndex &&
           currentAssignment.sectorIndex === defaultAssignment.sectorIndex
         );
       });

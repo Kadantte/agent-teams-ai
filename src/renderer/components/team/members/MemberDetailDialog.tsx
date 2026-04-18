@@ -9,8 +9,8 @@ import { selectMemberMessagesForTeamMember } from '@renderer/store/slices/teamSl
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { BarChart3, FileText, ListPlus, MessageSquare, UserMinus } from 'lucide-react';
 
-import { MemberDetailHeader } from './MemberDetailHeader';
 import { buildMemberActivityEntries } from './memberActivityEntries';
+import { MemberDetailHeader } from './MemberDetailHeader';
 import { MemberDetailStats } from './MemberDetailStats';
 import { type MemberActivityFilter, type MemberDetailTab } from './memberDetailTypes';
 import { MemberLogsTab } from './MemberLogsTab';

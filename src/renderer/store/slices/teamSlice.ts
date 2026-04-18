@@ -1656,7 +1656,7 @@ export function selectResolvedMembersForTeamName(
   const meta = state.memberActivityMetaByTeam[teamName];
   const metaMembers = meta?.members;
   const cached = resolvedMembersSelectorCache.get(teamName);
-  if (cached && cached.snapshotRef === snapshot.members && cached.metaMembersRef === metaMembers) {
+  if (cached?.snapshotRef === snapshot.members && cached.metaMembersRef === metaMembers) {
     return cached.result;
   }
 
@@ -1690,7 +1690,7 @@ export function selectResolvedMemberForTeamName(
   const metaEntry = state.memberActivityMetaByTeam[teamName]?.members[memberName];
   const cacheKey = `${teamName}:${memberName}`;
   const cached = resolvedMemberSelectorCache.get(cacheKey);
-  if (cached && cached.snapshotMemberRef === snapshotMember && cached.metaEntryRef === metaEntry) {
+  if (cached?.snapshotMemberRef === snapshotMember && cached.metaEntryRef === metaEntry) {
     return cached.result;
   }
 
@@ -1735,8 +1735,7 @@ export function selectTeamMessages(
   const entry = getTeamMessagesCacheEntry(state, teamName);
   const cached = mergedMessagesSelectorCache.get(teamName);
   if (
-    cached &&
-    cached.canonicalRef === entry.canonicalMessages &&
+    cached?.canonicalRef === entry.canonicalMessages &&
     cached.optimisticRef === entry.optimisticMessages
   ) {
     return cached.result;
@@ -1763,7 +1762,7 @@ export function selectMemberMessagesForTeamMember(
   const messages = selectTeamMessages(state, teamName);
   const cacheKey = `${teamName}:${memberName}`;
   const cached = memberMessagesSelectorCache.get(cacheKey);
-  if (cached && cached.messagesRef === messages) {
+  if (cached?.messagesRef === messages) {
     return cached.result;
   }
 
@@ -3530,8 +3529,10 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       return queuedRequest;
     }
 
-    let request!: Promise<RefreshTeamMessagesHeadResult>;
-    request = (async (): Promise<RefreshTeamMessagesHeadResult> => {
+    const requestRef: { current: Promise<RefreshTeamMessagesHeadResult> | null } = {
+      current: null,
+    };
+    requestRef.current = (async (): Promise<RefreshTeamMessagesHeadResult> => {
       const teamStateEpoch = captureTeamLocalStateEpoch(teamName);
       set((state) => ({
         teamMessagesByName: {
@@ -3621,7 +3622,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         }));
         throw error;
       } finally {
-        if (inFlightTeamMessagesHeadRequests.get(teamName) === request) {
+        if (inFlightTeamMessagesHeadRequests.get(teamName) === requestRef.current) {
           inFlightTeamMessagesHeadRequests.delete(teamName);
           if (pendingFreshTeamMessagesHeadRefreshes.delete(teamName)) {
             void get().refreshTeamMessagesHead(teamName);
@@ -3630,6 +3631,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       }
     })();
 
+    const request = requestRef.current;
     inFlightTeamMessagesHeadRequests.set(teamName, request);
     return request;
   },
@@ -3662,8 +3664,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       return;
     }
 
-    let request!: Promise<void>;
-    request = (async (): Promise<void> => {
+    const requestRef: { current: Promise<void> | null } = { current: null };
+    requestRef.current = (async (): Promise<void> => {
       const teamStateEpoch = captureTeamLocalStateEpoch(teamName);
       set((state) => ({
         teamMessagesByName: {
@@ -3747,12 +3749,13 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
           },
         }));
       } finally {
-        if (inFlightTeamMessagesOlderRequests.get(teamName) === request) {
+        if (inFlightTeamMessagesOlderRequests.get(teamName) === requestRef.current) {
           inFlightTeamMessagesOlderRequests.delete(teamName);
         }
       }
     })();
 
+    const request = requestRef.current;
     inFlightTeamMessagesOlderRequests.set(teamName, request);
     return request;
   },
@@ -3769,8 +3772,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       return existingRequest;
     }
 
-    let request!: Promise<void>;
-    request = (async (): Promise<void> => {
+    const requestRef: { current: Promise<void> | null } = { current: null };
+    requestRef.current = (async (): Promise<void> => {
       const teamStateEpoch = captureTeamLocalStateEpoch(teamName);
       try {
         const meta = await unwrapIpc('team:getMemberActivityMeta', () =>
@@ -3786,7 +3789,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
             return {};
           }
           const existing = state.memberActivityMetaByTeam[teamName];
-          if (existing && existing.feedRevision === meta.feedRevision) {
+          if (existing?.feedRevision === meta.feedRevision) {
             return {};
           }
           const sharedMembers = structurallyShareMemberActivityFacts(
@@ -3794,8 +3797,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
             meta.members
           );
           const nextMeta =
-            existing &&
-            existing.members === sharedMembers &&
+            existing?.members === sharedMembers &&
             existing.feedRevision === meta.feedRevision &&
             existing.computedAt === meta.computedAt
               ? existing
@@ -3816,7 +3818,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
         }
         throw error;
       } finally {
-        if (inFlightTeamMemberActivityMetaRequests.get(teamName) === request) {
+        if (inFlightTeamMemberActivityMetaRequests.get(teamName) === requestRef.current) {
           inFlightTeamMemberActivityMetaRequests.delete(teamName);
           if (pendingFreshTeamMemberActivityMetaRefreshes.delete(teamName)) {
             void get().refreshMemberActivityMeta(teamName);
@@ -3825,6 +3827,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       }
     })();
 
+    const request = requestRef.current;
     inFlightTeamMemberActivityMetaRequests.set(teamName, request);
     return request;
   },

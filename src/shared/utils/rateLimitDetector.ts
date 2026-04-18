@@ -104,10 +104,10 @@ function parseRelativeResetDuration(text: string): number | null {
   const match = LEADING_TIME_VALUE_RE.exec(tail);
   if (!match) return null;
 
-  const amount = Number.parseFloat(match[1]!);
+  const amount = Number.parseFloat(match[1]);
   if (!Number.isFinite(amount) || amount < 0) return null;
 
-  const unit = match[2]!.toLowerCase();
+  const unit = match[2].toLowerCase();
   if (['second', 'seconds', 'sec', 'secs', 's'].includes(unit)) {
     return Math.round(amount * 1000);
   }
@@ -157,7 +157,7 @@ function parseAbsoluteResetClockTime(text: string, now: Date): Date | null {
   const afterMatch = tail.slice(tzTokenLength);
   if (DAY_SHIFT_QUALIFIER_RE.test(afterMatch)) return null;
 
-  const hourRaw = Number.parseInt(match[1]!, 10);
+  const hourRaw = Number.parseInt(match[1], 10);
   const minuteRaw = match[2] ? Number.parseInt(match[2], 10) : 0;
   const ampm = match[3]?.toLowerCase() ?? null;
   const parenthesizedTz = parenthesizedTzMatch?.[1]?.toUpperCase() ?? '';

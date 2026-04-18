@@ -1,3 +1,4 @@
+import { atomicWriteAsync } from '@main/utils/atomicWrite';
 import { extractCwd } from '@main/utils/jsonl';
 import {
   encodePath,
@@ -5,7 +6,6 @@ import {
   getProjectsBasePath,
   getTeamsBasePath,
 } from '@main/utils/pathDecoder';
-import { atomicWriteAsync } from '@main/utils/atomicWrite';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { createLogger } from '@shared/utils/logger';
 import { createReadStream, type Dirent } from 'fs';
@@ -219,7 +219,8 @@ export class TeamTranscriptProjectResolver {
             ...config,
             projectPath: resolution.effectiveProjectPath,
             projectPathHistory: this.buildRepairedProjectPathHistory(
-              config,
+              config.projectPath,
+              config.projectPathHistory,
               resolution.effectiveProjectPath
             ),
           }
@@ -598,25 +599,11 @@ export class TeamTranscriptProjectResolver {
 
       parsed.projectPath = normalizedNextPath;
 
-      const history: string[] = [];
-      const seen = new Set<string>();
-      const pushHistory = (value: unknown): void => {
-        const normalized = normalizeProjectPathCandidate(value);
-        if (!normalized || normalized === normalizedNextPath || seen.has(normalized)) {
-          return;
-        }
-        seen.add(normalized);
-        history.push(normalized);
-      };
-
-      if (Array.isArray(parsed.projectPathHistory)) {
-        for (const value of parsed.projectPathHistory) {
-          pushHistory(value);
-        }
-      }
-      pushHistory(rawProjectPath);
-
-      parsed.projectPathHistory = history.slice(-500);
+      parsed.projectPathHistory = this.buildRepairedProjectPathHistory(
+        rawProjectPath,
+        parsed.projectPathHistory,
+        normalizedNextPath
+      );
       await atomicWriteAsync(configPath, JSON.stringify(parsed, null, 2));
       logger.info(
         `[${teamName}] Repaired transcript projectPath via exact session match: ${normalizedNextPath}`
@@ -663,7 +650,11 @@ export class TeamTranscriptProjectResolver {
     return orderedSessionIds;
   }
 
-  private buildRepairedProjectPathHistory(config: TeamConfig, nextProjectPath: string): string[] {
+  private buildRepairedProjectPathHistory(
+    currentProjectPath: unknown,
+    rawProjectPathHistory: unknown,
+    nextProjectPath: string
+  ): string[] {
     const normalizedNextPath = normalizeProjectPathCandidate(nextProjectPath);
     const history: string[] = [];
     const seen = new Set<string>();
@@ -676,12 +667,12 @@ export class TeamTranscriptProjectResolver {
       history.push(normalized);
     };
 
-    if (Array.isArray(config.projectPathHistory)) {
-      for (const value of config.projectPathHistory) {
+    if (Array.isArray(rawProjectPathHistory)) {
+      for (const value of rawProjectPathHistory) {
         pushHistory(value);
       }
     }
-    pushHistory(config.projectPath);
+    pushHistory(currentProjectPath);
 
     return history.slice(-500);
   }

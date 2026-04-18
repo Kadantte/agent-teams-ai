@@ -308,6 +308,17 @@ describe('MessagesPanel idle summary invariants', () => {
     ];
 
     await act(async () => {
+      storeState.teamMessagesByName['atlas-hq'] = {
+        canonicalMessages: messages,
+        optimisticMessages: [],
+        feedRevision: 'rev-1',
+        nextCursor: null,
+        hasMore: false,
+        lastFetchedAt: Date.now(),
+        loadingHead: false,
+        loadingOlder: false,
+        headHydrated: true,
+      };
       root.render(
         React.createElement(MessagesPanel, {
           teamName: 'atlas-hq',

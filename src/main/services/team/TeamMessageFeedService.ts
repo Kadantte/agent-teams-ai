@@ -390,7 +390,7 @@ export class TeamMessageFeedService {
 
     const feedRevision = toFeedRevision(messages);
     const nextEntry =
-      cached && cached.feedRevision === feedRevision
+      cached?.feedRevision === feedRevision
         ? cached
         : {
             feedRevision,

@@ -5,6 +5,7 @@
  * into ui/, hooks/, or core/ directly.
  */
 
+export type { InlineActivityEntry } from '../core/domain/buildInlineActivityEntries';
 export { buildInlineActivityEntries } from '../core/domain/buildInlineActivityEntries';
 export { buildGraphMemberNodeIdForMember } from '../core/domain/graphOwnerIdentity';
 export { TeamGraphAdapter } from './adapters/TeamGraphAdapter';

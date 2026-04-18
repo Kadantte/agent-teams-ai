@@ -267,7 +267,7 @@ export function initializeNotificationListeners(): () => void {
       const headResult = await current.refreshTeamMessagesHead(teamName);
       const latest = useStore.getState();
       const meta = latest.memberActivityMetaByTeam[teamName];
-      if (headResult.feedChanged || !meta || meta.feedRevision !== headResult.feedRevision) {
+      if (headResult.feedChanged || meta?.feedRevision !== headResult.feedRevision) {
         await latest.refreshMemberActivityMeta(teamName);
       }
     } catch {

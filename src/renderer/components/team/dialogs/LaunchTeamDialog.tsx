@@ -72,8 +72,8 @@ import { AdvancedCliSection } from './AdvancedCliSection';
 import { EffortLevelSelector } from './EffortLevelSelector';
 import { resolveLaunchDialogPrefill } from './launchDialogPrefill';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
-import { buildProviderPrepareModelCacheKey } from './providerPrepareCacheKey';
 import { ProjectPathSelector } from './ProjectPathSelector';
+import { buildProviderPrepareModelCacheKey } from './providerPrepareCacheKey';
 import {
   buildReusableProviderPrepareModelResults,
   getProviderPrepareCachedSnapshot,

@@ -148,11 +148,7 @@ export function buildDisplayItems(
   // Build display items
   for (const step of steps) {
     // Skip the last output step
-    if (
-      lastOutputStepRef &&
-      step.id === lastOutputStepRef.id &&
-      step.type === lastOutputStepRef.type
-    ) {
+    if (step.id === lastOutputStepRef?.id && step.type === lastOutputStepRef.type) {
       continue;
     }
 

@@ -839,7 +839,7 @@ async function handleGetData(
   const projectPath = data.config.projectPath;
   const live = provisioning.getLiveLeadProcessMessages(tn);
   const durableMessages = Array.isArray((data as { messages?: unknown }).messages)
-    ? (((data as { messages?: typeof live }).messages ?? []) as typeof live)
+    ? ((data as { messages?: typeof live }).messages ?? [])
     : [];
 
   if (live.length === 0) {

@@ -15,7 +15,7 @@ export interface TeamGraphDefaultLayoutSeed {
   assignments: Record<string, GraphOwnerSlotAssignment>;
 }
 
-const SMALL_TEAM_CARDINAL_SLOT_PRESETS: ReadonlyArray<ReadonlyArray<GraphOwnerSlotAssignment>> = [
+const SMALL_TEAM_CARDINAL_SLOT_PRESETS: readonly (readonly GraphOwnerSlotAssignment[])[] = [
   [],
   [{ ringIndex: 0, sectorIndex: 0 }],
   [
@@ -83,7 +83,7 @@ export function buildTeamGraphDefaultLayoutSeed(
   const preset = SMALL_TEAM_CARDINAL_SLOT_PRESETS[orderedVisibleOwnerIds.length];
   const assignments: Record<string, GraphOwnerSlotAssignment> = {};
 
-  if (preset && preset.length === orderedVisibleOwnerIds.length) {
+  if (preset?.length === orderedVisibleOwnerIds.length) {
     orderedVisibleOwnerIds.forEach((stableOwnerId, index) => {
       assignments[stableOwnerId] = preset[index]!;
     });

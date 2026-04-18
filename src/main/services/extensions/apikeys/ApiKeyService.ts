@@ -88,7 +88,7 @@ export class ApiKeyService {
       );
     }
     if (!request.value) throw new Error('Key value is required');
-    if (request.scope === 'project' && (!request.projectPath || !request.projectPath.trim())) {
+    if (request.scope === 'project' && !request.projectPath?.trim()) {
       throw new Error('Project-scoped API keys require a project path');
     }
 

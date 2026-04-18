@@ -88,6 +88,7 @@ import {
 } from './services/extensions';
 import { startEventLoopLagMonitor } from './services/infrastructure/EventLoopLagMonitor';
 import { HttpServer } from './services/infrastructure/HttpServer';
+import { clearAutoResumeService } from './services/team/AutoResumeService';
 import {
   buildTeamControlApiBaseUrl,
   clearTeamControlApiState,
@@ -100,7 +101,6 @@ import {
   type TeamReconcileTrigger,
 } from './services/team/TeamReconcileDrainScheduler';
 import { TeamSentMessagesStore } from './services/team/TeamSentMessagesStore';
-import { clearAutoResumeService } from './services/team/AutoResumeService';
 import { getAppIconPath } from './utils/appIcon';
 import { getProjectsBasePath, getTeamsBasePath, getTodosBasePath } from './utils/pathDecoder';
 import {
