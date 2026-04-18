@@ -116,4 +116,16 @@ describe('teamModelAvailability', () => {
     expect(normalizeTeamModelForUi('anthropic', 'opus')).toBe('opus');
     expect(getTeamModelSelectionError('anthropic', 'opus')).toBeNull();
   });
+
+  it('keeps known Anthropic full model ids selectable without runtime verification', () => {
+    expect(normalizeTeamModelForUi('anthropic', 'claude-opus-4-7')).toBe('claude-opus-4-7');
+    expect(normalizeTeamModelForUi('anthropic', 'claude-opus-4-7[1m]')).toBe(
+      'claude-opus-4-7[1m]'
+    );
+    expect(normalizeTeamModelForUi('anthropic', 'claude-haiku-4-5-20251001')).toBe(
+      'claude-haiku-4-5-20251001'
+    );
+    expect(getTeamModelSelectionError('anthropic', 'claude-opus-4-7')).toBeNull();
+    expect(getTeamModelSelectionError('anthropic', 'claude-haiku-4-5-20251001')).toBeNull();
+  });
 });

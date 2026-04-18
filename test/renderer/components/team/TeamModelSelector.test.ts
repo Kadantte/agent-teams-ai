@@ -22,6 +22,15 @@ describe('formatTeamModelSummary', () => {
     );
   });
 
+  it('formats current Anthropic Opus model ids with the latest 4.7 label', () => {
+    expect(formatTeamModelSummary('anthropic', 'claude-opus-4-7', 'high')).toBe(
+      'Anthropic · Opus 4.7 · High'
+    );
+    expect(formatTeamModelSummary('codex', 'claude-opus-4-7', 'medium')).toBe(
+      'Opus 4.7 · via Codex · Medium'
+    );
+  });
+
   it('keeps native Codex-family models branded normally', () => {
     expect(formatTeamModelSummary('codex', 'gpt-5.4', 'medium')).toBe('5.4 · Medium');
   });
@@ -106,6 +115,7 @@ describe('formatTeamModelSummary', () => {
     expect(getTeamModelSelectionError('codex', 'gpt-5.4')).toContain('waiting for Codex runtime verification');
     expect(getTeamModelSelectionError('codex', '')).toBeNull();
     expect(getTeamModelSelectionError('anthropic', 'opus')).toBeNull();
+    expect(getTeamModelSelectionError('anthropic', 'claude-opus-4-7')).toBeNull();
   });
 });
 
@@ -130,10 +140,16 @@ describe('computeEffectiveTeamModel', () => {
     expect(computeEffectiveTeamModel('opus[1m]', true, 'anthropic')).toBe('opus');
     expect(computeEffectiveTeamModel('opus[1m][1m]', true, 'anthropic')).toBe('opus');
     expect(computeEffectiveTeamModel('', true, 'anthropic')).toBe('opus');
+    expect(computeEffectiveTeamModel('claude-opus-4-7[1m]', true, 'anthropic')).toBe(
+      'claude-opus-4-7'
+    );
   });
 
   it('returns haiku as-is', () => {
     expect(computeEffectiveTeamModel('haiku', false, 'anthropic')).toBe('haiku');
+    expect(computeEffectiveTeamModel('claude-haiku-4-5-20251001', false, 'anthropic')).toBe(
+      'claude-haiku-4-5-20251001'
+    );
   });
 
   it('returns non-anthropic models as-is', () => {

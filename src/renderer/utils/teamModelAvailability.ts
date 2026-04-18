@@ -1,5 +1,6 @@
 import {
   getProviderScopedTeamModelLabel,
+  isSupportedAnthropicTeamModel,
   getRuntimeAwareTeamModelUiDisabledReason,
   getTeamProviderLabel,
   getTeamProviderModelOptions,
@@ -230,7 +231,7 @@ export function isTeamModelAvailableForUi(
   }
 
   if (providerId === 'anthropic') {
-    return getFallbackTeamProviderModels(providerId).includes(trimmed);
+    return isSupportedAnthropicTeamModel(trimmed);
   }
 
   return getRuntimeModelAvailability(providerId, trimmed, providerStatus) === 'available';

@@ -38,10 +38,10 @@ function createSpawnEntry(overrides: Partial<MemberSpawnStatusEntry> = {}): Memb
 describe('resolveMemberRuntimeSummary', () => {
   it('shows the live runtime model for loading members when available', () => {
     const member = createMember();
-    const spawnEntry = createSpawnEntry({ runtimeModel: 'claude-opus-4-6', runtimeAlive: true });
+    const spawnEntry = createSpawnEntry({ runtimeModel: 'claude-opus-4-7', runtimeAlive: true });
 
     expect(resolveMemberRuntimeSummary(member, undefined, spawnEntry)).toBe(
-      'Anthropic · Opus 4.6 · Medium'
+      'Anthropic · Opus 4.7 · Medium'
     );
   });
 

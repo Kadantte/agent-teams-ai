@@ -27,6 +27,7 @@ import {
   getProviderScopedTeamModelLabel,
   getTeamModelLabel as getCatalogTeamModelLabel,
   getTeamProviderLabel as getCatalogTeamProviderLabel,
+  isAnthropicHaikuTeamModel,
 } from '@renderer/utils/teamModelCatalog';
 import { extractProviderScopedBaseModel } from '@renderer/utils/teamModelContext';
 import { getAnthropicDefaultTeamModel } from '@shared/utils/anthropicModelDefaults';
@@ -109,7 +110,7 @@ export function computeEffectiveTeamModel(
 
   const base = extractProviderScopedBaseModel(selectedModel, providerId);
   if (limitContext) return base || getAnthropicDefaultTeamModel(true);
-  if (base === 'haiku') return base;
+  if (isAnthropicHaikuTeamModel(base)) return base;
   return base ? `${base}[1m]` : getAnthropicDefaultTeamModel(limitContext);
 }
 
@@ -141,7 +142,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
     disableGeminiOption && isGeminiUiFrozen() && providerId === 'gemini' ? 'anthropic' : providerId;
   const defaultModelTooltip = useMemo(() => {
     if (effectiveProviderId === 'anthropic') {
-      return 'Uses the Claude team default model.\nResolves to Opus 1M, or Opus 200K when Limit context is enabled.';
+      return 'Uses the Claude team default model.\nResolves to Opus 4.7 with 1M context, or Opus 4.7 with 200K context when Limit context is enabled.';
     }
     return 'Uses the runtime default for the selected provider.';
   }, [effectiveProviderId]);
