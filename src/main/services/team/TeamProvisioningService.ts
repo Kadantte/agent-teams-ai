@@ -98,6 +98,7 @@ import {
 } from './idleNotificationMainProcessSemantics';
 import { withInboxLock } from './inboxLock';
 import { getEffectiveInboxMessageId } from './inboxMessageIdentity';
+import { buildProgressAssistantOutput, buildProgressLogsTail } from './progressPayload';
 import { resolveDesktopTeammateModeDecision } from './runtimeTeammateMode';
 import {
   choosePreferredLaunchSnapshot,
@@ -206,7 +207,13 @@ const VERIFY_TIMEOUT_MS = 15_000;
 const VERIFY_POLL_MS = 500;
 const STDERR_RING_LIMIT = 64 * 1024;
 const STDOUT_RING_LIMIT = 64 * 1024;
-const LOG_PROGRESS_THROTTLE_MS = 300;
+// Progress emissions fan out the latest CLI tail + assistant output to the
+// renderer over IPC. Under load the previous 300ms cadence combined with an
+// unbounded payload (see `emitLogsProgress`) caused renderer OOM crashes
+// (≈3 full-history serializations per second, each holding thousands of
+// lines). The tail cap in `emitLogsProgress` bounds each payload; we also
+// slow the cadence to ~1s so Zustand can keep up on large teams.
+const LOG_PROGRESS_THROTTLE_MS = 1000;
 const UI_LOGS_TAIL_LIMIT = 128 * 1024;
 const PROBE_CACHE_TTL_MS = 36 * 60 * 60 * 1000;
 const PREFLIGHT_BINARY_TIMEOUT_MS = 8000;
@@ -2223,10 +2230,12 @@ function updateProgress(
     'pid' | 'error' | 'warnings' | 'cliLogsTail' | 'configReady' | 'messageSeverity'
   >
 ): TeamProvisioningProgress {
+  // Cap assistant output on every progress tick. `updateProgress` is invoked
+  // from ~20 event-driven sites (auth retries, stall warnings, spawn events),
+  // and an unbounded `provisioningOutputParts.join` was part of the same OOM
+  // class that `emitLogsProgress` already guards against.
   const assistantOutput =
-    run.provisioningOutputParts.length > 0
-      ? run.provisioningOutputParts.join('\n\n')
-      : run.progress.assistantOutput;
+    buildProgressAssistantOutput(run.provisioningOutputParts) ?? run.progress.assistantOutput;
   run.progress = {
     ...run.progress,
     state,
@@ -2357,10 +2366,22 @@ function extractCliLogsFromRun(run: ProvisioningRun): string | undefined {
   return extractLogsTail(run.stdoutBuffer, run.stderrBuffer);
 }
 
+/**
+ * Emit a throttled progress update for the renderer. Payloads are capped to a
+ * tail window so that the hot emission path (called every LOG_PROGRESS_THROTTLE_MS
+ * under streaming output) cannot accumulate into multi-megabyte IPC messages
+ * that would OOM the renderer's Zustand state. The full history stays in
+ * `run.claudeLogLines` / `run.provisioningOutputParts` for diagnostics and
+ * one-shot completion emissions that intentionally use `extractCliLogsFromRun`.
+ */
 function emitLogsProgress(run: ProvisioningRun): void {
-  const logsTail = extractCliLogsFromRun(run);
-  const assistantOutput =
-    run.provisioningOutputParts.length > 0 ? run.provisioningOutputParts.join('\n\n') : undefined;
+  // Prefer the line-buffered history (already chronological with [stdout]/[stderr]
+  // markers) and fall back to the legacy ring-buffer tail only when no lines
+  // have been captured yet (early in provisioning).
+  const logsTail =
+    buildProgressLogsTail(run.claudeLogLines) ??
+    extractLogsTail(run.stdoutBuffer, run.stderrBuffer);
+  const assistantOutput = buildProgressAssistantOutput(run.provisioningOutputParts);
 
   if (!logsTail && !assistantOutput) {
     return;
@@ -5113,7 +5134,9 @@ export class TeamProvisioningService {
             message: this.buildStallProgressMessage(silenceSec, elapsed),
             messageSeverity: 'warning' as const,
           }),
-          assistantOutput: run.provisioningOutputParts.join('\n\n'),
+          assistantOutput:
+            buildProgressAssistantOutput(run.provisioningOutputParts) ??
+            run.progress.assistantOutput,
         };
         run.onProgress(run.progress);
       } catch (err) {
@@ -9649,7 +9672,9 @@ export class TeamProvisioningService {
             updatedAt: nowIso(),
             message: retryText,
             messageSeverity: 'error' as const,
-            assistantOutput: run.provisioningOutputParts.join('\n\n'),
+            assistantOutput:
+              buildProgressAssistantOutput(run.provisioningOutputParts) ??
+              run.progress.assistantOutput,
           };
           run.onProgress(run.progress);
         }
