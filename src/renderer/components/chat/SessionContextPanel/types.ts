@@ -5,6 +5,7 @@
 import type { ClaudeMdSource } from '@renderer/types/claudeMd';
 import type { ContextInjection, ContextPhaseInfo } from '@renderer/types/contextInjection';
 import type { SessionMetrics } from '@shared/types';
+import type { DerivedContextMetrics } from '@shared/utils/contextMetrics';
 
 // =============================================================================
 // Props Interface
@@ -23,8 +24,8 @@ export interface SessionContextPanelProps {
   onNavigateToTool?: (turnIndex: number, toolUseId: string) => void;
   /** Navigate to the user message group preceding the AI group at turnIndex */
   onNavigateToUserGroup?: (turnIndex: number) => void;
-  /** Total session tokens (input + output + cache) for comparison */
-  totalSessionTokens?: number;
+  /** Unified context metrics for the selected AI group */
+  contextMetrics?: DerivedContextMetrics;
   /** Full session metrics (input, output, cache tokens, cost) */
   sessionMetrics?: SessionMetrics;
   /** Combined cost of all subagent processes */

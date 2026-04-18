@@ -12,7 +12,6 @@ import {
   COLOR_TEXT_MUTED,
   COLOR_TEXT_SECONDARY,
 } from '@renderer/constants/cssVariables';
-import { formatPercentOfTotal } from '@renderer/utils/contextMath';
 import { formatCostUsd } from '@shared/utils/costFormatting';
 import { ArrowDownWideNarrow, FileText, LayoutList, X } from 'lucide-react';
 
@@ -23,11 +22,12 @@ import { SessionContextHelpTooltip } from './SessionContextHelpTooltip';
 import type { ContextViewMode } from '../types';
 import type { ContextPhaseInfo } from '@renderer/types/contextInjection';
 import type { SessionMetrics } from '@shared/types';
+import type { DerivedContextMetrics } from '@shared/utils/contextMetrics';
 
 interface SessionContextHeaderProps {
   injectionCount: number;
   totalTokens: number;
-  totalSessionTokens?: number;
+  contextMetrics?: DerivedContextMetrics;
   sessionMetrics?: SessionMetrics;
   subagentCostUsd?: number;
   onClose?: () => void;
@@ -42,7 +42,7 @@ interface SessionContextHeaderProps {
 export const SessionContextHeader = ({
   injectionCount,
   totalTokens,
-  totalSessionTokens,
+  contextMetrics,
   sessionMetrics,
   subagentCostUsd,
   onClose,
@@ -53,6 +53,45 @@ export const SessionContextHeader = ({
   viewMode,
   onViewModeChange,
 }: Readonly<SessionContextHeaderProps>): React.ReactElement => {
+  const formatPercentLabel = (percent: number | null, suffix: string): string | null => {
+    if (percent === null) {
+      return null;
+    }
+    return `${percent.toFixed(1)}% ${suffix}`;
+  };
+
+  const renderMetricValue = (
+    label: string,
+    tokens: number | null,
+    percentLabel: string | null,
+    options?: {
+      approximate?: boolean;
+      unavailableLabel?: string;
+    }
+  ): React.ReactElement => (
+    <div
+      className="flex items-center justify-between gap-3 rounded px-2 py-1.5"
+      style={{ backgroundColor: COLOR_SURFACE_OVERLAY }}
+    >
+      <span style={{ color: COLOR_TEXT_MUTED }}>{label}</span>
+      <div className="text-right">
+        <div className="font-medium tabular-nums" style={{ color: COLOR_TEXT_SECONDARY }}>
+          {tokens === null
+            ? (options?.unavailableLabel ?? 'Unavailable')
+            : `${options?.approximate ? '~' : ''}${formatTokens(tokens)}`}
+        </div>
+        {percentLabel && (
+          <div className="text-[10px] tabular-nums" style={{ color: COLOR_TEXT_MUTED }}>
+            {percentLabel}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const codexTelemetryUnavailable =
+    contextMetrics?.providerId === 'codex' && contextMetrics.promptInputSource === 'unavailable';
+
   return (
     <div className="shrink-0 px-4 py-3" style={{ borderBottom: `1px solid ${COLOR_BORDER}` }}>
       {/* Title row */}
@@ -60,7 +99,7 @@ export const SessionContextHeader = ({
         <div className="flex items-center gap-2">
           <FileText size={16} style={{ color: COLOR_TEXT_SECONDARY }} />
           <h2 className="text-sm font-semibold" style={{ color: COLOR_TEXT }}>
-            Visible Context
+            Context
           </h2>
           <span
             className="rounded px-1.5 py-0.5 text-xs"
@@ -87,42 +126,50 @@ export const SessionContextHeader = ({
         </div>
       </div>
 
-      {/* Token comparison stats */}
+      {/* Primary metrics */}
       <div
-        className="mt-2 flex items-center justify-between pt-2 text-xs"
+        className="mt-2 space-y-1.5 pt-2 text-xs"
         style={{ borderTop: `1px solid ${COLOR_BORDER_SUBTLE}` }}
       >
-        <div className="flex items-center gap-4">
-          {/* Visible Context tokens */}
-          <div>
-            <span style={{ color: COLOR_TEXT_MUTED }}>Visible: </span>
-            <span className="font-medium tabular-nums" style={{ color: COLOR_TEXT_SECONDARY }}>
-              ~{formatTokens(totalTokens)}
-            </span>
-          </div>
-          {/* Total Input tokens (if provided) */}
-          {totalSessionTokens !== undefined && totalSessionTokens > 0 && (
-            <div>
-              <span style={{ color: COLOR_TEXT_MUTED }}>Input: </span>
-              <span className="font-medium tabular-nums" style={{ color: COLOR_TEXT_SECONDARY }}>
-                {formatTokens(totalSessionTokens)}
-              </span>
-            </div>
-          )}
-        </div>
-        {/* Percentage of total */}
-        {formatPercentOfTotal(totalTokens, totalSessionTokens) && (
-          <span
-            className="rounded px-1.5 py-0.5 tabular-nums"
-            style={{
-              backgroundColor: COLOR_SURFACE_OVERLAY,
-              color: COLOR_TEXT_MUTED,
-            }}
-          >
-            {formatPercentOfTotal(totalTokens, totalSessionTokens)}
-          </span>
+        {renderMetricValue(
+          'Context Used',
+          contextMetrics?.contextUsedTokens ?? null,
+          formatPercentLabel(
+            contextMetrics?.contextUsedPercentOfContextWindow ?? null,
+            'of context'
+          )
+        )}
+        {renderMetricValue(
+          'Prompt Input',
+          contextMetrics?.promptInputTokens ?? null,
+          formatPercentLabel(
+            contextMetrics?.promptInputPercentOfContextWindow ?? null,
+            'of context'
+          )
+        )}
+        {renderMetricValue(
+          'Visible Context',
+          totalTokens,
+          formatPercentLabel(
+            contextMetrics?.visibleContextPercentOfPromptInput ?? null,
+            'of prompt'
+          ),
+          { approximate: true }
         )}
       </div>
+
+      {codexTelemetryUnavailable && (
+        <div
+          className="mt-2 rounded px-2 py-1.5 text-[10px]"
+          style={{
+            border: `1px solid ${COLOR_BORDER_SUBTLE}`,
+            color: COLOR_TEXT_MUTED,
+          }}
+        >
+          Codex prompt-side usage is not exposed by the current runtime telemetry yet, so Prompt
+          Input and Context Used stay unavailable instead of showing a fake zero.
+        </div>
+      )}
 
       {/* Session Metrics Breakdown */}
       {sessionMetrics && (

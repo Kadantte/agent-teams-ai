@@ -25,7 +25,7 @@ import {
   isTeamProvisioningActive,
 } from '@renderer/store/slices/teamSlice';
 import { createChipFromSelection } from '@renderer/utils/chipUtils';
-import { formatPercentOfTotal, sumContextInjectionTokens } from '@renderer/utils/contextMath';
+import { sumContextInjectionTokens } from '@renderer/utils/contextMath';
 import { formatProjectPath } from '@renderer/utils/pathDisplay';
 import { buildTaskCountsByOwner, normalizePath } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
@@ -35,6 +35,7 @@ import {
   type TaskChangeRequestOptions,
 } from '@renderer/utils/taskChangeRequest';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
+import { deriveContextMetrics } from '@shared/utils/contextMetrics';
 import { isLeadAgentType, isLeadMember } from '@shared/utils/leadDetection';
 import { createLogger } from '@shared/utils/logger';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
@@ -114,6 +115,7 @@ import type {
   TeamTaskWithKanban,
 } from '@shared/types';
 import type { EditorSelectionAction } from '@shared/types/editor';
+import type { ContextUsageLike } from '@shared/utils/contextMetrics';
 
 interface TeamDetailViewProps {
   teamName: string;
@@ -445,6 +447,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
 }: LeadContextBridgeProps): React.JSX.Element | null {
   const {
     leadTabData,
+    leadContextSnapshot,
     isContextPanelVisible,
     selectedContextPhase,
     setContextPanelVisibleForTab,
@@ -453,6 +456,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
   } = useStore(
     useShallow((s) => ({
       leadTabData: tabId ? (s.tabSessionData[tabId] ?? null) : null,
+      leadContextSnapshot: s.leadContextByTeam[teamName] ?? null,
       isContextPanelVisible: tabId ? (s.tabUIStates.get(tabId)?.showContextPanel ?? false) : false,
       selectedContextPhase: tabId ? (s.tabUIStates.get(tabId)?.selectedContextPhase ?? null) : null,
       setContextPanelVisibleForTab: s.setContextPanelVisibleForTab,
@@ -491,9 +495,13 @@ const LeadContextBridge = memo(function LeadContextBridge({
     const total = processes.reduce((sum, p) => sum + (p.metrics.costUsd ?? 0), 0);
     return total > 0 ? total : undefined;
   }, [leadSessionDetail?.processes]);
-  const { allContextInjections, lastAiGroupTotalTokens } = useMemo(() => {
+  const { allContextInjections, lastAssistantUsage, lastAssistantModelName } = useMemo(() => {
     if (!leadSessionLoaded || !leadSessionContextStats || !leadConversation?.items.length) {
-      return { allContextInjections: [] as ContextInjection[], lastAiGroupTotalTokens: undefined };
+      return {
+        allContextInjections: [] as ContextInjection[],
+        lastAssistantUsage: null as ContextUsageLike | null,
+        lastAssistantModelName: undefined as string | undefined,
+      };
     }
 
     const effectivePhase = selectedContextPhase;
@@ -511,7 +519,8 @@ const LeadContextBridge = memo(function LeadContextBridge({
       if (lastAiItem?.type !== 'ai') {
         return {
           allContextInjections: [] as ContextInjection[],
-          lastAiGroupTotalTokens: undefined,
+          lastAssistantUsage: null,
+          lastAssistantModelName: undefined,
         };
       }
       targetAiGroupId = lastAiItem.group.id;
@@ -520,7 +529,8 @@ const LeadContextBridge = memo(function LeadContextBridge({
     const stats = leadSessionContextStats.get(targetAiGroupId);
     const injections = stats?.accumulatedInjections ?? [];
 
-    let totalTokens: number | undefined;
+    let lastUsage: ContextUsageLike | null = null;
+    let lastModelName: string | undefined;
     const targetItem = leadConversation.items.find(
       (item) => item.type === 'ai' && item.group.id === targetAiGroupId
     );
@@ -529,18 +539,18 @@ const LeadContextBridge = memo(function LeadContextBridge({
       for (let i = responses.length - 1; i >= 0; i--) {
         const msg = responses[i];
         if (msg.type === 'assistant' && msg.usage) {
-          const usage = msg.usage;
-          totalTokens =
-            (usage.input_tokens ?? 0) +
-            (usage.output_tokens ?? 0) +
-            (usage.cache_read_input_tokens ?? 0) +
-            (usage.cache_creation_input_tokens ?? 0);
+          lastUsage = msg.usage;
+          lastModelName = msg.model;
           break;
         }
       }
     }
 
-    return { allContextInjections: injections, lastAiGroupTotalTokens: totalTokens };
+    return {
+      allContextInjections: injections,
+      lastAssistantUsage: lastUsage,
+      lastAssistantModelName: lastModelName,
+    };
   }, [
     leadConversation,
     leadSessionContextStats,
@@ -552,10 +562,26 @@ const LeadContextBridge = memo(function LeadContextBridge({
     () => sumContextInjectionTokens(allContextInjections),
     [allContextInjections]
   );
-  const visibleContextPercentLabel = useMemo(
-    () => formatPercentOfTotal(visibleContextTokens, lastAiGroupTotalTokens),
-    [visibleContextTokens, lastAiGroupTotalTokens]
+  const contextMetrics = useMemo(
+    () =>
+      deriveContextMetrics({
+        usage: lastAssistantUsage,
+        modelName: lastAssistantModelName,
+        contextWindowTokens: leadContextSnapshot?.contextWindowTokens ?? null,
+        visibleContextTokens,
+      }),
+    [
+      lastAssistantModelName,
+      lastAssistantUsage,
+      leadContextSnapshot?.contextWindowTokens,
+      visibleContextTokens,
+    ]
   );
+  const contextUsedPercentLabel = useMemo(() => {
+    const percent =
+      contextMetrics.contextUsedPercentOfContextWindow ?? leadContextSnapshot?.contextUsedPercent;
+    return percent === null || percent === undefined ? null : `${percent.toFixed(1)}%`;
+  }, [contextMetrics.contextUsedPercentOfContextWindow, leadContextSnapshot?.contextUsedPercent]);
 
   if (!leadSessionId) {
     return null;
@@ -570,7 +596,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
               injections={allContextInjections}
               onClose={() => setContextPanelVisible(false)}
               projectRoot={leadSessionDetail?.session?.projectPath ?? fallbackProjectRoot}
-              totalSessionTokens={lastAiGroupTotalTokens}
+              contextMetrics={contextMetrics}
               sessionMetrics={leadSessionDetail?.metrics}
               subagentCostUsd={leadSubagentCostUsd}
               phaseInfo={leadSessionPhaseInfo ?? undefined}
@@ -585,7 +611,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
             >
               <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--color-text)]">Visible Context</p>
+                  <p className="text-sm font-medium text-[var(--color-text)]">Context</p>
                   <p className="text-[10px] text-[var(--color-text-muted)]">
                     {leadSessionLoading ? 'Loading…' : 'No session loaded'}
                   </p>
@@ -644,7 +670,7 @@ const LeadContextBridge = memo(function LeadContextBridge({
                 : leadSessionId
           }
         >
-          {visibleContextPercentLabel ?? 'Context'}
+          {contextUsedPercentLabel ?? 'Context'}
         </button>
       </div>
     </>

@@ -362,7 +362,7 @@ export class TeamGraphAdapter {
     toolHistory?: Record<string, ActiveToolCall[]>,
     isTeamProvisioning = false
   ): void {
-    const percent = leadContext?.percent;
+    const percent = leadContext?.contextUsedPercent;
     const leadMember = data.members.find((member) => member.name === leadName);
     const activeTool = TeamGraphAdapter.#selectVisibleTool(
       activeTools?.[leadName],

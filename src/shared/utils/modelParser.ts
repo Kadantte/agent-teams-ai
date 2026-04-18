@@ -3,7 +3,7 @@
  * Parses model identifiers into friendly display names and metadata.
  */
 
-/** Default context window size for Claude models (all current models use 200K) */
+/** Fallback context window size when a more exact model-specific window is unavailable. */
 export const DEFAULT_CONTEXT_WINDOW = 200_000;
 
 /** Known model families with specific styling */

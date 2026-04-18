@@ -505,6 +505,68 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     );
   });
 
+  it('preserves a requested 1M Anthropic window when runtime logs strip the [1m] suffix', () => {
+    const svc = new TeamProvisioningService();
+    const run = {
+      request: {
+        providerId: 'anthropic',
+        model: 'opus[1m]',
+        limitContext: false,
+      },
+      leadContextUsage: null,
+    } as any;
+
+    (svc as any).updateLeadContextUsageFromUsage(
+      run,
+      {
+        input_tokens: 12,
+        cache_creation_input_tokens: 34,
+        cache_read_input_tokens: 56,
+        output_tokens: 7,
+      },
+      'claude-opus-4-6'
+    );
+
+    expect(run.leadContextUsage).toMatchObject({
+      promptInputTokens: 102,
+      outputTokens: 7,
+      contextUsedTokens: 109,
+      contextWindowTokens: 1_000_000,
+      promptInputSource: 'anthropic_usage',
+    });
+  });
+
+  it('preserves a limited 200K Anthropic window when runtime logs strip the [1m] suffix', () => {
+    const svc = new TeamProvisioningService();
+    const run = {
+      request: {
+        providerId: 'anthropic',
+        model: 'opus',
+        limitContext: true,
+      },
+      leadContextUsage: null,
+    } as any;
+
+    (svc as any).updateLeadContextUsageFromUsage(
+      run,
+      {
+        input_tokens: 12,
+        cache_creation_input_tokens: 34,
+        cache_read_input_tokens: 56,
+        output_tokens: 7,
+      },
+      'claude-opus-4-6'
+    );
+
+    expect(run.leadContextUsage).toMatchObject({
+      promptInputTokens: 102,
+      outputTokens: 7,
+      contextUsedTokens: 109,
+      contextWindowTokens: 200_000,
+      promptInputSource: 'anthropic_usage',
+    });
+  });
+
   it('emits a lead-message refresh after provisioning reaches ready', async () => {
     const svc = new TeamProvisioningService();
     const emitter = vi.fn();

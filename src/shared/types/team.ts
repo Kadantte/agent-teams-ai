@@ -787,12 +787,22 @@ export interface LeadActivitySnapshot {
 }
 
 export interface LeadContextUsage {
-  /** Total tokens currently in context (input + cache_creation + cache_read) */
-  currentTokens: number;
+  /** Prompt-side tokens currently occupying the context window. */
+  promptInputTokens: number | null;
+  /** Tokens generated in the latest response. */
+  outputTokens: number | null;
+  /** Total occupied context window tokens (prompt input + output). */
+  contextUsedTokens: number | null;
   /** Model's context window size */
-  contextWindow: number;
-  /** Usage percentage (0-100) */
-  percent: number;
+  contextWindowTokens: number | null;
+  /** Context usage percentage (0-100) */
+  contextUsedPercent: number | null;
+  /** Which usage contract produced the prompt-side numbers. */
+  promptInputSource:
+    | 'anthropic_usage'
+    | 'openai_responses_usage'
+    | 'openai_chat_usage'
+    | 'unavailable';
   /** ISO timestamp of last update */
   updatedAt: string;
 }

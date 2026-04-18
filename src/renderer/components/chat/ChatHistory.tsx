@@ -14,17 +14,15 @@ import { SessionContextPanel } from './SessionContextPanel/index';
 /** Pixels from bottom considered "near bottom" for scroll-button visibility and auto-scroll. */
 const SCROLL_THRESHOLD = 300;
 
-import {
-  computeRemainingContext,
-  formatPercentOfTotal,
-  sumContextInjectionTokens,
-} from '@renderer/utils/contextMath';
+import { computeRemainingContext, sumContextInjectionTokens } from '@renderer/utils/contextMath';
+import { deriveContextMetrics } from '@shared/utils/contextMetrics';
 
 import { ChatHistoryEmptyState } from './ChatHistoryEmptyState';
 import { ChatHistoryItem } from './ChatHistoryItem';
 import { ChatHistoryLoadingState } from './ChatHistoryLoadingState';
 
 import type { ContextInjection } from '@renderer/types/contextInjection';
+import type { ContextUsageLike } from '@shared/utils/contextMetrics';
 
 /**
  * Waits for two requestAnimationFrame cycles, allowing the virtualizer to render.
@@ -129,6 +127,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
   const pendingNavigation = thisTab?.pendingNavigation;
 
   const teamBySessionId = useStore(useShallow((s) => s.teamBySessionId));
+  const leadContextByTeam = useStore(useShallow((s) => s.leadContextByTeam));
 
   // Look up whether this session belongs to a team
   const sessionTeam = useMemo(() => {
@@ -138,9 +137,13 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
   }, [teamBySessionId, sessionDetail?.session?.id]);
 
   // Compute all accumulated context injections (phase-aware)
-  const { allContextInjections, lastAiGroupTotalTokens } = useMemo(() => {
+  const { allContextInjections, lastAssistantUsage, lastAssistantModelName } = useMemo(() => {
     if (!sessionContextStats || !conversation?.items.length) {
-      return { allContextInjections: [] as ContextInjection[], lastAiGroupTotalTokens: undefined };
+      return {
+        allContextInjections: [] as ContextInjection[],
+        lastAssistantUsage: null as ContextUsageLike | null,
+        lastAssistantModelName: undefined as string | undefined,
+      };
     }
 
     // Determine which phase to show
@@ -161,7 +164,8 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
       if (lastAiItem?.type !== 'ai') {
         return {
           allContextInjections: [] as ContextInjection[],
-          lastAiGroupTotalTokens: undefined,
+          lastAssistantUsage: null,
+          lastAssistantModelName: undefined,
         };
       }
       targetAiGroupId = lastAiItem.group.id;
@@ -170,9 +174,8 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
     const stats = sessionContextStats.get(targetAiGroupId);
     const injections = stats?.accumulatedInjections ?? [];
 
-    // Get total INPUT tokens from the target AI group (excluding output tokens,
-    // since visible context is part of input only)
-    let totalTokens: number | undefined;
+    let lastUsage: ContextUsageLike | null = null;
+    let lastModelName: string | undefined;
     const targetItem = conversation.items.find(
       (item) => item.type === 'ai' && item.group.id === targetAiGroupId
     );
@@ -181,27 +184,51 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
       for (let i = responses.length - 1; i >= 0; i--) {
         const msg = responses[i];
         if (msg.type === 'assistant' && msg.usage) {
-          const usage = msg.usage;
-          totalTokens =
-            (usage.input_tokens ?? 0) +
-            (usage.cache_read_input_tokens ?? 0) +
-            (usage.cache_creation_input_tokens ?? 0);
+          lastUsage = msg.usage;
+          lastModelName = msg.model;
           break;
         }
       }
     }
 
-    return { allContextInjections: injections, lastAiGroupTotalTokens: totalTokens };
+    return {
+      allContextInjections: injections,
+      lastAssistantUsage: lastUsage,
+      lastAssistantModelName: lastModelName,
+    };
   }, [sessionContextStats, conversation, selectedContextPhase, sessionPhaseInfo]);
-
-  const visibleContextPercentLabel = useMemo(() => {
-    const visibleTokens = sumContextInjectionTokens(allContextInjections);
-    return formatPercentOfTotal(visibleTokens, lastAiGroupTotalTokens);
-  }, [allContextInjections, lastAiGroupTotalTokens]);
+  const visibleContextTokens = useMemo(
+    () => sumContextInjectionTokens(allContextInjections),
+    [allContextInjections]
+  );
+  const sessionLeadContext = sessionTeam ? (leadContextByTeam[sessionTeam.teamName] ?? null) : null;
+  const contextMetrics = useMemo(
+    () =>
+      deriveContextMetrics({
+        usage: lastAssistantUsage,
+        modelName: lastAssistantModelName,
+        contextWindowTokens: sessionLeadContext?.contextWindowTokens ?? null,
+        visibleContextTokens,
+      }),
+    [
+      lastAssistantModelName,
+      lastAssistantUsage,
+      sessionLeadContext?.contextWindowTokens,
+      visibleContextTokens,
+    ]
+  );
+  const contextUsedPercentLabel = useMemo(() => {
+    const percent = contextMetrics.contextUsedPercentOfContextWindow;
+    return percent === null ? null : `${percent.toFixed(1)}%`;
+  }, [contextMetrics.contextUsedPercentOfContextWindow]);
 
   const remainingContext = useMemo(
-    () => computeRemainingContext(lastAiGroupTotalTokens),
-    [lastAiGroupTotalTokens]
+    () =>
+      computeRemainingContext(
+        contextMetrics.contextUsedTokens ?? undefined,
+        contextMetrics.contextWindowTokens ?? undefined
+      ),
+    [contextMetrics.contextUsedTokens, contextMetrics.contextWindowTokens]
   );
 
   // State for navigation highlight (blue, used for Turn navigation from CLAUDE.md panel)
@@ -839,7 +866,7 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
               onNavigateToTurn={handleNavigateToTurn}
               onNavigateToTool={handleNavigateToTool}
               onNavigateToUserGroup={handleNavigateToUserGroup}
-              totalSessionTokens={lastAiGroupTotalTokens}
+              contextMetrics={contextMetrics}
               sessionMetrics={sessionDetail?.metrics}
               subagentCostUsd={subagentCostUsd}
               onViewReport={effectiveTabId ? () => openSessionReport(effectiveTabId) : undefined}
@@ -877,9 +904,9 @@ export const ChatHistory = ({ tabId }: ChatHistoryProps): JSX.Element => {
                     : 'var(--color-text-secondary)',
                 }}
               >
-                {visibleContextPercentLabel ? (
+                {contextUsedPercentLabel ? (
                   <>
-                    {visibleContextPercentLabel}
+                    {contextUsedPercentLabel}
                     {remainingContext && remainingContext.urgency !== 'normal' && (
                       <span
                         style={{

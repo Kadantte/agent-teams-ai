@@ -35,6 +35,7 @@ import { DEFAULT_TOOL_APPROVAL_SETTINGS } from '@shared/types/team';
 import { resolveLanguageName } from '@shared/utils/agentLanguage';
 import { getAnthropicDefaultTeamModel } from '@shared/utils/anthropicModelDefaults';
 import { parseCliArgs } from '@shared/utils/cliArgsParser';
+import { deriveContextMetrics, inferContextWindowTokens } from '@shared/utils/contextMetrics';
 import {
   isInboxNoiseMessage,
   isMeaningfulBootstrapCheckInMessage,
@@ -82,6 +83,7 @@ import { resolveTeamProviderId } from '../runtime/providerRuntimeEnv';
 
 import { buildActionModeProtocol } from './actionModeInstructions';
 import { atomicWriteAsync } from './atomicWrite';
+import { peekAutoResumeService } from './AutoResumeService';
 import { ClaudeBinaryResolver } from './ClaudeBinaryResolver';
 import { withFileLock } from './fileLock';
 import {
@@ -112,7 +114,6 @@ import { TeamMembersMetaStore } from './TeamMembersMetaStore';
 import { TeamMetaStore } from './TeamMetaStore';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskReader } from './TeamTaskReader';
-import { peekAutoResumeService } from './AutoResumeService';
 
 /**
  * Kill a team CLI process using SIGKILL (uncatchable).
@@ -649,8 +650,11 @@ interface ProvisioningRun {
   authRetryInProgress: boolean;
   /** Tracks lead process context window usage from stream-json usage data. */
   leadContextUsage: {
-    currentTokens: number;
-    contextWindow: number;
+    promptInputTokens: number | null;
+    outputTokens: number | null;
+    contextUsedTokens: number | null;
+    contextWindowTokens: number | null;
+    promptInputSource: LeadContextUsage['promptInputSource'];
     lastUsageMessageId: string | null;
     lastEmittedAt: number;
   } | null;
@@ -3181,13 +3185,93 @@ export class TeamProvisioningService {
     if (!run?.leadContextUsage || run.processKilled || run.cancelRequested) {
       return { usage: null, runId: null };
     }
-    const { currentTokens, contextWindow } = run.leadContextUsage;
-    const percentRaw = contextWindow > 0 ? Math.round((currentTokens / contextWindow) * 100) : 0;
-    const percent = Math.max(0, Math.min(100, percentRaw));
     return {
-      usage: { currentTokens, contextWindow, percent, updatedAt: new Date().toISOString() },
+      usage: this.buildLeadContextUsagePayload(run),
       runId,
     };
+  }
+
+  private getInitialLeadContextWindowTokens(run: ProvisioningRun): number | null {
+    const providerId = normalizeOptionalTeamProviderId(run.request.providerId);
+    const modelName =
+      typeof run.request.model === 'string' && run.request.model.trim().length > 0
+        ? run.request.model.trim()
+        : providerId === 'anthropic'
+          ? getAnthropicDefaultTeamModel(run.request.limitContext === true)
+          : undefined;
+
+    return inferContextWindowTokens({
+      providerId,
+      modelName,
+      limitContext: run.request.limitContext === true,
+    });
+  }
+
+  private buildLeadContextUsagePayload(run: ProvisioningRun): LeadContextUsage {
+    const usage = run.leadContextUsage;
+    if (!usage) {
+      return {
+        promptInputTokens: null,
+        outputTokens: null,
+        contextUsedTokens: null,
+        contextWindowTokens: null,
+        contextUsedPercent: null,
+        promptInputSource: 'unavailable',
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    const { contextUsedTokens, contextWindowTokens } = usage;
+    const percentRaw =
+      contextUsedTokens !== null && contextWindowTokens !== null && contextWindowTokens > 0
+        ? Math.round((contextUsedTokens / contextWindowTokens) * 100)
+        : null;
+
+    return {
+      promptInputTokens: usage.promptInputTokens,
+      outputTokens: usage.outputTokens,
+      contextUsedTokens: usage.contextUsedTokens,
+      contextWindowTokens: usage.contextWindowTokens,
+      contextUsedPercent: percentRaw === null ? null : Math.max(0, Math.min(100, percentRaw)),
+      promptInputSource: usage.promptInputSource,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private updateLeadContextUsageFromUsage(
+    run: ProvisioningRun,
+    usage: Record<string, unknown>,
+    modelName: string | undefined
+  ): void {
+    const existingContextWindowTokens =
+      run.leadContextUsage?.contextWindowTokens ?? this.getInitialLeadContextWindowTokens(run);
+    const metrics = deriveContextMetrics({
+      usage,
+      providerId: normalizeOptionalTeamProviderId(run.request.providerId),
+      modelName,
+      contextWindowTokens: existingContextWindowTokens,
+      limitContext: run.request.limitContext === true,
+    });
+
+    if (!run.leadContextUsage) {
+      run.leadContextUsage = {
+        promptInputTokens: metrics.promptInputTokens,
+        outputTokens: metrics.outputTokens,
+        contextUsedTokens: metrics.contextUsedTokens,
+        contextWindowTokens: metrics.contextWindowTokens,
+        promptInputSource: metrics.promptInputSource,
+        lastUsageMessageId: null,
+        lastEmittedAt: 0,
+      };
+      return;
+    }
+
+    run.leadContextUsage.promptInputTokens = metrics.promptInputTokens;
+    run.leadContextUsage.outputTokens = metrics.outputTokens;
+    run.leadContextUsage.contextUsedTokens = metrics.contextUsedTokens;
+    run.leadContextUsage.contextWindowTokens =
+      metrics.contextWindowTokens ?? run.leadContextUsage.contextWindowTokens;
+    run.leadContextUsage.promptInputSource = metrics.promptInputSource;
   }
 
   private isCurrentTrackedRun(run: ProvisioningRun): boolean {
@@ -3711,15 +3795,7 @@ export class TeamProvisioningService {
       return;
     }
     run.leadContextUsage.lastEmittedAt = now;
-    const { currentTokens, contextWindow } = run.leadContextUsage;
-    const percentRaw = contextWindow > 0 ? Math.round((currentTokens / contextWindow) * 100) : 0;
-    const percent = Math.max(0, Math.min(100, percentRaw));
-    const payload: LeadContextUsage = {
-      currentTokens,
-      contextWindow,
-      percent,
-      updatedAt: new Date().toISOString(),
-    };
+    const payload = this.buildLeadContextUsagePayload(run);
     this.teamChangeEmitter?.({
       type: 'lead-context',
       teamName: run.teamName,
@@ -8430,36 +8506,12 @@ export class TeamProvisioningService {
         if (usage && typeof usage === 'object') {
           // Dedup: skip if same message.id (SDK bug: multi-block = same usage repeated)
           if (!msgId || run.leadContextUsage?.lastUsageMessageId !== msgId) {
-            const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
-            const cacheCreation =
-              typeof usage.cache_creation_input_tokens === 'number'
-                ? usage.cache_creation_input_tokens
-                : 0;
-            const cacheRead =
-              typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
-            // Total context window usage = all three token categories
-            // input_tokens = tokens AFTER last cache breakpoint (small)
-            // cache_creation = tokens written to cache (first request)
-            // cache_read = tokens read from cache (subsequent requests) — these ARE in context window
-            const currentTokens = inputTokens + cacheCreation + cacheRead;
-
-            if (!run.leadContextUsage) {
-              // Determine initial context window from model selection
-              // computeEffectiveTeamModel() defaults to 'opus[1m]' when no model selected
-              const modelStr = (run.request.model ?? '').toLowerCase();
-              const isHaiku = modelStr.includes('haiku');
-              const isLimitedContext = run.request.limitContext === true;
-              // limitContext=true → 200K, haiku → 200K, [1m] → 1M, default → 1M (opus[1m])
-              const initialContextWindow = isLimitedContext || isHaiku ? 200_000 : 1_000_000;
-
-              run.leadContextUsage = {
-                currentTokens,
-                contextWindow: initialContextWindow,
-                lastUsageMessageId: msgId,
-                lastEmittedAt: 0,
-              };
-            } else {
-              run.leadContextUsage.currentTokens = currentTokens;
+            this.updateLeadContextUsageFromUsage(
+              run,
+              usage,
+              typeof messageObj.model === 'string' ? messageObj.model : undefined
+            );
+            if (run.leadContextUsage) {
               run.leadContextUsage.lastUsageMessageId = msgId;
             }
             this.emitLeadContextUsage(run);
@@ -8506,13 +8558,16 @@ export class TeamProvisioningService {
             ) {
               if (!run.leadContextUsage) {
                 run.leadContextUsage = {
-                  currentTokens: 0,
-                  contextWindow: modelData.contextWindow,
+                  promptInputTokens: null,
+                  outputTokens: null,
+                  contextUsedTokens: null,
+                  contextWindowTokens: modelData.contextWindow,
+                  promptInputSource: 'unavailable',
                   lastUsageMessageId: null,
                   lastEmittedAt: 0,
                 };
               } else {
-                run.leadContextUsage.contextWindow = modelData.contextWindow;
+                run.leadContextUsage.contextWindowTokens = modelData.contextWindow;
                 run.leadContextUsage.lastEmittedAt = 0; // force re-emit
               }
               this.emitLeadContextUsage(run);
@@ -8527,30 +8582,17 @@ export class TeamProvisioningService {
           | Record<string, unknown>
           | undefined;
         if (resultUsage && typeof resultUsage === 'object') {
-          const inp = typeof resultUsage.input_tokens === 'number' ? resultUsage.input_tokens : 0;
-          const cc =
-            typeof resultUsage.cache_creation_input_tokens === 'number'
-              ? resultUsage.cache_creation_input_tokens
-              : 0;
-          const cr =
-            typeof resultUsage.cache_read_input_tokens === 'number'
-              ? resultUsage.cache_read_input_tokens
-              : 0;
-          const total = inp + cc + cr;
-          if (total > 0) {
-            if (!run.leadContextUsage) {
-              run.leadContextUsage = {
-                currentTokens: total,
-                contextWindow: 0,
-                lastUsageMessageId: null,
-                lastEmittedAt: 0,
-              };
-            } else {
-              run.leadContextUsage.currentTokens = total;
-              run.leadContextUsage.lastEmittedAt = 0;
-            }
-            this.emitLeadContextUsage(run);
+          this.updateLeadContextUsageFromUsage(
+            run,
+            resultUsage,
+            typeof (msg.result as Record<string, unknown> | undefined)?.model === 'string'
+              ? ((msg.result as Record<string, unknown>).model as string)
+              : undefined
+          );
+          if (run.leadContextUsage) {
+            run.leadContextUsage.lastEmittedAt = 0;
           }
+          this.emitLeadContextUsage(run);
         }
 
         if (run.provisioningComplete) {

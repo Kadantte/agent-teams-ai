@@ -425,7 +425,7 @@ const MemberPopoverContent = ({
         )}
       </div>
 
-      {/* Context usage stays hidden for now because LeadContextUsage.percent is unreliable. */}
+      {/* Context usage stays hidden for now because lead context telemetry is still incomplete. */}
 
       {/* Current task indicator — reuses same pattern as MemberCard */}
       {node.currentTaskId && node.currentTaskSubject && (

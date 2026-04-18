@@ -22,20 +22,33 @@ export function inferTeamProviderIdFromModel(
   if (!normalized) {
     return undefined;
   }
+  const normalizedWithoutExtendedContextSuffix = normalized.replace(/(?:\[1m\])+$/, '');
 
-  if (normalized.startsWith('gpt-') || normalized.startsWith('codex')) {
+  if (
+    normalized.startsWith('gpt-') ||
+    normalized.startsWith('codex') ||
+    normalizedWithoutExtendedContextSuffix.startsWith('gpt-') ||
+    normalizedWithoutExtendedContextSuffix.startsWith('codex')
+  ) {
     return 'codex';
   }
 
-  if (normalized.startsWith('gemini')) {
+  if (
+    normalized.startsWith('gemini') ||
+    normalizedWithoutExtendedContextSuffix.startsWith('gemini')
+  ) {
     return 'gemini';
   }
 
   if (
     normalized.startsWith('claude') ||
+    normalizedWithoutExtendedContextSuffix.startsWith('claude') ||
     normalized === 'opus' ||
+    normalizedWithoutExtendedContextSuffix === 'opus' ||
     normalized === 'sonnet' ||
-    normalized === 'haiku'
+    normalizedWithoutExtendedContextSuffix === 'sonnet' ||
+    normalized === 'haiku' ||
+    normalizedWithoutExtendedContextSuffix === 'haiku'
   ) {
     return 'anthropic';
   }

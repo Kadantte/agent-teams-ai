@@ -48,7 +48,7 @@ export const SessionContextPanel = ({
   onNavigateToTurn,
   onNavigateToTool,
   onNavigateToUserGroup,
-  totalSessionTokens,
+  contextMetrics,
   sessionMetrics,
   subagentCostUsd,
   onViewReport,
@@ -193,7 +193,7 @@ export const SessionContextPanel = ({
       <SessionContextHeader
         injectionCount={injections.length}
         totalTokens={totalTokens}
-        totalSessionTokens={totalSessionTokens}
+        contextMetrics={contextMetrics}
         sessionMetrics={sessionMetrics}
         subagentCostUsd={subagentCostUsd}
         onClose={onClose}
