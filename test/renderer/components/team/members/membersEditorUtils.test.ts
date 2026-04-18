@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildMembersFromDrafts,
   createMemberDraftsFromInputs,
   filterEditableMemberInputs,
 } from '@renderer/components/team/members/MembersEditorSection';
@@ -59,5 +60,30 @@ describe('members editor editable input filtering', () => {
       model: 'gpt-5.4-mini',
       effort: 'medium',
     });
+  });
+
+  it('preserves explicit codex models when exporting member inputs', () => {
+    const drafts = createMemberDraftsFromInputs(
+      filterEditableMemberInputs([
+        {
+          name: 'alice',
+          agentType: 'reviewer',
+          providerId: 'codex',
+          model: 'gpt-5.4-mini',
+          effort: 'medium',
+        },
+      ] satisfies Array<
+        Pick<ResolvedTeamMember, 'name' | 'agentType' | 'providerId' | 'model' | 'effort'>
+      >)
+    );
+
+    expect(buildMembersFromDrafts(drafts)).toEqual([
+      expect.objectContaining({
+        name: 'alice',
+        providerId: 'codex',
+        model: 'gpt-5.4-mini',
+        effort: 'medium',
+      }),
+    ]);
   });
 });
