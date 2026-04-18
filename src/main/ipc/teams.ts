@@ -100,6 +100,10 @@ import { ConfigManager } from '../services/infrastructure/ConfigManager';
 import { NotificationManager } from '../services/infrastructure/NotificationManager';
 import { gitIdentityResolver } from '../services/parsing/GitIdentityResolver';
 import {
+  getAutoResumeService,
+  initializeAutoResumeService,
+} from '../services/team/AutoResumeService';
+import {
   buildActionModeAgentBlock,
   isAgentActionMode,
 } from '../services/team/actionModeInstructions';
@@ -301,11 +305,25 @@ const SEEN_API_ERROR_KEYS_MAX = 500;
  * and NotificationManager dedupeKey (to prevent storage duplicates).
  */
 function checkRateLimitMessages(
-  messages: readonly { messageId?: string; from: string; text: string; timestamp: string }[],
+  messages: readonly {
+    messageId?: string;
+    from: string;
+    text: string;
+    timestamp: string;
+    to?: string;
+    source?: string;
+    leadSessionId?: string;
+  }[],
   teamName: string,
   teamDisplayName: string,
-  projectPath?: string
+  projectPath?: string,
+  teamIsAlive = true,
+  currentLeadSessionId: string | null = null
 ): void {
+  const observedAt = new Date();
+  const autoResumeEnabled =
+    ConfigManager.getInstance().getConfig().notifications.autoResumeOnRateLimit;
+
   for (const msg of messages) {
     if (msg.from === 'user') continue;
     if (!isRateLimitMessage(msg.text)) continue;
@@ -313,28 +331,55 @@ function checkRateLimitMessages(
     const rawKey = msg.messageId ?? `${msg.from}:${msg.timestamp}`;
     const dedupeKey = `rate-limit:${teamName}:${rawKey}`;
 
-    // In-memory guard: prevents resurrection after user deletes the notification
-    if (seenRateLimitKeys.has(dedupeKey)) continue;
-    seenRateLimitKeys.add(dedupeKey);
+    // In-memory guard: prevents resurrection after user deletes the notification.
+    if (!seenRateLimitKeys.has(dedupeKey)) {
+      seenRateLimitKeys.add(dedupeKey);
 
-    // Evict oldest entries to prevent unbounded growth
-    if (seenRateLimitKeys.size > SEEN_RATE_LIMIT_KEYS_MAX) {
-      const first = seenRateLimitKeys.values().next().value;
-      if (first) seenRateLimitKeys.delete(first);
+      // Evict oldest entries to prevent unbounded growth
+      if (seenRateLimitKeys.size > SEEN_RATE_LIMIT_KEYS_MAX) {
+        const first = seenRateLimitKeys.values().next().value;
+        if (first) seenRateLimitKeys.delete(first);
+      }
+
+      void NotificationManager.getInstance()
+        .addTeamNotification({
+          teamEventType: 'rate_limit',
+          teamName,
+          teamDisplayName,
+          from: msg.from,
+          summary: `Rate limit: ${msg.from}`,
+          body: msg.text.slice(0, 200),
+          dedupeKey,
+          projectPath,
+        })
+        .catch(() => undefined);
     }
 
-    void NotificationManager.getInstance()
-      .addTeamNotification({
-        teamEventType: 'rate_limit',
+    // Only schedule auto-resume while a live team run currently exists.
+    // Persisted history for an offline/stopped team may still contain the old
+    // rate-limit message, but arming a new timer from that stale history would
+    // resurrect the nudge into a later manual restart.
+    const isLeadAutoResumeCandidate =
+      !msg.to && (msg.source === 'lead_process' || msg.source === 'lead_session');
+
+    if (autoResumeEnabled && teamIsAlive && isLeadAutoResumeCandidate) {
+      // Only let persisted lead_session history rebuild auto-resume when it
+      // clearly belongs to the currently running lead session. Otherwise an old
+      // rate-limit from a previous manual run can resurrect into a newer restart.
+      if (msg.source === 'lead_session') {
+        if (!currentLeadSessionId) continue;
+        if (msg.leadSessionId !== currentLeadSessionId) continue;
+      }
+
+      // Pass the original message timestamp so relative reset windows survive restarts
+      // and old history does not rebuild a fresh auto-resume timer from "now".
+      getAutoResumeService().handleRateLimitMessage(
         teamName,
-        teamDisplayName,
-        from: msg.from,
-        summary: `Rate limit: ${msg.from}`,
-        body: msg.text.slice(0, 200),
-        dedupeKey,
-        projectPath,
-      })
-      .catch(() => undefined);
+        msg.text,
+        observedAt,
+        new Date(msg.timestamp)
+      );
+    }
   }
 }
 
@@ -436,6 +481,7 @@ export function initializeTeamHandlers(
 ): void {
   teamDataService = service;
   teamProvisioningService = provisioningService;
+  initializeAutoResumeService(provisioningService);
   teamMemberLogsFinder = logsFinder ?? null;
   memberStatsComputer = statsComputer ?? null;
   teamBackupService = backupService ?? null;
@@ -759,13 +805,21 @@ async function handleGetData(
   }
   const provisioning = getTeamProvisioningService();
   const isAlive = provisioning.isTeamAlive(tn);
+  const currentLeadSessionId = provisioning.getCurrentLeadSessionId(tn);
 
   const displayName = data.config.name || tn;
   const projectPath = data.config.projectPath;
 
   const live = provisioning.getLiveLeadProcessMessages(tn);
   if (live.length === 0) {
-    checkRateLimitMessages(data.messages, tn, displayName, projectPath);
+    checkRateLimitMessages(
+      data.messages,
+      tn,
+      displayName,
+      projectPath,
+      isAlive,
+      currentLeadSessionId
+    );
     checkApiErrorMessages(data.messages, tn, displayName, projectPath);
     return { success: true, data: { ...data, isAlive } };
   }
@@ -845,7 +899,7 @@ async function handleGetData(
   }
   merged.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
-  checkRateLimitMessages(merged, tn, displayName, projectPath);
+  checkRateLimitMessages(merged, tn, displayName, projectPath, isAlive, currentLeadSessionId);
   checkApiErrorMessages(merged, tn, displayName, projectPath);
   return { success: true, data: { ...data, isAlive, messages: merged } };
 }
@@ -926,6 +980,7 @@ async function handleDeleteTeam(
     return { success: false, error: validated.error ?? 'Invalid teamName' };
   }
   return wrapTeamHandler('deleteTeam', async () => {
+    getAutoResumeService().cancelPendingAutoResume(validated.value!);
     getTeamProvisioningService().stopTeam(validated.value!);
     await getTeamDataService().deleteTeam(validated.value!);
   });
@@ -951,6 +1006,7 @@ async function handlePermanentlyDeleteTeam(
     return { success: false, error: validated.error ?? 'Invalid teamName' };
   }
   return wrapTeamHandler('permanentlyDeleteTeam', async () => {
+    getAutoResumeService().cancelPendingAutoResume(validated.value!);
     await getTeamDataService().permanentlyDeleteTeam(validated.value!);
     // Clean up app-owned data (attachments, task-attachments) that lives outside ~/.claude/
     const appData = getAppDataPath();
@@ -2733,6 +2789,7 @@ async function handleStopTeam(
   }
   return wrapTeamHandler('stop', async () => {
     addMainBreadcrumb('team', 'stop', { teamName: validated.value! });
+    getAutoResumeService().cancelPendingAutoResume(validated.value!);
     getTeamProvisioningService().stopTeam(validated.value!);
   });
 }

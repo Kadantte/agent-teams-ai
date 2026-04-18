@@ -70,6 +70,7 @@ import { setReviewMainWindow } from './ipc/review';
 import { setTmuxMainWindow } from './ipc/tmux';
 import {
   ApiKeyService,
+  createExtensionsRuntimeAdapter,
   ExtensionFacadeService,
   GlamaMcpEnrichmentService,
   McpCatalogAggregator,
@@ -84,7 +85,6 @@ import {
   SkillsCatalogService,
   SkillsMutationService,
   SkillsWatcherService,
-  createExtensionsRuntimeAdapter,
 } from './services/extensions';
 import { startEventLoopLagMonitor } from './services/infrastructure/EventLoopLagMonitor';
 import { HttpServer } from './services/infrastructure/HttpServer';
@@ -100,6 +100,7 @@ import {
   type TeamReconcileTrigger,
 } from './services/team/TeamReconcileDrainScheduler';
 import { TeamSentMessagesStore } from './services/team/TeamSentMessagesStore';
+import { clearAutoResumeService } from './services/team/AutoResumeService';
 import { getAppIconPath } from './utils/appIcon';
 import { getProjectsBasePath, getTeamsBasePath, getTodosBasePath } from './utils/pathDecoder';
 import {
@@ -1069,6 +1070,11 @@ async function startHttpServer(
  */
 function shutdownServices(): void {
   logger.info('Shutting down services...');
+
+  // Clear pending auto-resume timers before anything else — otherwise the
+  // dangling setTimeout handles keep the event loop alive past shutdown and
+  // may fire against a torn-down provisioning service.
+  clearAutoResumeService();
 
   // Kill all team CLI processes via SIGKILL BEFORE anything else.
   // This must happen before the OS closes stdin pipes (on app exit),
