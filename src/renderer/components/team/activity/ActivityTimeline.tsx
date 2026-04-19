@@ -21,8 +21,31 @@ import {
 } from './LeadThoughtsGroup';
 import { useNewItemKeys } from './useNewItemKeys';
 
-import type { TimelineItem } from './LeadThoughtsGroup';
+import type { LeadThoughtGroup, TimelineItem } from './LeadThoughtsGroup';
 import type { InboxMessage, ResolvedTeamMember } from '@shared/types';
+
+/**
+ * A single visual row in the timeline. The render phase maps 1:1 from this
+ * list into JSX, which is the shape a windowing library (e.g.
+ * `@tanstack/react-virtual`) expects. Grouping happens earlier, in
+ * `groupTimelineItems`; this layer flattens groups/separators/dividers into
+ * atomic rows so each one can be measured and rendered independently.
+ *
+ * The `itemIndex` fields point back into `timelineItems` so per-item state
+ * (collapse mode, zebra shading, "is new" flag, session anchor) can still be
+ * resolved without threading it through every row entry.
+ */
+type TimelineRow =
+  | { kind: 'session-separator'; key: string }
+  | {
+      kind: 'lead-thought-group';
+      key: string;
+      itemIndex: number;
+      group: LeadThoughtGroup;
+      isPinned: boolean;
+    }
+  | { kind: 'compaction-divider'; key: string; message: InboxMessage }
+  | { kind: 'message-row'; key: string; itemIndex: number; message: InboxMessage };
 
 /**
  * Viewport contract — describes the scroll container that hosts the timeline
@@ -489,6 +512,66 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
   const pinnedThoughtGroup = timelineItems[0]?.type === 'lead-thoughts' ? timelineItems[0] : null;
   const startIndex = pinnedThoughtGroup ? 1 : 0;
 
+  // Flatten timelineItems into atomic render rows. Each row maps to exactly
+  // one visual element — no Fragment bundles session separators with their
+  // owning item, because a windowing layer (landing in a follow-up PR) needs
+  // each row to be measurable and addressable independently.
+  const renderRows = useMemo<readonly TimelineRow[]>(() => {
+    const rows: TimelineRow[] = [];
+    if (pinnedThoughtGroup) {
+      rows.push({
+        kind: 'lead-thought-group',
+        key: getThoughtGroupKey(pinnedThoughtGroup.group),
+        itemIndex: 0,
+        group: pinnedThoughtGroup.group,
+        isPinned: true,
+      });
+    }
+    for (let i = startIndex; i < timelineItems.length; i += 1) {
+      const item = timelineItems[i];
+      if (i > 0) {
+        const currSessionId = getItemSessionAnchorId(item);
+        const prevSessionId = previousSessionAnchorByIndex[i];
+        if (prevSessionId && currSessionId && prevSessionId !== currSessionId) {
+          // Include itemIndex in the key so a repeated transition (e.g. lead
+          // sessions A→B→A→B) does not collide on key `A->B` twice — React
+          // treats duplicate keys as the same element and reuses state
+          // across unrelated separators.
+          rows.push({
+            kind: 'session-separator',
+            key: `session-separator-${i}-${prevSessionId}->${currSessionId}`,
+          });
+        }
+      }
+      if (item.type === 'lead-thoughts') {
+        rows.push({
+          kind: 'lead-thought-group',
+          key: getThoughtGroupKey(item.group),
+          itemIndex: i,
+          group: item.group,
+          isPinned: false,
+        });
+        continue;
+      }
+      const message = item.message;
+      if (isCompactionMessage(message)) {
+        rows.push({
+          kind: 'compaction-divider',
+          key: `compaction-${toMessageKey(message)}`,
+          message,
+        });
+        continue;
+      }
+      rows.push({
+        kind: 'message-row',
+        key: toMessageKey(message),
+        itemIndex: i,
+        message,
+      });
+    }
+    return rows;
+  }, [pinnedThoughtGroup, previousSessionAnchorByIndex, startIndex, timelineItems]);
+
   // Determine the index of the "newest" non-thought timeline item (for auto-expand).
   const newestMessageIndex = useMemo(() => {
     return findNewestMessageIndex(timelineItems);
@@ -530,6 +613,113 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
     [allCollapsed, newestMessageIndex, pinnedThoughtGroup, expandOverrides, onToggleExpandOverride]
   );
 
+  // Render a single atomic row. Logic per kind mirrors the previous inline
+  // render path; separators and dividers are their own rows rather than
+  // being bundled into Fragments, which is the contract the virtualizer will
+  // consume in a follow-up PR.
+  const renderTimelineRow = (row: TimelineRow): React.JSX.Element | null => {
+    switch (row.kind) {
+      case 'session-separator':
+        return (
+          <div
+            key={row.key}
+            className="flex items-center gap-3"
+            style={{ paddingTop: 45, paddingBottom: 45 }}
+          >
+            <div className="h-px flex-1 bg-blue-600/30 dark:bg-blue-400/30" />
+            <span className="whitespace-nowrap text-[11px] font-medium text-blue-600 dark:text-blue-400">
+              New session
+            </span>
+            <div className="h-px flex-1 bg-blue-600/30 dark:bg-blue-400/30" />
+          </div>
+        );
+      case 'compaction-divider':
+        return <CompactionDivider key={row.key} message={row.message} />;
+      case 'lead-thought-group': {
+        const { group, itemIndex, isPinned, key } = row;
+        const firstThought = group.thoughts[0];
+        const info = memberInfo.get(firstThought.from);
+        const collapseProps = getItemCollapseProps(key, itemIndex);
+        const pinnedCanBeLive = isPinned
+          ? currentLeadSessionId
+            ? firstThought.leadSessionId === currentLeadSessionId
+            : true
+          : false;
+        return (
+          <LeadThoughtsGroupRow
+            key={key}
+            group={group}
+            memberColor={info?.color}
+            canBeLive={pinnedCanBeLive}
+            isTeamAlive={pinnedCanBeLive ? isTeamAlive : undefined}
+            leadActivity={pinnedCanBeLive ? leadActivity : undefined}
+            leadContextUpdatedAt={pinnedCanBeLive ? leadContextUpdatedAt : undefined}
+            isNew={newItemKeys.has(key)}
+            onVisible={onMessageVisible}
+            observerRoot={observerRoot}
+            zebraShade={zebraShadeSet.has(itemIndex)}
+            collapseMode={collapseProps.collapseMode}
+            isCollapsed={collapseProps.isCollapsed}
+            canToggleCollapse={collapseProps.canToggleCollapse}
+            collapseToggleKey={collapseProps.collapseToggleKey}
+            onToggleCollapse={onToggleExpandOverride}
+            onTaskIdClick={onTaskIdClick}
+            memberColorMap={colorMap}
+            onReply={onReplyToMessage}
+            compactHeader={compactHeader}
+            teamNames={teamNames}
+            teamColorByName={teamColorByName}
+            onTeamClick={onTeamClick}
+            onExpand={compactHeader ? onExpandItem : undefined}
+            expandItemKey={compactHeader ? key : undefined}
+          />
+        );
+      }
+      case 'message-row': {
+        const { message, itemIndex, key } = row;
+        const renderProps = resolveMessageRenderProps(message, ctx);
+        const collapseProps = getItemCollapseProps(key, itemIndex);
+        const isUnread = readState
+          ? !message.read && !readState.readSet.has(readState.getMessageKey(message))
+          : !message.read;
+        return (
+          <MemoizedMessageRowWithObserver
+            key={key}
+            message={message}
+            teamName={teamName}
+            memberRole={renderProps.memberRole}
+            memberColor={renderProps.memberColor}
+            recipientColor={renderProps.recipientColor}
+            isUnread={isUnread}
+            isNew={newItemKeys.has(key)}
+            zebraShade={zebraShadeSet.has(itemIndex)}
+            memberColorMap={colorMap}
+            localMemberNames={localMemberNames}
+            onMemberNameClick={onMemberClick ? handleMemberNameClick : undefined}
+            onCreateTask={onCreateTaskFromMessage}
+            onReply={onReplyToMessage}
+            onVisible={onMessageVisible}
+            onTaskIdClick={onTaskIdClick}
+            onRestartTeam={onRestartTeam}
+            collapseMode={collapseProps.collapseMode}
+            isCollapsed={collapseProps.isCollapsed}
+            canToggleCollapse={collapseProps.canToggleCollapse}
+            collapseToggleKey={collapseProps.collapseToggleKey}
+            onToggleCollapse={onToggleExpandOverride}
+            compactHeader={compactHeader}
+            teamNames={teamNames}
+            teamColorByName={teamColorByName}
+            onTeamClick={onTeamClick}
+            onExpand={compactHeader ? onExpandItem : undefined}
+            expandItemKey={compactHeader ? key : undefined}
+            observerRoot={observerRoot}
+            onExpandContent={onExpandContent}
+          />
+        );
+      }
+    }
+  };
+
   if (messages.length === 0) {
     return (
       <div className="rounded-md border border-[var(--color-border)] p-3 pl-5 text-xs text-[var(--color-text-muted)]">
@@ -541,168 +731,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
 
   return (
     <div ref={rootRef} className="space-y-1">
-      {/* Pinned (newest) thought group — always at top */}
-      {pinnedThoughtGroup &&
-        (() => {
-          const { group } = pinnedThoughtGroup;
-          const firstThought = group.thoughts[0];
-          const pinnedCanBeLive = currentLeadSessionId
-            ? firstThought.leadSessionId === currentLeadSessionId
-            : true;
-          const info = memberInfo.get(firstThought.from);
-          const itemKey = getThoughtGroupKey(group);
-          const stableKey = itemKey;
-          const collapseProps = getItemCollapseProps(stableKey, 0);
-          return (
-            <LeadThoughtsGroupRow
-              key={itemKey}
-              group={group}
-              memberColor={info?.color}
-              canBeLive={pinnedCanBeLive}
-              isTeamAlive={pinnedCanBeLive ? isTeamAlive : undefined}
-              leadActivity={pinnedCanBeLive ? leadActivity : undefined}
-              leadContextUpdatedAt={pinnedCanBeLive ? leadContextUpdatedAt : undefined}
-              isNew={newItemKeys.has(itemKey)}
-              onVisible={onMessageVisible}
-              observerRoot={observerRoot}
-              zebraShade={zebraShadeSet.has(0)}
-              collapseMode={collapseProps.collapseMode}
-              isCollapsed={collapseProps.isCollapsed}
-              canToggleCollapse={collapseProps.canToggleCollapse}
-              collapseToggleKey={collapseProps.collapseToggleKey}
-              onToggleCollapse={onToggleExpandOverride}
-              onTaskIdClick={onTaskIdClick}
-              memberColorMap={colorMap}
-              onReply={onReplyToMessage}
-              compactHeader={compactHeader}
-              teamNames={teamNames}
-              teamColorByName={teamColorByName}
-              onTeamClick={onTeamClick}
-              onExpand={compactHeader ? onExpandItem : undefined}
-              expandItemKey={compactHeader ? itemKey : undefined}
-            />
-          );
-        })()}
-
-      {/* Remaining items */}
-      {timelineItems.slice(startIndex).map((item, index) => {
-        const realIndex = index + startIndex;
-
-        // Session boundary separator (messages sorted desc — new on top)
-        let sessionSeparator: React.JSX.Element | null = null;
-        if (realIndex > 0) {
-          const currSessionId = getItemSessionAnchorId(item);
-          const prevSessionId = previousSessionAnchorByIndex[realIndex];
-          if (prevSessionId && currSessionId && prevSessionId !== currSessionId) {
-            sessionSeparator = (
-              <div
-                className="flex items-center gap-3"
-                style={{ paddingTop: 45, paddingBottom: 45 }}
-              >
-                <div className="h-px flex-1 bg-blue-600/30 dark:bg-blue-400/30" />
-                <span className="whitespace-nowrap text-[11px] font-medium text-blue-600 dark:text-blue-400">
-                  New session
-                </span>
-                <div className="h-px flex-1 bg-blue-600/30 dark:bg-blue-400/30" />
-              </div>
-            );
-          }
-        }
-
-        if (item.type === 'lead-thoughts') {
-          const { group } = item;
-          const firstThought = group.thoughts[0];
-          const info = memberInfo.get(firstThought.from);
-          const itemKey = getThoughtGroupKey(group);
-          const stableKey = itemKey;
-          const collapseProps = getItemCollapseProps(stableKey, realIndex);
-          return (
-            <React.Fragment key={itemKey}>
-              {sessionSeparator}
-              <LeadThoughtsGroupRow
-                group={group}
-                memberColor={info?.color}
-                canBeLive={false}
-                isNew={newItemKeys.has(itemKey)}
-                onVisible={onMessageVisible}
-                observerRoot={observerRoot}
-                zebraShade={zebraShadeSet.has(realIndex)}
-                collapseMode={collapseProps.collapseMode}
-                isCollapsed={collapseProps.isCollapsed}
-                canToggleCollapse={collapseProps.canToggleCollapse}
-                collapseToggleKey={collapseProps.collapseToggleKey}
-                onToggleCollapse={onToggleExpandOverride}
-                onTaskIdClick={onTaskIdClick}
-                memberColorMap={colorMap}
-                onReply={onReplyToMessage}
-                compactHeader={compactHeader}
-                teamNames={teamNames}
-                teamColorByName={teamColorByName}
-                onTeamClick={onTeamClick}
-                onExpand={compactHeader ? onExpandItem : undefined}
-                expandItemKey={compactHeader ? itemKey : undefined}
-              />
-            </React.Fragment>
-          );
-        }
-
-        const { message } = item;
-
-        // Compaction boundary — render as a divider instead of a regular message card
-        if (isCompactionMessage(message)) {
-          const messageKey = toMessageKey(message);
-          return (
-            <React.Fragment key={messageKey}>
-              {sessionSeparator}
-              <CompactionDivider message={message} />
-            </React.Fragment>
-          );
-        }
-
-        const renderProps = resolveMessageRenderProps(message, ctx);
-        const messageKey = toMessageKey(message);
-        const stableKey = messageKey;
-        const collapseProps = getItemCollapseProps(stableKey, realIndex);
-        const isUnread = readState
-          ? !message.read && !readState.readSet.has(readState.getMessageKey(message))
-          : !message.read;
-        return (
-          <React.Fragment key={messageKey}>
-            {sessionSeparator}
-            <MemoizedMessageRowWithObserver
-              message={message}
-              teamName={teamName}
-              memberRole={renderProps.memberRole}
-              memberColor={renderProps.memberColor}
-              recipientColor={renderProps.recipientColor}
-              isUnread={isUnread}
-              isNew={newItemKeys.has(messageKey)}
-              zebraShade={zebraShadeSet.has(realIndex)}
-              memberColorMap={colorMap}
-              localMemberNames={localMemberNames}
-              onMemberNameClick={onMemberClick ? handleMemberNameClick : undefined}
-              onCreateTask={onCreateTaskFromMessage}
-              onReply={onReplyToMessage}
-              onVisible={onMessageVisible}
-              onTaskIdClick={onTaskIdClick}
-              onRestartTeam={onRestartTeam}
-              collapseMode={collapseProps.collapseMode}
-              isCollapsed={collapseProps.isCollapsed}
-              canToggleCollapse={collapseProps.canToggleCollapse}
-              collapseToggleKey={collapseProps.collapseToggleKey}
-              onToggleCollapse={onToggleExpandOverride}
-              compactHeader={compactHeader}
-              teamNames={teamNames}
-              teamColorByName={teamColorByName}
-              onTeamClick={onTeamClick}
-              onExpand={compactHeader ? onExpandItem : undefined}
-              expandItemKey={compactHeader ? messageKey : undefined}
-              observerRoot={observerRoot}
-              onExpandContent={onExpandContent}
-            />
-          </React.Fragment>
-        );
-      })}
+      {renderRows.map((row) => renderTimelineRow(row))}
       {hiddenCount > 0 && (
         <div className="relative flex justify-center pb-3 pt-1">
           {/* Bottom-up shadow gradient: darkest at bottom edge, fades upward */}

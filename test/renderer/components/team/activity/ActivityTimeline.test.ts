@@ -289,6 +289,60 @@ describe('ActivityTimeline session separators', () => {
       root.unmount();
     });
   });
+
+  it('renders each separator distinctly when the same session transition repeats', async () => {
+    const warnSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const root = createRoot(container);
+    const messages: InboxMessage[] = [
+      makeMessage({
+        messageId: 'thought-b-2',
+        text: 'b second',
+        leadSessionId: 'lead-session-b',
+        from: 'team-lead',
+        source: 'lead_session',
+      }),
+      makeMessage({
+        messageId: 'thought-a-2',
+        text: 'a second',
+        leadSessionId: 'lead-session-a',
+        from: 'team-lead',
+        source: 'lead_session',
+      }),
+      makeMessage({
+        messageId: 'thought-b-1',
+        text: 'b first',
+        leadSessionId: 'lead-session-b',
+        from: 'team-lead',
+        source: 'lead_session',
+      }),
+      makeMessage({
+        messageId: 'thought-a-1',
+        text: 'a first',
+        leadSessionId: 'lead-session-a',
+        from: 'team-lead',
+        source: 'lead_session',
+      }),
+    ];
+
+    await act(async () => {
+      root.render(React.createElement(ActivityTimeline, { messages, teamName: 'demo-team' }));
+    });
+
+    // Three transitions: b→a, a→b, b→a. All three separators must render.
+    const matches = container.textContent?.match(/New session/g) ?? [];
+    expect(matches.length).toBe(3);
+
+    // React warns via `console.error` when duplicate keys are detected.
+    const duplicateKeyWarnings = warnSpy.mock.calls.filter((call) =>
+      String(call[0]).includes('unique "key"')
+    );
+    expect(duplicateKeyWarnings).toHaveLength(0);
+
+    warnSpy.mockRestore();
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });
 
 describe('ActivityTimeline viewport observerRoot', () => {
