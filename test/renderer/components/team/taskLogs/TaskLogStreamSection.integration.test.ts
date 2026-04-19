@@ -402,7 +402,7 @@ describe('TaskLogStreamSection integration', () => {
     expect(text).toContain('Task Log Stream');
     expect(text).toContain('Grep');
     expect(text).toContain('Edit');
-    expect(text).toContain('Claude');
+    expect(text).toContain('Agent');
     expect(text).toContain('3 tool calls');
     expect(text).not.toContain('[]');
     expect(text).not.toContain('Audit complete');

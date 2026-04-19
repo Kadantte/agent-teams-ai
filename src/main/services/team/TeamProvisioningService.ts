@@ -69,6 +69,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import pidusage from 'pidusage';
+import * as readline from 'readline';
 
 import {
   type GeminiRuntimeAuthState,
@@ -121,6 +122,7 @@ import { TeamMembersMetaStore } from './TeamMembersMetaStore';
 import { TeamMetaStore } from './TeamMetaStore';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskReader } from './TeamTaskReader';
+import { TeamTranscriptProjectResolver } from './TeamTranscriptProjectResolver';
 
 /**
  * Kill a team CLI process using SIGKILL (uncatchable).
@@ -2288,9 +2290,12 @@ function updateProgress(
   return run.progress;
 }
 
-function buildCombinedLogs(stdoutBuffer: string, stderrBuffer: string): string {
-  const stdoutTrimmed = stdoutBuffer.trim();
-  const stderrTrimmed = stderrBuffer.trim();
+function buildCombinedLogs(
+  stdoutBuffer: string | undefined,
+  stderrBuffer: string | undefined
+): string {
+  const stdoutTrimmed = (stdoutBuffer ?? '').trim();
+  const stderrTrimmed = (stderrBuffer ?? '').trim();
 
   if (stdoutTrimmed.length === 0 && stderrTrimmed.length === 0) {
     return '';
@@ -2370,7 +2375,10 @@ function normalizeRecordStringValues(value: unknown): Record<string, string> {
   );
 }
 
-function extractLogsTail(stdoutBuffer: string, stderrBuffer: string): string | undefined {
+function extractLogsTail(
+  stdoutBuffer: string | undefined,
+  stderrBuffer: string | undefined
+): string | undefined {
   const trimmed = buildCombinedLogs(stdoutBuffer, stderrBuffer).trim();
   if (trimmed.length === 0) {
     return undefined;
@@ -2392,14 +2400,97 @@ function extractLogsTail(stdoutBuffer: string, stderrBuffer: string): string | u
  * in provisioning before any output has been line-split).
  */
 function extractCliLogsFromRun(run: ProvisioningRun): string | undefined {
-  if (run.claudeLogLines.length > 0) {
-    const joined = run.claudeLogLines.join('\n').trim();
+  const claudeLogLines = Array.isArray(run.claudeLogLines) ? run.claudeLogLines : [];
+  if (claudeLogLines.length > 0) {
+    const joined = claudeLogLines.join('\n').trim();
     if (joined.length === 0) {
       return undefined;
     }
     return joined;
   }
   return extractLogsTail(run.stdoutBuffer, run.stderrBuffer);
+}
+
+interface RetainedClaudeLogsSnapshot {
+  lines: string[];
+  updatedAt?: string;
+}
+
+interface PersistedTranscriptClaudeLogsCacheEntry {
+  transcriptPath: string;
+  mtimeMs: number;
+  size: number;
+  snapshot: RetainedClaudeLogsSnapshot;
+}
+
+function buildRetainedClaudeLogsSnapshot(run: ProvisioningRun): RetainedClaudeLogsSnapshot | null {
+  const claudeLogLines = Array.isArray(run.claudeLogLines) ? run.claudeLogLines : [];
+  if (claudeLogLines.length > 0) {
+    return {
+      lines: [...claudeLogLines],
+      updatedAt: run.claudeLogsUpdatedAt,
+    };
+  }
+
+  const fallback = extractCliLogsFromRun(run);
+  if (!fallback) {
+    return null;
+  }
+
+  const lines = fallback
+    .split('\n')
+    .map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line))
+    .filter((line) => line.length > 0);
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  return {
+    lines,
+    updatedAt: run.claudeLogsUpdatedAt ?? run.progress.updatedAt,
+  };
+}
+
+function sliceClaudeLogs(
+  linesChronological: string[],
+  updatedAt: string | undefined,
+  query?: { offset?: number; limit?: number }
+): { lines: string[]; total: number; hasMore: boolean; updatedAt?: string } {
+  const offsetRaw = query?.offset ?? 0;
+  const limitRaw = query?.limit ?? 100;
+  const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, Math.floor(limitRaw))) : 100;
+
+  const total = linesChronological.length;
+  if (total === 0) {
+    return { lines: [], total: 0, hasMore: false, updatedAt };
+  }
+
+  const newestExclusive = Math.max(0, total - offset);
+  const oldestInclusive = Math.max(0, newestExclusive - limit);
+  const normalizeLine = (line: string): string => {
+    // Back-compat: older builds prefixed every line with "[stdout] " / "[stderr] "
+    if (line.startsWith('[stdout] ') && line !== '[stdout]') {
+      return line.slice('[stdout] '.length);
+    }
+    if (line.startsWith('[stderr] ') && line !== '[stderr]') {
+      return line.slice('[stderr] '.length);
+    }
+    return line;
+  };
+
+  const lines = linesChronological
+    .slice(oldestInclusive, newestExclusive)
+    .map(normalizeLine)
+    .toReversed();
+
+  return {
+    lines,
+    total,
+    hasMore: oldestInclusive > 0,
+    updatedAt,
+  };
 }
 
 /**
@@ -2532,6 +2623,11 @@ export class TeamProvisioningService {
   private readonly runs = new Map<string, ProvisioningRun>();
   private readonly provisioningRunByTeam = new Map<string, string>();
   private readonly aliveRunByTeam = new Map<string, string>();
+  private readonly retainedClaudeLogsByTeam = new Map<string, RetainedClaudeLogsSnapshot>();
+  private readonly persistedTranscriptClaudeLogsCache = new Map<
+    string,
+    PersistedTranscriptClaudeLogsCacheEntry
+  >();
   private readonly teamOpLocks = new Map<string, Promise<void>>();
   private readonly leadInboxRelayInFlight = new Map<string, Promise<number>>();
   private readonly relayedLeadInboxMessageIds = new Map<string, Set<string>>();
@@ -2554,6 +2650,7 @@ export class TeamProvisioningService {
   >();
   private readonly launchStateStore = new TeamLaunchStateStore();
   private readonly memberLogsFinder: TeamMemberLogsFinder;
+  private readonly transcriptProjectResolver: TeamTranscriptProjectResolver;
   private teamChangeEmitter: ((event: TeamChangeEvent) => void) | null = null;
   private helpOutputCache: string | null = null;
   private helpOutputCacheTime = 0;
@@ -2589,6 +2686,7 @@ export class TeamProvisioningService {
       this.inboxReader,
       this.membersMetaStore
     );
+    this.transcriptProjectResolver = new TeamTranscriptProjectResolver(this.configReader);
   }
 
   setCrossTeamSender(
@@ -2613,52 +2711,28 @@ export class TeamProvisioningService {
     this.controlApiBaseUrlResolver = resolver;
   }
 
-  getClaudeLogs(
+  async getClaudeLogs(
     teamName: string,
     query?: { offset?: number; limit?: number }
-  ): { lines: string[]; total: number; hasMore: boolean; updatedAt?: string } {
+  ): Promise<{ lines: string[]; total: number; hasMore: boolean; updatedAt?: string }> {
     const runId = this.getTrackedRunId(teamName);
-    if (!runId) {
-      return { lines: [], total: 0, hasMore: false };
-    }
-    const run = this.runs.get(runId);
-    if (!run) {
-      return { lines: [], total: 0, hasMore: false };
-    }
-
-    const offsetRaw = query?.offset ?? 0;
-    const limitRaw = query?.limit ?? 100;
-    const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
-    const limit = Number.isFinite(limitRaw)
-      ? Math.max(1, Math.min(1000, Math.floor(limitRaw)))
-      : 100;
-
-    const total = run.claudeLogLines.length;
-    if (total === 0) {
-      return { lines: [], total: 0, hasMore: false, updatedAt: run.claudeLogsUpdatedAt };
+    if (runId) {
+      const run = this.runs.get(runId);
+      if (run) {
+        return sliceClaudeLogs(run.claudeLogLines, run.claudeLogsUpdatedAt, query);
+      }
     }
 
-    const newestExclusive = Math.max(0, total - offset);
-    const oldestInclusive = Math.max(0, newestExclusive - limit);
-    const normalizeLine = (line: string): string => {
-      // Back-compat: older builds prefixed every line with "[stdout] " / "[stderr] "
-      if (line.startsWith('[stdout] ') && line !== '[stdout]')
-        return line.slice('[stdout] '.length);
-      if (line.startsWith('[stderr] ') && line !== '[stderr]')
-        return line.slice('[stderr] '.length);
-      return line;
-    };
+    const retained = this.retainedClaudeLogsByTeam.get(teamName);
+    if (!retained) {
+      const transcriptSnapshot = await this.getPersistedTranscriptClaudeLogs(teamName);
+      if (!transcriptSnapshot) {
+        return { lines: [], total: 0, hasMore: false };
+      }
+      return sliceClaudeLogs(transcriptSnapshot.lines, transcriptSnapshot.updatedAt, query);
+    }
 
-    const lines = run.claudeLogLines
-      .slice(oldestInclusive, newestExclusive)
-      .map(normalizeLine)
-      .toReversed();
-    return {
-      lines,
-      total,
-      hasMore: oldestInclusive > 0,
-      updatedAt: run.claudeLogsUpdatedAt,
-    };
+    return sliceClaudeLogs(retained.lines, retained.updatedAt, query);
   }
 
   private getProvisioningRunId(teamName: string): string | null {
@@ -2671,6 +2745,85 @@ export class TeamProvisioningService {
 
   private getTrackedRunId(teamName: string): string | null {
     return this.getProvisioningRunId(teamName) ?? this.getAliveRunId(teamName);
+  }
+
+  private async getPersistedTranscriptClaudeLogs(
+    teamName: string
+  ): Promise<RetainedClaudeLogsSnapshot | null> {
+    const context = await this.transcriptProjectResolver.getContext(teamName);
+    const leadSessionId =
+      typeof context?.config.leadSessionId === 'string' ? context.config.leadSessionId.trim() : '';
+    if (!context || leadSessionId.length === 0) {
+      this.persistedTranscriptClaudeLogsCache.delete(teamName);
+      return null;
+    }
+
+    const transcriptPath = path.join(context.projectDir, `${leadSessionId}.jsonl`);
+
+    let stat: fs.Stats;
+    try {
+      stat = await fs.promises.stat(transcriptPath);
+    } catch {
+      this.persistedTranscriptClaudeLogsCache.delete(teamName);
+      return null;
+    }
+
+    if (!stat.isFile()) {
+      this.persistedTranscriptClaudeLogsCache.delete(teamName);
+      return null;
+    }
+
+    const cached = this.persistedTranscriptClaudeLogsCache.get(teamName);
+    if (
+      cached &&
+      cached.transcriptPath === transcriptPath &&
+      cached.mtimeMs === stat.mtimeMs &&
+      cached.size === stat.size
+    ) {
+      return cached.snapshot;
+    }
+
+    const lines = await this.readTranscriptClaudeLogLines(transcriptPath);
+    if (lines.length === 0) {
+      this.persistedTranscriptClaudeLogsCache.delete(teamName);
+      return null;
+    }
+
+    const snapshot = {
+      lines,
+      updatedAt: stat.mtime.toISOString(),
+    };
+    this.persistedTranscriptClaudeLogsCache.set(teamName, {
+      transcriptPath,
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      snapshot,
+    });
+    return snapshot;
+  }
+
+  private async readTranscriptClaudeLogLines(filePath: string): Promise<string[]> {
+    const lines: string[] = [];
+    const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    try {
+      for await (const rawLine of rl) {
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+        if (!line.trim()) {
+          continue;
+        }
+        lines.push(line);
+        if (lines.length > TeamProvisioningService.CLAUDE_LOG_LINES_LIMIT) {
+          lines.splice(0, lines.length - TeamProvisioningService.CLAUDE_LOG_LINES_LIMIT);
+        }
+      }
+    } finally {
+      rl.close();
+      stream.close();
+    }
+
+    return lines;
   }
 
   private clearSameTeamRetryTimers(teamName: string): void {
@@ -2686,6 +2839,8 @@ export class TeamProvisioningService {
 
   private resetTeamScopedTransientStateForNewRun(teamName: string): void {
     peekAutoResumeService()?.cancelPendingAutoResume(teamName);
+    this.retainedClaudeLogsByTeam.delete(teamName);
+    this.persistedTranscriptClaudeLogsCache.delete(teamName);
     this.leadInboxRelayInFlight.delete(teamName);
     this.relayedLeadInboxMessageIds.delete(teamName);
     this.pendingCrossTeamFirstReplies.delete(teamName);
@@ -11481,6 +11636,7 @@ export class TeamProvisioningService {
   private cleanupRun(run: ProvisioningRun): void {
     const currentTrackedRunId = this.getTrackedRunId(run.teamName);
     const hasNewerTrackedRun = currentTrackedRunId !== null && currentTrackedRunId !== run.runId;
+    const retainedClaudeLogs = hasNewerTrackedRun ? null : buildRetainedClaudeLogsSnapshot(run);
 
     if (!hasNewerTrackedRun) {
       peekAutoResumeService()?.cancelPendingAutoResume(run.teamName);
@@ -11572,6 +11728,13 @@ export class TeamProvisioningService {
     if (run.bootstrapUserPromptPath) {
       void removeDeterministicBootstrapUserPromptFile(run.bootstrapUserPromptPath);
       run.bootstrapUserPromptPath = null;
+    }
+    if (!hasNewerTrackedRun) {
+      if (retainedClaudeLogs) {
+        this.retainedClaudeLogsByTeam.set(run.teamName, retainedClaudeLogs);
+      } else {
+        this.retainedClaudeLogsByTeam.delete(run.teamName);
+      }
     }
     // Remove from runs Map to free memory (stdoutBuffer, stderrBuffer, claudeLogLines)
     this.runs.delete(run.runId);
