@@ -100,6 +100,7 @@ function parseLaunchRequest(teamName: string, body: unknown): TeamLaunchRequest 
               throw new HttpBadRequestError('providerId must be anthropic, codex, or gemini');
             })();
   const prompt = assertOptionalString(payload.prompt, 'prompt');
+  const providerBackendId = assertOptionalString(payload.providerBackendId, 'providerBackendId');
   const model = assertOptionalString(payload.model, 'model');
   const effort = assertOptionalEffort(payload.effort);
   const clearContext = assertOptionalBoolean(payload.clearContext, 'clearContext');
@@ -111,6 +112,9 @@ function parseLaunchRequest(teamName: string, body: unknown): TeamLaunchRequest 
     teamName,
     cwd: assertAbsoluteCwd(payload.cwd),
     providerId,
+    ...(providerBackendId && {
+      providerBackendId,
+    }),
     ...(prompt && {
       prompt,
     }),

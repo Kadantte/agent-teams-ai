@@ -74,7 +74,8 @@ export class ProviderConnectionService {
 
   async applyConfiguredConnectionEnv(
     env: NodeJS.ProcessEnv,
-    providerId: CliProviderId
+    providerId: CliProviderId,
+    runtimeBackendOverride?: string | null
   ): Promise<NodeJS.ProcessEnv> {
     if (providerId === 'anthropic') {
       const authMode = this.getConfiguredAuthMode(providerId);
@@ -109,8 +110,8 @@ export class ProviderConnectionService {
     }
 
     const codexConnection = this.configManager.getConfig().providerConnections.codex;
-    const codexRuntimeBackend = this.getConfiguredCodexRuntimeBackend();
-    if (!this.shouldExposeCodexConnectionModes()) {
+    const codexRuntimeBackend = this.getConfiguredCodexRuntimeBackend(runtimeBackendOverride);
+    if (!this.shouldExposeCodexConnectionModes(runtimeBackendOverride)) {
       delete env[CODEX_API_KEY_BETA_ENV_VAR];
       delete env.OPENAI_API_KEY;
       delete env[CODEX_NATIVE_API_KEY_ENV_VAR];
@@ -172,7 +173,8 @@ export class ProviderConnectionService {
 
   async augmentConfiguredConnectionEnv(
     env: NodeJS.ProcessEnv,
-    providerId: CliProviderId
+    providerId: CliProviderId,
+    runtimeBackendOverride?: string | null
   ): Promise<NodeJS.ProcessEnv> {
     if (providerId === 'anthropic') {
       if (this.getConfiguredAuthMode(providerId) !== 'api_key') {
@@ -191,8 +193,8 @@ export class ProviderConnectionService {
     }
 
     const codexConnection = this.configManager.getConfig().providerConnections.codex;
-    const codexRuntimeBackend = this.getConfiguredCodexRuntimeBackend();
-    if (!this.shouldExposeCodexConnectionModes()) {
+    const codexRuntimeBackend = this.getConfiguredCodexRuntimeBackend(runtimeBackendOverride);
+    if (!this.shouldExposeCodexConnectionModes(runtimeBackendOverride)) {
       return env;
     }
 
@@ -248,7 +250,8 @@ export class ProviderConnectionService {
 
   async getConfiguredConnectionIssue(
     env: NodeJS.ProcessEnv,
-    providerId: CliProviderId
+    providerId: CliProviderId,
+    runtimeBackendOverride?: string | null
   ): Promise<string | null> {
     if (providerId === 'anthropic') {
       if (this.getConfiguredAuthMode(providerId) !== 'api_key') {
@@ -270,8 +273,11 @@ export class ProviderConnectionService {
     }
 
     const codexConnection = this.configManager.getConfig().providerConnections.codex;
-    const codexRuntimeBackend = this.getConfiguredCodexRuntimeBackend();
-    if (!this.shouldExposeCodexConnectionModes() || codexConnection.authMode !== 'api_key') {
+    const codexRuntimeBackend = this.getConfiguredCodexRuntimeBackend(runtimeBackendOverride);
+    if (
+      !this.shouldExposeCodexConnectionModes(runtimeBackendOverride) ||
+      codexConnection.authMode !== 'api_key'
+    ) {
       return null;
     }
 
@@ -294,12 +300,17 @@ export class ProviderConnectionService {
 
   async getConfiguredConnectionIssues(
     env: NodeJS.ProcessEnv,
-    providerIds: readonly CliProviderId[] = ['anthropic', 'codex', 'gemini']
+    providerIds: readonly CliProviderId[] = ['anthropic', 'codex', 'gemini'],
+    runtimeBackendOverrides?: Partial<Record<CliProviderId, string>>
   ): Promise<Partial<Record<CliProviderId, string>>> {
     const issues: Partial<Record<CliProviderId, string>> = {};
 
     for (const providerId of providerIds) {
-      const issue = await this.getConfiguredConnectionIssue(env, providerId);
+      const issue = await this.getConfiguredConnectionIssue(
+        env,
+        providerId,
+        runtimeBackendOverrides?.[providerId]
+      );
       if (issue) {
         issues[providerId] = issue;
       }
@@ -369,15 +380,25 @@ export class ProviderConnectionService {
     return this.apiKeyService.lookupPreferred(envVarName);
   }
 
-  private getConfiguredCodexRuntimeBackend(): 'auto' | 'adapter' | 'api' | 'codex-native' {
+  private getConfiguredCodexRuntimeBackend(
+    runtimeBackendOverride?: string | null
+  ): 'auto' | 'adapter' | 'api' | 'codex-native' {
+    if (
+      runtimeBackendOverride === 'auto' ||
+      runtimeBackendOverride === 'adapter' ||
+      runtimeBackendOverride === 'api' ||
+      runtimeBackendOverride === CODEX_NATIVE_BACKEND_ID
+    ) {
+      return runtimeBackendOverride;
+    }
     return this.configManager.getConfig().runtime.providerBackends.codex;
   }
 
-  private shouldExposeCodexConnectionModes(): boolean {
+  private shouldExposeCodexConnectionModes(runtimeBackendOverride?: string | null): boolean {
     const config = this.configManager.getConfig();
     return (
       config.providerConnections.codex.apiKeyBetaEnabled ||
-      config.runtime.providerBackends.codex === CODEX_NATIVE_BACKEND_ID
+      this.getConfiguredCodexRuntimeBackend(runtimeBackendOverride) === CODEX_NATIVE_BACKEND_ID
     );
   }
 

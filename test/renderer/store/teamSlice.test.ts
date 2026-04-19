@@ -2934,6 +2934,49 @@ describe('teamSlice actions', () => {
   });
 
   describe('provisioning run scoping', () => {
+    it('persists providerBackendId into createTeam launch params', async () => {
+      const store = createSliceStore();
+
+      await store.getState().createTeam({
+        teamName: 'my-team',
+        cwd: '/tmp/project',
+        members: [],
+        providerId: 'codex',
+        providerBackendId: 'codex-native',
+        model: 'gpt-5.4',
+        effort: 'medium',
+      });
+
+      expect(store.getState().launchParamsByTeam['my-team']).toEqual({
+        providerId: 'codex',
+        providerBackendId: 'codex-native',
+        model: 'gpt-5.4',
+        effort: 'medium',
+        limitContext: false,
+      });
+    });
+
+    it('persists providerBackendId into launchTeam launch params', async () => {
+      const store = createSliceStore();
+
+      await store.getState().launchTeam({
+        teamName: 'my-team',
+        cwd: '/tmp/project',
+        providerId: 'codex',
+        providerBackendId: 'codex-native',
+        model: 'gpt-5.4',
+        effort: 'medium',
+      });
+
+      expect(store.getState().launchParamsByTeam['my-team']).toEqual({
+        providerId: 'codex',
+        providerBackendId: 'codex-native',
+        model: 'gpt-5.4',
+        effort: 'medium',
+        limitContext: false,
+      });
+    });
+
     it('rolls back optimistic pending run on early createTeam failure', async () => {
       const store = createSliceStore();
       hoisted.createTeam.mockRejectedValue(new Error('create failed'));

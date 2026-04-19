@@ -408,7 +408,7 @@ function mergeProvisioningWarnings(
 }
 
 function buildRuntimeLaunchWarning(
-  request: Pick<TeamCreateRequest, 'providerId' | 'model' | 'effort'>,
+  request: Pick<TeamCreateRequest, 'providerId' | 'providerBackendId' | 'model' | 'effort'>,
   env: NodeJS.ProcessEnv,
   options?: {
     geminiRuntimeAuth?: GeminiRuntimeAuthState | null;
@@ -420,7 +420,7 @@ function buildRuntimeLaunchWarning(
   const providerLabel = getTeamProviderLabel(providerId);
   const modelLabel = request.model?.trim() || 'default';
   const effortLabel = request.effort ?? 'default';
-  const backend = getConfiguredRuntimeBackend(providerId);
+  const backend = request.providerBackendId?.trim() || getConfiguredRuntimeBackend(providerId);
   const flags: string[] = [];
   if (env.CLAUDE_CODE_USE_GEMINI === '1') flags.push('USE_GEMINI');
   if (env.CLAUDE_CODE_USE_OPENAI === '1') flags.push('USE_OPENAI');
@@ -455,7 +455,7 @@ function logRuntimeLaunchSnapshot(
   teamName: string,
   claudePath: string,
   args: string[],
-  request: Pick<TeamCreateRequest, 'providerId' | 'model' | 'effort'>,
+  request: Pick<TeamCreateRequest, 'providerId' | 'providerBackendId' | 'model' | 'effort'>,
   env: NodeJS.ProcessEnv,
   options?: {
     geminiRuntimeAuth?: GeminiRuntimeAuthState | null;
@@ -466,9 +466,10 @@ function logRuntimeLaunchSnapshot(
   const providerId = resolveTeamProviderId(request.providerId);
   const snapshot = {
     providerId,
+    providerBackendId: request.providerBackendId ?? null,
     model: request.model ?? null,
     effort: request.effort ?? null,
-    configuredBackend: getConfiguredRuntimeBackend(providerId),
+    configuredBackend: request.providerBackendId?.trim() || getConfiguredRuntimeBackend(providerId),
     promptSize: options?.promptSize ?? null,
     expectedMembersCount: options?.expectedMembersCount ?? null,
     geminiRuntimeAuth:
@@ -1149,12 +1150,22 @@ function buildEffectiveTeamMemberSpecs(
 }
 
 function shouldSkipResumeForProviderRuntimeChange(
-  request: Pick<TeamLaunchRequest, 'providerId' | 'model'>,
-  config: Record<string, unknown>
+  request: Pick<TeamLaunchRequest, 'providerId' | 'providerBackendId' | 'model'>,
+  config: Record<string, unknown>,
+  persistedProviderBackendId?: string | null
 ): { skip: boolean; reason?: string } {
   const providerId = normalizeTeamMemberProviderId(request.providerId);
   if (providerId !== 'gemini' && providerId !== 'codex') {
     return { skip: false };
+  }
+
+  const requestedBackendId = request.providerBackendId?.trim() || null;
+  const previousBackendId = persistedProviderBackendId?.trim() || null;
+  if (requestedBackendId && previousBackendId && requestedBackendId !== previousBackendId) {
+    return {
+      skip: true,
+      reason: `runtime backend changed (${previousBackendId} -> ${requestedBackendId})`,
+    };
   }
 
   const members = Array.isArray(config.members)
@@ -4193,6 +4204,7 @@ export class TeamProvisioningService {
     const updatedAt = nowIso();
     const runId = this.getTrackedRunId(teamName);
     const run = runId ? (this.runs.get(runId) ?? null) : null;
+    const persistedTeamMeta = await this.teamMetaStore.getMeta(teamName).catch(() => null);
 
     let configuredMembers: TeamConfig['members'] = [];
     try {
@@ -4294,6 +4306,7 @@ export class TeamProvisioningService {
       teamName,
       updatedAt,
       runId: run?.runId ?? null,
+      providerBackendId: run?.request.providerBackendId ?? persistedTeamMeta?.providerBackendId,
       members: snapshotMembers,
     };
 
@@ -5838,7 +5851,10 @@ export class TeamProvisioningService {
         throw new Error('Claude CLI not found; install it or provide a valid path');
       }
 
-      const provisioningEnv = await this.buildProvisioningEnv(request.providerId);
+      const provisioningEnv = await this.buildProvisioningEnv(
+        request.providerId,
+        request.providerBackendId
+      );
       const { env: shellEnv, geminiRuntimeAuth, warning: envWarning } = provisioningEnv;
       if (envWarning) {
         throw new Error(envWarning);
@@ -6042,6 +6058,7 @@ export class TeamProvisioningService {
           cwd: request.cwd,
           prompt: request.prompt,
           providerId: request.providerId,
+          providerBackendId: request.providerBackendId,
           model: request.model,
           effort: request.effort,
           skipPermissions: request.skipPermissions,
@@ -6065,7 +6082,10 @@ export class TeamProvisioningService {
             agentType: 'general-purpose' as const,
             color: getMemberColorByName(m.name.trim()),
             joinedAt: Date.now(),
-          }))
+          })),
+          {
+            providerBackendId: request.providerBackendId,
+          }
         );
         if (request.skipPermissions === false) {
           await this.seedTeammateOperationalPermissionRules(request.teamName, request.cwd);
@@ -6310,7 +6330,14 @@ export class TeamProvisioningService {
       if (!skipResume) {
         try {
           const configParsed = JSON.parse(configRaw) as Record<string, unknown>;
-          const resumeGuard = shouldSkipResumeForProviderRuntimeChange(request, configParsed);
+          const persistedTeamMeta = await this.teamMetaStore
+            .getMeta(request.teamName)
+            .catch(() => null);
+          const resumeGuard = shouldSkipResumeForProviderRuntimeChange(
+            request,
+            configParsed,
+            persistedTeamMeta?.providerBackendId ?? null
+          );
           if (resumeGuard.skip) {
             logger.info(
               `[${request.teamName}] Skipping session resume — ${resumeGuard.reason ?? 'runtime changed'}`
@@ -6395,7 +6422,10 @@ export class TeamProvisioningService {
       const runId = randomUUID();
       const startedAt = nowIso();
 
-      const provisioningEnv = await this.buildProvisioningEnv(request.providerId);
+      const provisioningEnv = await this.buildProvisioningEnv(
+        request.providerId,
+        request.providerBackendId
+      );
       const { env: shellEnv, geminiRuntimeAuth, warning: envWarning } = provisioningEnv;
       if (envWarning) {
         throw new Error(envWarning);
@@ -6421,6 +6451,7 @@ export class TeamProvisioningService {
         members: effectiveMemberSpecs,
         cwd: request.cwd,
         providerId: request.providerId,
+        providerBackendId: request.providerBackendId,
         model: request.model,
         effort: request.effort,
         skipPermissions: request.skipPermissions,
@@ -6643,6 +6674,42 @@ export class TeamProvisioningService {
       });
       // --resume is added above when a valid previous session JSONL exists.
       // Without it, CLI creates a fresh session ID automatically.
+      await this.teamMetaStore.writeMeta(request.teamName, {
+        displayName: syntheticRequest.displayName,
+        description: syntheticRequest.description,
+        color: syntheticRequest.color,
+        cwd: request.cwd,
+        prompt: request.prompt,
+        providerId: request.providerId,
+        providerBackendId: request.providerBackendId,
+        model: request.model,
+        effort: request.effort,
+        skipPermissions: request.skipPermissions,
+        worktree: request.worktree,
+        extraCliArgs: request.extraCliArgs,
+        limitContext: request.limitContext,
+        createdAt: Date.now(),
+      });
+      await this.membersMetaStore.writeMembers(
+        request.teamName,
+        effectiveMemberSpecs.map((member) => ({
+          name: member.name.trim(),
+          role: member.role?.trim() || undefined,
+          workflow: member.workflow?.trim() || undefined,
+          providerId: normalizeOptionalTeamProviderId(member.providerId),
+          model: member.model?.trim() || undefined,
+          effort:
+            member.effort === 'low' || member.effort === 'medium' || member.effort === 'high'
+              ? member.effort
+              : undefined,
+          agentType: 'general-purpose',
+          color: getMemberColorByName(member.name.trim()),
+          joinedAt: Date.now(),
+        })),
+        {
+          providerBackendId: request.providerBackendId,
+        }
+      );
 
       try {
         if (request.skipPermissions === false) {
@@ -11253,9 +11320,6 @@ export class TeamProvisioningService {
       }
     );
 
-    // Clean up team.meta.json — provisioning succeeded, config.json is now authoritative.
-    await this.teamMetaStore.deleteMeta(run.teamName).catch(() => {});
-
     // Audit: flag any expected member not registered in config.json after provisioning.
     await this.refreshMemberSpawnStatusesFromLeadInbox(run);
     await this.maybeAuditMemberSpawnStatuses(run, { force: true });
@@ -12182,7 +12246,8 @@ export class TeamProvisioningService {
   }
 
   private async buildProvisioningEnv(
-    providerId: TeamProviderId | undefined = 'anthropic'
+    providerId: TeamProviderId | undefined = 'anthropic',
+    providerBackendId?: string | null
   ): Promise<ProvisioningEnvResolution> {
     const shellEnv = await resolveInteractiveShellEnv();
     // getHomeDir() uses Electron's app.getPath('home') which handles Unicode
@@ -12228,6 +12293,7 @@ export class TeamProvisioningService {
     const resolvedProviderId = resolveTeamProviderId(providerId);
     const providerEnvResult = await buildProviderAwareCliEnv({
       providerId,
+      providerBackendId,
       shellEnv,
       env,
     });
@@ -13059,7 +13125,10 @@ export class TeamProvisioningService {
           agentType: 'general-purpose',
           color: getMemberColorByName(member.name.trim()),
           joinedAt,
-        }))
+        })),
+        {
+          providerBackendId: request.providerBackendId,
+        }
       );
     } catch (error) {
       logger.warn(

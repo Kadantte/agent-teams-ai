@@ -2319,6 +2319,7 @@ export class TeamDataService {
       description: request.description,
       color: request.color,
       cwd: request.cwd?.trim() || '',
+      providerBackendId: request.providerBackendId,
       createdAt: joinedAt,
     });
 
@@ -2349,7 +2350,10 @@ export class TeamDataService {
         agentType: 'general-purpose',
         color: getMemberColorByName(member.name.trim()),
         joinedAt,
-      }))
+      })),
+      {
+        providerBackendId: request.providerBackendId,
+      }
     );
   }
 

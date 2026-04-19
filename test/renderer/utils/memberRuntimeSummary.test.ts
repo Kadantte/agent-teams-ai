@@ -80,4 +80,22 @@ describe('resolveMemberRuntimeSummary', () => {
       '5.4 Mini · Medium · 256.0 MB'
     );
   });
+
+  it('keeps the persisted backend lane visible in the runtime summary', () => {
+    const member = createMember({ model: 'gpt-5.4-mini' });
+
+    expect(
+      resolveMemberRuntimeSummary(
+        member,
+        {
+          providerId: 'codex',
+          providerBackendId: 'codex-native',
+          model: 'gpt-5.4-mini',
+          effort: 'medium',
+          limitContext: false,
+        },
+        undefined
+      )
+    ).toBe('5.4 Mini · Medium · Codex native');
+  });
 });

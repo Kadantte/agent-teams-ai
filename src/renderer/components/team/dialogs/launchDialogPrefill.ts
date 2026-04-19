@@ -8,6 +8,7 @@ import type { ResolvedTeamMember, TeamCreateRequest, TeamProviderId } from '@sha
 
 interface PreviousLaunchParamsLike {
   providerId?: TeamProviderId;
+  providerBackendId?: string;
   model?: string;
   effort?: string;
   limitContext?: boolean;
@@ -26,6 +27,7 @@ interface LaunchDialogPrefillInput {
 
 interface LaunchDialogPrefillResult {
   providerId: TeamProviderId;
+  providerBackendId?: string;
   model: string;
   effort: string;
   limitContext: boolean;
@@ -101,6 +103,10 @@ export function resolveLaunchDialogPrefill({
 
   return {
     providerId,
+    providerBackendId:
+      previousLaunchParams?.providerBackendId?.trim() ||
+      savedRequest?.providerBackendId?.trim() ||
+      undefined,
     model: matchingModel
       ? normalizeExplicitTeamModelForUi(providerId, matchingModel)
       : getStoredModel(providerId),

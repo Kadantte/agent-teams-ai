@@ -19,6 +19,7 @@ export interface TeamMetaFile {
   cwd: string;
   prompt?: string;
   providerId?: 'anthropic' | 'codex' | 'gemini';
+  providerBackendId?: string;
   model?: string;
   effort?: string;
   skipPermissions?: boolean;
@@ -29,6 +30,14 @@ export interface TeamMetaFile {
 }
 
 const MAX_META_FILE_BYTES = 256 * 1024;
+
+function normalizeOptionalBackendId(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
 
 export class TeamMetaStore {
   private getMetaPath(teamName: string): string {
@@ -89,6 +98,7 @@ export class TeamMetaStore {
         file.providerId === 'gemini'
           ? file.providerId
           : undefined,
+      providerBackendId: normalizeOptionalBackendId(file.providerBackendId),
       model: typeof file.model === 'string' ? file.model.trim() || undefined : undefined,
       effort: typeof file.effort === 'string' ? file.effort.trim() || undefined : undefined,
       skipPermissions: typeof file.skipPermissions === 'boolean' ? file.skipPermissions : undefined,
@@ -109,6 +119,7 @@ export class TeamMetaStore {
       cwd: data.cwd.trim(),
       prompt: data.prompt?.trim() || undefined,
       providerId: data.providerId,
+      providerBackendId: normalizeOptionalBackendId(data.providerBackendId),
       model: data.model?.trim() || undefined,
       effort: data.effort?.trim() || undefined,
       skipPermissions: data.skipPermissions,

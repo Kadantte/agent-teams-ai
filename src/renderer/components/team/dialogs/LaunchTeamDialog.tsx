@@ -45,6 +45,7 @@ import {
   normalizeCreateLaunchProviderForUi,
 } from '@renderer/utils/geminiUiFreeze';
 import { normalizePath } from '@renderer/utils/pathNormalize';
+import { resolveEffectiveProviderBackendId } from '@renderer/utils/providerBackendIdentity';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import {
   getTeamModelSelectionError,
@@ -319,6 +320,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   );
   const members = isLaunch ? props.members : storeMembers;
   const [savedLaunchProviderId, setSavedLaunchProviderId] = useState<TeamProviderId | null>(null);
+  const [savedLaunchProviderBackendId, setSavedLaunchProviderBackendId] = useState<string | null>(
+    null
+  );
 
   // Advanced CLI section state (with localStorage persistence)
   const [worktreeEnabled, setWorktreeEnabledRaw] = useState(
@@ -623,6 +627,11 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
           : savedRequest?.providerId === 'anthropic'
             ? 'anthropic'
             : null;
+      const savedProviderBackendId =
+        typeof savedRequest?.providerBackendId === 'string' &&
+        savedRequest.providerBackendId.trim().length > 0
+          ? savedRequest.providerBackendId.trim()
+          : null;
       const storedProviderId = normalizeProviderForMode(getStoredTeamProvider(), multimodelEnabled);
       const launchPrefill = resolveLaunchDialogPrefill({
         members,
@@ -635,6 +644,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         getStoredModel: getStoredTeamModel,
       });
       setSavedLaunchProviderId(savedProviderId);
+      setSavedLaunchProviderBackendId(
+        launchPrefill.providerBackendId ?? savedProviderBackendId ?? null
+      );
 
       setMembersDrafts(
         createMemberDraftsFromInputs(editableMembersSource).map((member) =>
@@ -1390,6 +1402,13 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             cwd: effectiveCwd,
             prompt: promptDraft.value.trim() || undefined,
             providerId: selectedProviderId,
+            providerBackendId:
+              resolveEffectiveProviderBackendId(
+                runtimeProviderStatusById.get(selectedProviderId)
+              ) ??
+              previousLaunchParams?.providerBackendId ??
+              savedLaunchProviderBackendId ??
+              undefined,
             model: computeEffectiveTeamModel(selectedModel, limitContext, selectedProviderId),
             effort: (selectedEffort as EffortLevel) || undefined,
             limitContext,

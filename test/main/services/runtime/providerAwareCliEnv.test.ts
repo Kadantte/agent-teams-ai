@@ -98,7 +98,8 @@ describe('buildProviderAwareCliEnv', () => {
         CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
         CLAUDE_CODE_ENTRY_PROVIDER: 'anthropic',
       }),
-      'anthropic'
+      'anthropic',
+      undefined
     );
     expect(result.connectionIssues).toEqual({
       anthropic: 'missing key',
@@ -163,7 +164,8 @@ describe('buildProviderAwareCliEnv', () => {
         HOME: '/Users/electron-home',
         USERPROFILE: '/Users/electron-home',
       }),
-      'anthropic'
+      'anthropic',
+      undefined
     );
     expect(result.env.HOME).toBe('/Users/electron-home');
     expect(result.env.USERPROFILE).toBe('/Users/electron-home');
@@ -208,7 +210,8 @@ describe('buildProviderAwareCliEnv', () => {
         CLAUDE_CODE_CODEX_BACKEND: 'adapter',
         CLAUDE_CODE_CODEX_NATIVE_INTERNAL_UNLOCK: '1',
       }),
-      'codex'
+      'codex',
+      undefined
     );
     expect(result.env.CLAUDE_CODE_CODEX_NATIVE_INTERNAL_UNLOCK).toBe('1');
   });

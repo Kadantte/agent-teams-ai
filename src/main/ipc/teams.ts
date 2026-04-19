@@ -1126,6 +1126,25 @@ function parseOptionalMemberProviderId(
   return { valid: false, error: 'member providerId must be anthropic, codex, or gemini' };
 }
 
+function parseOptionalProviderBackendId(
+  value: unknown
+): { valid: true; value: string | undefined } | { valid: false; error: string } {
+  if (value === undefined || value === null || value === '') {
+    return { valid: true, value: undefined };
+  }
+  if (typeof value !== 'string') {
+    return { valid: false, error: 'providerBackendId must be a string' };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { valid: true, value: undefined };
+  }
+  if (trimmed.length > 64) {
+    return { valid: false, error: 'providerBackendId too long (max 64)' };
+  }
+  return { valid: true, value: trimmed };
+}
+
 function parseOptionalMemberEffort(
   value: unknown
 ): { valid: true; value: EffortLevel | undefined } | { valid: false; error: string } {
@@ -1219,6 +1238,10 @@ async function validateProvisioningRequest(
   if (payload.prompt !== undefined && typeof payload.prompt !== 'string') {
     return { valid: false, error: 'prompt must be a string' };
   }
+  const providerBackendValidation = parseOptionalProviderBackendId(payload.providerBackendId);
+  if (!providerBackendValidation.valid) {
+    return { valid: false, error: providerBackendValidation.error };
+  }
 
   try {
     await fs.promises.mkdir(cwd, { recursive: true });
@@ -1276,6 +1299,7 @@ async function validateProvisioningRequest(
           : payload.providerId === 'gemini'
             ? 'gemini'
             : 'anthropic',
+      providerBackendId: providerBackendValidation.value,
       model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
       effort: isValidEffort(payload.effort) ? payload.effort : undefined,
       skipPermissions:
@@ -1385,6 +1409,10 @@ async function handleLaunchTeam(
   if (payload.model !== undefined && typeof payload.model !== 'string') {
     return { success: false, error: 'model must be a string' };
   }
+  const providerBackendValidation = parseOptionalProviderBackendId(payload.providerBackendId);
+  if (!providerBackendValidation.valid) {
+    return { success: false, error: providerBackendValidation.error };
+  }
 
   // Detect draft team: team.meta.json exists but config.json doesn't.
   // This happens when user created team config without launching (launchTeam=false),
@@ -1403,7 +1431,8 @@ async function handleLaunchTeam(
   if (isDraft) {
     const meta = await teamMetaStore.getMeta(tn);
     const membersStore = new TeamMembersMetaStore();
-    const members = await membersStore.getMembers(tn);
+    const membersMeta = await membersStore.getMeta(tn);
+    const members = membersMeta?.members ?? [];
 
     const createRequest: TeamCreateRequest = {
       teamName: tn,
@@ -1422,6 +1451,10 @@ async function handleLaunchTeam(
               : meta?.providerId === 'gemini'
                 ? 'gemini'
                 : 'anthropic',
+      providerBackendId:
+        providerBackendValidation.value ??
+        meta?.providerBackendId ??
+        membersMeta?.providerBackendId,
       model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
       effort: isValidEffort(payload.effort) ? payload.effort : undefined,
       limitContext: typeof payload.limitContext === 'boolean' ? payload.limitContext : undefined,
@@ -1468,6 +1501,7 @@ async function handleLaunchTeam(
             : payload.providerId === 'gemini'
               ? 'gemini'
               : 'anthropic',
+        providerBackendId: providerBackendValidation.value,
         model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
         effort: isValidEffort(payload.effort) ? payload.effort : undefined,
         clearContext: payload.clearContext === true ? true : undefined,
@@ -2552,6 +2586,10 @@ async function handleCreateConfig(
       return { success: false, error: 'cwd must be an absolute path' };
     }
   }
+  const providerBackendValidation = parseOptionalProviderBackendId(payload.providerBackendId);
+  if (!providerBackendValidation.valid) {
+    return { success: false, error: providerBackendValidation.error };
+  }
 
   const seenNames = new Set<string>();
   const members: TeamCreateConfigRequest['members'] = [];
@@ -2609,6 +2647,7 @@ async function handleCreateConfig(
       color: typeof payload.color === 'string' ? payload.color.trim() || undefined : undefined,
       members,
       cwd: typeof payload.cwd === 'string' ? payload.cwd.trim() || undefined : undefined,
+      providerBackendId: providerBackendValidation.value,
     })
   );
 }
@@ -3884,7 +3923,8 @@ async function handleGetSavedRequest(
   }
 
   const membersStore = new TeamMembersMetaStore();
-  const members = await membersStore.getMembers(tn);
+  const membersMeta = await membersStore.getMeta(tn);
+  const members = membersMeta?.members ?? [];
 
   return {
     success: true,
@@ -3896,6 +3936,7 @@ async function handleGetSavedRequest(
       cwd: meta.cwd,
       prompt: meta.prompt,
       providerId: meta.providerId ?? 'anthropic',
+      providerBackendId: meta.providerBackendId ?? membersMeta?.providerBackendId,
       model: meta.model,
       effort: meta.effort as TeamCreateRequest['effort'],
       skipPermissions: meta.skipPermissions,

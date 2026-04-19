@@ -17,6 +17,7 @@ type ProviderEnvTargetId = CliProviderId | TeamProviderId | undefined;
 export interface ProviderAwareCliEnvOptions {
   binaryPath?: string | null;
   providerId?: ProviderEnvTargetId;
+  providerBackendId?: string | null;
   shellEnv?: NodeJS.ProcessEnv | null;
   env?: NodeJS.ProcessEnv;
   connectionMode?: 'strict' | 'augment';
@@ -71,21 +72,39 @@ export async function buildProviderAwareCliEnv(
   if (options.providerId) {
     const resolvedProviderId = resolveTeamProviderId(options.providerId);
     applyProviderRuntimeEnv(env, options.providerId);
+    if (resolvedProviderId === 'codex' && options.providerBackendId?.trim()) {
+      env.CLAUDE_CODE_CODEX_BACKEND = options.providerBackendId.trim();
+    }
+    if (resolvedProviderId === 'gemini' && options.providerBackendId?.trim()) {
+      env.CLAUDE_CODE_GEMINI_BACKEND = options.providerBackendId.trim();
+    }
     if (connectionMode === 'augment') {
-      await providerConnectionService.augmentConfiguredConnectionEnv(env, resolvedProviderId);
+      await providerConnectionService.augmentConfiguredConnectionEnv(
+        env,
+        resolvedProviderId,
+        options.providerBackendId
+      );
       return {
         env,
         connectionIssues: {},
       };
     }
 
-    await providerConnectionService.applyConfiguredConnectionEnv(env, resolvedProviderId);
+    await providerConnectionService.applyConfiguredConnectionEnv(
+      env,
+      resolvedProviderId,
+      options.providerBackendId
+    );
 
     return {
       env,
-      connectionIssues: await providerConnectionService.getConfiguredConnectionIssues(env, [
-        resolvedProviderId,
-      ]),
+      connectionIssues: await providerConnectionService.getConfiguredConnectionIssues(
+        env,
+        [resolvedProviderId],
+        resolvedProviderId === 'codex' || resolvedProviderId === 'gemini'
+          ? { [resolvedProviderId]: options.providerBackendId?.trim() || undefined }
+          : undefined
+      ),
     };
   }
 

@@ -442,6 +442,50 @@ describe('TeamProvisioningService', () => {
       });
     });
 
+    it('exposes providerBackendId from the live run request when available', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+        })),
+      };
+      (svc as any).teamMetaStore = {
+        getMeta: vi.fn(async () => ({ providerBackendId: 'adapter' })),
+      };
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4', providerBackendId: 'codex-native' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 123_000_000),
+      } as any);
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(snapshot.providerBackendId).toBe('codex-native');
+    });
+
+    it('falls back to persisted team meta backend when no live run exists', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+        })),
+      };
+      (svc as any).teamMetaStore = {
+        getMeta: vi.fn(async () => ({ providerBackendId: 'codex-native' })),
+      };
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(snapshot.providerBackendId).toBe('codex-native');
+    });
+
     it('falls back to per-pid pidusage reads when batched sampling fails', async () => {
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
@@ -967,6 +1011,63 @@ describe('TeamProvisioningService', () => {
     const launchArgs = vi.mocked(spawnCli).mock.calls[0]?.[1] as string[];
     expect(launchArgs).toContain('--resume');
     expect(launchArgs).toContain(leadSessionId);
+  });
+
+  it('skips --resume when the persisted runtime backend lane changed', async () => {
+    allowConsoleLogs();
+    const teamName = 'resume-backend-change-team';
+    const leadSessionId = 'lead-session-backend-change';
+    writeLaunchConfig(teamName, tempClaudeRoot, leadSessionId, ['alice']);
+
+    vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+    vi.mocked(spawnCli).mockImplementation(() => {
+      throw new Error('launch spawn EINVAL');
+    });
+
+    const svc = new TeamProvisioningService(undefined, undefined, undefined, undefined, {
+      writeConfigFile: vi.fn(async () => '/mock/mcp-config-launch.json'),
+      removeConfigFile: vi.fn(async () => {}),
+    } as any);
+    (svc as any).buildProvisioningEnv = vi.fn(async () => ({
+      env: { CODEX_API_KEY: 'test' },
+      authSource: 'codex_runtime',
+    }));
+    (svc as any).resolveLaunchExpectedMembers = vi.fn(async () => ({
+      members: [{ name: 'alice' }],
+      source: 'members-meta',
+      warning: undefined,
+    }));
+    (svc as any).normalizeTeamConfigForLaunch = vi.fn(async () => {});
+    (svc as any).assertConfigLeadOnlyForLaunch = vi.fn(async () => {});
+    (svc as any).updateConfigProjectPath = vi.fn(async () => {});
+    (svc as any).restorePrelaunchConfig = vi.fn(async () => {});
+    (svc as any).validateAgentTeamsMcpRuntime = vi.fn(async () => {});
+    (svc as any).pathExists = vi.fn(async (targetPath: string) =>
+      targetPath.endsWith(`${leadSessionId}.jsonl`)
+    );
+    (svc as any).teamMetaStore = {
+      getMeta: vi.fn(async () => ({ providerBackendId: 'adapter' })),
+      writeMeta: vi.fn(async () => {}),
+      deleteMeta: vi.fn(async () => {}),
+    };
+
+    await expect(
+      svc.launchTeam(
+        {
+          teamName,
+          cwd: tempClaudeRoot,
+          providerId: 'codex',
+          providerBackendId: 'codex-native',
+          model: 'gpt-5.4',
+        },
+        () => {}
+      )
+    ).rejects.toThrow('launch spawn EINVAL');
+
+    const launchArgs = vi.mocked(spawnCli).mock.calls.at(-1)?.[1] as string[];
+    expect(launchArgs).toBeTruthy();
+    expect(launchArgs).not.toContain('--resume');
+    expect(launchArgs).not.toContain(leadSessionId);
   });
 
   it('seeds the current lead session id immediately when launch resumes an existing session', async () => {
