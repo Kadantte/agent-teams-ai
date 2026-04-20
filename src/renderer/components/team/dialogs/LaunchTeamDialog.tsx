@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  mergeCodexCliStatusWithSnapshot,
+  useCodexAccountSnapshot,
+} from '@features/codex-account/renderer';
 import { api } from '@renderer/api';
 import { SkipPermissionsCheckbox } from '@renderer/components/team/dialogs/SkipPermissionsCheckbox';
 import {
@@ -36,6 +40,7 @@ import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { useStore } from '@renderer/store';
+import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import {
   isTeamProvisioningActive,
   selectResolvedMembersForTeamName,
@@ -45,6 +50,8 @@ import {
   normalizeCreateLaunchProviderForUi,
 } from '@renderer/utils/geminiUiFreeze';
 import { normalizePath } from '@renderer/utils/pathNormalize';
+import { resolveUiOwnedProviderBackendId } from '@renderer/utils/providerBackendIdentity';
+import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import {
   getTeamModelSelectionError,
@@ -248,9 +255,27 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const multimodelEnabled = useStore((s) => s.appConfig?.general?.multimodelEnabled ?? true);
   const cliStatus = useStore((s) => s.cliStatus);
   const cliStatusLoading = useStore((s) => s.cliStatusLoading);
+  const bootstrapCliStatus = useStore((s) => s.bootstrapCliStatus);
   const fetchCliStatus = useStore((s) => s.fetchCliStatus);
   const isLaunchMode = props.mode === 'launch' || props.mode === 'relaunch';
   const isRelaunch = props.mode === 'relaunch';
+  const loadingCliStatus = useMemo(
+    () =>
+      !cliStatus && cliStatusLoading && multimodelEnabled
+        ? createLoadingMultimodelCliStatus()
+        : cliStatus,
+    [cliStatus, cliStatusLoading, multimodelEnabled]
+  );
+  const codexAccount = useCodexAccountSnapshot({
+    enabled:
+      multimodelEnabled &&
+      loadingCliStatus?.flavor === 'agent_teams_orchestrator' &&
+      Boolean(loadingCliStatus?.providers.some((provider) => provider.providerId === 'codex')),
+  });
+  const effectiveCliStatus = useMemo(
+    () => mergeCodexCliStatusWithSnapshot(loadingCliStatus, codexAccount.snapshot),
+    [loadingCliStatus, codexAccount.snapshot]
+  );
   const isSchedule = props.mode === 'schedule';
   const schedule = isSchedule ? (props.schedule ?? null) : null;
   const isEditing = isSchedule && !!schedule;
@@ -336,6 +361,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   );
   const members = isLaunchMode ? props.members : storeMembers;
   const [savedLaunchProviderId, setSavedLaunchProviderId] = useState<TeamProviderId | null>(null);
+  const [savedLaunchProviderBackendId, setSavedLaunchProviderBackendId] = useState<string | null>(
+    null
+  );
 
   // Advanced CLI section state (with localStorage persistence)
   const [worktreeEnabled, setWorktreeEnabledRaw] = useState(
@@ -381,7 +409,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   );
 
   const runtimeBackendSummaryByProvider = useMemo(() => {
-    const entries: (readonly [TeamProviderId, string | null])[] = (cliStatus?.providers ?? []).map(
+    const entries: (readonly [TeamProviderId, string | null])[] = (
+      effectiveCliStatus?.providers ?? []
+    ).map(
       (provider) =>
         [
           provider.providerId as TeamProviderId,
@@ -389,7 +419,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         ] as const
     );
     return new Map<TeamProviderId, string | null>(entries);
-  }, [cliStatus?.providers]);
+  }, [effectiveCliStatus?.providers]);
   const runtimeBackendSummaryByProviderRef = useRef(runtimeBackendSummaryByProvider);
   const prepareChecksRef = useRef<ProvisioningProviderCheck[]>([]);
   const prepareModelResultsCacheRef = useRef(
@@ -410,9 +440,11 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const runtimeProviderStatusById = useMemo(
     () =>
       new Map(
-        (cliStatus?.providers ?? []).map((provider) => [provider.providerId, provider] as const)
+        (effectiveCliStatus?.providers ?? []).map(
+          (provider) => [provider.providerId, provider] as const
+        )
       ),
-    [cliStatus?.providers]
+    [effectiveCliStatus?.providers]
   );
 
   useEffect(() => {
@@ -438,8 +470,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     if (!open || cliStatus || cliStatusLoading) {
       return;
     }
-    void fetchCliStatus();
-  }, [open, cliStatus, cliStatusLoading, fetchCliStatus]);
+    void refreshCliStatusForCurrentMode({
+      multimodelEnabled,
+      bootstrapCliStatus,
+      fetchCliStatus,
+    });
+  }, [bootstrapCliStatus, cliStatus, cliStatusLoading, fetchCliStatus, multimodelEnabled, open]);
 
   // Schedule store actions
   const createSchedule = useStore((s) => s.createSchedule);
@@ -640,6 +676,11 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
           : savedRequest?.providerId === 'anthropic'
             ? 'anthropic'
             : null;
+      const savedProviderBackendId =
+        typeof savedRequest?.providerBackendId === 'string' &&
+        savedRequest.providerBackendId.trim().length > 0
+          ? savedRequest.providerBackendId.trim()
+          : null;
       const storedProviderId = normalizeProviderForMode(getStoredTeamProvider(), multimodelEnabled);
       const launchPrefill = resolveLaunchDialogPrefill({
         members,
@@ -652,6 +693,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         getStoredModel: getStoredTeamModel,
       });
       setSavedLaunchProviderId(savedProviderId);
+      setSavedLaunchProviderBackendId(
+        launchPrefill.providerBackendId ?? savedProviderBackendId ?? null
+      );
 
       setMembersDrafts(
         createMemberDraftsFromInputs(editableMembersSource).map((member) =>
@@ -1405,6 +1449,14 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             cwd: effectiveCwd,
             prompt: promptDraft.value.trim() || undefined,
             providerId: selectedProviderId,
+            providerBackendId:
+              resolveUiOwnedProviderBackendId(
+                selectedProviderId,
+                runtimeProviderStatusById.get(selectedProviderId)
+              ) ??
+              previousLaunchParams?.providerBackendId ??
+              savedLaunchProviderBackendId ??
+              undefined,
             model: computeEffectiveTeamModel(selectedModel, limitContext, selectedProviderId),
             effort: (selectedEffort as EffortLevel) || undefined,
             limitContext,

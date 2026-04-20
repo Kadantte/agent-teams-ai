@@ -2388,6 +2388,7 @@ export class TeamDataService {
       description: request.description,
       color: request.color,
       cwd: request.cwd?.trim() || '',
+      providerBackendId: request.providerBackendId,
       createdAt: joinedAt,
     });
 
@@ -2425,7 +2426,9 @@ export class TeamDataService {
         joinedAt,
       }))
     );
-    await this.membersMetaStore.writeMembers(request.teamName, membersToWrite);
+    await this.membersMetaStore.writeMembers(request.teamName, membersToWrite, {
+      providerBackendId: request.providerBackendId,
+    });
   }
 
   async reconcileTeamArtifacts(
