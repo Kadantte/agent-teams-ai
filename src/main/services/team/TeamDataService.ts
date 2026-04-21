@@ -2384,6 +2384,7 @@ export class TeamDataService {
       color: request.color,
       cwd: request.cwd?.trim() || '',
       providerBackendId: request.providerBackendId,
+      fastMode: request.fastMode,
       createdAt: joinedAt,
     });
 

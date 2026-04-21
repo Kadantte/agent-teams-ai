@@ -6,7 +6,7 @@ import * as path from 'path';
 
 import { atomicWriteAsync } from './atomicWrite';
 
-import type { ProviderModelLaunchIdentity, TeamProviderId } from '@shared/types';
+import type { ProviderModelLaunchIdentity, TeamFastMode, TeamProviderId } from '@shared/types';
 
 /**
  * Persisted team-level metadata saved by the UI before CLI provisioning.
@@ -25,6 +25,7 @@ export interface TeamMetaFile {
   providerBackendId?: string;
   model?: string;
   effort?: string;
+  fastMode?: TeamFastMode;
   skipPermissions?: boolean;
   worktree?: string;
   extraCliArgs?: string;
@@ -49,6 +50,10 @@ function normalizeProviderId(value: unknown): TeamProviderId | undefined {
 
 function normalizeOptionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeFastMode(value: unknown): TeamFastMode | null {
+  return value === 'inherit' || value === 'on' || value === 'off' ? value : null;
 }
 
 function normalizeLaunchIdentity(value: unknown): ProviderModelLaunchIdentity | undefined {
@@ -80,7 +85,8 @@ function normalizeLaunchIdentity(value: unknown): ProviderModelLaunchIdentity | 
     raw.selectedEffort === 'low' ||
     raw.selectedEffort === 'medium' ||
     raw.selectedEffort === 'high' ||
-    raw.selectedEffort === 'xhigh'
+    raw.selectedEffort === 'xhigh' ||
+    raw.selectedEffort === 'max'
       ? raw.selectedEffort
       : null;
   const resolvedEffort =
@@ -89,7 +95,8 @@ function normalizeLaunchIdentity(value: unknown): ProviderModelLaunchIdentity | 
     raw.resolvedEffort === 'low' ||
     raw.resolvedEffort === 'medium' ||
     raw.resolvedEffort === 'high' ||
-    raw.resolvedEffort === 'xhigh'
+    raw.resolvedEffort === 'xhigh' ||
+    raw.resolvedEffort === 'max'
       ? raw.resolvedEffort
       : null;
 
@@ -105,6 +112,9 @@ function normalizeLaunchIdentity(value: unknown): ProviderModelLaunchIdentity | 
     catalogFetchedAt: normalizeOptionalString(raw.catalogFetchedAt),
     selectedEffort,
     resolvedEffort,
+    selectedFastMode: normalizeFastMode(raw.selectedFastMode),
+    resolvedFastMode: typeof raw.resolvedFastMode === 'boolean' ? raw.resolvedFastMode : null,
+    fastResolutionReason: normalizeOptionalString(raw.fastResolutionReason),
   };
 }
 
@@ -173,6 +183,7 @@ export class TeamMetaStore {
       ),
       model: typeof file.model === 'string' ? file.model.trim() || undefined : undefined,
       effort: typeof file.effort === 'string' ? file.effort.trim() || undefined : undefined,
+      fastMode: normalizeFastMode(file.fastMode) ?? undefined,
       skipPermissions: typeof file.skipPermissions === 'boolean' ? file.skipPermissions : undefined,
       worktree: typeof file.worktree === 'string' ? file.worktree.trim() || undefined : undefined,
       extraCliArgs:
@@ -198,6 +209,7 @@ export class TeamMetaStore {
       ),
       model: data.model?.trim() || undefined,
       effort: data.effort?.trim() || undefined,
+      fastMode: normalizeFastMode(data.fastMode) ?? undefined,
       skipPermissions: data.skipPermissions,
       worktree: data.worktree?.trim() || undefined,
       extraCliArgs: data.extraCliArgs?.trim() || undefined,

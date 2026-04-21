@@ -93,15 +93,16 @@ describe('team effort options', () => {
     );
   });
 
-  it('shows only supported low/medium/high efforts for Anthropic and never leaks max', () => {
+  it('keeps Anthropic aliases conservative when the resolved runtime model does not support effort', () => {
     const providerStatus = createProviderStatus('anthropic', {
-      id: 'opus',
-      launchModel: 'opus',
-      displayName: 'Opus 4.7',
-      hidden: false,
-      supportedReasoningEfforts: ['low', 'medium', 'high'],
+      id: 'opus[1m]',
+      launchModel: 'opus[1m]',
+      displayName: 'Opus 4.7 (1M)',
+      hidden: true,
+      supportedReasoningEfforts: [],
       defaultReasoningEffort: null,
       inputModalities: ['text', 'image'],
+      supportsFastMode: false,
       supportsPersonality: false,
       isDefault: true,
       upgrade: false,
@@ -110,11 +111,83 @@ describe('team effort options', () => {
 
     expect(
       getTeamEffortOptions({ providerId: 'anthropic', model: 'opus', providerStatus })
+    ).toEqual([{ value: '', label: 'Default' }]);
+  });
+
+  it('shows Anthropic max only for the exact resolved model that supports it', () => {
+    const providerStatus = {
+      ...createProviderStatus('anthropic', {
+        id: 'claude-opus-4-6',
+        launchModel: 'claude-opus-4-6',
+        displayName: 'Opus 4.6',
+        hidden: false,
+        supportedReasoningEfforts: ['low', 'medium', 'high', 'max'],
+        defaultReasoningEffort: 'medium',
+        inputModalities: ['text', 'image'],
+        supportsFastMode: true,
+        supportsPersonality: false,
+        isDefault: false,
+        upgrade: false,
+        source: 'anthropic-models-api',
+      }),
+      modelCatalog: {
+        schemaVersion: 1,
+        providerId: 'anthropic' as const,
+        source: 'anthropic-models-api' as const,
+        status: 'ready' as const,
+        fetchedAt: '2026-04-21T00:00:00.000Z',
+        staleAt: '2026-04-21T00:10:00.000Z',
+        defaultModelId: 'opus[1m]',
+        defaultLaunchModel: 'opus[1m]',
+        models: [
+          {
+            id: 'opus[1m]',
+            launchModel: 'opus[1m]',
+            displayName: 'Opus 4.7 (1M)',
+            hidden: true,
+            supportedReasoningEfforts: [],
+            defaultReasoningEffort: null,
+            inputModalities: ['text', 'image'],
+            supportsFastMode: false,
+            supportsPersonality: false,
+            isDefault: true,
+            upgrade: false,
+            source: 'anthropic-models-api' as const,
+          },
+          {
+            id: 'claude-opus-4-6',
+            launchModel: 'claude-opus-4-6',
+            displayName: 'Opus 4.6',
+            hidden: false,
+            supportedReasoningEfforts: ['low', 'medium', 'high', 'max'],
+            defaultReasoningEffort: 'medium',
+            inputModalities: ['text', 'image'],
+            supportsFastMode: true,
+            supportsPersonality: false,
+            isDefault: false,
+            upgrade: false,
+            source: 'anthropic-models-api' as const,
+          },
+        ],
+        diagnostics: {
+          configReadState: 'ready',
+          appServerState: 'healthy',
+        },
+      },
+    } satisfies CliProviderStatus;
+
+    expect(
+      getTeamEffortOptions({
+        providerId: 'anthropic',
+        model: 'claude-opus-4-6',
+        providerStatus,
+      })
     ).toEqual([
-      { value: '', label: 'Default' },
+      { value: '', label: 'Default (Medium)' },
       { value: 'low', label: 'Low' },
       { value: 'medium', label: 'Medium' },
       { value: 'high', label: 'High' },
+      { value: 'max', label: 'Max' },
     ]);
   });
 

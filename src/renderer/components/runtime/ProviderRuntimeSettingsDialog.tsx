@@ -722,6 +722,19 @@ export const ProviderRuntimeSettingsDialog = ({
   const codexActionBusy =
     disabled || selectedProviderLoading || connectionSaving || codexAccount.loading;
   const runtimeBusy = disabled || selectedProviderLoading || runtimeSaving;
+  const anthropicFastModeCapability =
+    selectedProvider?.providerId === 'anthropic'
+      ? (selectedProvider.runtimeCapabilities?.fastMode ?? null)
+      : null;
+  const anthropicFastModeEnabled =
+    appConfig?.providerConnections?.anthropic.fastModeDefault === true;
+  const anthropicFastModeSupported = anthropicFastModeCapability?.supported === true;
+  const anthropicFastModeAvailable = anthropicFastModeCapability?.available === true;
+  const anthropicFastModeDisabledReason =
+    anthropicFastModeCapability?.reason ??
+    (anthropicFastModeSupported
+      ? 'Fast mode is currently unavailable for this Anthropic runtime.'
+      : 'This Anthropic runtime does not expose Fast mode.');
   const connectionMethodCardsHint = selectedProvider
     ? getConnectionMethodCardsHint(selectedProvider)
     : null;
@@ -969,6 +982,29 @@ export const ProviderRuntimeSettingsDialog = ({
     }
   };
 
+  const handleAnthropicFastModeDefaultChange = async (enabled: boolean): Promise<void> => {
+    if (selectedProvider?.providerId !== 'anthropic' || anthropicFastModeEnabled === enabled) {
+      return;
+    }
+
+    setConnectionSaving(true);
+    setConnectionError(null);
+    try {
+      await updateConfig('providerConnections', {
+        anthropic: {
+          fastModeDefault: enabled,
+        },
+      });
+      await onRefreshProvider?.('anthropic');
+    } catch (error) {
+      setConnectionError(
+        error instanceof Error ? error.message : 'Failed to update Anthropic Fast mode'
+      );
+    } finally {
+      setConnectionSaving(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
@@ -1187,6 +1223,50 @@ export const ProviderRuntimeSettingsDialog = ({
                   </span>
                 ) : null}
               </div>
+
+              {selectedProvider.providerId === 'anthropic' ? (
+                <div
+                  className="space-y-2 rounded-md border p-3"
+                  style={{ borderColor: 'var(--color-border-subtle)' }}
+                >
+                  <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                    Fast mode default
+                  </div>
+                  <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    Apply Claude Code Fast mode by default for new Anthropic team launches when the
+                    resolved model and runtime allow it.
+                  </div>
+                  {anthropicFastModeSupported ? (
+                    <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
+                      {[
+                        { enabled: false, label: 'Default Off' },
+                        { enabled: true, label: 'Prefer Fast' },
+                      ].map((option) => (
+                        <button
+                          key={option.label}
+                          type="button"
+                          className={`rounded-[3px] px-3 py-1 text-xs font-medium transition-colors ${
+                            anthropicFastModeEnabled === option.enabled
+                              ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm'
+                              : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+                          }`}
+                          disabled={connectionBusy || !anthropicFastModeAvailable}
+                          onClick={() => void handleAnthropicFastModeDefaultChange(option.enabled)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                    {anthropicFastModeSupported && anthropicFastModeAvailable
+                      ? anthropicFastModeEnabled
+                        ? 'New Anthropic launches will request Fast mode by default when the resolved model supports it.'
+                        : 'New Anthropic launches stay on normal speed unless a team explicitly enables Fast mode.'
+                      : anthropicFastModeDisabledReason}
+                  </div>
+                </div>
+              ) : null}
 
               {selectedProvider.providerId === 'codex' ? (
                 <div

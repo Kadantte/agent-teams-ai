@@ -28,6 +28,7 @@ export const PROTECTED_CLI_FLAGS = new Set([
   '--effort',
   '--teammate-mode',
   '--resume',
+  '--settings',
   '--permission-mode',
   '--permission-prompt-tool',
   '--dangerously-skip-permissions',

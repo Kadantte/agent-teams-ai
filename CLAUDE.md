@@ -25,6 +25,7 @@ Electron 40.x, React 19.x, TypeScript 5.x, Tailwind CSS 3.x, Zustand 4.x
 
 ## Commands
 Always use pnpm (not npm/yarn) for this project.
+Workspace membership is canonical in `pnpm-workspace.yaml`; do not re-add root `package.json.workspaces`, because npm subproject installs in Codex Cloud must treat nested packages as standalone projects.
 Do NOT run `pnpm lint:fix` unless the user explicitly asks for it — it interferes with agents running in parallel.
 When running build/typecheck/test commands, pipe through `tail -20` to avoid flooding the context window (e.g. `pnpm typecheck 2>&1 | tail -20`).
 

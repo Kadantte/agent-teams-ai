@@ -20,6 +20,7 @@
 | [kanban-design.md](./kanban-design.md) | Kanban flow, колонки, review mechanism, kanban-state.json |
 | [implementation.md](./implementation.md) | Техплан: файлы, шаги, verification |
 | [research-worktrees.md](./research-worktrees.md) | Git worktrees + teams, запуск Claude процессов из UI (Phase 2) |
+| [task-queue-derived-agenda-plan.md](./task-queue-derived-agenda-plan.md) | Подробный rollout-plan по разделению queue/inventory, derived actionOwner и phased agenda/delta sync |
 
 ## Ключевые решения
 

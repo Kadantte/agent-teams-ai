@@ -237,6 +237,7 @@ export type ProviderConnectionAuthMode = 'auto' | 'oauth' | 'api_key';
 export interface ProviderConnectionsConfig {
   anthropic: {
     authMode: ProviderConnectionAuthMode;
+    fastModeDefault: boolean;
   };
   codex: {
     preferredAuthMode: CodexAccountAuthMode;
@@ -333,6 +334,7 @@ const DEFAULT_CONFIG: AppConfig = {
   providerConnections: {
     anthropic: {
       authMode: 'auto',
+      fastModeDefault: false,
     },
     codex: {
       preferredAuthMode: 'auto',

@@ -40,6 +40,12 @@ interface RuntimeProviderCapabilitiesResponse {
     values?: string[];
     configPassthrough?: boolean;
   };
+  fastMode?: {
+    supported?: boolean;
+    available?: boolean;
+    reason?: string | null;
+    source?: 'runtime';
+  };
 }
 
 interface RuntimeProviderModelCatalogItemResponse {
@@ -49,6 +55,7 @@ interface RuntimeProviderModelCatalogItemResponse {
   hidden?: boolean;
   supportedReasoningEfforts?: string[];
   defaultReasoningEffort?: string | null;
+  supportsFastMode?: boolean;
   inputModalities?: string[];
   supportsPersonality?: boolean;
   isDefault?: boolean;
@@ -279,7 +286,8 @@ function normalizeRuntimeReasoningEffort(
     value === 'low' ||
     value === 'medium' ||
     value === 'high' ||
-    value === 'xhigh'
+    value === 'xhigh' ||
+    value === 'max'
     ? value
     : null;
 }
@@ -347,6 +355,7 @@ function mapRuntimeProviderModelCatalog(
           hidden: model.hidden === true,
           supportedReasoningEfforts,
           defaultReasoningEffort,
+          supportsFastMode: model.supportsFastMode === true,
           inputModalities: model.inputModalities?.filter((value) => value.trim().length > 0) ?? [],
           supportsPersonality: model.supportsPersonality === true,
           isDefault: model.isDefault === true,
@@ -475,6 +484,14 @@ export class ClaudeMultimodelBridgeService {
                   ),
                   configPassthrough:
                     runtimeStatus.runtimeCapabilities.reasoningEffort.configPassthrough === true,
+                }
+              : undefined,
+            fastMode: runtimeStatus.runtimeCapabilities.fastMode
+              ? {
+                  supported: runtimeStatus.runtimeCapabilities.fastMode.supported === true,
+                  available: runtimeStatus.runtimeCapabilities.fastMode.available === true,
+                  reason: runtimeStatus.runtimeCapabilities.fastMode.reason ?? null,
+                  source: 'runtime',
                 }
               : undefined,
           }

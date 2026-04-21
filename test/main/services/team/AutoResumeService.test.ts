@@ -6,6 +6,8 @@ import type { ConfigManager } from '../../../../src/main/services/infrastructure
 
 const TEAM = 'test-team';
 const RATE_LIMIT_MSG = "You've hit your limit. Resets in 5 minutes.";
+const MODEL_COOLDOWN_API_ERROR =
+  'API Error: 429 {"error":{"code":"model_cooldown","message":"All credentials for model claude-opus-4-6 are cooling down via provider claude","model":"claude-opus-4-6","provider":"claude","reset_seconds":41,"reset_time":"40s"}}';
 
 describe('AutoResumeService', () => {
   const mockConfig = { autoResumeOnRateLimit: false };
@@ -58,6 +60,21 @@ describe('AutoResumeService', () => {
 
     vi.advanceTimersByTime(24 * 60 * 60 * 1000);
     expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+  });
+
+  it('schedules auto-resume from model_cooldown API errors', async () => {
+    mockConfig.autoResumeOnRateLimit = true;
+    provisioningService.isTeamAlive.mockReturnValue(true);
+    provisioningService.sendMessageToTeam.mockResolvedValue(undefined);
+    const now = new Date('2026-04-17T12:00:00Z');
+
+    service.handleRateLimitMessage(TEAM, MODEL_COOLDOWN_API_ERROR, now);
+
+    await vi.advanceTimersByTimeAsync(41 * 1000 + 29 * 1000);
+    expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(provisioningService.sendMessageToTeam).toHaveBeenCalledTimes(1);
   });
 
   it('reschedules when a later rate-limit message changes the reset time', async () => {

@@ -3,12 +3,24 @@
  */
 
 const RATE_LIMIT_SUBSTRING = "You've hit your limit";
+const MODEL_COOLDOWN_CODE = 'model_cooldown';
+
+interface StructuredRateLimitPayload {
+  code: string | null;
+  message: string | null;
+  resetSeconds: number | null;
+  resetTime: string | null;
+}
 
 /**
  * Returns true if the message text contains the rate limit indicator.
  */
 export function isRateLimitMessage(text: string): boolean {
-  return text.includes(RATE_LIMIT_SUBSTRING);
+  if (!text) return false;
+  if (text.includes(RATE_LIMIT_SUBSTRING)) return true;
+
+  const structured = extractStructuredRateLimitPayload(text);
+  return structured ? isStructuredRateLimitPayload(structured) : false;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +74,14 @@ export function parseRateLimitResetTime(text: string, now: Date = new Date()): D
   // message. Prevents false positives from unrelated prose containing
   // words like "reset" (e.g. "reset the 5pm meeting").
   if (!isRateLimitMessage(text)) return null;
+
+  const structured = extractStructuredRateLimitPayload(text);
+  if (structured && isStructuredRateLimitPayload(structured)) {
+    const structuredReset = parseStructuredResetTime(structured, now);
+    if (structuredReset) {
+      return structuredReset;
+    }
+  }
 
   const relative = parseRelativeResetDuration(text);
   if (relative !== null) {
@@ -118,6 +138,79 @@ function parseRelativeResetDuration(text: string): number | null {
     return Math.round(amount * 60 * 60 * 1000);
   }
   return null;
+}
+
+function extractStructuredRateLimitPayload(text: string): StructuredRateLimitPayload | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const prefixedMatch = /^(?:API Error:\s*\d+\s+|\d+\s+)?(\{[\s\S]*\})$/i.exec(trimmed);
+  const jsonCandidate = prefixedMatch?.[1] ?? (trimmed.startsWith('{') ? trimmed : null);
+  if (!jsonCandidate) return null;
+
+  try {
+    const parsed = JSON.parse(jsonCandidate) as {
+      error?: {
+        code?: unknown;
+        message?: unknown;
+        reset_seconds?: unknown;
+        reset_time?: unknown;
+      };
+      code?: unknown;
+      message?: unknown;
+      reset_seconds?: unknown;
+      reset_time?: unknown;
+    };
+    const errorPayload = parsed.error;
+
+    return {
+      code: readStringField(errorPayload?.code) ?? readStringField(parsed.code),
+      message: readStringField(errorPayload?.message) ?? readStringField(parsed.message),
+      resetSeconds:
+        readNumberField(errorPayload?.reset_seconds) ?? readNumberField(parsed.reset_seconds),
+      resetTime: readStringField(errorPayload?.reset_time) ?? readStringField(parsed.reset_time),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isStructuredRateLimitPayload(payload: StructuredRateLimitPayload): boolean {
+  const code = payload.code?.trim().toLowerCase();
+  if (code === MODEL_COOLDOWN_CODE) {
+    return true;
+  }
+
+  const message = payload.message?.trim().toLowerCase() ?? '';
+  return (
+    (message.includes('cooling down') || message.includes('model cooldown')) &&
+    (payload.resetSeconds !== null || payload.resetTime !== null)
+  );
+}
+
+function parseStructuredResetTime(payload: StructuredRateLimitPayload, now: Date): Date | null {
+  if (payload.resetSeconds !== null) {
+    return new Date(now.getTime() + Math.max(0, payload.resetSeconds) * 1000);
+  }
+
+  const resetTime = payload.resetTime?.trim();
+  if (!resetTime) return null;
+
+  const relative = parseRelativeResetDuration(`Resets in ${resetTime}`);
+  if (relative !== null) {
+    return new Date(now.getTime() + relative);
+  }
+
+  const absolute = Date.parse(resetTime);
+  return Number.isFinite(absolute) ? new Date(absolute) : null;
+}
+
+function readStringField(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function readNumberField(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 // ---------------------------------------------------------------------------

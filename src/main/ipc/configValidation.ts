@@ -497,25 +497,37 @@ function validateProviderConnectionsSection(
       const anthropicUpdate: Partial<ProviderConnectionsConfig['anthropic']> = {};
 
       for (const [connectionKey, connectionValue] of Object.entries(value)) {
-        if (connectionKey !== 'authMode') {
+        if (connectionKey !== 'authMode' && connectionKey !== 'fastModeDefault') {
           return {
             valid: false,
             error: `providerConnections.anthropic.${connectionKey} is not a valid setting`,
           };
         }
 
-        if (
-          connectionValue !== 'auto' &&
-          connectionValue !== 'oauth' &&
-          connectionValue !== 'api_key'
-        ) {
+        if (connectionKey === 'authMode') {
+          if (
+            connectionValue !== 'auto' &&
+            connectionValue !== 'oauth' &&
+            connectionValue !== 'api_key'
+          ) {
+            return {
+              valid: false,
+              error: 'providerConnections.anthropic.authMode must be one of: auto, oauth, api_key',
+            };
+          }
+
+          anthropicUpdate.authMode = connectionValue;
+          continue;
+        }
+
+        if (typeof connectionValue !== 'boolean') {
           return {
             valid: false,
-            error: 'providerConnections.anthropic.authMode must be one of: auto, oauth, api_key',
+            error: 'providerConnections.anthropic.fastModeDefault must be a boolean',
           };
         }
 
-        anthropicUpdate.authMode = connectionValue;
+        anthropicUpdate.fastModeDefault = connectionValue;
       }
 
       result.anthropic = anthropicUpdate as ProviderConnectionsConfig['anthropic'];

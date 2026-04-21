@@ -190,6 +190,7 @@ import type {
   TeamLaunchResponse,
   TeamMemberActivityMeta,
   TeamMessageNotificationData,
+  TeamFastMode,
   TeamProviderBackendId,
   TeamProviderId,
   TeamProvisioningPrepareResult,
@@ -1198,6 +1199,21 @@ function parseOptionalTeamEffort(
   };
 }
 
+function parseOptionalTeamFastMode(
+  value: unknown
+): { valid: true; value: TeamFastMode | undefined } | { valid: false; error: string } {
+  if (value === undefined || value === null || value === '') {
+    return { valid: true, value: undefined };
+  }
+  if (value === 'inherit' || value === 'on' || value === 'off') {
+    return { valid: true, value };
+  }
+  return {
+    valid: false,
+    error: 'fastMode must be one of inherit, on, or off',
+  };
+}
+
 async function validateProvisioningRequest(
   request: unknown
 ): Promise<{ valid: true; value: TeamCreateRequest } | { valid: false; error: string }> {
@@ -1224,12 +1240,15 @@ async function validateProvisioningRequest(
   if (!Array.isArray(payload.members)) {
     return { valid: false, error: 'members must be an array' };
   }
-  const providerId =
+  const explicitProviderId =
     payload.providerId === 'codex'
       ? 'codex'
       : payload.providerId === 'gemini'
         ? 'gemini'
-        : 'anthropic';
+        : payload.providerId === 'anthropic'
+          ? 'anthropic'
+          : undefined;
+  const providerId = explicitProviderId ?? 'anthropic';
 
   const seenNames = new Set<string>();
   const members: TeamCreateRequest['members'] = [];
@@ -1304,6 +1323,10 @@ async function validateProvisioningRequest(
   if (!effortValidation.valid) {
     return { valid: false, error: effortValidation.error };
   }
+  const fastModeValidation = parseOptionalTeamFastMode(payload.fastMode);
+  if (!fastModeValidation.valid) {
+    return { valid: false, error: fastModeValidation.error };
+  }
 
   try {
     await fs.promises.mkdir(cwd, { recursive: true });
@@ -1359,6 +1382,7 @@ async function validateProvisioningRequest(
       providerBackendId: providerBackendValidation.value,
       model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
       effort: effortValidation.value,
+      fastMode: fastModeValidation.value,
       skipPermissions:
         typeof payload.skipPermissions === 'boolean' ? payload.skipPermissions : undefined,
       worktree:
@@ -1512,6 +1536,10 @@ async function handleLaunchTeam(
     if (!effortValidation.valid) {
       return { success: false, error: effortValidation.error };
     }
+    const fastModeValidation = parseOptionalTeamFastMode(payload.fastMode);
+    if (!fastModeValidation.valid) {
+      return { success: false, error: fastModeValidation.error };
+    }
 
     const createRequest: TeamCreateRequest = {
       teamName: tn,
@@ -1527,6 +1555,7 @@ async function handleLaunchTeam(
       ),
       model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
       effort: effortValidation.value,
+      fastMode: fastModeValidation.value ?? meta?.fastMode,
       limitContext: typeof payload.limitContext === 'boolean' ? payload.limitContext : undefined,
       skipPermissions:
         typeof payload.skipPermissions === 'boolean' ? payload.skipPermissions : undefined,
@@ -1558,10 +1587,44 @@ async function handleLaunchTeam(
     );
   }
 
-  const effortValidation = parseOptionalTeamEffort(payload.effort, providerId);
+  const persistedMeta = await teamMetaStore.getMeta(tn).catch(() => null);
+  const launchProviderId = explicitProviderId ?? persistedMeta?.providerId ?? providerId;
+  const rawLaunchProviderBackendId =
+    payload.providerBackendId ??
+    persistedMeta?.providerBackendId ??
+    persistedMeta?.launchIdentity?.providerBackendId ??
+    undefined;
+  const launchProviderBackendValidation = parseOptionalProviderBackendId(
+    rawLaunchProviderBackendId,
+    launchProviderId
+  );
+  if (!launchProviderBackendValidation.valid) {
+    return { success: false, error: launchProviderBackendValidation.error };
+  }
+  const rawLaunchEffort =
+    payload.effort ??
+    persistedMeta?.effort ??
+    persistedMeta?.launchIdentity?.selectedEffort ??
+    undefined;
+  const effortValidation = parseOptionalTeamEffort(rawLaunchEffort, launchProviderId);
   if (!effortValidation.valid) {
     return { success: false, error: effortValidation.error };
   }
+  const rawLaunchFastMode =
+    payload.fastMode ??
+    persistedMeta?.fastMode ??
+    persistedMeta?.launchIdentity?.selectedFastMode ??
+    undefined;
+  const fastModeValidation = parseOptionalTeamFastMode(rawLaunchFastMode);
+  if (!fastModeValidation.valid) {
+    return { success: false, error: fastModeValidation.error };
+  }
+  const rawLaunchModel =
+    typeof payload.model === 'string' && payload.model.trim().length > 0
+      ? payload.model.trim()
+      : (persistedMeta?.model ?? persistedMeta?.launchIdentity?.selectedModel ?? undefined);
+  const launchLimitContext =
+    typeof payload.limitContext === 'boolean' ? payload.limitContext : persistedMeta?.limitContext;
 
   return wrapTeamHandler('launch', () => {
     addMainBreadcrumb('team', 'launch', { teamName: validatedTeamName.value! });
@@ -1570,10 +1633,12 @@ async function handleLaunchTeam(
         teamName: validatedTeamName.value!,
         cwd,
         prompt: typeof payload.prompt === 'string' ? payload.prompt.trim() || undefined : undefined,
-        providerId,
-        providerBackendId: providerBackendValidation.value,
-        model: typeof payload.model === 'string' ? payload.model.trim() || undefined : undefined,
+        providerId: launchProviderId,
+        providerBackendId: launchProviderBackendValidation.value,
+        model: rawLaunchModel,
         effort: effortValidation.value,
+        fastMode: fastModeValidation.value,
+        limitContext: launchLimitContext,
         clearContext: payload.clearContext === true ? true : undefined,
         skipPermissions:
           typeof payload.skipPermissions === 'boolean' ? payload.skipPermissions : undefined,
@@ -2660,6 +2725,10 @@ async function handleCreateConfig(
   if (!providerBackendValidation.valid) {
     return { success: false, error: providerBackendValidation.error };
   }
+  const fastModeValidation = parseOptionalTeamFastMode(payload.fastMode);
+  if (!fastModeValidation.valid) {
+    return { success: false, error: fastModeValidation.error };
+  }
 
   const seenNames = new Set<string>();
   const members: TeamCreateConfigRequest['members'] = [];
@@ -2721,6 +2790,7 @@ async function handleCreateConfig(
       members,
       cwd: typeof payload.cwd === 'string' ? payload.cwd.trim() || undefined : undefined,
       providerBackendId: providerBackendValidation.value,
+      fastMode: fastModeValidation.value,
     })
   );
 }
@@ -4023,6 +4093,7 @@ async function handleGetSavedRequest(
       ),
       model: meta.model,
       effort: meta.effort as TeamCreateRequest['effort'],
+      fastMode: meta.fastMode as TeamCreateRequest['fastMode'],
       skipPermissions: meta.skipPermissions,
       worktree: meta.worktree,
       extraCliArgs: meta.extraCliArgs,

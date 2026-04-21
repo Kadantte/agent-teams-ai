@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  reconcileAnthropicRuntimeSelections,
+  resolveAnthropicFastMode,
+  resolveAnthropicRuntimeSelection,
+} from '@features/anthropic-runtime-profile/renderer';
+import {
   mergeCodexCliStatusWithSnapshot,
   useCodexAccountSnapshot,
 } from '@features/codex-account/renderer';
@@ -100,6 +105,7 @@ import type {
   EffortLevel,
   Project,
   TeamCreateRequest,
+  TeamFastMode,
   TeamProviderId,
   TeamProvisioningMemberInput,
 } from '@shared/types';
@@ -119,6 +125,11 @@ function getStoredTeamModel(providerId: TeamProviderId): string {
     return providerId === 'anthropic' ? 'opus' : '';
   }
   return normalizeExplicitTeamModelForUi(providerId, stored === '__default__' ? '' : stored);
+}
+
+function getStoredTeamFastMode(): TeamFastMode {
+  const stored = localStorage.getItem('team:lastSelectedFastMode');
+  return stored === 'on' || stored === 'off' || stored === 'inherit' ? stored : 'inherit';
 }
 
 function isEphemeralRenderedProjectPath(projectPath: string | null | undefined): boolean {
@@ -313,6 +324,9 @@ export const CreateTeamDialog = ({
 }: CreateTeamDialogProps): React.JSX.Element => {
   const { isLight } = useTheme();
   const multimodelEnabled = useStore((s) => s.appConfig?.general?.multimodelEnabled ?? true);
+  const anthropicProviderFastModeDefault = useStore(
+    (s) => s.appConfig?.providerConnections?.anthropic.fastModeDefault ?? false
+  );
   const cliStatus = useStore((s) => s.cliStatus);
   const cliStatusLoading = useStore((s) => s.cliStatusLoading);
   const bootstrapCliStatus = useStore((s) => s.bootstrapCliStatus);
@@ -396,6 +410,8 @@ export const CreateTeamDialog = ({
     const stored = localStorage.getItem('team:lastSelectedEffort');
     return stored === null ? 'medium' : stored;
   });
+  const [selectedFastMode, setSelectedFastModeRaw] = useState<TeamFastMode>(getStoredTeamFastMode);
+  const [anthropicRuntimeNotice, setAnthropicRuntimeNotice] = useState<string | null>(null);
 
   // Advanced CLI section state (use teamName-derived key for localStorage)
   const advancedKey = sanitizeTeamName(teamName.trim()) || '_new_';
@@ -454,6 +470,11 @@ export const CreateTeamDialog = ({
   const setSelectedEffort = (value: string): void => {
     setSelectedEffortRaw(value);
     localStorage.setItem('team:lastSelectedEffort', value);
+  };
+
+  const setSelectedFastMode = (value: TeamFastMode): void => {
+    setSelectedFastModeRaw(value);
+    localStorage.setItem('team:lastSelectedFastMode', value);
   };
 
   const setWorktreeEnabled = (value: boolean): void => {
@@ -1003,6 +1024,84 @@ export const CreateTeamDialog = ({
       ),
     [limitContext, runtimeProviderStatusById, selectedModel, selectedProviderId]
   );
+  const anthropicRuntimeSelection = useMemo(
+    () =>
+      selectedProviderId === 'anthropic'
+        ? resolveAnthropicRuntimeSelection({
+            source: {
+              modelCatalog: runtimeProviderStatusById.get('anthropic')?.modelCatalog,
+              runtimeCapabilities: runtimeProviderStatusById.get('anthropic')?.runtimeCapabilities,
+            },
+            selectedModel,
+            limitContext,
+          })
+        : null,
+    [limitContext, runtimeProviderStatusById, selectedModel, selectedProviderId]
+  );
+  const anthropicFastModeResolution = useMemo(
+    () =>
+      selectedProviderId === 'anthropic' && anthropicRuntimeSelection
+        ? resolveAnthropicFastMode({
+            selection: anthropicRuntimeSelection,
+            selectedFastMode,
+            providerFastModeDefault: anthropicProviderFastModeDefault,
+          })
+        : null,
+    [
+      anthropicProviderFastModeDefault,
+      anthropicRuntimeSelection,
+      selectedFastMode,
+      selectedProviderId,
+    ]
+  );
+
+  useEffect(() => {
+    if (selectedProviderId !== 'anthropic') {
+      setAnthropicRuntimeNotice(null);
+      return;
+    }
+
+    const reconciliation = reconcileAnthropicRuntimeSelections({
+      selection:
+        anthropicRuntimeSelection ??
+        resolveAnthropicRuntimeSelection({
+          source: {
+            modelCatalog: null,
+            runtimeCapabilities: null,
+          },
+          selectedModel,
+          limitContext,
+        }),
+      selectedEffort,
+      selectedFastMode,
+      providerFastModeDefault: anthropicProviderFastModeDefault,
+    });
+
+    const notices: string[] = [];
+    if (reconciliation.nextEffort !== selectedEffort) {
+      setSelectedEffortRaw(reconciliation.nextEffort);
+      localStorage.setItem('team:lastSelectedEffort', reconciliation.nextEffort);
+      if (reconciliation.effortResetReason) {
+        notices.push(reconciliation.effortResetReason);
+      }
+    }
+    if (reconciliation.nextFastMode !== selectedFastMode) {
+      setSelectedFastModeRaw(reconciliation.nextFastMode);
+      localStorage.setItem('team:lastSelectedFastMode', reconciliation.nextFastMode);
+      if (reconciliation.fastModeResetReason) {
+        notices.push(reconciliation.fastModeResetReason);
+      }
+    }
+    setAnthropicRuntimeNotice(notices.length > 0 ? notices.join(' ') : null);
+  }, [
+    anthropicProviderFastModeDefault,
+    anthropicRuntimeSelection,
+    limitContext,
+    selectedEffort,
+    selectedFastMode,
+    selectedModel,
+    selectedProviderId,
+  ]);
 
   const sanitizedTeamName = sanitizeTeamName(teamName.trim());
   const teamNameInlineError = validateTeamNameInline(teamName);
@@ -1026,6 +1125,7 @@ export const CreateTeamDialog = ({
         ) ?? undefined,
       model: effectiveModel,
       effort: (selectedEffort as EffortLevel) || undefined,
+      fastMode: selectedProviderId === 'anthropic' ? selectedFastMode : undefined,
       limitContext,
       skipPermissions,
       worktree: worktreeEnabled && worktreeName.trim() ? worktreeName.trim() : undefined,
@@ -1043,6 +1143,7 @@ export const CreateTeamDialog = ({
       runtimeProviderStatusById,
       effectiveModel,
       selectedEffort,
+      selectedFastMode,
       limitContext,
       skipPermissions,
       worktreeEnabled,
@@ -1132,18 +1233,49 @@ export const CreateTeamDialog = ({
     args.push('--mcp-config', '<auto>', '--disallowedTools', APP_TEAM_RUNTIME_DISALLOWED_TOOLS);
     if (skipPermissions) args.push('--dangerously-skip-permissions');
     if (effectiveModel) args.push('--model', effectiveModel);
-    if (selectedEffort) args.push('--effort', selectedEffort);
+    const effectiveEffort =
+      selectedProviderId === 'anthropic'
+        ? selectedEffort || anthropicRuntimeSelection?.defaultEffort || ''
+        : selectedEffort;
+    if (effectiveEffort) args.push('--effort', effectiveEffort);
+    if (selectedProviderId === 'anthropic') {
+      const fastSettings = anthropicFastModeResolution?.resolvedFastMode
+        ? { fastMode: true, fastModePerSessionOptIn: false }
+        : { fastMode: false };
+      args.push('--settings', JSON.stringify(fastSettings));
+    }
     return args;
-  }, [skipPermissions, effectiveModel, selectedEffort]);
+  }, [
+    anthropicFastModeResolution?.resolvedFastMode,
+    anthropicRuntimeSelection?.defaultEffort,
+    effectiveModel,
+    selectedEffort,
+    selectedProviderId,
+    skipPermissions,
+  ]);
 
   const launchOptionalSummary = useMemo(() => {
     const summary: string[] = [];
     if (prompt.trim()) summary.push('Lead prompt');
     if (skipPermissions) summary.push('Auto-approve tools');
+    if (selectedProviderId === 'anthropic') {
+      if (selectedFastMode === 'on') summary.push('Fast mode');
+      else if (selectedFastMode === 'off') summary.push('Fast disabled');
+      else if (anthropicProviderFastModeDefault) summary.push('Fast default');
+    }
     if (worktreeEnabled && worktreeName.trim()) summary.push(`Worktree: ${worktreeName.trim()}`);
     if (customArgs.trim()) summary.push('Custom CLI args');
     return summary;
-  }, [prompt, skipPermissions, worktreeEnabled, worktreeName, customArgs]);
+  }, [
+    anthropicProviderFastModeDefault,
+    customArgs,
+    prompt,
+    selectedFastMode,
+    selectedProviderId,
+    skipPermissions,
+    worktreeEnabled,
+    worktreeName,
+  ]);
 
   const teamDetailsSummary = useMemo(() => {
     const summary: string[] = [];
@@ -1212,6 +1344,8 @@ export const CreateTeamDialog = ({
             color: request.color,
             members: request.members,
             cwd: effectiveCwd || undefined,
+            providerBackendId: request.providerBackendId,
+            fastMode: request.fastMode,
           });
           onOpenTeam(request.teamName, effectiveCwd || undefined);
           resetFormState();
@@ -1389,11 +1523,15 @@ export const CreateTeamDialog = ({
               onProviderChange={setSelectedProviderId}
               onModelChange={setSelectedModel}
               onEffortChange={setSelectedEffort}
+              fastMode={selectedFastMode}
+              providerFastModeDefault={anthropicProviderFastModeDefault}
+              onFastModeChange={setSelectedFastMode}
               onLimitContextChange={setLimitContext}
               syncModelsWithTeammates={syncModelsWithLead}
               onSyncModelsWithTeammatesChange={handleSyncModelsWithLeadChange}
               disableGeminiOption={isGeminiUiFrozen()}
               leadModelIssueText={leadModelIssueText}
+              leadFastModeNotice={anthropicRuntimeNotice}
               memberModelIssueById={memberModelIssueById}
               headerTop={
                 <div className="flex items-center gap-2">

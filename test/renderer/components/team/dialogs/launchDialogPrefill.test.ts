@@ -38,6 +38,7 @@ describe('resolveLaunchDialogPrefill', () => {
       multimodelEnabled: true,
       storedProviderId: 'anthropic',
       storedEffort: 'medium',
+      storedFastMode: 'inherit',
       storedLimitContext: false,
       getStoredModel: createStoredModelGetter({
         anthropic: 'haiku',
@@ -50,6 +51,7 @@ describe('resolveLaunchDialogPrefill', () => {
       providerBackendId: 'codex-native',
       model: 'gpt-5.4',
       effort: 'medium',
+      fastMode: 'inherit',
       limitContext: false,
     });
   });
@@ -81,6 +83,7 @@ describe('resolveLaunchDialogPrefill', () => {
       multimodelEnabled: true,
       storedProviderId: 'anthropic',
       storedEffort: 'medium',
+      storedFastMode: 'inherit',
       storedLimitContext: false,
       getStoredModel: createStoredModelGetter({
         anthropic: 'haiku',
@@ -93,6 +96,7 @@ describe('resolveLaunchDialogPrefill', () => {
       providerBackendId: 'codex-native',
       model: 'gpt-5.4',
       effort: 'medium',
+      fastMode: 'inherit',
       limitContext: false,
     });
   });
@@ -110,6 +114,7 @@ describe('resolveLaunchDialogPrefill', () => {
       multimodelEnabled: true,
       storedProviderId: 'anthropic',
       storedEffort: 'medium',
+      storedFastMode: 'inherit',
       storedLimitContext: false,
       getStoredModel: createStoredModelGetter({
         anthropic: 'haiku',
@@ -122,6 +127,7 @@ describe('resolveLaunchDialogPrefill', () => {
       providerBackendId: 'codex-native',
       model: 'gpt-5.3-codex',
       effort: 'high',
+      fastMode: 'inherit',
       limitContext: false,
     });
   });
@@ -142,6 +148,7 @@ describe('resolveLaunchDialogPrefill', () => {
       multimodelEnabled: true,
       storedProviderId: 'anthropic',
       storedEffort: 'medium',
+      storedFastMode: 'inherit',
       storedLimitContext: false,
       getStoredModel: createStoredModelGetter({
         anthropic: 'haiku',
@@ -154,6 +161,7 @@ describe('resolveLaunchDialogPrefill', () => {
       providerBackendId: 'codex-native',
       model: 'gpt-5.4',
       effort: 'medium',
+      fastMode: 'inherit',
       limitContext: false,
     });
   });
@@ -174,6 +182,7 @@ describe('resolveLaunchDialogPrefill', () => {
       multimodelEnabled: true,
       storedProviderId: 'codex',
       storedEffort: 'medium',
+      storedFastMode: 'inherit',
       storedLimitContext: false,
       getStoredModel: createStoredModelGetter({
         codex: 'gpt-5.4',
@@ -185,6 +194,7 @@ describe('resolveLaunchDialogPrefill', () => {
       providerBackendId: 'codex-native',
       model: 'gpt-5.4',
       effort: 'medium',
+      fastMode: 'inherit',
       limitContext: false,
     });
   });
@@ -207,6 +217,7 @@ describe('resolveLaunchDialogPrefill', () => {
       multimodelEnabled: true,
       storedProviderId: 'anthropic',
       storedEffort: 'medium',
+      storedFastMode: 'inherit',
       storedLimitContext: false,
       getStoredModel: createStoredModelGetter({
         anthropic: 'haiku',
@@ -216,8 +227,10 @@ describe('resolveLaunchDialogPrefill', () => {
 
     expect(result).toEqual({
       providerId: 'anthropic',
+      providerBackendId: undefined,
       model: 'haiku',
       effort: 'medium',
+      fastMode: 'inherit',
       limitContext: false,
     });
   });
@@ -235,6 +248,7 @@ describe('resolveLaunchDialogPrefill', () => {
       multimodelEnabled: true,
       storedProviderId: 'anthropic',
       storedEffort: 'medium',
+      storedFastMode: 'inherit',
       storedLimitContext: false,
       getStoredModel: createStoredModelGetter({
         anthropic: 'haiku',
@@ -243,8 +257,10 @@ describe('resolveLaunchDialogPrefill', () => {
 
     expect(result).toEqual({
       providerId: 'anthropic',
+      providerBackendId: undefined,
       model: 'opus',
       effort: 'high',
+      fastMode: 'inherit',
       limitContext: true,
     });
   });
@@ -261,6 +277,7 @@ describe('resolveLaunchDialogPrefill', () => {
       multimodelEnabled: true,
       storedProviderId: 'anthropic',
       storedEffort: 'medium',
+      storedFastMode: 'inherit',
       storedLimitContext: false,
       getStoredModel: createStoredModelGetter({
         anthropic: 'haiku',
@@ -273,6 +290,7 @@ describe('resolveLaunchDialogPrefill', () => {
       providerBackendId: 'codex-native',
       model: 'custom-model[1m]',
       effort: 'medium',
+      fastMode: 'inherit',
       limitContext: false,
     });
   });
@@ -289,6 +307,7 @@ describe('resolveLaunchDialogPrefill', () => {
       multimodelEnabled: true,
       storedProviderId: 'anthropic',
       storedEffort: 'medium',
+      storedFastMode: 'inherit',
       storedLimitContext: false,
       getStoredModel: createStoredModelGetter({
         anthropic: 'haiku',
@@ -301,6 +320,7 @@ describe('resolveLaunchDialogPrefill', () => {
       providerBackendId: 'codex-native',
       model: 'custom-model[1m]',
       effort: 'medium',
+      fastMode: 'inherit',
       limitContext: false,
     });
   });

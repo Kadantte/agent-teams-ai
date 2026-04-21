@@ -101,6 +101,7 @@ export interface MembersEditorSectionProps {
   inheritedProviderId?: TeamProviderId;
   inheritedModel?: string;
   inheritedEffort?: EffortLevel;
+  limitContext?: boolean;
   inheritModelSettingsByDefault?: boolean;
   forceInheritedModelSettings?: boolean;
   modelLockReason?: string;
@@ -134,6 +135,7 @@ export const MembersEditorSection = ({
   inheritedProviderId,
   inheritedModel,
   inheritedEffort,
+  limitContext = false,
   inheritModelSettingsByDefault = false,
   forceInheritedModelSettings = false,
   modelLockReason,
@@ -331,6 +333,7 @@ export const MembersEditorSection = ({
                 inheritedProviderId={inheritedProviderId}
                 inheritedModel={inheritedModel}
                 inheritedEffort={inheritedEffort}
+                limitContext={limitContext}
                 forceInheritedModelSettings={forceInheritedModelSettings}
                 draftKeyPrefix={draftKeyPrefix}
                 projectPath={projectPath}
@@ -374,6 +377,7 @@ export const MembersEditorSection = ({
                       inheritedProviderId={inheritedProviderId}
                       inheritedModel={inheritedModel}
                       inheritedEffort={inheritedEffort}
+                      limitContext={limitContext}
                       forceInheritedModelSettings={forceInheritedModelSettings}
                       draftKeyPrefix={draftKeyPrefix}
                       projectPath={projectPath}

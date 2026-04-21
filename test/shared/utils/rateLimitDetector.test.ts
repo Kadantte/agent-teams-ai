@@ -8,6 +8,10 @@ import {
 // Helper: every production rate-limit message starts with this substring.
 // Prefix test inputs so they clear the parser's rate-limit-context gate.
 const RL = "You've hit your limit. ";
+const MODEL_COOLDOWN_API_ERROR =
+  'API Error: 429 {"error":{"code":"model_cooldown","message":"All credentials for model claude-opus-4-6 are cooling down via provider claude","model":"claude-opus-4-6","provider":"claude","reset_seconds":41,"reset_time":"40s"}}';
+const MODEL_COOLDOWN_NO_SECONDS_API_ERROR =
+  'API Error: 429 {"error":{"code":"model_cooldown","message":"All credentials for model claude-opus-4-6 are cooling down via provider claude","model":"claude-opus-4-6","provider":"claude","reset_time":"40s"}}';
 
 describe('isRateLimitMessage', () => {
   it('detects the canonical substring', () => {
@@ -21,6 +25,10 @@ describe('isRateLimitMessage', () => {
     expect(isRateLimitMessage('All good here')).toBe(false);
     expect(isRateLimitMessage('hit the limit')).toBe(false); // missing "You've"
     expect(isRateLimitMessage('')).toBe(false);
+  });
+
+  it('detects structured model_cooldown API errors as rate limits', () => {
+    expect(isRateLimitMessage(MODEL_COOLDOWN_API_ERROR)).toBe(true);
   });
 });
 
@@ -39,6 +47,18 @@ describe('parseRateLimitResetTime', () => {
       parseRateLimitResetTime('Please reset your expectations at 3pm (PST).', now)
     ).toBeNull();
     expect(parseRateLimitResetTime('Resets in 2 hours.', now)).toBeNull();
+  });
+
+  it('parses model_cooldown reset_seconds from structured API errors', () => {
+    const now = new Date('2026-04-17T12:00:00Z');
+    const result = parseRateLimitResetTime(MODEL_COOLDOWN_API_ERROR, now);
+    expect(result?.toISOString()).toBe('2026-04-17T12:00:41.000Z');
+  });
+
+  it('falls back to structured reset_time when reset_seconds is missing', () => {
+    const now = new Date('2026-04-17T12:00:00Z');
+    const result = parseRateLimitResetTime(MODEL_COOLDOWN_NO_SECONDS_API_ERROR, now);
+    expect(result?.toISOString()).toBe('2026-04-17T12:00:40.000Z');
   });
 
   // ---------------------------------------------------------------------

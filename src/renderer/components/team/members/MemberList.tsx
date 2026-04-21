@@ -168,7 +168,9 @@ function areLaunchParamsEquivalent(
     left.providerId === right.providerId &&
     left.providerBackendId === right.providerBackendId &&
     left.model === right.model &&
-    left.effort === right.effort
+    left.effort === right.effort &&
+    left.fastMode === right.fastMode &&
+    left.limitContext === right.limitContext
   );
 }
 

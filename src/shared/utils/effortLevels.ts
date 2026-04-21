@@ -7,6 +7,7 @@ export const TEAM_EFFORT_LEVELS = [
   'medium',
   'high',
   'xhigh',
+  'max',
 ] as const satisfies readonly EffortLevel[];
 
 export const LEGACY_TEAM_EFFORT_LEVELS = [
@@ -23,8 +24,16 @@ export const CODEX_TEAM_EFFORT_LEVELS = [
   'xhigh',
 ] as const satisfies readonly EffortLevel[];
 
+export const ANTHROPIC_TEAM_EFFORT_LEVELS = [
+  'low',
+  'medium',
+  'high',
+  'max',
+] as const satisfies readonly EffortLevel[];
+
 const LEGACY_TEAM_EFFORT_LEVEL_SET = new Set<EffortLevel>(LEGACY_TEAM_EFFORT_LEVELS);
 const CODEX_TEAM_EFFORT_LEVEL_SET = new Set<EffortLevel>(CODEX_TEAM_EFFORT_LEVELS);
+const ANTHROPIC_TEAM_EFFORT_LEVEL_SET = new Set<EffortLevel>(ANTHROPIC_TEAM_EFFORT_LEVELS);
 
 export function isTeamEffortLevel(value: unknown): value is EffortLevel {
   return typeof value === 'string' && TEAM_EFFORT_LEVELS.includes(value as EffortLevel);
@@ -46,12 +55,19 @@ export function isTeamEffortLevelForProvider(
     return CODEX_TEAM_EFFORT_LEVEL_SET.has(value);
   }
 
+  if (providerId === 'anthropic') {
+    return ANTHROPIC_TEAM_EFFORT_LEVEL_SET.has(value);
+  }
+
   return LEGACY_TEAM_EFFORT_LEVEL_SET.has(value);
 }
 
 export function formatEffortLevelListForProvider(providerId?: TeamProviderId | null): string {
   if (providerId === 'codex') {
     return CODEX_TEAM_EFFORT_LEVELS.join(', ');
+  }
+  if (providerId === 'anthropic') {
+    return ANTHROPIC_TEAM_EFFORT_LEVELS.join(', ');
   }
   return LEGACY_TEAM_EFFORT_LEVELS.join(', ');
 }

@@ -331,6 +331,7 @@ export function useSettingsHandlers({
         providerConnections: {
           anthropic: {
             authMode: 'auto',
+            fastModeDefault: false,
           },
           codex: {
             preferredAuthMode: 'auto',

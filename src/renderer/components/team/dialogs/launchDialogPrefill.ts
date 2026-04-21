@@ -12,6 +12,7 @@ interface PreviousLaunchParamsLike {
   providerBackendId?: string;
   model?: string;
   effort?: string;
+  fastMode?: 'inherit' | 'on' | 'off';
   limitContext?: boolean;
 }
 
@@ -22,6 +23,7 @@ interface LaunchDialogPrefillInput {
   multimodelEnabled: boolean;
   storedProviderId: TeamProviderId;
   storedEffort: string;
+  storedFastMode: 'inherit' | 'on' | 'off';
   storedLimitContext: boolean;
   getStoredModel: (providerId: TeamProviderId) => string;
 }
@@ -31,6 +33,7 @@ interface LaunchDialogPrefillResult {
   providerBackendId?: string;
   model: string;
   effort: string;
+  fastMode: 'inherit' | 'on' | 'off';
   limitContext: boolean;
 }
 
@@ -62,6 +65,7 @@ export function resolveLaunchDialogPrefill({
   multimodelEnabled,
   storedProviderId,
   storedEffort,
+  storedFastMode,
   storedLimitContext,
   getStoredModel,
 }: LaunchDialogPrefillInput): LaunchDialogPrefillResult {
@@ -99,6 +103,8 @@ export function resolveLaunchDialogPrefill({
 
   const effort =
     currentLead?.effort ?? savedRequest?.effort ?? previousLaunchParams?.effort ?? storedEffort;
+  const fastMode =
+    savedRequest?.fastMode ?? previousLaunchParams?.fastMode ?? storedFastMode ?? 'inherit';
   const limitContext =
     previousLaunchParams?.limitContext ?? savedRequest?.limitContext ?? storedLimitContext;
 
@@ -113,6 +119,7 @@ export function resolveLaunchDialogPrefill({
       ? normalizeExplicitTeamModelForUi(providerId, matchingModel)
       : getStoredModel(providerId),
     effort,
+    fastMode,
     limitContext,
   };
 }

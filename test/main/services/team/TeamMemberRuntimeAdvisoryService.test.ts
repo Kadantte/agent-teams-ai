@@ -152,6 +152,7 @@ describe('TeamMemberRuntimeAdvisoryService', () => {
 
   it.each([
     ['rate_limited', 'Provider returned 429 rate limit for this request.'],
+    ['rate_limited', 'All credentials for model claude-opus-4-6 are cooling down via provider claude.'],
     ['auth_error', 'Authentication failed due to invalid API key.'],
     ['network_error', 'Fetch failed because the network connection timed out.'],
     ['provider_overloaded', 'Service unavailable: provider temporarily unavailable (503).'],

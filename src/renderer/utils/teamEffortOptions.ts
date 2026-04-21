@@ -1,3 +1,5 @@
+import { resolveAnthropicRuntimeSelection } from '@features/anthropic-runtime-profile/renderer';
+
 import type { CliProviderStatus, EffortLevel, TeamProviderId } from '@shared/types';
 
 const BASE_EFFORT_OPTIONS = [{ value: '', label: 'Default' }] as const;
@@ -9,6 +11,7 @@ export const TEAM_EFFORT_LABELS: Record<EffortLevel, string> = {
   low: 'Low',
   medium: 'Medium',
   high: 'High',
+  max: 'Max',
   xhigh: 'XHigh',
 };
 
@@ -59,11 +62,33 @@ function normalizeEfforts(
 export function getTeamEffortOptions(params: {
   providerId?: TeamProviderId;
   model?: string;
+  limitContext?: boolean;
   providerStatus?: CliProviderStatus | null;
 }): readonly TeamEffortOption[] {
   const providerId = params.providerId;
   if (!providerId) {
     return BASE_EFFORT_OPTIONS;
+  }
+
+  if (providerId === 'anthropic') {
+    const selection = resolveAnthropicRuntimeSelection({
+      source: {
+        modelCatalog: params.providerStatus?.modelCatalog,
+        runtimeCapabilities: params.providerStatus?.runtimeCapabilities,
+      },
+      selectedModel: params.model,
+      limitContext: params.limitContext === true,
+    });
+    const defaultLabel = selection.defaultEffort
+      ? `Default (${TEAM_EFFORT_LABELS[selection.defaultEffort]})`
+      : 'Default';
+    return [
+      { value: '', label: defaultLabel },
+      ...selection.supportedEfforts.map((effort) => ({
+        value: effort,
+        label: TEAM_EFFORT_LABELS[effort],
+      })),
+    ];
   }
 
   const runtimeCapability = params.providerStatus?.runtimeCapabilities?.reasoningEffort;
@@ -81,16 +106,6 @@ export function getTeamEffortOptions(params: {
   const defaultLabel = catalogModel?.defaultReasoningEffort
     ? `Default (${TEAM_EFFORT_LABELS[catalogModel.defaultReasoningEffort]})`
     : 'Default';
-
-  if (providerId === 'anthropic') {
-    return [
-      { value: '', label: defaultLabel },
-      ...efforts.map((effort) => ({
-        value: effort,
-        label: TEAM_EFFORT_LABELS[effort],
-      })),
-    ];
-  }
 
   if (providerId === 'codex') {
     const fallbackEfforts =

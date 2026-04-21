@@ -14,6 +14,7 @@ export interface EffortLevelSelectorProps {
   id?: string;
   providerId?: TeamProviderId;
   model?: string;
+  limitContext?: boolean;
 }
 
 export const EffortLevelSelector: React.FC<EffortLevelSelectorProps> = ({
@@ -22,9 +23,12 @@ export const EffortLevelSelector: React.FC<EffortLevelSelectorProps> = ({
   id,
   providerId,
   model,
+  limitContext,
 }) => {
   const { providerStatus } = useEffectiveCliProviderStatus(providerId);
-  const effortOptions = getTeamEffortOptions({ providerId, model, providerStatus });
+  const effortOptions = getTeamEffortOptions({ providerId, model, limitContext, providerStatus });
+  const showsAnthropicMax =
+    providerId === 'anthropic' && effortOptions.some((option) => option.value === 'max');
 
   return (
     <div className="mb-3">
@@ -56,6 +60,12 @@ export const EffortLevelSelector: React.FC<EffortLevelSelectorProps> = ({
         Controls how much reasoning the selected provider invests before responding. Default uses
         the provider&apos;s standard behavior for the selected model.
       </p>
+      {showsAnthropicMax ? (
+        <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+          Max is Anthropic&apos;s heavier reasoning mode and only appears when the resolved launch
+          model supports it.
+        </p>
+      ) : null}
     </div>
   );
 };

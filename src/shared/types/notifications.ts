@@ -327,6 +327,7 @@ export interface AppConfig {
   providerConnections: {
     anthropic: {
       authMode: 'auto' | 'oauth' | 'api_key';
+      fastModeDefault: boolean;
     };
     codex: {
       preferredAuthMode: 'auto' | 'chatgpt' | 'api_key';

@@ -15,7 +15,13 @@ const QUOTA_EXHAUSTED_TOKENS = [
   'quota exceeded',
   'quota exhausted',
 ];
-const RATE_LIMITED_TOKENS = ['rate limit', 'too many requests', '429'];
+const RATE_LIMITED_TOKENS = [
+  'rate limit',
+  'too many requests',
+  '429',
+  'model cooldown',
+  'cooling down',
+];
 const AUTH_ERROR_TOKENS = [
   'unauthorized',
   'forbidden',

@@ -9,7 +9,7 @@ import { migrateProviderBackendId } from '@shared/utils/providerBackend';
 import { isAbsolute } from 'path';
 
 import type { HttpServices } from './index';
-import type { EffortLevel, TeamLaunchRequest } from '@shared/types/team';
+import type { EffortLevel, TeamFastMode, TeamLaunchRequest } from '@shared/types/team';
 import type { FastifyInstance } from 'fastify';
 
 const logger = createLogger('HTTP:teams');
@@ -95,6 +95,18 @@ function assertOptionalEffort(
   return value;
 }
 
+function assertOptionalFastMode(value: unknown): TeamFastMode | undefined {
+  if (value == null) {
+    return undefined;
+  }
+
+  if (value !== 'inherit' && value !== 'on' && value !== 'off') {
+    throw new HttpBadRequestError('fastMode must be one of: inherit, on, off');
+  }
+
+  return value;
+}
+
 function parseLaunchRequest(teamName: string, body: unknown): TeamLaunchRequest {
   const payload = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
   const providerId =
@@ -117,6 +129,7 @@ function parseLaunchRequest(teamName: string, body: unknown): TeamLaunchRequest 
   }
   const model = assertOptionalString(payload.model, 'model');
   const effort = assertOptionalEffort(payload.effort, providerId);
+  const fastMode = assertOptionalFastMode(payload.fastMode);
   const clearContext = assertOptionalBoolean(payload.clearContext, 'clearContext');
   const skipPermissions = assertOptionalBoolean(payload.skipPermissions, 'skipPermissions');
   const worktree = assertOptionalString(payload.worktree, 'worktree');
@@ -137,6 +150,9 @@ function parseLaunchRequest(teamName: string, body: unknown): TeamLaunchRequest 
     }),
     ...(effort && {
       effort,
+    }),
+    ...(fastMode && {
+      fastMode,
     }),
     ...(clearContext !== undefined && {
       clearContext,

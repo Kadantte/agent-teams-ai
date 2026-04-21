@@ -46,6 +46,7 @@ interface MemberDraftRowProps {
   inheritedProviderId?: TeamProviderId;
   inheritedModel?: string;
   inheritedEffort?: EffortLevel;
+  limitContext?: boolean;
   draftKeyPrefix?: string;
   projectPath?: string | null;
   mentionSuggestions?: MentionSuggestion[];
@@ -91,6 +92,7 @@ export const MemberDraftRow = ({
   inheritedProviderId = 'anthropic',
   inheritedModel = '',
   inheritedEffort,
+  limitContext = false,
   draftKeyPrefix,
   projectPath,
   mentionSuggestions = [],
@@ -448,6 +450,7 @@ export const MemberDraftRow = ({
                 id={`member-${member.id}-effort`}
                 providerId={effectiveProviderId}
                 model={effectiveModel}
+                limitContext={limitContext}
               />
               {lockProviderModel && (
                 <p className="text-[11px] text-amber-300">

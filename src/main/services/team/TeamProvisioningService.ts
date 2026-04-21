@@ -2,6 +2,10 @@ import {
   killTmuxPaneForCurrentPlatformSync,
   listTmuxPanePidsForCurrentPlatform,
 } from '@features/tmux-installer/main';
+import {
+  resolveAnthropicFastMode,
+  resolveAnthropicRuntimeSelection,
+} from '@features/anthropic-runtime-profile/main';
 import { ConfigManager } from '@main/services/infrastructure/ConfigManager';
 import { NotificationManager } from '@main/services/infrastructure/NotificationManager';
 import { getAppIconPath } from '@main/utils/appIcon';
@@ -170,6 +174,7 @@ interface RelayInboxMessageView {
 }
 
 import type {
+  CliProviderModelCatalog,
   ActiveToolCall,
   CliProviderRuntimeCapabilities,
   CrossTeamSendResult,
@@ -190,6 +195,7 @@ import type {
   TeamConfig,
   TeamCreateRequest,
   TeamCreateResponse,
+  TeamFastMode,
   TeamLaunchAggregateState,
   TeamLaunchRequest,
   TeamLaunchResponse,
@@ -328,6 +334,7 @@ interface RuntimeStatusCommandResponse {
   providers?: Record<
     string,
     {
+      modelCatalog?: CliProviderModelCatalog | null;
       runtimeCapabilities?: CliProviderRuntimeCapabilities | null;
     }
   >;
@@ -336,6 +343,7 @@ interface RuntimeStatusCommandResponse {
 interface RuntimeProviderLaunchFacts {
   defaultModel: string | null;
   modelIds: Set<string>;
+  modelCatalog: CliProviderModelCatalog | null;
   runtimeCapabilities: CliProviderRuntimeCapabilities | null;
 }
 
@@ -414,6 +422,47 @@ function isCodexEffortRuntimeSupported(
 
   const reasoning = capabilities?.reasoningEffort;
   return reasoning?.configPassthrough === true && reasoning.values.includes(effort);
+}
+
+function getAnthropicFastModeDefault(): boolean {
+  return (
+    ConfigManager.getInstance().getConfig().providerConnections.anthropic.fastModeDefault === true
+  );
+}
+
+function resolveAnthropicSelectionFromFacts(params: {
+  selectedModel?: string;
+  limitContext?: boolean;
+  facts: Pick<RuntimeProviderLaunchFacts, 'modelCatalog' | 'runtimeCapabilities'>;
+}) {
+  return resolveAnthropicRuntimeSelection({
+    source: {
+      modelCatalog: params.facts.modelCatalog,
+      runtimeCapabilities: params.facts.runtimeCapabilities,
+    },
+    selectedModel: params.selectedModel,
+    limitContext: params.limitContext === true,
+  });
+}
+
+function buildAnthropicSettingsArgs(
+  providerId: TeamProviderId,
+  launchIdentity?: ProviderModelLaunchIdentity | null
+): string[] {
+  if (providerId !== 'anthropic' || typeof launchIdentity?.resolvedFastMode !== 'boolean') {
+    return [];
+  }
+
+  const settings = launchIdentity.resolvedFastMode
+    ? {
+        fastMode: true,
+        fastModePerSessionOptIn: false,
+      }
+    : {
+        fastMode: false,
+      };
+
+  return ['--settings', JSON.stringify(settings)];
 }
 
 function isProbeTimeoutMessage(message: string): boolean {
@@ -522,7 +571,10 @@ function mergeProvisioningWarnings(
 }
 
 function buildRuntimeLaunchWarning(
-  request: Pick<TeamCreateRequest, 'providerId' | 'providerBackendId' | 'model' | 'effort'>,
+  request: Pick<
+    TeamCreateRequest,
+    'providerId' | 'providerBackendId' | 'model' | 'effort' | 'fastMode'
+  >,
   env: NodeJS.ProcessEnv,
   options?: {
     geminiRuntimeAuth?: GeminiRuntimeAuthState | null;
@@ -534,6 +586,10 @@ function buildRuntimeLaunchWarning(
   const providerLabel = getTeamProviderLabel(providerId);
   const modelLabel = request.model?.trim() || 'default';
   const effortLabel = request.effort ?? 'default';
+  const fastLabel =
+    providerId === 'anthropic'
+      ? `, fast ${request.fastMode ?? (getAnthropicFastModeDefault() ? 'inherit:on' : 'inherit:off')}`
+      : '';
   const backend =
     migrateProviderBackendId(providerId, request.providerBackendId?.trim()) ||
     getConfiguredRuntimeBackend(providerId);
@@ -564,14 +620,17 @@ function buildRuntimeLaunchWarning(
     typeof options?.expectedMembersCount === 'number'
       ? `, members ${options.expectedMembersCount}`
       : '';
-  return `Launch runtime: ${providerLabel} · ${modelLabel} · ${effortLabel}${backendPart}${authPart}${promptPart}${membersPart}${flagsPart}`;
+  return `Launch runtime: ${providerLabel} · ${modelLabel} · ${effortLabel}${fastLabel}${backendPart}${authPart}${promptPart}${membersPart}${flagsPart}`;
 }
 
 function logRuntimeLaunchSnapshot(
   teamName: string,
   claudePath: string,
   args: string[],
-  request: Pick<TeamCreateRequest, 'providerId' | 'providerBackendId' | 'model' | 'effort'>,
+  request: Pick<
+    TeamCreateRequest,
+    'providerId' | 'providerBackendId' | 'model' | 'effort' | 'fastMode'
+  >,
   env: NodeJS.ProcessEnv,
   options?: {
     geminiRuntimeAuth?: GeminiRuntimeAuthState | null;
@@ -586,6 +645,7 @@ function logRuntimeLaunchSnapshot(
     providerBackendId: migrateProviderBackendId(providerId, request.providerBackendId) ?? null,
     model: request.model ?? null,
     effort: request.effort ?? null,
+    fastMode: request.fastMode ?? null,
     configuredBackend:
       migrateProviderBackendId(providerId, request.providerBackendId?.trim()) ||
       getConfiguredRuntimeBackend(providerId),
@@ -2984,12 +3044,16 @@ export class TeamProvisioningService {
       }
     );
     const runtimeStatusPromise =
-      params.providerId === 'codex'
-        ? execCli(params.claudePath, ['runtime', 'status', '--json', '--provider', 'codex'], {
-            cwd: params.cwd,
-            env: params.env,
-            timeout: 8_000,
-          })
+      params.providerId === 'codex' || params.providerId === 'anthropic'
+        ? execCli(
+            params.claudePath,
+            ['runtime', 'status', '--json', '--provider', params.providerId],
+            {
+              cwd: params.cwd,
+              env: params.env,
+              timeout: 8_000,
+            }
+          )
         : null;
 
     const [modelListResult, runtimeStatusResult] = await Promise.allSettled([
@@ -3020,6 +3084,7 @@ export class TeamProvisioningService {
     }
 
     let runtimeCapabilities: CliProviderRuntimeCapabilities | null = null;
+    let modelCatalog: CliProviderModelCatalog | null = null;
     if (
       runtimeStatusResult.status === 'fulfilled' &&
       runtimeStatusResult.value &&
@@ -3029,7 +3094,12 @@ export class TeamProvisioningService {
         const parsed = extractJsonObjectFromCli<RuntimeStatusCommandResponse>(
           runtimeStatusResult.value.stdout
         );
-        runtimeCapabilities = parsed.providers?.[params.providerId]?.runtimeCapabilities ?? null;
+        const providerStatus = parsed.providers?.[params.providerId];
+        runtimeCapabilities = providerStatus?.runtimeCapabilities ?? null;
+        modelCatalog =
+          providerStatus?.modelCatalog?.providerId === params.providerId
+            ? providerStatus.modelCatalog
+            : null;
       } catch (error) {
         logger.warn(
           `[${params.providerId}] Failed to parse runtime capabilities for launch validation: ${
@@ -3039,16 +3109,32 @@ export class TeamProvisioningService {
       }
     }
 
+    if (modelCatalog) {
+      for (const model of modelCatalog.models ?? []) {
+        const launchModel = model.launchModel?.trim();
+        if (launchModel) {
+          modelIds.add(launchModel);
+        }
+        const catalogId = model.id?.trim();
+        if (catalogId) {
+          modelIds.add(catalogId);
+        }
+      }
+      defaultModel = modelCatalog.defaultLaunchModel?.trim() || defaultModel;
+    }
+
     return {
       defaultModel:
         params.providerId === 'anthropic'
           ? resolveAnthropicLaunchModel({
               limitContext: params.limitContext === true,
-              availableLaunchModels: modelIds,
+              availableLaunchModels:
+                modelCatalog?.models.map((model) => model.launchModel) ?? modelIds,
               defaultLaunchModel: defaultModel,
             })
           : defaultModel,
       modelIds,
+      modelCatalog,
       runtimeCapabilities,
     };
   }
@@ -3056,7 +3142,7 @@ export class TeamProvisioningService {
   private buildProviderModelLaunchIdentity(params: {
     request: Pick<
       TeamCreateRequest,
-      'providerId' | 'providerBackendId' | 'model' | 'effort' | 'limitContext'
+      'providerId' | 'providerBackendId' | 'model' | 'effort' | 'fastMode' | 'limitContext'
     >;
     facts: RuntimeProviderLaunchFacts;
   }): ProviderModelLaunchIdentity {
@@ -3068,6 +3154,39 @@ export class TeamProvisioningService {
       limitContext: params.request.limitContext,
       facts: params.facts,
     });
+    if (providerId === 'anthropic') {
+      const selection = resolveAnthropicSelectionFromFacts({
+        selectedModel: params.request.model,
+        limitContext: params.request.limitContext,
+        facts: params.facts,
+      });
+      const fastResolution = resolveAnthropicFastMode({
+        selection,
+        selectedFastMode: params.request.fastMode,
+        providerFastModeDefault: getAnthropicFastModeDefault(),
+      });
+
+      return {
+        providerId,
+        providerBackendId:
+          migrateProviderBackendId(providerId, params.request.providerBackendId) ?? null,
+        selectedModel: explicitModel ?? null,
+        selectedModelKind: explicitModel ? 'explicit' : 'default',
+        resolvedLaunchModel: selection.resolvedLaunchModel ?? resolvedLaunchModel,
+        catalogId:
+          selection.catalogModel?.id?.trim() ||
+          selection.resolvedLaunchModel ||
+          resolvedLaunchModel,
+        catalogSource: selection.catalogSource,
+        catalogFetchedAt: selection.catalogFetchedAt,
+        selectedEffort: params.request.effort ?? null,
+        resolvedEffort: params.request.effort ?? selection.defaultEffort ?? null,
+        selectedFastMode: params.request.fastMode ?? 'inherit',
+        resolvedFastMode: fastResolution.resolvedFastMode,
+        fastResolutionReason: fastResolution.disabledReason,
+      };
+    }
+
     const resolvedEffort = params.request.effort ?? null;
 
     return {
@@ -3090,9 +3209,50 @@ export class TeamProvisioningService {
     providerId: TeamProviderId;
     model?: string;
     effort?: EffortLevel;
+    fastMode?: TeamFastMode;
+    limitContext?: boolean;
     facts: RuntimeProviderLaunchFacts;
   }): void {
     const explicitModel = getExplicitLaunchModelSelection(params.model);
+
+    if (params.providerId === 'anthropic') {
+      const selection = resolveAnthropicSelectionFromFacts({
+        selectedModel: params.model,
+        limitContext: params.limitContext,
+        facts: params.facts,
+      });
+      const resolvedLaunchModel = selection.resolvedLaunchModel?.trim() || null;
+      if (!resolvedLaunchModel) {
+        throw new Error(
+          `${params.actorLabel} could not resolve the selected Anthropic model against the current runtime catalog.`
+        );
+      }
+      if (params.facts.modelIds.size > 0 && !params.facts.modelIds.has(resolvedLaunchModel)) {
+        throw new Error(
+          `${params.actorLabel} resolves to Anthropic model "${resolvedLaunchModel}", but the current runtime does not list it as launchable.`
+        );
+      }
+      if (params.effort && !selection.supportedEfforts.includes(params.effort)) {
+        const modelLabel = selection.displayName ?? resolvedLaunchModel;
+        throw new Error(
+          `${params.actorLabel} uses Anthropic effort "${params.effort}", but ${modelLabel} does not support it in the current runtime.`
+        );
+      }
+
+      const fastResolution = resolveAnthropicFastMode({
+        selection,
+        selectedFastMode: params.fastMode,
+        providerFastModeDefault: getAnthropicFastModeDefault(),
+      });
+      if ((params.fastMode ?? 'inherit') === 'on' && !fastResolution.selectable) {
+        throw new Error(
+          `${params.actorLabel} enables Anthropic Fast mode, but ${
+            fastResolution.disabledReason ?? 'it is unavailable for the selected runtime or model.'
+          }`
+        );
+      }
+      return;
+    }
 
     if (params.providerId !== 'codex') {
       if (params.effort && !isLegacySafeEffort(params.effort)) {
@@ -3133,7 +3293,7 @@ export class TeamProvisioningService {
     env: NodeJS.ProcessEnv;
     request: Pick<
       TeamCreateRequest,
-      'providerId' | 'providerBackendId' | 'model' | 'effort' | 'limitContext'
+      'providerId' | 'providerBackendId' | 'model' | 'effort' | 'fastMode' | 'limitContext'
     >;
     effectiveMembers: TeamCreateRequest['members'];
   }): Promise<ProviderModelLaunchIdentity> {
@@ -3161,6 +3321,8 @@ export class TeamProvisioningService {
       providerId: leadProviderId,
       model: params.request.model,
       effort: params.request.effort,
+      fastMode: params.request.fastMode,
+      limitContext: params.request.limitContext,
       facts: leadFacts,
     });
 
@@ -3172,6 +3334,7 @@ export class TeamProvisioningService {
         providerId: memberProviderId,
         model: member.model,
         effort: member.effort,
+        limitContext: params.request.limitContext,
         facts: memberFacts,
       });
     }
@@ -4867,6 +5030,7 @@ export class TeamProvisioningService {
         run?.request.providerId ?? persistedTeamMeta?.providerId,
         run?.request.providerBackendId ?? persistedTeamMeta?.providerBackendId
       ),
+      fastMode: run?.request.fastMode ?? persistedTeamMeta?.fastMode,
       members: snapshotMembers,
     };
 
@@ -6728,6 +6892,8 @@ export class TeamProvisioningService {
         request.model,
         launchIdentity
       );
+      const resolvedProviderId = resolveTeamProviderId(request.providerId);
+      const anthropicSettingsArgs = buildAnthropicSettingsArgs(resolvedProviderId, launchIdentity);
       const spawnArgs = [
         '--input-format',
         'stream-json',
@@ -6751,7 +6917,8 @@ export class TeamProvisioningService {
           ? ['--dangerously-skip-permissions', '--permission-mode', 'bypassPermissions']
           : ['--permission-prompt-tool', 'stdio', '--permission-mode', 'default']),
         ...(launchModelArg ? ['--model', launchModelArg] : []),
-        ...(request.effort ? ['--effort', request.effort] : []),
+        ...(launchIdentity.resolvedEffort ? ['--effort', launchIdentity.resolvedEffort] : []),
+        ...anthropicSettingsArgs,
         ...(request.worktree ? ['--worktree', request.worktree] : []),
         ...parseCliArgs(request.extraCliArgs),
         ...providerArgs,
@@ -6784,6 +6951,7 @@ export class TeamProvisioningService {
           providerBackendId: request.providerBackendId,
           model: request.model,
           effort: request.effort,
+          fastMode: request.fastMode,
           skipPermissions: request.skipPermissions,
           worktree: request.worktree,
           extraCliArgs: request.extraCliArgs,
@@ -7185,6 +7353,7 @@ export class TeamProvisioningService {
         providerBackendId: request.providerBackendId,
         model: request.model,
         effort: request.effort,
+        fastMode: request.fastMode,
         skipPermissions: request.skipPermissions,
       };
 
@@ -7389,12 +7558,15 @@ export class TeamProvisioningService {
         request.model,
         launchIdentity
       );
+      const resolvedProviderId = resolveTeamProviderId(request.providerId);
+      const anthropicSettingsArgs = buildAnthropicSettingsArgs(resolvedProviderId, launchIdentity);
       if (launchModelArg) {
         launchArgs.push('--model', launchModelArg);
       }
-      if (request.effort) {
-        launchArgs.push('--effort', request.effort);
+      if (launchIdentity.resolvedEffort) {
+        launchArgs.push('--effort', launchIdentity.resolvedEffort);
       }
+      launchArgs.push(...anthropicSettingsArgs);
       if (request.worktree) {
         launchArgs.push('--worktree', request.worktree);
       }
@@ -7423,6 +7595,7 @@ export class TeamProvisioningService {
         providerBackendId: request.providerBackendId,
         model: request.model,
         effort: request.effort,
+        fastMode: request.fastMode,
         skipPermissions: request.skipPermissions,
         worktree: request.worktree,
         extraCliArgs: request.extraCliArgs,

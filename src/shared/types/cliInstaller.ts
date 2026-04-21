@@ -117,7 +117,14 @@ export interface CliProviderModelAvailability {
   checkedAt?: string | null;
 }
 
-export type CliProviderReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type CliProviderReasoningEffort =
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max';
 
 export type CliProviderModelCatalogSource =
   | 'anthropic-models-api'
@@ -132,6 +139,7 @@ export interface CliProviderModelCatalogItem {
   hidden: boolean;
   supportedReasoningEfforts: CliProviderReasoningEffort[];
   defaultReasoningEffort: CliProviderReasoningEffort | null;
+  supportsFastMode?: boolean;
   inputModalities: string[];
   supportsPersonality: boolean;
   isDefault: boolean;
@@ -168,6 +176,12 @@ export interface CliProviderRuntimeCapabilities {
     supported: boolean;
     values: CliProviderReasoningEffort[];
     configPassthrough?: boolean;
+  };
+  fastMode?: {
+    supported: boolean;
+    available: boolean;
+    reason?: string | null;
+    source: 'runtime';
   };
 }
 

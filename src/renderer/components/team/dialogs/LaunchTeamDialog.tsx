@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  reconcileAnthropicRuntimeSelections,
+  resolveAnthropicFastMode,
+  resolveAnthropicRuntimeSelection,
+} from '@features/anthropic-runtime-profile/renderer';
+import {
   mergeCodexCliStatusWithSnapshot,
   useCodexAccountSnapshot,
 } from '@features/codex-account/renderer';
@@ -115,6 +120,7 @@ import type {
   Schedule,
   ScheduleLaunchConfig,
   TeamCreateRequest,
+  TeamFastMode,
   TeamLaunchRequest,
   TeamProviderId,
   UpdateSchedulePatch,
@@ -216,6 +222,11 @@ function getStoredTeamModel(providerId: TeamProviderId): string {
   return normalizeExplicitTeamModelForUi(providerId, stored === '__default__' ? '' : stored);
 }
 
+function getStoredTeamFastMode(): TeamFastMode {
+  const stored = localStorage.getItem('team:lastSelectedFastMode');
+  return stored === 'on' || stored === 'off' || stored === 'inherit' ? stored : 'inherit';
+}
+
 function getProviderLabel(providerId: TeamProviderId): string {
   return getCatalogTeamProviderLabel(providerId) ?? 'Anthropic';
 }
@@ -254,6 +265,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const { open, onClose } = props;
   const { isLight } = useTheme();
   const multimodelEnabled = useStore((s) => s.appConfig?.general?.multimodelEnabled ?? true);
+  const anthropicProviderFastModeDefault = useStore(
+    (s) => s.appConfig?.providerConnections?.anthropic.fastModeDefault ?? false
+  );
   const cliStatus = useStore((s) => s.cliStatus);
   const cliStatusLoading = useStore((s) => s.cliStatusLoading);
   const bootstrapCliStatus = useStore((s) => s.bootstrapCliStatus);
@@ -341,6 +355,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     const stored = localStorage.getItem('team:lastSelectedEffort');
     return stored === null ? 'medium' : stored;
   });
+  const [selectedFastMode, setSelectedFastModeRaw] = useState<TeamFastMode>(getStoredTeamFastMode);
+  const [anthropicRuntimeNotice, setAnthropicRuntimeNotice] = useState<string | null>(null);
 
   // ---------------------------------------------------------------------------
   // Launch-only state
@@ -535,6 +551,11 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     localStorage.setItem('team:lastSelectedEffort', value);
   };
 
+  const setSelectedFastMode = (value: TeamFastMode): void => {
+    setSelectedFastModeRaw(value);
+    localStorage.setItem('team:lastSelectedFastMode', value);
+  };
+
   // ---------------------------------------------------------------------------
   // localStorage migration: schedule → team namespace (one-time)
   // ---------------------------------------------------------------------------
@@ -625,6 +646,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       );
       setSkipPermissionsRaw(schedule.launchConfig.skipPermissions !== false);
       setSelectedEffortRaw(schedule.launchConfig.effort ?? '');
+      setSelectedFastModeRaw(getStoredTeamFastMode());
     } else {
       // Create mode — reset to defaults
       setSchedLabel('');
@@ -641,6 +663,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       setSelectedProviderIdRaw(storedProviderId);
       setSelectedModelRaw(getStoredTeamModel(storedProviderId));
       setSelectedEffortRaw('medium');
+      setSelectedFastModeRaw(getStoredTeamFastMode());
     }
 
     setLocalError(null);
@@ -690,6 +713,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         multimodelEnabled,
         storedProviderId,
         storedEffort: storedEffort === null ? 'medium' : storedEffort,
+        storedFastMode: getStoredTeamFastMode(),
         storedLimitContext: localStorage.getItem('team:lastLimitContext') === 'true',
         getStoredModel: getStoredTeamModel,
       });
@@ -709,6 +733,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       setSelectedProviderIdRaw(launchPrefill.providerId);
       setSelectedModelRaw(launchPrefill.model);
       setSelectedEffortRaw(launchPrefill.effort);
+      setSelectedFastModeRaw(launchPrefill.fastMode);
       setLimitContextRaw(launchPrefill.limitContext);
       setSkipPermissionsRaw(
         savedRequest?.skipPermissions ??
@@ -753,6 +778,85 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       ) ?? '',
     [limitContext, runtimeProviderStatusById, selectedModel, selectedProviderId]
   );
+  const anthropicRuntimeSelection = useMemo(
+    () =>
+      selectedProviderId === 'anthropic'
+        ? resolveAnthropicRuntimeSelection({
+            source: {
+              modelCatalog: runtimeProviderStatusById.get('anthropic')?.modelCatalog,
+              runtimeCapabilities: runtimeProviderStatusById.get('anthropic')?.runtimeCapabilities,
+            },
+            selectedModel,
+            limitContext,
+          })
+        : null,
+    [limitContext, runtimeProviderStatusById, selectedModel, selectedProviderId]
+  );
+  const anthropicFastModeResolution = useMemo(
+    () =>
+      selectedProviderId === 'anthropic' && anthropicRuntimeSelection
+        ? resolveAnthropicFastMode({
+            selection: anthropicRuntimeSelection,
+            selectedFastMode,
+            providerFastModeDefault: anthropicProviderFastModeDefault,
+          })
+        : null,
+    [
+      anthropicProviderFastModeDefault,
+      anthropicRuntimeSelection,
+      selectedFastMode,
+      selectedProviderId,
+    ]
+  );
+
+  useEffect(() => {
+    if (selectedProviderId !== 'anthropic') {
+      setAnthropicRuntimeNotice(null);
+      return;
+    }
+
+    const reconciliation = reconcileAnthropicRuntimeSelections({
+      selection:
+        anthropicRuntimeSelection ??
+        resolveAnthropicRuntimeSelection({
+          source: {
+            modelCatalog: null,
+            runtimeCapabilities: null,
+          },
+          selectedModel,
+          limitContext,
+        }),
+      selectedEffort,
+      selectedFastMode,
+      providerFastModeDefault: anthropicProviderFastModeDefault,
+    });
+
+    const notices: string[] = [];
+    if (reconciliation.nextEffort !== selectedEffort) {
+      setSelectedEffortRaw(reconciliation.nextEffort);
+      localStorage.setItem('team:lastSelectedEffort', reconciliation.nextEffort);
+      if (reconciliation.effortResetReason) {
+        notices.push(reconciliation.effortResetReason);
+      }
+    }
+    if (reconciliation.nextFastMode !== selectedFastMode) {
+      setSelectedFastModeRaw(reconciliation.nextFastMode);
+      localStorage.setItem('team:lastSelectedFastMode', reconciliation.nextFastMode);
+      if (reconciliation.fastModeResetReason) {
+        notices.push(reconciliation.fastModeResetReason);
+      }
+    }
+    setAnthropicRuntimeNotice(notices.length > 0 ? notices.join(' ') : null);
+  }, [
+    anthropicProviderFastModeDefault,
+    anthropicRuntimeSelection,
+    limitContext,
+    selectedEffort,
+    selectedFastMode,
+    selectedModel,
+    selectedProviderId,
+  ]);
+
   const selectedModelChecksByProvider = useMemo(() => {
     const modelsByProvider = new Map<TeamProviderId, string[]>();
     const defaultSelectionByProvider = new Map<TeamProviderId, boolean>();
@@ -1237,17 +1341,30 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       runtimeProviderStatusById.get(selectedProviderId)
     );
     if (model) args.push('--model', model);
-    if (selectedEffort) args.push('--effort', selectedEffort);
+    const effectiveEffort =
+      selectedProviderId === 'anthropic'
+        ? selectedEffort || anthropicRuntimeSelection?.defaultEffort || ''
+        : selectedEffort;
+    if (effectiveEffort) args.push('--effort', effectiveEffort);
+    if (selectedProviderId === 'anthropic') {
+      const fastSettings = anthropicFastModeResolution?.resolvedFastMode
+        ? { fastMode: true, fastModePerSessionOptIn: false }
+        : { fastMode: false };
+      args.push('--settings', JSON.stringify(fastSettings));
+    }
     if (!clearContext) args.push('--resume', '<previous>');
     return args;
   }, [
+    anthropicFastModeResolution?.resolvedFastMode,
+    anthropicRuntimeSelection?.defaultEffort,
     isLaunchMode,
     skipPermissions,
     selectedModel,
     limitContext,
     selectedEffort,
-    clearContext,
     selectedProviderId,
+    clearContext,
+    runtimeProviderStatusById,
   ]);
 
   const launchOptionalSummary = useMemo(() => {
@@ -1258,6 +1375,11 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     summary.push(`Provider: ${getProviderLabel(selectedProviderId)}`);
     if (selectedModel) summary.push(`Model: ${selectedModel}`);
     if (selectedEffort) summary.push(`Effort: ${selectedEffort}`);
+    if (selectedProviderId === 'anthropic') {
+      if (selectedFastMode === 'on') summary.push('Fast mode');
+      else if (selectedFastMode === 'off') summary.push('Fast disabled');
+      else if (anthropicProviderFastModeDefault) summary.push('Fast default');
+    }
     if (selectedProviderId === 'anthropic' && limitContext) summary.push('Limited to 200K context');
     if (skipPermissions) summary.push('Auto-approve tools');
     if (clearContext) summary.push('Fresh session');
@@ -1270,6 +1392,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     selectedModel,
     selectedProviderId,
     selectedEffort,
+    selectedFastMode,
+    anthropicProviderFastModeDefault,
     limitContext,
     skipPermissions,
     clearContext,
@@ -1478,6 +1602,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               runtimeProviderStatusById.get(selectedProviderId)
             ),
             effort: (selectedEffort as EffortLevel) || undefined,
+            fastMode: selectedProviderId === 'anthropic' ? selectedFastMode : undefined,
             limitContext,
             clearContext: clearContext || undefined,
             skipPermissions,
@@ -1869,14 +1994,18 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   providerId={selectedProviderId}
                   model={selectedModel}
                   effort={(selectedEffort as EffortLevel) || undefined}
+                  fastMode={selectedFastMode}
+                  providerFastModeDefault={anthropicProviderFastModeDefault}
                   limitContext={limitContext}
                   onProviderChange={setSelectedProviderId}
                   onModelChange={setSelectedModel}
                   onEffortChange={setSelectedEffort}
+                  onFastModeChange={setSelectedFastMode}
                   onLimitContextChange={setLimitContext}
                   syncModelsWithTeammates={syncModelsWithLead}
                   onSyncModelsWithTeammatesChange={setSyncModelsWithLead}
                   leadWarningText={leadRuntimeWarningText}
+                  leadFastModeNotice={anthropicRuntimeNotice}
                   memberWarningById={memberRuntimeWarningById}
                   leadModelIssueText={leadModelIssueText}
                   memberModelIssueById={memberModelIssueById}
@@ -2029,6 +2158,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   id="dialog-effort"
                   providerId={selectedProviderId}
                   model={selectedModel}
+                  limitContext={false}
                 />
                 <SkipPermissionsCheckbox
                   id="dialog-skip-permissions"

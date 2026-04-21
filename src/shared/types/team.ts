@@ -782,9 +782,10 @@ export interface TeamViewSnapshot {
   isAlive?: boolean;
 }
 
-export type EffortLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type EffortLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type TeamProviderId = 'anthropic' | 'codex' | 'gemini';
 export type TeamProviderBackendId = 'auto' | 'adapter' | 'api' | 'cli-sdk' | 'codex-native';
+export type TeamFastMode = 'inherit' | 'on' | 'off';
 
 export interface ProviderModelLaunchIdentity {
   providerId: TeamProviderId;
@@ -802,6 +803,9 @@ export interface ProviderModelLaunchIdentity {
   catalogFetchedAt: string | null;
   selectedEffort: EffortLevel | null;
   resolvedEffort: EffortLevel | null;
+  selectedFastMode?: TeamFastMode | null;
+  resolvedFastMode?: boolean | null;
+  fastResolutionReason?: string | null;
 }
 
 export interface TeamLaunchRequest {
@@ -812,6 +816,7 @@ export interface TeamLaunchRequest {
   providerBackendId?: TeamProviderBackendId;
   model?: string;
   effort?: EffortLevel;
+  fastMode?: TeamFastMode;
   /** When true, context window is limited to 200K tokens instead of the default. */
   limitContext?: boolean;
   /** When true, skip --resume and start a fresh session (clears context memory). */
@@ -949,6 +954,7 @@ export interface TeamAgentRuntimeSnapshot {
   updatedAt: string;
   runId: string | null;
   providerBackendId?: TeamProviderBackendId;
+  fastMode?: TeamFastMode;
   members: Record<string, TeamAgentRuntimeEntry>;
 }
 
@@ -1061,6 +1067,7 @@ export interface TeamCreateRequest {
   providerBackendId?: TeamProviderBackendId;
   model?: string;
   effort?: EffortLevel;
+  fastMode?: TeamFastMode;
   /** When true, context window is limited to 200K tokens instead of the default. */
   limitContext?: boolean;
   /** When false, run WITHOUT --dangerously-skip-permissions (manual tool approval). Default: true. */
@@ -1079,6 +1086,7 @@ export interface TeamCreateConfigRequest {
   members: TeamProvisioningMemberInput[];
   cwd?: string;
   providerBackendId?: TeamProviderBackendId;
+  fastMode?: TeamFastMode;
 }
 
 export interface TeamCreateResponse {

@@ -246,6 +246,7 @@ function makeAppConfig(multimodelEnabled: boolean): AppConfig {
     providerConnections: {
       anthropic: {
         authMode: 'auto',
+        fastModeDefault: false,
       },
       codex: {
         preferredAuthMode: 'auto',
