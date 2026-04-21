@@ -52,6 +52,17 @@ vi.mock('@main/utils/childProcess', () => ({
         stdout: JSON.stringify({
           schemaVersion: 1,
           providers: {
+            anthropic: {
+              defaultModel: 'opus[1m]',
+              models: [
+                { id: 'opus', label: 'Opus 4.7', description: 'Anthropic default family alias' },
+                {
+                  id: 'opus[1m]',
+                  label: 'Opus 4.7 (1M)',
+                  description: 'Anthropic long-context default',
+                },
+              ],
+            },
             codex: {
               defaultModel: 'gpt-5.4',
               models: [{ id: 'gpt-5.4', label: 'GPT-5.4', description: 'Codex default' }],

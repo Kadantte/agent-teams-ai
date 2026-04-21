@@ -793,7 +793,12 @@ export interface ProviderModelLaunchIdentity {
   selectedModelKind: 'default' | 'explicit';
   resolvedLaunchModel: string | null;
   catalogId: string | null;
-  catalogSource: 'app-server' | 'static-fallback' | 'runtime' | 'unavailable';
+  catalogSource:
+    | 'anthropic-models-api'
+    | 'app-server'
+    | 'static-fallback'
+    | 'runtime'
+    | 'unavailable';
   catalogFetchedAt: string | null;
   selectedEffort: EffortLevel | null;
   resolvedEffort: EffortLevel | null;

@@ -1,3 +1,4 @@
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -28,8 +29,70 @@ vi.mock('@main/services/infrastructure/NotificationManager', () => ({
   },
 }));
 
+const execCliMock = vi.fn(async (_binaryPath: string | null, args: string[]) => {
+  if (args[0] === 'model') {
+    return {
+      stdout: JSON.stringify({
+        schemaVersion: 1,
+        providers: {
+          anthropic: {
+            defaultModel: 'opus[1m]',
+            models: [
+              { id: 'opus', label: 'Opus 4.7', description: 'Anthropic default family alias' },
+              {
+                id: 'opus[1m]',
+                label: 'Opus 4.7 (1M)',
+                description: 'Anthropic long-context default',
+              },
+            ],
+          },
+          codex: {
+            defaultModel: 'gpt-5.4-mini',
+            models: [{ id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', description: 'Codex default' }],
+          },
+          gemini: {
+            defaultModel: 'gemini-2.5-pro',
+            models: [{ id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Default' }],
+          },
+        },
+      }),
+      stderr: '',
+      exitCode: 0,
+    };
+  }
+
+  if (args[0] === 'runtime') {
+    return {
+      stdout: JSON.stringify({
+        providers: {
+          codex: {
+            runtimeCapabilities: {
+              modelCatalog: { dynamic: false, source: 'runtime' },
+              reasoningEffort: {
+                supported: true,
+                values: ['low', 'medium', 'high'],
+                configPassthrough: false,
+              },
+            },
+          },
+        },
+      }),
+      stderr: '',
+      exitCode: 0,
+    };
+  }
+
+  return { stdout: '', stderr: '', exitCode: 0 };
+});
+vi.mock('@main/utils/childProcess', () => ({
+  execCli: (...args: Parameters<typeof execCliMock>) => execCliMock(...args),
+  spawnCli: vi.fn(),
+  killProcessTree: vi.fn(),
+}));
+
 import { TeamProvisioningService } from '@main/services/team/TeamProvisioningService';
 import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
+import { spawnCli } from '@main/utils/childProcess';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 
 function getRealAgentTeamsMcpLaunchSpec(): { command: string; args: string[] } {
@@ -144,6 +207,14 @@ process.stdin.on('data', (chunk) => {
   return scriptPath;
 }
 
+function spawnRealCli(
+  command: string,
+  args: readonly string[],
+  options?: Parameters<typeof spawn>[2]
+) {
+  return options ? spawn(command, [...args], options) : spawn(command, [...args]);
+}
+
 async function removeTempRoot(dirPath: string): Promise<void> {
   if (!dirPath) {
     return;
@@ -169,6 +240,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    execCliMock.mockClear();
     addTeamNotificationMock.mockResolvedValue(null);
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-team-prepare-'));
     vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/fake/claude');
@@ -366,6 +438,64 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     expect(result.details).toContain(
       `Selected model ${DEFAULT_PROVIDER_MODEL_SELECTION} verified for launch.`
     );
+    expect(spawnProbe).toHaveBeenCalledWith(
+      '/fake/claude',
+      expect.arrayContaining(['--model', 'opus']),
+      tempRoot,
+      expect.any(Object),
+      60_000,
+      expect.any(Object)
+    );
+  });
+
+  it('falls back from an unavailable Anthropic 1M launch id to the base model during prepare', async () => {
+    execCliMock.mockImplementationOnce(async (_binaryPath: string | null, args: string[]) => {
+      if (args[0] === 'model') {
+        return {
+          stdout: JSON.stringify({
+            schemaVersion: 1,
+            providers: {
+              anthropic: {
+                defaultModel: 'opus',
+                models: [{ id: 'opus', label: 'Opus 4.8', description: 'Only base launch value' }],
+              },
+            },
+          }),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'getCachedOrProbeResult').mockResolvedValue({
+      claudePath: '/fake/claude',
+      authSource: 'oauth_token',
+    });
+    vi.spyOn(svc as any, 'buildProvisioningEnv').mockResolvedValue({
+      env: {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      authSource: 'oauth_token',
+      geminiRuntimeAuth: null,
+    });
+    const spawnProbe = vi.spyOn(svc as any, 'spawnProbe').mockResolvedValue({
+      stdout: 'PONG',
+      stderr: '',
+      exitCode: 0,
+    });
+
+    const result = await svc.prepareForProvisioning(tempRoot, {
+      forceFresh: true,
+      providerId: 'anthropic',
+      modelIds: ['opus[1m]'],
+      limitContext: false,
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.details).toContain('Selected model opus[1m] verified for launch.');
     expect(spawnProbe).toHaveBeenCalledWith(
       '/fake/claude',
       expect.arrayContaining(['--model', 'opus']),
@@ -786,6 +916,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
       const configPath = writeMcpConfig(tempRoot, {
         'agent-teams': getRealAgentTeamsMcpLaunchSpec(),
       });
+      vi.mocked(spawnCli).mockImplementation(spawnRealCli);
 
       await expect(
         (svc as any).validateAgentTeamsMcpRuntime('/fake/claude', tempRoot, process.env, configPath)
@@ -814,6 +945,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
         args: [mockServerPath],
       },
     });
+    vi.mocked(spawnCli).mockImplementation(spawnRealCli);
 
     await expect(
       (svc as any).validateAgentTeamsMcpRuntime('/fake/claude', tempRoot, process.env, configPath)
@@ -829,6 +961,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
         args: [mockServerPath],
       },
     });
+    vi.mocked(spawnCli).mockImplementation(spawnRealCli);
 
     await expect(
       (svc as any).validateAgentTeamsMcpRuntime('/fake/claude', tempRoot, process.env, configPath)

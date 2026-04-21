@@ -1,10 +1,5 @@
 import { parseModelString } from '@shared/utils/modelParser';
-import {
-  filterVisibleProviderRuntimeModels,
-  GPT_5_1_CODEX_MINI_UI_DISABLED_MODEL,
-  GPT_5_2_CODEX_UI_DISABLED_MODEL,
-  GPT_5_3_CODEX_SPARK_UI_DISABLED_MODEL,
-} from '@shared/utils/providerModelVisibility';
+import { filterVisibleProviderRuntimeModels } from '@shared/utils/providerModelVisibility';
 
 import type { CliProviderId, CliProviderStatus, TeamProviderId } from '@shared/types';
 
@@ -260,6 +255,23 @@ export function getTeamModelLabel(model: string | undefined): string | undefined
   return formatParsedClaudeModelLabel(trimmed) ?? trimmed;
 }
 
+function getRuntimeCatalogModel(
+  providerId: SupportedProviderId | undefined,
+  model: string | undefined,
+  providerStatus?: RuntimeAwareProviderStatus | null
+): NonNullable<RuntimeAwareProviderStatus['modelCatalog']>['models'][number] | null {
+  const trimmed = model?.trim();
+  if (!providerId || !trimmed || providerStatus?.modelCatalog?.providerId !== providerId) {
+    return null;
+  }
+
+  return (
+    providerStatus.modelCatalog.models.find(
+      (item) => item.launchModel === trimmed || item.id === trimmed
+    ) ?? null
+  );
+}
+
 export function getTeamModelBadgeLabel(
   providerId: SupportedProviderId,
   model: string | undefined
@@ -305,6 +317,33 @@ export function getProviderScopedTeamModelLabel(
   }
 
   return baseLabel.replace(/^GPT-/i, '');
+}
+
+export function getRuntimeAwareProviderScopedTeamModelLabel(
+  providerId: SupportedProviderId,
+  model: string | undefined,
+  providerStatus?: RuntimeAwareProviderStatus | null
+): string | undefined {
+  const runtimeModel = getRuntimeCatalogModel(providerId, model, providerStatus);
+  const runtimeLabel = runtimeModel?.displayName?.trim();
+  if (runtimeLabel) {
+    return getProviderScopedTeamModelLabel(providerId, runtimeLabel) ?? runtimeLabel;
+  }
+
+  return getProviderScopedTeamModelLabel(providerId, model);
+}
+
+export function getRuntimeAwareTeamModelBadgeLabel(
+  providerId: SupportedProviderId,
+  model: string | undefined,
+  providerStatus?: RuntimeAwareProviderStatus | null
+): string | undefined {
+  const runtimeModel = getRuntimeCatalogModel(providerId, model, providerStatus);
+  if (runtimeModel?.badgeLabel?.trim()) {
+    return runtimeModel.badgeLabel.trim();
+  }
+
+  return getTeamModelBadgeLabel(providerId, model);
 }
 
 export function sortTeamProviderModels(

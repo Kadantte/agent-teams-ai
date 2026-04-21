@@ -1344,4 +1344,70 @@ describe('TeamProvisioningService auto-resume cleanup', () => {
       getConfigSpy.mockRestore();
     }
   });
+
+  it('schedules auto-resume from api_retry model_cooldown payloads during provisioning', async () => {
+    vi.setSystemTime(new Date('2026-04-17T12:00:00.000Z'));
+
+    const service = new TeamProvisioningService();
+    seedConfig('my-team');
+    const run = attachRun(service, 'my-team', {
+      provisioningComplete: false,
+      detectedSessionId: 'sess-live',
+    });
+    (run as unknown as { progress: Record<string, unknown> }).progress = {
+      state: 'starting',
+      updatedAt: '2026-04-17T12:00:00.000Z',
+    };
+    const onProgress = vi.fn();
+    (run as unknown as { onProgress: (progress: unknown) => void }).onProgress = onProgress;
+
+    const autoResumeProvisioning = {
+      getCurrentRunId: vi.fn(() => 'run-1' as string | null),
+      isTeamAlive: vi.fn(() => true),
+      sendMessageToTeam: vi.fn(async () => undefined),
+    };
+    initializeAutoResumeService(autoResumeProvisioning);
+
+    const configManager = ConfigManager.getInstance();
+    const actualConfig = configManager.getConfig();
+    const getConfigSpy = vi.spyOn(configManager, 'getConfig').mockImplementation(
+      () =>
+        ({
+          ...actualConfig,
+          notifications: {
+            ...actualConfig.notifications,
+            autoResumeOnRateLimit: true,
+          },
+        }) as never
+    );
+
+    try {
+      callHandleStreamJsonMessage(service, run, {
+        type: 'system',
+        subtype: 'api_retry',
+        timestamp: '2026-04-17T12:00:00.000Z',
+        attempt: 1,
+        max_retries: 10,
+        error_status: 429,
+        error: 'model_cooldown',
+        error_message:
+          '429 {"error":{"code":"model_cooldown","message":"All credentials for model claude-opus-4-6 are cooling down via provider claude","model":"claude-opus-4-6","provider":"claude","reset_seconds":41,"reset_time":"40s"}}',
+        retry_delay_ms: 41_000,
+      });
+
+      expect(onProgress).toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(41 * 1000 + 29 * 1000);
+      expect(autoResumeProvisioning.sendMessageToTeam).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(autoResumeProvisioning.sendMessageToTeam).toHaveBeenCalledTimes(1);
+      expect(autoResumeProvisioning.sendMessageToTeam).toHaveBeenCalledWith(
+        'my-team',
+        expect.stringContaining('rate limit has reset')
+      );
+    } finally {
+      getConfigSpy.mockRestore();
+    }
+  });
 });

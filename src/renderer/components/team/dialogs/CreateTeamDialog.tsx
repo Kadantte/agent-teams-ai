@@ -984,10 +984,6 @@ export const CreateTeamDialog = ({
     [memberColorMap, members, soloTeam]
   );
 
-  const effectiveModel = useMemo(
-    () => computeEffectiveTeamModel(selectedModel, limitContext, selectedProviderId),
-    [selectedModel, limitContext, selectedProviderId]
-  );
   const runtimeProviderStatusById = useMemo(
     () =>
       new Map(
@@ -996,6 +992,16 @@ export const CreateTeamDialog = ({
         )
       ),
     [effectiveCliStatus?.providers]
+  );
+  const effectiveModel = useMemo(
+    () =>
+      computeEffectiveTeamModel(
+        selectedModel,
+        limitContext,
+        selectedProviderId,
+        runtimeProviderStatusById.get(selectedProviderId)
+      ),
+    [limitContext, runtimeProviderStatusById, selectedModel, selectedProviderId]
   );
 
   const sanitizedTeamName = sanitizeTeamName(teamName.trim());

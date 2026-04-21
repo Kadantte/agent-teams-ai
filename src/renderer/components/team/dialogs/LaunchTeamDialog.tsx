@@ -744,8 +744,14 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   }, [isLaunchMode, previousProviderId, selectedProviderId]);
 
   const effectiveLeadRuntimeModel = useMemo(
-    () => computeEffectiveTeamModel(selectedModel, limitContext, selectedProviderId) ?? '',
-    [selectedModel, limitContext, selectedProviderId]
+    () =>
+      computeEffectiveTeamModel(
+        selectedModel,
+        limitContext,
+        selectedProviderId,
+        runtimeProviderStatusById.get(selectedProviderId)
+      ) ?? '',
+    [limitContext, runtimeProviderStatusById, selectedModel, selectedProviderId]
   );
   const selectedModelChecksByProvider = useMemo(() => {
     const modelsByProvider = new Map<TeamProviderId, string[]>();
@@ -1224,7 +1230,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     args.push('--verbose', '--setting-sources', 'user,project,local');
     args.push('--mcp-config', '<auto>', '--disallowedTools', APP_TEAM_RUNTIME_DISALLOWED_TOOLS);
     if (skipPermissions) args.push('--dangerously-skip-permissions');
-    const model = computeEffectiveTeamModel(selectedModel, limitContext, selectedProviderId);
+    const model = computeEffectiveTeamModel(
+      selectedModel,
+      limitContext,
+      selectedProviderId,
+      runtimeProviderStatusById.get(selectedProviderId)
+    );
     if (model) args.push('--model', model);
     if (selectedEffort) args.push('--effort', selectedEffort);
     if (!clearContext) args.push('--resume', '<previous>');
@@ -1460,7 +1471,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                 previousLaunchParams?.providerBackendId ?? savedLaunchProviderBackendId
               ) ??
               undefined,
-            model: computeEffectiveTeamModel(selectedModel, limitContext, selectedProviderId),
+            model: computeEffectiveTeamModel(
+              selectedModel,
+              limitContext,
+              selectedProviderId,
+              runtimeProviderStatusById.get(selectedProviderId)
+            ),
             effort: (selectedEffort as EffortLevel) || undefined,
             limitContext,
             clearContext: clearContext || undefined,

@@ -1,9 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
 
-import {
-  mergeCodexCliStatusWithSnapshot,
-  useCodexAccountSnapshot,
-} from '@features/codex-account/renderer';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import { Label } from '@renderer/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
@@ -13,8 +9,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip';
+import { useEffectiveCliProviderStatus } from '@renderer/hooks/useEffectiveCliProviderStatus';
 import { cn } from '@renderer/lib/utils';
-import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import { useStore } from '@renderer/store';
 import {
   GEMINI_UI_DISABLED_BADGE_LABEL,
@@ -30,13 +26,17 @@ import {
 import {
   doesTeamModelCarryProviderBrand,
   getProviderScopedTeamModelLabel,
+  getRuntimeAwareProviderScopedTeamModelLabel,
   getTeamModelLabel as getCatalogTeamModelLabel,
   getTeamProviderLabel as getCatalogTeamProviderLabel,
   isAnthropicHaikuTeamModel,
 } from '@renderer/utils/teamModelCatalog';
 import { extractProviderScopedBaseModel } from '@renderer/utils/teamModelContext';
+import { resolveAnthropicLaunchModel } from '@shared/utils/anthropicLaunchModel';
 import { getAnthropicDefaultTeamModel } from '@shared/utils/anthropicModelDefaults';
 import { AlertTriangle, Info } from 'lucide-react';
+
+import type { CliProviderStatus } from '@shared/types';
 
 export { getProviderScopedTeamModelLabel } from '@renderer/utils/teamModelCatalog';
 
@@ -108,16 +108,24 @@ export function formatTeamModelSummary(
 export function computeEffectiveTeamModel(
   selectedModel: string,
   limitContext: boolean,
-  providerId: 'anthropic' | 'codex' | 'gemini' = 'anthropic'
+  providerId: 'anthropic' | 'codex' | 'gemini' = 'anthropic',
+  providerStatus?: Pick<CliProviderStatus, 'providerId' | 'modelCatalog'> | null
 ): string | undefined {
   if (providerId !== 'anthropic') {
     return selectedModel.trim() || undefined;
   }
 
-  const base = extractProviderScopedBaseModel(selectedModel, providerId);
-  if (limitContext) return base || getAnthropicDefaultTeamModel(true);
-  if (isAnthropicHaikuTeamModel(base)) return base;
-  return base ? `${base}[1m]` : getAnthropicDefaultTeamModel(limitContext);
+  const catalog =
+    providerStatus?.providerId === 'anthropic' ? (providerStatus.modelCatalog ?? null) : null;
+
+  return (
+    resolveAnthropicLaunchModel({
+      selectedModel,
+      limitContext,
+      availableLaunchModels: catalog?.models.map((model) => model.launchModel),
+      defaultLaunchModel: catalog?.defaultLaunchModel ?? null,
+    }) ?? getAnthropicDefaultTeamModel(limitContext)
+  );
 }
 
 export interface TeamModelSelectorProps {
@@ -139,35 +147,36 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
   disableGeminiOption = false,
   modelIssueReasonByValue,
 }) => {
-  const cliStatus = useStore((s) => s.cliStatus);
-  const cliStatusLoading = useStore((s) => s.cliStatusLoading);
   const multimodelEnabled = useStore((s) => s.appConfig?.general?.multimodelEnabled ?? true);
-  const loadingCliStatus = useMemo(
-    () =>
-      !cliStatus && cliStatusLoading && multimodelEnabled
-        ? createLoadingMultimodelCliStatus()
-        : cliStatus,
-    [cliStatus, cliStatusLoading, multimodelEnabled]
-  );
 
   const effectiveProviderId =
     disableGeminiOption && isGeminiUiFrozen() && providerId === 'gemini' ? 'anthropic' : providerId;
-  const codexAccount = useCodexAccountSnapshot({
-    enabled: multimodelEnabled && effectiveProviderId === 'codex',
-  });
-  const effectiveCliStatus = useMemo(
-    () => mergeCodexCliStatusWithSnapshot(loadingCliStatus, codexAccount.snapshot),
-    [codexAccount.snapshot, loadingCliStatus]
-  );
-  const effectiveCliStatusLoading = cliStatusLoading && effectiveCliStatus === null;
+  const {
+    cliStatus: effectiveCliStatus,
+    providerStatus: runtimeProviderStatus,
+    loading: effectiveCliStatusLoading,
+  } = useEffectiveCliProviderStatus(effectiveProviderId);
   const multimodelAvailable =
     multimodelEnabled || effectiveCliStatus?.flavor === 'agent_teams_orchestrator';
   const defaultModelTooltip = useMemo(() => {
     if (effectiveProviderId === 'anthropic') {
-      return 'Uses the Claude team default model.\nResolves to Opus 4.7 with 1M context, or Opus 4.7 with 200K context when Limit context is enabled.';
+      const defaultLongContextModel =
+        getRuntimeAwareProviderScopedTeamModelLabel(
+          'anthropic',
+          getAnthropicDefaultTeamModel(false),
+          runtimeProviderStatus
+        ) ?? 'Opus 4.7 (1M)';
+      const defaultLimitedContextModel =
+        getRuntimeAwareProviderScopedTeamModelLabel(
+          'anthropic',
+          getAnthropicDefaultTeamModel(true),
+          runtimeProviderStatus
+        ) ?? 'Opus 4.7';
+
+      return `Uses the Claude team default model.\nResolves to ${defaultLongContextModel} with 1M context, or ${defaultLimitedContextModel} with 200K context when Limit context is enabled.`;
     }
     return 'Uses the runtime default for the selected provider.';
-  }, [effectiveProviderId]);
+  }, [effectiveProviderId, runtimeProviderStatus]);
   const getProviderDisabledReason = (candidateProviderId: string): string | null => {
     if (candidateProviderId === 'opencode') {
       return OPENCODE_UI_DISABLED_REASON;
@@ -210,13 +219,6 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
 
     return statusBadge;
   };
-  const runtimeProviderStatus = useMemo(
-    () =>
-      effectiveCliStatus?.providers.find(
-        (provider) => provider.providerId === effectiveProviderId
-      ) ?? null,
-    [effectiveCliStatus?.providers, effectiveProviderId]
-  );
   const shouldAwaitRuntimeModelList =
     effectiveProviderId !== 'anthropic' &&
     (effectiveCliStatus == null || effectiveCliStatusLoading) &&

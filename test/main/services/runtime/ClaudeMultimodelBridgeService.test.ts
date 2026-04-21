@@ -299,6 +299,143 @@ describe('ClaudeMultimodelBridgeService', () => {
     });
   });
 
+  it('maps anthropic runtime model catalog metadata through the bridge', async () => {
+    execCliMock.mockResolvedValue({
+      stdout: JSON.stringify({
+        schemaVersion: 2,
+        providers: {
+          anthropic: {
+            supported: true,
+            authenticated: true,
+            authMethod: 'oauth_token',
+            verificationState: 'verified',
+            canLoginFromUi: true,
+            models: ['opus', 'claude-opus-4-6', 'sonnet', 'haiku'],
+            modelCatalog: {
+              schemaVersion: 1,
+              providerId: 'anthropic',
+              source: 'anthropic-models-api',
+              status: 'ready',
+              fetchedAt: '2026-04-21T00:00:00.000Z',
+              staleAt: '2026-04-21T00:10:00.000Z',
+              defaultModelId: 'opus[1m]',
+              defaultLaunchModel: 'opus[1m]',
+              models: [
+                {
+                  id: 'opus',
+                  launchModel: 'opus',
+                  displayName: 'Opus 4.8',
+                  hidden: false,
+                  supportedReasoningEfforts: ['low', 'medium', 'high'],
+                  defaultReasoningEffort: null,
+                  inputModalities: ['text', 'image'],
+                  supportsPersonality: false,
+                  isDefault: false,
+                  upgrade: false,
+                  source: 'anthropic-models-api',
+                  badgeLabel: 'Opus 4.8',
+                },
+                {
+                  id: 'opus[1m]',
+                  launchModel: 'opus[1m]',
+                  displayName: 'Opus 4.8 (1M)',
+                  hidden: true,
+                  supportedReasoningEfforts: ['low', 'medium', 'high'],
+                  defaultReasoningEffort: null,
+                  inputModalities: ['text', 'image'],
+                  supportsPersonality: false,
+                  isDefault: true,
+                  upgrade: false,
+                  source: 'anthropic-models-api',
+                },
+              ],
+              diagnostics: {
+                configReadState: 'ready',
+                appServerState: 'healthy',
+                message: null,
+                code: null,
+              },
+            },
+            capabilities: {
+              teamLaunch: true,
+              oneShot: true,
+              extensions: {
+                plugins: { status: 'supported', ownership: 'shared', reason: null },
+                mcp: { status: 'supported', ownership: 'shared', reason: null },
+                skills: { status: 'supported', ownership: 'shared', reason: null },
+                apiKeys: { status: 'supported', ownership: 'shared', reason: null },
+              },
+            },
+            runtimeCapabilities: {
+              modelCatalog: {
+                dynamic: true,
+                source: 'anthropic-models-api',
+              },
+              reasoningEffort: {
+                supported: true,
+                values: ['low', 'medium', 'high'],
+                configPassthrough: false,
+              },
+            },
+            backend: {
+              kind: 'anthropic',
+              label: 'Anthropic',
+            },
+          },
+        },
+      }),
+      stderr: '',
+      exitCode: 0,
+    });
+
+    const { ClaudeMultimodelBridgeService } =
+      await import('@main/services/runtime/ClaudeMultimodelBridgeService');
+    const service = new ClaudeMultimodelBridgeService();
+
+    const provider = await service.getProviderStatus('/mock/agent_teams_orchestrator', 'anthropic');
+
+    expect(provider).toMatchObject({
+      providerId: 'anthropic',
+      authenticated: true,
+      models: ['opus', 'claude-opus-4-6', 'sonnet', 'haiku'],
+      modelCatalog: {
+        providerId: 'anthropic',
+        source: 'anthropic-models-api',
+        status: 'ready',
+        defaultModelId: 'opus[1m]',
+        defaultLaunchModel: 'opus[1m]',
+      },
+      runtimeCapabilities: {
+        modelCatalog: {
+          dynamic: true,
+          source: 'anthropic-models-api',
+        },
+        reasoningEffort: {
+          supported: true,
+          values: ['low', 'medium', 'high'],
+          configPassthrough: false,
+        },
+      },
+    });
+    expect(provider.modelCatalog?.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          launchModel: 'opus',
+          displayName: 'Opus 4.8',
+          hidden: false,
+          source: 'anthropic-models-api',
+          badgeLabel: 'Opus 4.8',
+        }),
+        expect.objectContaining({
+          launchModel: 'opus[1m]',
+          displayName: 'Opus 4.8 (1M)',
+          hidden: true,
+          source: 'anthropic-models-api',
+        }),
+      ])
+    );
+  });
+
   it('keeps codex-native lane truth honest from unified runtime status through renderer summaries', async () => {
     execCliMock.mockResolvedValue({
       stdout: JSON.stringify({

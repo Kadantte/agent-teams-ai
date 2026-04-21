@@ -38,6 +38,7 @@ import { getMemberColorByName } from '@shared/constants/memberColors';
 import { DEFAULT_TOOL_APPROVAL_SETTINGS } from '@shared/types/team';
 import { resolveLanguageName } from '@shared/utils/agentLanguage';
 import { getAnthropicDefaultTeamModel } from '@shared/utils/anthropicModelDefaults';
+import { resolveAnthropicLaunchModel } from '@shared/utils/anthropicLaunchModel';
 import { parseCliArgs } from '@shared/utils/cliArgsParser';
 import { deriveContextMetrics, inferContextWindowTokens } from '@shared/utils/contextMetrics';
 import { isTeamEffortLevel } from '@shared/utils/effortLevels';
@@ -365,6 +366,10 @@ function getLaunchModelArg(
   model: string | undefined,
   launchIdentity?: ProviderModelLaunchIdentity | null
 ): string | undefined {
+  if (providerId === 'anthropic' && launchIdentity?.resolvedLaunchModel) {
+    return launchIdentity.resolvedLaunchModel;
+  }
+
   const explicitModel = getExplicitLaunchModelSelection(model);
   if (explicitModel) {
     return explicitModel;
@@ -434,6 +439,25 @@ function isTransientModelProbeMessage(message: string): boolean {
     lower.includes('503') ||
     lower.includes('504')
   );
+}
+
+function resolveRequestedLaunchModel(params: {
+  providerId: TeamProviderId;
+  selectedModel?: string;
+  limitContext?: boolean;
+  facts: Pick<RuntimeProviderLaunchFacts, 'defaultModel' | 'modelIds'>;
+}): string | null {
+  if (params.providerId === 'anthropic') {
+    return resolveAnthropicLaunchModel({
+      selectedModel: params.selectedModel,
+      limitContext: params.limitContext === true,
+      availableLaunchModels: params.facts.modelIds,
+      defaultLaunchModel: params.facts.defaultModel,
+    });
+  }
+
+  const explicitModel = getExplicitLaunchModelSelection(params.selectedModel);
+  return explicitModel ?? params.facts.defaultModel;
 }
 
 function getTeamProviderLabel(providerId: TeamProviderId): string {
@@ -2950,14 +2974,6 @@ export class TeamProvisioningService {
     env: NodeJS.ProcessEnv;
     limitContext?: boolean;
   }): Promise<RuntimeProviderLaunchFacts> {
-    if (params.providerId === 'anthropic') {
-      return {
-        defaultModel: getAnthropicDefaultTeamModel(params.limitContext === true),
-        modelIds: new Set<string>(),
-        runtimeCapabilities: null,
-      };
-    }
-
     const modelListPromise = execCli(
       params.claudePath,
       ['model', 'list', '--json', '--provider', params.providerId],
@@ -3024,19 +3040,34 @@ export class TeamProvisioningService {
     }
 
     return {
-      defaultModel,
+      defaultModel:
+        params.providerId === 'anthropic'
+          ? resolveAnthropicLaunchModel({
+              limitContext: params.limitContext === true,
+              availableLaunchModels: modelIds,
+              defaultLaunchModel: defaultModel,
+            })
+          : defaultModel,
       modelIds,
       runtimeCapabilities,
     };
   }
 
   private buildProviderModelLaunchIdentity(params: {
-    request: Pick<TeamCreateRequest, 'providerId' | 'providerBackendId' | 'model' | 'effort'>;
+    request: Pick<
+      TeamCreateRequest,
+      'providerId' | 'providerBackendId' | 'model' | 'effort' | 'limitContext'
+    >;
     facts: RuntimeProviderLaunchFacts;
   }): ProviderModelLaunchIdentity {
     const providerId = resolveTeamProviderId(params.request.providerId);
     const explicitModel = getExplicitLaunchModelSelection(params.request.model);
-    const resolvedLaunchModel = explicitModel ?? params.facts.defaultModel;
+    const resolvedLaunchModel = resolveRequestedLaunchModel({
+      providerId,
+      selectedModel: params.request.model,
+      limitContext: params.request.limitContext,
+      facts: params.facts,
+    });
     const resolvedEffort = params.request.effort ?? null;
 
     return {
@@ -5417,6 +5448,13 @@ export class TeamProvisioningService {
     }
 
     const { env } = await this.buildProvisioningEnv(providerId);
+    const runtimeFacts = await this.readRuntimeProviderLaunchFacts({
+      claudePath,
+      cwd,
+      providerId,
+      env,
+      limitContext,
+    });
     const probeOutcomeByResolvedModelId = new Map<
       string,
       { kind: 'ready' | 'warning' | 'unavailable'; reason?: string }
@@ -5451,16 +5489,19 @@ export class TeamProvisioningService {
       let targetModelId = label;
       if (isDefaultProviderModelSelection(label)) {
         if (resolvedDefaultModelId === undefined) {
-          try {
-            resolvedDefaultModelId = await this.resolveProviderDefaultModel(
-              claudePath,
-              cwd,
-              providerId,
-              env,
-              limitContext
-            );
-          } catch {
-            resolvedDefaultModelId = null;
+          resolvedDefaultModelId = runtimeFacts.defaultModel;
+          if (!resolvedDefaultModelId) {
+            try {
+              resolvedDefaultModelId = await this.resolveProviderDefaultModel(
+                claudePath,
+                cwd,
+                providerId,
+                env,
+                limitContext
+              );
+            } catch {
+              resolvedDefaultModelId = null;
+            }
           }
         }
         if (!resolvedDefaultModelId) {
@@ -5471,6 +5512,16 @@ export class TeamProvisioningService {
           continue;
         }
         targetModelId = resolvedDefaultModelId;
+      } else if (providerId === 'anthropic') {
+        const resolvedAnthropicModel = resolveAnthropicLaunchModel({
+          selectedModel: label,
+          limitContext,
+          availableLaunchModels: runtimeFacts.modelIds,
+          defaultLaunchModel: runtimeFacts.defaultModel,
+        });
+        if (resolvedAnthropicModel) {
+          targetModelId = resolvedAnthropicModel;
+        }
       }
 
       const cachedOutcome = probeOutcomeByResolvedModelId.get(targetModelId);
@@ -5538,10 +5589,6 @@ export class TeamProvisioningService {
     env: NodeJS.ProcessEnv,
     limitContext: boolean
   ): Promise<string | null> {
-    if (providerId === 'anthropic') {
-      return getAnthropicDefaultTeamModel(limitContext);
-    }
-
     const { stdout } = await execCli(claudePath, ['model', 'list', '--json', '--provider', 'all'], {
       cwd,
       env,
@@ -5549,9 +5596,21 @@ export class TeamProvisioningService {
     });
     const parsed = extractJsonObjectFromCli<ProviderModelListCommandResponse>(stdout);
     const defaultModel = parsed.providers?.[providerId]?.defaultModel;
-    return typeof defaultModel === 'string' && defaultModel.trim().length > 0
-      ? defaultModel.trim()
-      : null;
+    const normalizedDefaultModel =
+      typeof defaultModel === 'string' && defaultModel.trim().length > 0
+        ? defaultModel.trim()
+        : null;
+    const modelIds = normalizeProviderModelListModels(parsed.providers?.[providerId]);
+
+    if (providerId === 'anthropic') {
+      return resolveAnthropicLaunchModel({
+        limitContext,
+        availableLaunchModels: modelIds,
+        defaultLaunchModel: normalizedDefaultModel,
+      });
+    }
+
+    return normalizedDefaultModel;
   }
 
   private async materializeEffectiveTeamMemberSpecs(params: {
@@ -5830,6 +5889,8 @@ export class TeamProvisioningService {
       lower.includes('quota will reset after') ||
       lower.includes('exhausted your capacity on this model') ||
       lower.includes('resource exhausted') ||
+      lower.includes('model cooldown') ||
+      lower.includes('cooling down') ||
       lower.includes('rate limit') ||
       lower.includes('rate_limit')
     );
@@ -10774,12 +10835,29 @@ export class TeamProvisioningService {
         const errorStatus = typeof msg.error_status === 'number' ? msg.error_status : undefined;
         const errorLabel = typeof msg.error === 'string' ? msg.error.replace(/_/g, ' ') : undefined;
         const retryDelay = typeof msg.retry_delay_ms === 'number' ? msg.retry_delay_ms : undefined;
-        const errorMessage =
+        const rawErrorMessage =
           typeof msg.error_message === 'string' && msg.error_message.trim().length > 0
-            ? this.normalizeApiRetryErrorMessage(msg.error_message.trim())
+            ? msg.error_message.trim()
             : undefined;
+        const errorMessage = rawErrorMessage
+          ? this.normalizeApiRetryErrorMessage(rawErrorMessage)
+          : undefined;
         const looksLikeQuotaRetry =
           errorLabel === 'rate limit' || this.isQuotaRetryMessage(errorMessage);
+
+        if (looksLikeQuotaRetry && rawErrorMessage) {
+          const observedAt = new Date();
+          const messageTimestamp =
+            typeof msg.timestamp === 'string' && Number.isFinite(Date.parse(msg.timestamp))
+              ? new Date(msg.timestamp)
+              : observedAt;
+          peekAutoResumeService()?.handleRateLimitMessage(
+            run.teamName,
+            rawErrorMessage,
+            observedAt,
+            messageTimestamp
+          );
+        }
 
         // Use a human label for known quota/rate-limit retries instead of a misleading 500 bucket.
         const statusLabel = looksLikeQuotaRetry

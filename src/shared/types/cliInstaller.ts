@@ -119,7 +119,10 @@ export interface CliProviderModelAvailability {
 
 export type CliProviderReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
-export type CliProviderModelCatalogSource = 'app-server' | 'static-fallback';
+export type CliProviderModelCatalogSource =
+  | 'anthropic-models-api'
+  | 'app-server'
+  | 'static-fallback';
 export type CliProviderModelCatalogStatus = 'ready' | 'stale' | 'degraded' | 'unavailable';
 
 export interface CliProviderModelCatalogItem {

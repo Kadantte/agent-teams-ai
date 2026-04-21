@@ -10,7 +10,7 @@ import { resolveGeminiRuntimeAuth } from './geminiRuntimeAuth';
 import { buildProviderAwareCliEnv } from './providerAwareCliEnv';
 import { providerConnectionService } from './ProviderConnectionService';
 
-import type { CliProviderId, CliProviderStatus } from '@shared/types';
+import type { CliProviderId, CliProviderReasoningEffort, CliProviderStatus } from '@shared/types';
 
 const logger = createLogger('ClaudeMultimodelBridgeService');
 
@@ -33,12 +33,46 @@ interface RuntimeExtensionCapabilitiesResponse {
 interface RuntimeProviderCapabilitiesResponse {
   modelCatalog?: {
     dynamic?: boolean;
-    source?: 'app-server' | 'static-fallback' | 'runtime';
+    source?: 'anthropic-models-api' | 'app-server' | 'static-fallback' | 'runtime';
   };
   reasoningEffort?: {
     supported?: boolean;
     values?: string[];
     configPassthrough?: boolean;
+  };
+}
+
+interface RuntimeProviderModelCatalogItemResponse {
+  id?: string;
+  launchModel?: string;
+  displayName?: string;
+  hidden?: boolean;
+  supportedReasoningEfforts?: string[];
+  defaultReasoningEffort?: string | null;
+  inputModalities?: string[];
+  supportsPersonality?: boolean;
+  isDefault?: boolean;
+  upgrade?: boolean;
+  source?: 'anthropic-models-api' | 'app-server' | 'static-fallback';
+  badgeLabel?: string | null;
+  statusMessage?: string | null;
+}
+
+interface RuntimeProviderModelCatalogResponse {
+  schemaVersion?: number;
+  providerId?: CliProviderId;
+  source?: 'anthropic-models-api' | 'app-server' | 'static-fallback';
+  status?: 'ready' | 'stale' | 'degraded' | 'unavailable';
+  fetchedAt?: string;
+  staleAt?: string;
+  defaultModelId?: string | null;
+  defaultLaunchModel?: string | null;
+  models?: RuntimeProviderModelCatalogItemResponse[];
+  diagnostics?: {
+    configReadState?: 'ready' | 'unsupported' | 'failed' | 'skipped';
+    appServerState?: 'healthy' | 'degraded' | 'runtime-missing' | 'incompatible';
+    message?: string | null;
+    code?: string | null;
   };
 }
 
@@ -120,6 +154,7 @@ interface UnifiedRuntimeStatusResponse {
         detailMessage?: string | null;
       }[];
       models?: (string | { id?: string; label?: string; description?: string })[];
+      modelCatalog?: RuntimeProviderModelCatalogResponse | null;
       capabilities?: {
         teamLaunch?: boolean;
         oneShot?: boolean;
@@ -236,6 +271,112 @@ function extractModelIds(
   });
 }
 
+function normalizeRuntimeReasoningEffort(
+  value: string | null | undefined
+): CliProviderReasoningEffort | null {
+  return value === 'none' ||
+    value === 'minimal' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh'
+    ? value
+    : null;
+}
+
+function collectRuntimeReasoningEfforts(values?: string[]): CliProviderReasoningEffort[] {
+  return (
+    values?.flatMap((value) => {
+      const normalized = normalizeRuntimeReasoningEffort(value);
+      return normalized ? [normalized] : [];
+    }) ?? []
+  );
+}
+
+function mapRuntimeProviderModelCatalog(
+  providerId: CliProviderId,
+  modelCatalog?: RuntimeProviderModelCatalogResponse | null
+): CliProviderStatus['modelCatalog'] {
+  if (modelCatalog?.providerId !== providerId) {
+    return null;
+  }
+
+  const fetchedAt = modelCatalog.fetchedAt?.trim();
+  const staleAt = modelCatalog.staleAt?.trim();
+  const source = modelCatalog.source;
+  const status = modelCatalog.status;
+  if (
+    modelCatalog.schemaVersion !== 1 ||
+    !fetchedAt ||
+    !staleAt ||
+    (source !== 'anthropic-models-api' &&
+      source !== 'app-server' &&
+      source !== 'static-fallback') ||
+    (status !== 'ready' && status !== 'stale' && status !== 'degraded' && status !== 'unavailable')
+  ) {
+    return null;
+  }
+
+  const models: NonNullable<CliProviderStatus['modelCatalog']>['models'] =
+    modelCatalog.models?.flatMap((model) => {
+      const id = model.id?.trim();
+      const launchModel = model.launchModel?.trim();
+      const displayName = model.displayName?.trim();
+      if (!id || !launchModel || !displayName) {
+        return [];
+      }
+
+      const supportedReasoningEfforts = collectRuntimeReasoningEfforts(
+        model.supportedReasoningEfforts
+      );
+      const defaultReasoningEffort = normalizeRuntimeReasoningEffort(
+        model.defaultReasoningEffort ?? null
+      );
+      const itemSource =
+        model.source === 'anthropic-models-api' ||
+        model.source === 'app-server' ||
+        model.source === 'static-fallback'
+          ? model.source
+          : source;
+
+      return [
+        {
+          id,
+          launchModel,
+          displayName,
+          hidden: model.hidden === true,
+          supportedReasoningEfforts,
+          defaultReasoningEffort,
+          inputModalities: model.inputModalities?.filter((value) => value.trim().length > 0) ?? [],
+          supportsPersonality: model.supportsPersonality === true,
+          isDefault: model.isDefault === true,
+          upgrade: model.upgrade === true,
+          source: itemSource,
+          badgeLabel: model.badgeLabel ?? null,
+          statusMessage: model.statusMessage ?? null,
+        },
+      ];
+    }) ?? [];
+
+  return {
+    schemaVersion: 1,
+    providerId,
+    source,
+    status,
+    fetchedAt,
+    staleAt,
+    defaultModelId: modelCatalog.defaultModelId ?? null,
+    defaultLaunchModel: modelCatalog.defaultLaunchModel ?? null,
+    models,
+    diagnostics: {
+      configReadState: modelCatalog.diagnostics?.configReadState ?? 'skipped',
+      appServerState: modelCatalog.diagnostics?.appServerState ?? 'degraded',
+      message: modelCatalog.diagnostics?.message ?? null,
+      code: modelCatalog.diagnostics?.code ?? null,
+    },
+  };
+}
+
 export class ClaudeMultimodelBridgeService {
   private async buildCliEnv(
     binaryPath: string
@@ -308,6 +449,7 @@ export class ClaudeMultimodelBridgeService {
           detailMessage: diagnostic.detailMessage ?? null,
         })) ?? [],
       models: extractModelIds(runtimeStatus.models),
+      modelCatalog: mapRuntimeProviderModelCatalog(providerId, runtimeStatus.modelCatalog),
       backend: runtimeStatus.backend?.kind
         ? {
             kind: runtimeStatus.backend.kind,
@@ -328,17 +470,9 @@ export class ClaudeMultimodelBridgeService {
             reasoningEffort: runtimeStatus.runtimeCapabilities.reasoningEffort
               ? {
                   supported: runtimeStatus.runtimeCapabilities.reasoningEffort.supported === true,
-                  values:
-                    runtimeStatus.runtimeCapabilities.reasoningEffort.values?.flatMap((value) =>
-                      value === 'none' ||
-                      value === 'minimal' ||
-                      value === 'low' ||
-                      value === 'medium' ||
-                      value === 'high' ||
-                      value === 'xhigh'
-                        ? [value]
-                        : []
-                    ) ?? [],
+                  values: collectRuntimeReasoningEfforts(
+                    runtimeStatus.runtimeCapabilities.reasoningEffort.values
+                  ),
                   configPassthrough:
                     runtimeStatus.runtimeCapabilities.reasoningEffort.configPassthrough === true,
                 }
