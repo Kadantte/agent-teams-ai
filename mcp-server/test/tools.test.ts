@@ -6,6 +6,7 @@ import path from 'path';
 import { AGENT_TEAMS_REGISTERED_TOOL_NAMES, registerTools } from '../src/tools';
 
 type RegisteredTool = {
+  description?: string;
   name: string;
   parameters?: { safeParse: (value: unknown) => { success: boolean } };
   execute: (args: Record<string, unknown>) => Promise<unknown> | unknown;
@@ -484,7 +485,12 @@ describe('agent-teams-mcp tools', () => {
     const memberBriefingText = (memberBriefing as { content: Array<{ text: string }> }).content[0]
       ?.text;
     expect(memberBriefingText).toContain('Member briefing for alice on team "alpha" (alpha).');
-    expect(memberBriefingText).toContain('Use task_briefing as your compact queue view');
+    expect(memberBriefingText).toContain(
+      'Use task_briefing as your primary working queue whenever you need to see assigned work.'
+    );
+    expect(memberBriefingText).toContain(
+      'Use task_list only to search/browse inventory rows, not as your working queue.'
+    );
     expect(memberBriefingText).toContain('Review MCP adapter');
   });
 
@@ -593,14 +599,19 @@ describe('agent-teams-mcp tools', () => {
       memberName: 'alice',
     })) as { content: Array<{ text: string }> };
     const briefingText = briefing.content[0]?.text ?? '';
-    expect(briefingText).toContain('In progress:');
+    expect(briefingText).toContain(
+      'Primary queue for alice. Act only on Actionable items. Awareness items are watch-only context unless the lead reroutes the task or you become the actionOwner.'
+    );
+    expect(briefingText).toContain(
+      'Use task_list only to search/browse inventory rows, not as your working queue.'
+    );
+    expect(briefingText).toContain('Actionable:');
     expect(briefingText).toContain(`#${activeTask.displayId}`);
     expect(briefingText).toContain('Description: This one is already in progress');
     expect(briefingText).toContain('Investigating the active task now.');
-    expect(briefingText).toContain('Pending:');
     expect(briefingText).toContain(`#${queuedTask.displayId}`);
     expect(briefingText).not.toContain('Pending description should stay out of briefing details');
-    expect(briefingText).toContain('Completed:');
+    expect(briefingText).toContain('Awareness:');
     expect(briefingText).toContain(`#${completedTask.displayId}`);
     expect(briefingText).not.toContain('Completed description should also stay compact');
 
@@ -618,6 +629,9 @@ describe('agent-teams-mcp tools', () => {
     );
     expect(memberBriefingText).toContain('reason and your best ETA or what you are waiting on');
     expect(memberBriefingText).toContain('IMPORTANT: Communicate in English.');
+    expect(memberBriefingText).toContain(
+      'Awareness items are watch-only context and do not authorize you to start work unless the lead reroutes the task or you become the actionOwner.'
+    );
     expect(memberBriefingText).toContain('TURN ACTION MODE PROTOCOL (HIGHEST PRIORITY FOR EACH USER TURN):');
     expect(memberBriefingText).toContain('Task briefing for alice:');
     expect(memberBriefingText).toContain(`#${activeTask.displayId}`);
@@ -660,6 +674,95 @@ describe('agent-teams-mcp tools', () => {
     expect(inboxResolvedBriefingText).not.toContain(
       'Warning: Member metadata was not found in config.json, members.meta.json, or inbox files yet.'
     );
+  });
+
+  it('returns compact lead_briefing output and filtered task_list inventory', async () => {
+    const claudeDir = makeClaudeDir();
+    const teamName = 'lead-queue';
+    writeTeamConfig(claudeDir, teamName, {
+      members: [
+        { name: 'lead', role: 'team-lead' },
+        { name: 'alice', role: 'developer' },
+        { name: 'bob', role: 'reviewer' },
+      ],
+    });
+
+    const queuedTask = parseJsonToolResult(
+      await getTool('task_create').execute({
+        claudeDir,
+        teamName,
+        subject: 'Queued work',
+        owner: 'alice',
+      })
+    );
+    const unassignedTask = parseJsonToolResult(
+      await getTool('task_create').execute({
+        claudeDir,
+        teamName,
+        subject: 'Unassigned work',
+      })
+    );
+    const reviewTask = parseJsonToolResult(
+      await getTool('task_create').execute({
+        claudeDir,
+        teamName,
+        subject: 'Awaiting reviewer',
+        owner: 'alice',
+      })
+    );
+
+    await getTool('task_complete').execute({
+      claudeDir,
+      teamName,
+      taskId: reviewTask.id,
+      actor: 'alice',
+    });
+    await getTool('review_request').execute({
+      claudeDir,
+      teamName,
+      taskId: reviewTask.id,
+      from: 'lead',
+      reviewer: 'bob',
+    });
+
+    const leadBriefing = (await getTool('lead_briefing').execute({
+      claudeDir,
+      teamName,
+    })) as { content: Array<{ text: string }> };
+    const leadBriefingText = leadBriefing.content[0]?.text ?? '';
+    expect(leadBriefingText).toContain('Lead queue for lead on team "lead-queue":');
+    expect(leadBriefingText).toContain(
+      'Primary lead queue. Sections below already represent lead-owned actions or watch-only context.'
+    );
+    expect(leadBriefingText).toContain(
+      'Use task_list only for search, filtering, and drill-down inventory lookups.'
+    );
+    expect(leadBriefingText).toContain('Needs owner assignment:');
+    expect(leadBriefingText).toContain(`#${unassignedTask.displayId}`);
+    expect(leadBriefingText).toContain('Watching:');
+    expect(leadBriefingText).toContain(`#${reviewTask.displayId}`);
+
+    const reviewInventory = parseJsonToolResult(
+      await getTool('task_list').execute({
+        claudeDir,
+        teamName,
+        reviewState: 'review',
+        kanbanColumn: 'review',
+      })
+    );
+    expect(reviewInventory).toHaveLength(1);
+    expect(reviewInventory[0].id).toBe(reviewTask.id);
+
+    const ownerPendingInventory = parseJsonToolResult(
+      await getTool('task_list').execute({
+        claudeDir,
+        teamName,
+        owner: 'alice',
+        status: 'pending',
+      })
+    );
+    expect(ownerPendingInventory).toHaveLength(1);
+    expect(ownerPendingInventory[0].id).toBe(queuedTask.id);
   });
 
   it('covers review_request_changes and full process lifecycle tools', async () => {
@@ -915,7 +1018,13 @@ describe('agent-teams-mcp tools', () => {
     expect(reloaded.comments[0].text).toBe('Comment should persist despite broken inbox');
   });
 
-  it('write operations return slim task (no comments/historyEvents arrays)', async () => {
+  it('write operations return slim task and task_list returns allowlisted inventory rows', async () => {
+    expect(getTool('task_list').description).toContain(
+      'Use it to browse, filter, and drill into inventory, not as a primary working queue.'
+    );
+    expect(getTool('task_list').description).toContain('Deleted tasks are excluded.');
+    expect(getTool('task_list').description).toContain('Defaults to 50 rows and caps at 200 rows');
+
     const claudeDir = makeClaudeDir();
     const teamName = 'slim-check';
 
@@ -980,20 +1089,27 @@ describe('agent-teams-mcp tools', () => {
     expect(completed.status).toBe('completed');
     expect(completed.comments).toBeUndefined();
 
-    // task_list: uses blocklist, includes description but not comments array
+    // task_list: explicit inventory shape only
     const listed = parseJsonToolResult(
       await getTool('task_list').execute({ claudeDir, teamName })
     );
     const listedTask = listed.find((t: { id: string }) => t.id === task.id);
     expect(listedTask).toBeDefined();
-    expect(listedTask.subject).toBe('Slim task test');
-    expect(listedTask.commentCount).toBe(1);
+    expect(listedTask).toEqual({
+      id: task.id,
+      displayId: task.displayId,
+      subject: 'Slim task test',
+      status: 'completed',
+      owner: 'lead',
+      reviewState: 'none',
+      commentCount: 1,
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+    });
+    expect(listedTask.description).toBeUndefined();
     expect(listedTask.comments).toBeUndefined();
     expect(listedTask.historyEvents).toBeUndefined();
     expect(listedTask.workIntervals).toBeUndefined();
-    // task_list preserves non-heavy fields
-    expect(listedTask.status).toBeDefined();
-    expect(listedTask.id).toBeDefined();
 
     // task_get: still returns full task with comments
     const full = parseJsonToolResult(

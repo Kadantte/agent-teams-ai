@@ -214,11 +214,16 @@ import type {
 } from '@shared/types';
 
 const logger = createLogger('Service:TeamProvisioning');
-const { AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES, createController, protocols } =
-  agentTeamsControllerModule;
+const {
+  AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES,
+  AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
+  createController,
+  protocols,
+} = agentTeamsControllerModule;
 const TEAM_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const RUN_TIMEOUT_MS = 300_000;
 const VERIFY_TIMEOUT_MS = 15_000;
+const MCP_PREFLIGHT_INITIALIZE_TIMEOUT_MS = 45_000;
 const VERIFY_POLL_MS = 500;
 const MCP_PREFLIGHT_SHUTDOWN_GRACE_MS = 250;
 const MCP_PREFLIGHT_SHUTDOWN_TIMEOUT_MS = 2_000;
@@ -1581,14 +1586,27 @@ function extractBootstrapFailureReason(text: string): string | null {
       (lower.includes('член') || lower.includes('member') || lower.includes('inbox'))) ||
     lower.includes('member_briefing tool is not available') ||
     lower.includes('member_briefing tool not found') ||
+    lower.includes('lead_briefing tool is not available') ||
+    lower.includes('lead_briefing tool not found') ||
     lower.includes('no such tool available: mcp__agent_teams__member_briefing') ||
+    lower.includes('no such tool available: mcp__agent_teams__lead_briefing') ||
     lower.includes('agent calls that include team_name must also include name') ||
     (lower.includes('member_briefing') &&
       (lower.includes('not available') ||
         lower.includes('not found') ||
         lower.includes('lookup failure') ||
         lower.includes('validation error') ||
-        lower.includes('api error'))) ||
+        lower.includes('api error') ||
+        lower.includes('empty content') ||
+        lower.includes('unspecified error'))) ||
+    (lower.includes('lead_briefing') &&
+      (lower.includes('not available') ||
+        lower.includes('not found') ||
+        lower.includes('lookup failure') ||
+        lower.includes('validation error') ||
+        lower.includes('api error') ||
+        lower.includes('empty content') ||
+        lower.includes('unspecified error'))) ||
     lower.includes('model is not supported') ||
     lower.includes('model is not available') ||
     lower.includes('model not available') ||
@@ -1767,7 +1785,9 @@ After member_briefing succeeds:
 - Do NOT ask the user or the lead to send you a task ID, task description, or "next task" right after bootstrap.
 - Only SendMessage the lead after bootstrap when there is a real blocker, a failed bootstrap, an explicit question, an urgent coordination need, or a completed task result to report.
 - Never send raw tool output, JSON, dict/object dumps, Python-style structs, or internal state payloads to the lead or the user. If you need to report bootstrap/task/tool status, rewrite it as one short natural-language sentence.
-- When you later receive work or reconnect after a restart, use task_briefing as your compact queue view. Use task_get when you need the full task context before starting a pending/needsFix task or when the in_progress briefing details are not enough.
+- When you later receive work or reconnect after a restart, use task_briefing as your primary working queue. Use task_list only to search/browse inventory rows, not as your working queue.
+- Act only on Actionable items in task_briefing. Awareness items are watch-only context unless the lead reroutes the task or you become the actionOwner.
+- Use task_get when you need the full task context before starting a pending/needsFix task or when the in_progress briefing details are not enough.
 - If a newly assigned task cannot be started immediately because you are still busy on another task, leave a short task comment on that waiting task right away with the reason and your best ETA, keep it in pending/TODO, and only move it to in_progress with task_start when you truly begin.
 - CRITICAL: If someone comments on your task, you MUST reply on that same task via task_add_comment. Never leave a user/lead/teammate task comment unanswered, even if the reply is only a short acknowledgement or status update. Do NOT treat status changes or direct messages as a substitute for an on-task reply.
 - CRITICAL: If a task gets a new comment and you are going to do additional implementation/fix/follow-up work on that same task, FIRST leave a short task comment saying what you are about to do, THEN move it to in_progress with task_start, THEN do the work, and when finished leave a short result comment and move it to done with task_complete. Never skip this comment -> reopen -> work -> comment -> done cycle.
@@ -1838,7 +1858,8 @@ ${actionModeProtocol}
      - If reconnect bootstrap succeeded and you have no immediate blocker, question, or task, produce ZERO assistant text for that turn and end it immediately.
      - Do NOT ask the user or the lead to send you a task ID, task description, or "next task" right after reconnect bootstrap.
      - Never send raw tool output, JSON, dict/object dumps, Python-style structs, or internal state payloads to the lead or the user. If you need to report bootstrap/task/tool status, rewrite it as one short natural-language sentence.
-     - Use task_briefing as your compact queue view.
+     - Use task_briefing as your primary working queue. Use task_list only to search/browse inventory rows, not as your working queue.
+     - Act only on Actionable items in task_briefing. Awareness items are watch-only context unless the lead reroutes the task or you become the actionOwner.
      - If task_briefing shows any in_progress task, resume/finish those first. Call task_get only if you need more context than task_briefing already gave you.
      - After that, prioritize tasks marked Needs fixes after review, then normal pending tasks.
      - Before you start any needsFix or pending task, call task_get for that specific task.
@@ -2016,7 +2037,7 @@ function buildDeterministicCreateBootstrapSpec(
       ...(request.skipPermissions === false
         ? {
             permissionSeedTools: [
-              ...AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
+              ...AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES,
               'Edit',
               'Write',
               'NotebookEdit',
@@ -2065,7 +2086,7 @@ function buildDeterministicLaunchBootstrapSpec(
       ...(request.skipPermissions === false
         ? {
             permissionSeedTools: [
-              ...AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
+              ...AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES,
               'Edit',
               'Write',
               'NotebookEdit',
@@ -2149,13 +2170,16 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
       `  - Do NOT split when work is inherently sequential, requires one person to keep consistent context, or the overhead would exceed the benefit.`,
       `  - When splitting, make each task have a clear completion criterion and a single accountable owner.`,
       ``,
-      `IMPORTANT: The board MCP only supports these domains: task, kanban, review, message, process. There is NO "member" domain — team members are managed by spawning teammates via the Task tool, not via the board MCP.`,
+      `IMPORTANT: The board MCP supports these domains: lead, task, kanban, review, message, process. There is NO "member" domain — team members are managed by spawning teammates via the Task tool, not via the board MCP.`,
       ``,
       `Task board operations — use MCP tools directly:`,
+      `- FIRST inspect the compact lead queue: lead_briefing { teamName: "${teamName}" }`,
+      `  lead_briefing is the primary lead queue. Decisions about what to act on now come from lead_briefing, not from raw task_list rows.`,
       `- Get task details: task_get { teamName: "${teamName}", taskId: "<id>" }`,
       `- Get a single comment without loading full task: task_get_comment { teamName: "${teamName}", taskId: "<id>", commentId: "<commentId or prefix>" }`,
       `  When a teammate reports "#abcd1234 done ... task_get_comment { taskId: "abcd1234", commentId: "e5f6a7b8" }", use that taskId and commentId to fetch the full result text.`,
-      `- List all tasks: task_list { teamName: "${teamName}" }`,
+      `- Browse/search compact inventory rows only: task_list { teamName: "${teamName}", owner?: "<member>", status?: "pending|in_progress|completed|deleted", reviewState?: "none|review|needsFix|approved", kanbanColumn?: "review|approved", relatedTo?: "<taskId or #displayId>", blockedBy?: "<taskId or #displayId>", limit?: <n> }`,
+      `  task_list is inventory/search/drill-down only. Do NOT treat task_list as the lead's working queue.`,
       `- Create task: task_create { teamName: "${teamName}", subject: "...", description?: "...", owner?: "<actual-member-name>", createdBy?: "<your-name>", blockedBy?: ["1","2"], related?: ["3"] }`,
       `- Create task from user message (preferred when you have a MessageId from a relayed inbox message): task_create_from_message { teamName: "${teamName}", messageId: "<exact-messageId>", subject: "...", owner?: "<member>", createdBy?: "<your-name>", blockedBy?: ["1","2"], related?: ["3"] }`,
       `- Assign/reassign owner: task_set_owner { teamName: "${teamName}", taskId: "<id>", owner: "<member-name>" }`,
@@ -2214,9 +2238,9 @@ function buildTeamCtlOpsInstructions(teamName: string, leadName: string): string
       `- Set createdBy when creating tasks so workflow history shows who created the task.`,
       ``,
       `Clarification handling (CRITICAL — MANDATORY for correct task board state):`,
-      `- When a teammate needs clarification (needsClarification: "lead"), you MUST reply via task comment first. This is the durable answer, auto-clears the flag, and wakes the owner.`,
+      `- When a teammate needs clarification (needsClarification: "lead"), you MUST reply via task comment first. This is the durable answer on the board.`,
       `- If you also send a SendMessage for urgency/visibility, treat it as an extra notification only — never as a substitute for the task-comment reply.`,
-      `- If you somehow reply via SendMessage before commenting, add the missing task comment immediately, and if needed also clear the flag manually:`,
+      `- Clarification flags are not assumed to auto-clear. After the blocker is truly resolved, clear the flag explicitly with:`,
       `  task_set_clarification { teamName: "${teamName}", taskId: "<taskId>", value: "clear" }`,
       `- If you cannot answer and the user needs to decide — ESCALATION PROTOCOL:`,
       `  1) FIRST, set the flag to "user" via MCP tool task_set_clarification (this updates the task board):`,
@@ -6975,7 +6999,7 @@ export class TeamProvisioningService {
           providerBackendId: request.providerBackendId,
         });
         if (request.skipPermissions === false) {
-          await this.seedTeammateOperationalPermissionRules(request.teamName, request.cwd);
+          await this.seedLeadBootstrapPermissionRules(request.teamName, request.cwd);
         }
 
         child = spawnCli(claudePath, spawnArgs, {
@@ -7623,7 +7647,7 @@ export class TeamProvisioningService {
 
       try {
         if (request.skipPermissions === false) {
-          await this.seedTeammateOperationalPermissionRules(request.teamName, request.cwd);
+          await this.seedLeadBootstrapPermissionRules(request.teamName, request.cwd);
         }
         child = spawnCli(claudePath, launchArgs, {
           cwd: request.cwd,
@@ -12174,28 +12198,25 @@ export class TeamProvisioningService {
     return added;
   }
 
-  private async seedTeammateOperationalPermissionRules(
+  private async seedLeadBootstrapPermissionRules(
     teamName: string,
     projectCwd: string
   ): Promise<void> {
     const settingsPath = path.join(projectCwd, '.claude', 'settings.local.json');
     try {
-      // FACT: Teammates need both MCP tools AND standard file tools (Write/Edit).
-      // FACT: Standard tools use "setMode: acceptEdits" permission_suggestions, but
-      // we can't change subprocess session mode — so we pre-add them as allow rules.
       const allTools = [
-        ...AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
+        ...AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES,
         'Edit',
         'Write',
         'NotebookEdit',
       ];
       const added = await this.addPermissionRulesToSettings(settingsPath, allTools, 'allow');
       logger.info(
-        `[${teamName}] Seeded teammate operational MCP rules in ${settingsPath} (${added} added)`
+        `[${teamName}] Seeded lead bootstrap MCP rules in ${settingsPath} (${added} added)`
       );
     } catch (error) {
       logger.warn(
-        `[${teamName}] Failed to seed teammate operational MCP rules: ${
+        `[${teamName}] Failed to seed lead bootstrap MCP rules: ${
           error instanceof Error ? error.message : String(error)
         }`
       );
@@ -14950,11 +14971,15 @@ export class TeamProvisioningService {
         });
       };
 
-      await request('initialize', {
-        protocolVersion: '2024-11-05',
-        capabilities: {},
-        clientInfo: { name: 'claude-agent-teams-ui', version: '1.0.0' },
-      });
+      await request(
+        'initialize',
+        {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'claude-agent-teams-ui', version: '1.0.0' },
+        },
+        MCP_PREFLIGHT_INITIALIZE_TIMEOUT_MS
+      );
       await notify('notifications/initialized');
 
       const toolsList = await request<McpToolsListResult>('tools/list', {});
@@ -14963,6 +14988,12 @@ export class TeamProvisioningService {
       );
       if (!memberBriefingTool) {
         throw new Error('agent-teams MCP started but tools/list did not include member_briefing');
+      }
+      const leadBriefingTool = (toolsList.tools ?? []).find(
+        (tool) => tool.name === 'lead_briefing'
+      );
+      if (!leadBriefingTool) {
+        throw new Error('agent-teams MCP started but tools/list did not include lead_briefing');
       }
 
       const memberBriefing = await request<McpToolCallResult>('tools/call', {
@@ -14984,6 +15015,27 @@ export class TeamProvisioningService {
       const briefingText = memberBriefing.content?.find((item) => item.type === 'text')?.text ?? '';
       if (briefingText.trim().length === 0) {
         throw new Error('agent-teams MCP returned empty content for member_briefing');
+      }
+
+      const leadBriefing = await request<McpToolCallResult>('tools/call', {
+        name: 'lead_briefing',
+        arguments: {
+          claudeDir: fixture.claudeDir,
+          teamName: fixture.teamName,
+        },
+      });
+
+      if (leadBriefing.isError) {
+        throw new Error(
+          leadBriefing.content?.[0]?.text ??
+            'agent-teams MCP returned an unspecified error for lead_briefing'
+        );
+      }
+
+      const leadBriefingText =
+        leadBriefing.content?.find((item) => item.type === 'text')?.text ?? '';
+      if (leadBriefingText.trim().length === 0) {
+        throw new Error('agent-teams MCP returned empty content for lead_briefing');
       }
     } catch (error) {
       const detail = buildCombinedLogs('', stderrBuffer).trim();

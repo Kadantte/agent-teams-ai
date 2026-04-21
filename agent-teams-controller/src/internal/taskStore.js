@@ -72,10 +72,12 @@ function normalizeTaskReviewState(value) {
   return REVIEW_STATES.has(String(value || '').trim()) ? String(value).trim() : 'none';
 }
 
-function listRawTasks(paths) {
+function listTaskRows(paths, options = {}) {
   ensureDir(paths.tasksDir);
   const entries = fs.readdirSync(paths.tasksDir);
-  const out = [];
+  const includeDeleted = options.includeDeleted === true;
+  const tasks = [];
+  const anomalies = [];
 
   for (const fileName of entries) {
     if (!fileName.endsWith('.json') || fileName.startsWith('.')) continue;
@@ -84,13 +86,25 @@ function listRawTasks(paths) {
     if (!rawTask) continue;
     if (rawTask.metadata && rawTask.metadata._internal === true) continue;
     try {
-      out.push(normalizeTask(rawTask, filePath));
-    } catch {
-      // Skip unreadable task rows.
+      const task = normalizeTask(rawTask, filePath);
+      if (includeDeleted || task.status !== 'deleted') {
+        tasks.push(task);
+      }
+    } catch (error) {
+      const taskId =
+        typeof rawTask?.id === 'string' || typeof rawTask?.id === 'number'
+          ? String(rawTask.id)
+          : path.basename(fileName, '.json');
+      anomalies.push({
+        code: 'unreadable_task',
+        taskId,
+        filePath,
+        detail: error instanceof Error ? error.message : 'Unreadable task row',
+      });
     }
   }
 
-  out.sort((a, b) => {
+  tasks.sort((a, b) => {
     const byDisplay = String(a.displayId || a.id).localeCompare(String(b.displayId || b.id), undefined, {
       numeric: true,
       sensitivity: 'base',
@@ -102,12 +116,15 @@ function listRawTasks(paths) {
     });
   });
 
-  return out;
+  return { tasks, anomalies };
+}
+
+function listRawTasks(paths) {
+  return listTaskRows(paths, { includeDeleted: true }).tasks;
 }
 
 function listTasks(paths, options = {}) {
-  const includeDeleted = options.includeDeleted === true;
-  return listRawTasks(paths).filter((task) => includeDeleted || task.status !== 'deleted');
+  return listTaskRows(paths, options).tasks;
 }
 
 function resolveTaskRef(paths, taskRef, options = {}) {
@@ -479,22 +496,10 @@ function addTaskComment(paths, taskRef, text, options = {}) {
   };
 
   let inserted = false;
-  let clarificationCleared = false;
   const task = updateTask(paths, taskRef, (currentTask) => {
     const comments = Array.isArray(currentTask.comments) ? currentTask.comments : [];
     if (comments.some((entry) => entry.id === comment.id)) {
       return currentTask;
-    }
-
-    const authorName = normalizeMemberName(comment.author);
-    const ownerName = normalizeMemberName(currentTask.owner);
-    if (currentTask.needsClarification === 'lead' && authorName && authorName !== ownerName) {
-      delete currentTask.needsClarification;
-      clarificationCleared = true;
-    }
-    if (currentTask.needsClarification === 'user' && authorName === 'user') {
-      delete currentTask.needsClarification;
-      clarificationCleared = true;
     }
 
     currentTask.comments = comments.concat([comment]);
@@ -502,7 +507,7 @@ function addTaskComment(paths, taskRef, text, options = {}) {
     return currentTask;
   });
 
-  return { comment, task, inserted, clarificationCleared };
+  return { comment, task, inserted, clarificationCleared: false };
 }
 
 function setNeedsClarification(paths, taskRef, value) {
@@ -808,6 +813,7 @@ module.exports = {
   deriveDisplayId,
   formatTaskBriefing,
   linkTask,
+  listTaskRows,
   listTasks,
   readTask,
   removeTaskAttachment,

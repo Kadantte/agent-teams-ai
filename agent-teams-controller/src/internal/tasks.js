@@ -2,6 +2,9 @@ const taskStore = require('./taskStore.js');
 const runtimeHelpers = require('./runtimeHelpers.js');
 const messages = require('./messages.js');
 const processStore = require('./processStore.js');
+const kanbanStore = require('./kanbanStore.js');
+const agenda = require('./agenda.js');
+const { withTeamBoardLock } = require('./boardLock.js');
 const { wrapAgentBlock } = require('./agentBlocks.js');
 
 function normalizeActorName(value) {
@@ -40,6 +43,13 @@ function quoteMarkdown(text) {
         .split('\n')
         .map((line) => `> ${line}`)
         .join('\n');
+}
+
+function warnNonCritical(message, error) {
+    if (typeof console === 'undefined' || typeof console.warn !== 'function') {
+        return;
+    }
+    console.warn(`${message}: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 function buildAssignmentMessage(context, task, options = {}) {
@@ -112,15 +122,19 @@ function maybeNotifyAssignedOwner(context, task, options = {}) {
     }
 
     const summary = options.summary || `New task #${task.displayId || task.id} assigned`;
-    messages.sendMessage(context, {
-        member: owner,
-        from: sender,
-        text: buildAssignmentMessage(context, task, options),
-        taskRefs: Array.isArray(options.taskRefs) && options.taskRefs.length > 0 ? options.taskRefs : undefined,
-        summary,
-        source: 'system_notification',
-        ...(leadSessionId ? { leadSessionId } : {}),
-    });
+    try {
+        messages.sendMessage(context, {
+            member: owner,
+            from: sender,
+            text: buildAssignmentMessage(context, task, options),
+            taskRefs: Array.isArray(options.taskRefs) && options.taskRefs.length > 0 ? options.taskRefs : undefined,
+            summary,
+            source: 'system_notification',
+            ...(leadSessionId ? { leadSessionId } : {}),
+        });
+    } catch (error) {
+        warnNonCritical(`[tasks] assignment notification failed for task ${task.id}`, error);
+    }
 }
 
 function maybeNotifyTaskOwnerOnComment(context, task, comment, options = {}) {
@@ -157,7 +171,7 @@ function maybeNotifyTaskOwnerOnComment(context, task, comment, options = {}) {
 }
 
 function createTask(context, input) {
-    const task = taskStore.createTask(context.paths, input);
+    const task = withTeamBoardLock(context.paths, () => taskStore.createTask(context.paths, input));
     if (input && input.notifyOwner !== false) {
         maybeNotifyAssignedOwner(context, task, {
             description: input.description,
@@ -219,23 +233,21 @@ function resolveTaskId(context, taskRef) {
 }
 
 function setTaskStatus(context, taskId, status, actor) {
-    return taskStore.setTaskStatus(context.paths, taskId, status, actor);
+    return withTeamBoardLock(context.paths, () =>
+        taskStore.setTaskStatus(context.paths, taskId, status, actor)
+    );
 }
 
 function startTask(context, taskId, actor) {
-    const task = setTaskStatus(context, taskId, 'in_progress', actor);
-    // Clear stale kanban entry (e.g. 'approved' or 'review') when task is reopened
-    try {
-        const kanbanStore = require('./kanbanStore.js');
+    return withTeamBoardLock(context.paths, () => {
+        const task = taskStore.setTaskStatus(context.paths, taskId, 'in_progress', actor);
         const state = kanbanStore.readKanbanState(context.paths, context.teamName);
         if (state.tasks[task.id]) {
             delete state.tasks[task.id];
             kanbanStore.writeKanbanState(context.paths, context.teamName, state);
         }
-    } catch {
-        // Best-effort: task status already updated, kanban cleanup failure is non-fatal
-    }
-    return task;
+        return task;
+    });
 }
 
 function notifyUnblockedOwners(context, completedTask) {
@@ -303,8 +315,8 @@ function completeTask(context, taskId, actor) {
     const task = setTaskStatus(context, taskId, 'completed', actor);
     try {
         notifyUnblockedOwners(context, task);
-    } catch {
-        // Best-effort: task completion succeeded, notification failure is non-fatal
+    } catch (error) {
+        warnNonCritical(`[tasks] dependency-resolution follow-up failed for task ${task.id}`, error);
     }
     return task;
 }
@@ -318,8 +330,14 @@ function restoreTask(context, taskId, actor) {
 }
 
 function setTaskOwner(context, taskId, owner) {
-    const previousTask = taskStore.readTask(context.paths, taskId, { includeDeleted: true });
-    const updatedTask = taskStore.setTaskOwner(context.paths, taskId, owner);
+    const { previousTask, updatedTask } = withTeamBoardLock(context.paths, () => {
+        const before = taskStore.readTask(context.paths, taskId, { includeDeleted: true });
+        const after = taskStore.setTaskOwner(context.paths, taskId, owner);
+        return {
+            previousTask: before,
+            updatedTask: after,
+        };
+    });
 
     if (
         owner != null &&
@@ -335,19 +353,23 @@ function setTaskOwner(context, taskId, owner) {
 }
 
 function updateTaskFields(context, taskId, fields) {
-    return taskStore.updateTaskFields(context.paths, taskId, fields);
+    return withTeamBoardLock(context.paths, () =>
+        taskStore.updateTaskFields(context.paths, taskId, fields)
+    );
 }
 
 function addTaskComment(context, taskId, flags) {
-    const result = taskStore.addTaskComment(context.paths, taskId, flags.text, {
-        author: typeof flags.from === 'string' && flags.from.trim() ?
-            flags.from.trim() : runtimeHelpers.inferLeadName(context.paths),
-        ...(flags.id ? { id: flags.id } : {}),
-        ...(flags.createdAt ? { createdAt: flags.createdAt } : {}),
-        ...(flags.type ? { type: flags.type } : {}),
-        ...(Array.isArray(flags.taskRefs) ? { taskRefs: flags.taskRefs } : {}),
-        ...(Array.isArray(flags.attachments) ? { attachments: flags.attachments } : {}),
-    });
+    const result = withTeamBoardLock(context.paths, () =>
+        taskStore.addTaskComment(context.paths, taskId, flags.text, {
+            author: typeof flags.from === 'string' && flags.from.trim() ?
+                flags.from.trim() : runtimeHelpers.inferLeadName(context.paths),
+            ...(flags.id ? { id: flags.id } : {}),
+            ...(flags.createdAt ? { createdAt: flags.createdAt } : {}),
+            ...(flags.type ? { type: flags.type } : {}),
+            ...(Array.isArray(flags.taskRefs) ? { taskRefs: flags.taskRefs } : {}),
+            ...(Array.isArray(flags.attachments) ? { attachments: flags.attachments } : {}),
+        })
+    );
 
     try {
         maybeNotifyTaskOwnerOnComment(context, result.task, result.comment, {
@@ -355,12 +377,7 @@ function addTaskComment(context, taskId, flags) {
             notifyOwner: flags.notifyOwner,
         });
     } catch (notifyError) {
-        // Best-effort: comment is already persisted, notification failure must not fail the call
-        if (typeof console !== 'undefined' && console.warn) {
-            console.warn(
-                `[tasks] owner notification failed for task ${taskId}: ${String(notifyError)}`
-            );
-        }
+        warnNonCritical(`[tasks] owner notification failed for task ${taskId}`, notifyError);
     }
 
     return {
@@ -376,7 +393,9 @@ function addTaskComment(context, taskId, flags) {
 function attachTaskFile(context, taskId, flags) {
     const canonicalTaskId = resolveTaskId(context, taskId);
     const saved = runtimeHelpers.saveTaskAttachmentFile(context.paths, canonicalTaskId, flags);
-    const task = taskStore.addTaskAttachmentMeta(context.paths, canonicalTaskId, saved.meta);
+    const task = withTeamBoardLock(context.paths, () =>
+        taskStore.addTaskAttachmentMeta(context.paths, canonicalTaskId, saved.meta)
+    );
     return {
         ...saved.meta,
         task,
@@ -386,7 +405,9 @@ function attachTaskFile(context, taskId, flags) {
 function attachCommentFile(context, taskId, commentId, flags) {
     const canonicalTaskId = resolveTaskId(context, taskId);
     const saved = runtimeHelpers.saveTaskAttachmentFile(context.paths, canonicalTaskId, flags);
-    const task = taskStore.addCommentAttachmentMeta(context.paths, canonicalTaskId, commentId, saved.meta);
+    const task = withTeamBoardLock(context.paths, () =>
+        taskStore.addCommentAttachmentMeta(context.paths, canonicalTaskId, commentId, saved.meta)
+    );
     return {
         ...saved.meta,
         task,
@@ -394,27 +415,45 @@ function attachCommentFile(context, taskId, commentId, flags) {
 }
 
 function addTaskAttachmentMeta(context, taskId, meta) {
-    return taskStore.addTaskAttachmentMeta(context.paths, taskId, meta);
+    return withTeamBoardLock(context.paths, () =>
+        taskStore.addTaskAttachmentMeta(context.paths, taskId, meta)
+    );
 }
 
 function removeTaskAttachment(context, taskId, attachmentId) {
-    return taskStore.removeTaskAttachment(context.paths, taskId, attachmentId);
+    return withTeamBoardLock(context.paths, () =>
+        taskStore.removeTaskAttachment(context.paths, taskId, attachmentId)
+    );
 }
 
 function setNeedsClarification(context, taskId, value) {
-    return taskStore.setNeedsClarification(context.paths, taskId, value == null ? 'clear' : String(value));
+    return withTeamBoardLock(context.paths, () =>
+        taskStore.setNeedsClarification(context.paths, taskId, value == null ? 'clear' : String(value))
+    );
 }
 
 function linkTask(context, taskId, targetId, linkType) {
-    return taskStore.linkTask(context.paths, taskId, targetId, String(linkType));
+    return withTeamBoardLock(context.paths, () =>
+        taskStore.linkTask(context.paths, taskId, targetId, String(linkType))
+    );
 }
 
 function unlinkTask(context, taskId, targetId, linkType) {
-    return taskStore.unlinkTask(context.paths, taskId, targetId, String(linkType));
+    return withTeamBoardLock(context.paths, () =>
+        taskStore.unlinkTask(context.paths, taskId, targetId, String(linkType))
+    );
 }
 
 async function taskBriefing(context, memberName) {
-    return taskStore.formatTaskBriefing(context.paths, context.teamName, String(memberName));
+    return agenda.formatTaskBriefing(context.paths, context.teamName, String(memberName));
+}
+
+async function leadBriefing(context) {
+    return agenda.formatLeadBriefing(context.paths, context.teamName);
+}
+
+function listTaskInventory(context, filters = {}) {
+    return agenda.listTaskInventory(context.paths, context.teamName, filters);
 }
 
 function getSystemLocale() {
@@ -505,10 +544,11 @@ function buildMemberTaskProtocol(teamName) {
    - Never do comment-driven implementation/fix work while the task is still shown as pending, review, completed, or approved.
    - After task_complete, send a notification to your team lead via SendMessage. Use the comment.id you saved earlier (first 8 characters). Your message must include: (a) which task is done, (b) a brief summary of the outcome (2-4 sentences), (c) a pointer to the full comment so the lead can fetch it, (d) what you will do next. Do NOT duplicate the entire results.
      Example: "#abcd1234 done. Found 3 competitors: two lack kanban, one went closed-source in Jan. For full details: task_get_comment { taskId: "abcd1234", commentId: "e5f6a7b8" }. Moving to #efgh5678 next."
-   - After task_complete, if the task needs review AND the team has a member whose role includes reviewing (e.g. "reviewer", "tech-lead", "qa"), IMMEDIATELY call review_request to move it to the review column and notify the reviewer:
+   - After task_complete, call review_request ONLY when review is explicitly expected for THIS task and a concrete reviewer is already known.
+     Example:
      { teamName: "${teamName}", taskId: "<taskId>", from: "<your-name>", reviewer: "<reviewer-name>" }
-     Do NOT leave a completed task without sending it to review when review is expected and a reviewer exists.
-     If no team member has a reviewer role, skip review_request — the task stays completed.
+     Do NOT infer mandatory review just from free-form teammate roles like "reviewer", "qa", or "tech-lead".
+     If review is not explicitly requested yet or the reviewer is still undecided, leave the task completed and wait.
 3b. When you BEGIN reviewing a task, FIRST call review_start to ensure it appears in the REVIEW column:
    { teamName: "${teamName}", taskId: "<taskId>", from: "<your-name>" }
    This is MANDATORY before review_approve or review_request_changes. Without this step, the kanban board may not show the task in REVIEW during your review.
@@ -543,16 +583,19 @@ function buildMemberTaskProtocol(teamName) {
       { teamName: "${teamName}", taskId: "<taskId>", text: "question / blocker / missing info", from: "<your-name>" }
    c) STEP 3 — THEN, send a message to your team lead via SendMessage so they notice it promptly.
    IMPORTANT: Always update the task board BEFORE sending the message. The flag + task comment are what make the request durable and visible on the board.
-   d) The flag is auto-cleared when the lead adds a task comment on your task.
-      If the lead replies via SendMessage instead, clear the flag yourself once you have the answer:
+   d) The clarification flag is durable until it is cleared explicitly.
+      When the blocker is truly resolved, clear the flag yourself with:
       { teamName: "${teamName}", taskId: "<taskId>", value: "clear" }
    e) Do NOT set clarification to "user" yourself — only the team lead escalates to the user.
 13. DEPENDENCY AWARENESS:
     When your task has blockedBy dependencies, check if they are completed before starting.
     When you complete a task that blocks others, blocked task owners are notified automatically via a task comment.
 14. TASK QUEUE DISCIPLINE:
-    - Use task_briefing as a compact queue view of your assigned tasks.
+    - task_briefing is your primary working queue for assigned tasks.
+    - Use task_list only to search/browse inventory rows. Do NOT use task_list as your working queue.
     - task_briefing may include full description/comments only for in_progress tasks; needsFix/pending/review/completed entries may be minimal on purpose.
+    - Act only on Actionable items from task_briefing.
+    - Awareness items are watch-only context. Do NOT start work from Awareness unless the lead reroutes the task or you become the actionOwner first.
     - Finish existing in_progress tasks first.
     - A newly assigned task must NOT remain silently pending/TODO. If you are idle and the task is ready to start, start it now. If it must wait because you are still busy on another task, blocked, or still need more context, immediately add a short task comment on that waiting task with the reason and your best ETA or what you are waiting on.
     - Keep any task you have not actually started in pending/TODO (use task_set_status pending if it was moved too early).
@@ -710,10 +753,11 @@ async function memberBriefing(context, memberName) {
         '',
         `Bootstrap flow:`,
         `1. Use this briefing as your durable rules source.`,
-        `2. Use task_briefing as your compact queue view whenever you need to see assigned work.`,
-        `3. Before starting a pending or needs-fix task, call task_get for that specific task if you need the full context. A newly assigned task must not remain silently pending/TODO: if you are idle and the task is ready to start, start it now; if it must wait because another task is already active, because it is blocked, or because you still need more context, add a short task comment with the reason + ETA or what you are waiting on and keep it pending/TODO until you actually begin.`,
-        `4. If this briefing was requested during reconnect, resume in_progress work first, then needs-fix tasks, then pending tasks.`,
-        `5. If you cannot obtain the context you need, notify your team lead ("${leadName}") and wait instead of guessing.`
+        `2. Use task_briefing as your primary working queue whenever you need to see assigned work. Use task_list only to search/browse inventory rows, not as your working queue.`,
+        `3. Act only on Actionable items in task_briefing. Awareness items are watch-only context and do not authorize you to start work unless the lead reroutes the task or you become the actionOwner.`,
+        `4. Before starting a pending or needs-fix task, call task_get for that specific task if you need the full context. A newly assigned task must not remain silently pending/TODO: if you are idle and the task is ready to start, start it now; if it must wait because another task is already active, because it is blocked, or because you still need more context, add a short task comment with the reason + ETA or what you are waiting on and keep it pending/TODO until you actually begin.`,
+        `5. If this briefing was requested during reconnect, resume in_progress work first, then needs-fix tasks, then pending tasks.`,
+        `6. If you cannot obtain the context you need, notify your team lead ("${leadName}") and wait instead of guessing.`
     );
 
     lines.push(
@@ -754,7 +798,9 @@ module.exports = {
     getTaskComment,
     linkTask,
     listDeletedTasks,
+    listTaskInventory,
     listTasks,
+    leadBriefing,
     removeTaskAttachment,
     resolveTaskId,
     restoreTask,
@@ -770,6 +816,6 @@ module.exports = {
     taskBriefing,
     unlinkTask,
     updateTask: (context, taskRef, updater) =>
-        taskStore.updateTask(context.paths, taskRef, updater),
+        withTeamBoardLock(context.paths, () => taskStore.updateTask(context.paths, taskRef, updater)),
     updateTaskFields,
 };

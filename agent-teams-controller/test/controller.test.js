@@ -146,6 +146,11 @@ describe('agent-teams-controller API', () => {
     expect(briefing).toContain('Implement carefully');
     expect(briefing).toContain('Working directory: /tmp/project-x');
     expect(briefing).toContain('Task briefing for bob:');
+    expect(briefing).toContain('Use task_briefing as your primary working queue whenever you need to see assigned work.');
+    expect(briefing).toContain('Use task_list only to search/browse inventory rows, not as your working queue.');
+    expect(briefing).toContain(
+      'Awareness items are watch-only context and do not authorize you to start work unless the lead reroutes the task or you become the actionOwner.'
+    );
   });
 
   it('resolves member briefing from members.meta.json when config members are missing', async () => {
@@ -280,7 +285,7 @@ describe('agent-teams-controller API', () => {
     expect(rows[1].id).toBe(registered.id);
   });
 
-  it('keeps assigned tasks pending by default, supports explicit immediate start, notifies owners, and groups briefing by review-aware sections', async () => {
+  it('keeps assigned tasks pending by default, supports explicit immediate start, notifies owners, and groups briefing into actionable and awareness queues', async () => {
     const claudeDir = makeClaudeDir();
     const controller = createController({ teamName: 'my-team', claudeDir });
 
@@ -355,24 +360,29 @@ describe('agent-teams-controller API', () => {
     expect(ownerInbox[3].text).toContain('task_add_comment');
 
     const briefing = await controller.tasks.taskBriefing('bob');
-    expect(briefing).toContain('In progress:');
+    expect(briefing).toContain(
+      'Primary queue for bob. Act only on Actionable items. Awareness items are watch-only context unless the lead reroutes the task or you become the actionOwner.'
+    );
+    expect(briefing).toContain(
+      'Use task_list only to search/browse inventory rows, not as your working queue.'
+    );
+    expect(briefing).toContain('Actionable:');
     expect(briefing).toContain(`#${activeTask.displayId}`);
     expect(briefing).toContain('Description: Resume immediately');
     expect(briefing).toContain('Resumed work with latest context.');
-    expect(briefing).toContain('Needs fixes after review:');
     expect(briefing).toContain(`#${needsFixTask.displayId}`);
-    expect(briefing).toContain('Pending:');
+    expect(briefing).toContain('reason=needs_fix');
     expect(briefing).toContain(`#${pendingTask.displayId}`);
     expect(briefing).not.toContain('Description: Do this later');
-    expect(briefing).toContain('Review:');
+    expect(briefing).toContain('Awareness:');
     expect(briefing).toContain(`#${reviewTask.displayId}`);
-    expect(briefing).toContain('Completed:');
+    expect(briefing).toContain('reason=review_reviewer_missing');
     expect(briefing).toContain(`#${completedTask.displayId}`);
     expect(briefing).not.toContain(
       'Completed task description should stay out of compact rows'
     );
-    expect(briefing).toContain('Approved (last 10):');
     expect(briefing).toContain(`#${approvedTask.displayId}`);
+    expect(briefing).toContain('Counters: actionable=4, awareness=3');
   });
 
   it('reconciles stale kanban rows and linked inbox comments idempotently', () => {
@@ -584,6 +594,31 @@ describe('agent-teams-controller API', () => {
     expect(startedEvents).toHaveLength(1);
   });
 
+  it('records review_start after review_request and surfaces review_in_progress for the reviewer', async () => {
+    const claudeDir = makeClaudeDir();
+    const controller = createController({ teamName: 'my-team', claudeDir });
+    const task = controller.tasks.createTask({ subject: 'Queued for review', owner: 'bob' });
+
+    controller.tasks.completeTask(task.id, 'bob');
+    controller.review.requestReview(task.id, { from: 'team-lead', reviewer: 'alice' });
+    const started = controller.review.startReview(task.id, { from: 'alice' });
+
+    expect(started.ok).toBe(true);
+    const reloaded = controller.tasks.getTask(task.id);
+    const requestedEvents = reloaded.historyEvents.filter((e) => e.type === 'review_requested');
+    const startedEvents = reloaded.historyEvents.filter((e) => e.type === 'review_started');
+    expect(requestedEvents).toHaveLength(1);
+    expect(startedEvents).toHaveLength(1);
+    expect(startedEvents[0].from).toBe('review');
+    expect(startedEvents[0].to).toBe('review');
+    expect(startedEvents[0].actor).toBe('alice');
+
+    const reviewerBriefing = await controller.tasks.taskBriefing('alice');
+    expect(reviewerBriefing).toContain(`#${task.displayId}`);
+    expect(reviewerBriefing).toContain('reason=review_in_progress');
+    expect(reviewerBriefing).toContain('reviewer=alice');
+  });
+
   it('throws when starting review on a deleted task', () => {
     const claudeDir = makeClaudeDir();
     const controller = createController({ teamName: 'my-team', claudeDir });
@@ -639,7 +674,7 @@ describe('agent-teams-controller API', () => {
     expect(rows[0].leadSessionId).toBe('lead-session-1');
   });
 
-  it('does not wake owner for self-comments and clears user clarification when user replies', () => {
+  it('does not wake owner for self-comments and keeps user clarification sticky until explicitly cleared', () => {
     const claudeDir = makeClaudeDir();
     const controller = createController({ teamName: 'my-team', claudeDir });
     const task = controller.tasks.createTask({
@@ -662,12 +697,16 @@ describe('agent-teams-controller API', () => {
       text: 'Please use the safer option.',
     });
 
-    expect(replied.task.needsClarification).toBeUndefined();
+    expect(replied.task.needsClarification).toBe('user');
     const reloaded = controller.tasks.getTask(task.id);
-    expect(reloaded.needsClarification).toBeUndefined();
+    expect(reloaded.needsClarification).toBe('user');
     const rows = JSON.parse(fs.readFileSync(ownerInboxPath, 'utf8'));
     expect(rows).toHaveLength(1);
     expect(rows[0].text).toContain('Please use the safer option.');
+
+    const cleared = controller.tasks.setNeedsClarification(task.id, 'clear');
+    expect(cleared.needsClarification).toBeUndefined();
+    expect(controller.tasks.getTask(task.id).needsClarification).toBeUndefined();
   });
 
   it('wakes lead owner on comment from another member', () => {
@@ -757,7 +796,7 @@ describe('agent-teams-controller API', () => {
     expect(rows.at(-1).leadSessionId).toBe('lead-session-1');
   });
 
-  it('limits approved briefing section to the latest 10 tasks by freshness', async () => {
+  it('keeps approved tasks in awareness ordered by freshness', async () => {
     const claudeDir = makeClaudeDir();
     const controller = createController({ teamName: 'my-team', claudeDir });
 
@@ -772,11 +811,112 @@ describe('agent-teams-controller API', () => {
     );
 
     const briefing = await controller.tasks.taskBriefing('bob');
-    expect(briefing).toContain('Approved (last 10):');
+    expect(briefing).toContain('Awareness:');
     expect(briefing).toContain(`#${approvedTasks[11].displayId}`);
     expect(briefing).toContain(`#${approvedTasks[2].displayId}`);
-    expect(briefing).not.toContain(`#${approvedTasks[1].displayId}`);
-    expect(briefing).not.toContain(`#${approvedTasks[0].displayId}`);
+    expect(briefing).toContain(`#${approvedTasks[1].displayId}`);
+    expect(briefing).toContain(`#${approvedTasks[0].displayId}`);
+    expect(briefing.indexOf(`#${approvedTasks[11].displayId}`)).toBeLessThan(
+      briefing.indexOf(`#${approvedTasks[0].displayId}`)
+    );
+  });
+
+  it('builds derived lead briefing and filtered task inventory', async () => {
+    const claudeDir = makeClaudeDir();
+    const controller = createController({ teamName: 'my-team', claudeDir });
+
+    const queuedTask = controller.tasks.createTask({
+      subject: 'Queued implementation',
+      owner: 'bob',
+      notifyOwner: false,
+    });
+    const unassignedTask = controller.tasks.createTask({
+      subject: 'Needs owner',
+      notifyOwner: false,
+    });
+    const reviewTask = controller.tasks.createTask({
+      subject: 'Needs review pickup',
+      owner: 'bob',
+      notifyOwner: false,
+    });
+
+    controller.tasks.completeTask(reviewTask.id, 'bob');
+    controller.review.requestReview(reviewTask.id, { from: 'alice', reviewer: 'alice' });
+
+    const leadBriefing = await controller.tasks.leadBriefing();
+    expect(leadBriefing).toContain('Lead queue for alice on team "my-team":');
+    expect(leadBriefing).toContain(
+      'Primary lead queue. Sections below already represent lead-owned actions or watch-only context.'
+    );
+    expect(leadBriefing).toContain(
+      'Use task_list only for search, filtering, and drill-down inventory lookups.'
+    );
+    expect(leadBriefing).toContain('Needs owner assignment:');
+    expect(leadBriefing).toContain(`#${unassignedTask.displayId}`);
+    expect(leadBriefing).toContain('Lead-owned follow-up:');
+    expect(leadBriefing).toContain(`#${reviewTask.displayId}`);
+
+    const reviewInventory = controller.tasks.listTaskInventory({ reviewState: 'review' });
+    expect(reviewInventory).toHaveLength(1);
+    expect(reviewInventory[0].id).toBe(reviewTask.id);
+
+    const ownerPendingInventory = controller.tasks.listTaskInventory({
+      owner: 'bob',
+      status: 'pending',
+    });
+    expect(ownerPendingInventory.map((task) => task.id)).toEqual([queuedTask.id]);
+  });
+
+  it('uses legacy kanban reviewer as a migration fallback for active review tasks', async () => {
+    const claudeDir = makeClaudeDir();
+    const configPath = path.join(claudeDir, 'teams', 'my-team', 'config.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config.members.push({ name: 'carol', role: 'reviewer' });
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    const controller = createController({ teamName: 'my-team', claudeDir });
+    const reviewTask = controller.tasks.createTask({
+      subject: 'Legacy review assignment',
+      owner: 'bob',
+      status: 'completed',
+      reviewState: 'review',
+      notifyOwner: false,
+    });
+
+    fs.writeFileSync(
+      path.join(claudeDir, 'teams', 'my-team', 'kanban-state.json'),
+      JSON.stringify(
+        {
+          teamName: 'my-team',
+          reviewers: [],
+          tasks: {
+            [reviewTask.id]: {
+              column: 'review',
+              reviewer: 'carol',
+              movedAt: '2026-01-01T00:00:00.000Z',
+            },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    const reviewerBriefing = await controller.tasks.taskBriefing('carol');
+    expect(reviewerBriefing).toContain(
+      'Primary queue for carol. Act only on Actionable items. Awareness items are watch-only context unless the lead reroutes the task or you become the actionOwner.'
+    );
+    expect(reviewerBriefing).toContain('Actionable:');
+    expect(reviewerBriefing).toContain(`#${reviewTask.displayId}`);
+    expect(reviewerBriefing).toContain('reviewer=carol');
+
+    const leadBriefing = await controller.tasks.leadBriefing();
+    expect(leadBriefing).toContain(
+      'Use task_list only for search, filtering, and drill-down inventory lookups.'
+    );
+    expect(leadBriefing).toContain('Watching:');
+    expect(leadBriefing).toContain(`#${reviewTask.displayId}`);
+    expect(leadBriefing).not.toContain('review_reviewer_missing');
   });
 
   it('marks stale processes stopped during listing and supports unregister', () => {

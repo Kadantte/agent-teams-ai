@@ -545,6 +545,15 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     });
 
     expect(prompt).toContain(
+      'When you later receive work or reconnect after a restart, use task_briefing as your primary working queue.'
+    );
+    expect(prompt).toContain(
+      'Use task_list only to search/browse inventory rows, not as your working queue.'
+    );
+    expect(prompt).toContain(
+      'Awareness items are watch-only context unless the lead reroutes the task or you become the actionOwner.'
+    );
+    expect(prompt).toContain(
       'If bootstrap succeeded and you have no task, produce ZERO assistant text for that turn and end it immediately after the successful tool result.'
     );
     expect(prompt).toContain(
@@ -676,6 +685,15 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
     expect(prompt).toContain('task_create_from_message');
     expect(prompt).toContain('task_set_owner');
     expect(prompt).toContain('cross_team_send');
+    expect(prompt).toContain(
+      'lead_briefing is the primary lead queue. Decisions about what to act on now come from lead_briefing, not from raw task_list rows.'
+    );
+    expect(prompt).toContain(
+      'Browse/search compact inventory rows only: task_list'
+    );
+    expect(prompt).toContain(
+      'task_list is inventory/search/drill-down only. Do NOT treat task_list as the lead\'s working queue.'
+    );
     expect(prompt).toContain(
       'review_request already notifies the reviewer'
     );

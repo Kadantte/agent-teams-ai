@@ -4,7 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { agentBlocks, getController } from '../controller';
-import { jsonTextContent, taskWriteResult, slimTask, slimTaskForList } from '../utils/format';
+import { jsonTextContent, taskWriteResult, slimTask } from '../utils/format';
 
 /** stripAgentBlocks from canonical agentBlocks module — single source of truth for the tag format. */
 const stripAgentBlocksFn = (text: string): string => agentBlocks.stripAgentBlocks(text);
@@ -19,6 +19,18 @@ const ALWAYS_LOAD_META = {
 } as const;
 
 const relationshipTypeSchema = z.enum(['blocked-by', 'blocks', 'related']);
+const inventoryTaskStatusSchema = z.enum(['pending', 'in_progress', 'completed']);
+const reviewStateSchema = z.enum(['none', 'review', 'needsFix', 'approved']);
+const inventoryKanbanColumnSchema = z.enum(['review', 'approved']);
+const DEFAULT_TASK_LIST_LIMIT = 50;
+const MAX_TASK_LIST_LIMIT = 200;
+
+function normalizeTaskListLimit(limit: number | undefined): number {
+  if (limit == null) {
+    return DEFAULT_TASK_LIST_LIMIT;
+  }
+  return Math.min(Math.max(1, Math.floor(limit)), MAX_TASK_LIST_LIMIT);
+}
 
 /** Allowed message source types for task_create_from_message provenance. Fail closed — only explicit user-originated sources. */
 const USER_ORIGINATED_SOURCES = new Set(['user_sent']);
@@ -299,14 +311,40 @@ export function registerTaskTools(server: Pick<FastMCP, 'addTool'>) {
 
   server.addTool({
     name: 'task_list',
-    description: 'List tasks for a team',
+    description:
+      'List compact active task inventory/search rows for a team. Deleted tasks are excluded. Use it to browse, filter, and drill into inventory, not as a primary working queue. Defaults to 50 rows and caps at 200 rows; use filters or a smaller limit to narrow results. Supports stable conjunctive filters for owner, active status, reviewState, review overlay column, and task relationships.',
     parameters: z.object({
       ...toolContextSchema,
+      owner: z.string().min(1).optional(),
+      status: inventoryTaskStatusSchema.optional(),
+      reviewState: reviewStateSchema.optional(),
+      kanbanColumn: inventoryKanbanColumnSchema.optional(),
+      relatedTo: z.string().min(1).optional(),
+      blockedBy: z.string().min(1).optional(),
+      limit: z.number().int().positive().optional(),
     }),
-    execute: async ({ teamName, claudeDir }) =>
+    execute: async ({
+      teamName,
+      claudeDir,
+      owner,
+      status,
+      reviewState,
+      kanbanColumn,
+      relatedTo,
+      blockedBy,
+      limit,
+    }) =>
       await Promise.resolve(
         jsonTextContent(
-          (getController(teamName, claudeDir).tasks.listTasks() as Record<string, unknown>[]).map(slimTaskForList)
+          getController(teamName, claudeDir).tasks.listTaskInventory({
+            ...(owner ? { owner } : {}),
+            ...(status ? { status } : {}),
+            ...(reviewState ? { reviewState } : {}),
+            ...(kanbanColumn ? { kanbanColumn } : {}),
+            ...(relatedTo ? { relatedTo } : {}),
+            ...(blockedBy ? { blockedBy } : {}),
+            limit: normalizeTaskListLimit(limit),
+          })
         )
       ),
   });

@@ -9,6 +9,7 @@ declare module 'agent-teams-controller' {
     getTask(taskId: string): unknown;
     getTaskComment(taskId: string, commentId: string): { comment: Record<string, unknown>; task: { id: string; displayId: string; subject: string; status: string; owner: string | null; commentCount: number } };
     listTasks(): unknown[];
+    listTaskInventory(filters?: Record<string, unknown>): unknown[];
     listDeletedTasks(): unknown[];
     resolveTaskId(taskRef: string): string;
     setTaskStatus(taskId: string, status: string, actor?: string): unknown;
@@ -27,6 +28,7 @@ declare module 'agent-teams-controller' {
     linkTask(taskId: string, targetId: string, linkType: string): unknown;
     unlinkTask(taskId: string, targetId: string, linkType: string): unknown;
     memberBriefing(memberName: string): Promise<string>;
+    leadBriefing(): Promise<string>;
     taskBriefing(memberName: string): Promise<string>;
   }
 
@@ -111,6 +113,7 @@ declare module 'agent-teams-controller' {
 
   export type AgentTeamsMcpToolGroupId =
     | 'task'
+    | 'lead'
     | 'kanban'
     | 'review'
     | 'message'
@@ -125,6 +128,7 @@ declare module 'agent-teams-controller' {
   }
 
   export const AGENT_TEAMS_TASK_TOOL_NAMES: readonly string[];
+  export const AGENT_TEAMS_LEAD_TOOL_NAMES: readonly string[];
   export const AGENT_TEAMS_REVIEW_TOOL_NAMES: readonly string[];
   export const AGENT_TEAMS_MESSAGE_TOOL_NAMES: readonly string[];
   export const AGENT_TEAMS_CROSS_TEAM_TOOL_NAMES: readonly string[];
@@ -135,4 +139,6 @@ declare module 'agent-teams-controller' {
   export const AGENT_TEAMS_REGISTERED_TOOL_NAMES: readonly string[];
   export const AGENT_TEAMS_TEAMMATE_OPERATIONAL_TOOL_NAMES: readonly string[];
   export const AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES: readonly string[];
+  export const AGENT_TEAMS_LEAD_BOOTSTRAP_TOOL_NAMES: readonly string[];
+  export const AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES: readonly string[];
 }

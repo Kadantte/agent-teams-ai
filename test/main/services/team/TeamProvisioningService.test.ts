@@ -131,7 +131,10 @@ import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
 import { spawnCli } from '@main/utils/childProcess';
 import { killProcessByPid } from '@main/utils/processKill';
 import { encodePath } from '@main/utils/pathDecoder';
-import { AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES } from 'agent-teams-controller';
+import {
+  AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES,
+  AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
+} from 'agent-teams-controller';
 import {
   killTmuxPaneForCurrentPlatformSync,
   listTmuxPanePidsForCurrentPlatform,
@@ -2073,7 +2076,7 @@ describe('TeamProvisioningService', () => {
     }
   });
 
-  it('pre-seeds teammate operational MCP permissions before createTeam spawn', async () => {
+  it('pre-seeds lead bootstrap MCP permissions before createTeam spawn', async () => {
     allowConsoleLogs();
     vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
     vi.mocked(spawnCli).mockImplementation(() => {
@@ -2124,8 +2127,9 @@ describe('TeamProvisioningService', () => {
       permissions?: { allow?: string[] };
     };
     expect(settings.permissions?.allow).toEqual(
-      expect.arrayContaining([...AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES])
+      expect.arrayContaining([...AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES])
     );
+    expect(settings.permissions?.allow).toContain('mcp__agent-teams__lead_briefing');
     expect(settings.permissions?.allow).not.toContain('mcp__agent-teams__team_stop');
     expect(settings.permissions?.allow).not.toContain('mcp__agent-teams__kanban_clear');
   });

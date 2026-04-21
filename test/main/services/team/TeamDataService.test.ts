@@ -1182,6 +1182,65 @@ describe('TeamDataService', () => {
     });
   });
 
+  it('preserves legacy kanban reviewer for tasks still in review without review history', async () => {
+    const service = new TeamDataService(
+      {
+        listTeams: vi.fn(),
+        getConfig: vi.fn(async () => ({
+          name: 'My team',
+          members: [
+            { name: 'lead', role: 'team lead' },
+            { name: 'bob', role: 'developer' },
+            { name: 'carol', role: 'reviewer' },
+          ],
+        })),
+      } as never,
+      {
+        getTasks: vi.fn(async () => [
+          {
+            id: 'task-legacy-review',
+            subject: 'Legacy review task',
+            status: 'completed',
+            owner: 'bob',
+            reviewState: 'review',
+            historyEvents: [],
+          },
+        ]),
+      } as never,
+      {
+        listInboxNames: vi.fn(async () => []),
+        getMessages: vi.fn(async () => []),
+      } as never,
+      {} as never,
+      {} as never,
+      {
+        resolveMembers: vi.fn(() => []),
+      } as never,
+      {
+        getState: vi.fn(async () => ({
+          teamName: 'my-team',
+          reviewers: [],
+          tasks: {
+            'task-legacy-review': {
+              column: 'review',
+              reviewer: 'carol',
+              movedAt: '2026-03-01T10:00:00.000Z',
+            },
+          },
+        })),
+      } as never
+    );
+
+    const data = await service.getTeamData('my-team');
+
+    expect(data.tasks[0]).toMatchObject({
+      id: 'task-legacy-review',
+      reviewState: 'review',
+      kanbanColumn: 'review',
+      reviewer: 'carol',
+    });
+  });
+
   it('propagates leadSessionId for kanban-driven review transitions', async () => {
     const requestReviewMock = vi.fn();
     const approveReviewMock = vi.fn();

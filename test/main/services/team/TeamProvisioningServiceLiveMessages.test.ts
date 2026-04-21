@@ -95,6 +95,7 @@ vi.mock('../../../../src/main/utils/fsRead', async (importOriginal) => {
 });
 
 vi.mock('agent-teams-controller', () => ({
+  AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES: [] as readonly string[],
   AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES: [] as readonly string[],
   createController: ({ teamName }: { teamName: string }) => ({
     messages: {

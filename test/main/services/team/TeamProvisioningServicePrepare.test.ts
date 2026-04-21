@@ -137,23 +137,19 @@ function writeMcpConfig(
 
 function writeMockMcpServer(
   targetDir: string,
-  variant: 'missing-member-briefing' | 'member-briefing-error'
+  variant:
+    | 'missing-member-briefing'
+    | 'missing-lead-briefing'
+    | 'member-briefing-error'
+    | 'lead-briefing-error'
 ): string {
   const scriptPath = path.join(targetDir, `mock-mcp-${variant}.js`);
   const tools =
     variant === 'missing-member-briefing'
-      ? [{ name: 'task_create' }]
-      : [{ name: 'member_briefing' }];
-  const toolCallResult =
-    variant === 'member-briefing-error'
-      ? {
-          content: [{ type: 'text', text: 'mock member_briefing failure' }],
-          isError: true,
-        }
-      : {
-          content: [{ type: 'text', text: 'ok' }],
-          isError: false,
-        };
+      ? [{ name: 'lead_briefing' }]
+      : variant === 'missing-lead-briefing'
+        ? [{ name: 'member_briefing' }]
+        : [{ name: 'member_briefing' }, { name: 'lead_briefing' }];
 
   fs.writeFileSync(
     scriptPath,
@@ -192,10 +188,26 @@ process.stdin.on('data', (chunk) => {
       continue;
     }
     if (message.method === 'tools/call') {
+      const toolName = message.params?.name;
+      const toolCallResult =
+        (${JSON.stringify(variant)} === 'member-briefing-error' && toolName === 'member_briefing')
+          ? {
+              content: [{ type: 'text', text: 'mock member_briefing failure' }],
+              isError: true,
+            }
+          : (${JSON.stringify(variant)} === 'lead-briefing-error' && toolName === 'lead_briefing')
+            ? {
+                content: [{ type: 'text', text: 'mock lead_briefing failure' }],
+                isError: true,
+              }
+            : {
+                content: [{ type: 'text', text: 'ok' }],
+                isError: false,
+              };
       send({
         jsonrpc: '2.0',
         id: message.id,
-        result: ${JSON.stringify(toolCallResult)},
+        result: toolCallResult,
       });
     }
   }
@@ -1099,6 +1111,21 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     ).rejects.toThrow('tools/list did not include member_briefing');
   });
 
+  it('fails validation when tools/list does not include lead_briefing', async () => {
+    const svc = new TeamProvisioningService();
+    const mockServerPath = writeMockMcpServer(tempRoot, 'missing-lead-briefing');
+    const configPath = writeMcpConfig(tempRoot, {
+      'agent-teams': {
+        command: process.execPath,
+        args: [mockServerPath],
+      },
+    });
+
+    await expect(
+      (svc as any).validateAgentTeamsMcpRuntime('/fake/claude', tempRoot, process.env, configPath)
+    ).rejects.toThrow('tools/list did not include lead_briefing');
+  });
+
   it('fails validation when member_briefing itself returns an MCP error', async () => {
     const svc = new TeamProvisioningService();
     const mockServerPath = writeMockMcpServer(tempRoot, 'member-briefing-error');
@@ -1113,5 +1140,20 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     await expect(
       (svc as any).validateAgentTeamsMcpRuntime('/fake/claude', tempRoot, process.env, configPath)
     ).rejects.toThrow('mock member_briefing failure');
+  });
+
+  it('fails validation when lead_briefing itself returns an MCP error', async () => {
+    const svc = new TeamProvisioningService();
+    const mockServerPath = writeMockMcpServer(tempRoot, 'lead-briefing-error');
+    const configPath = writeMcpConfig(tempRoot, {
+      'agent-teams': {
+        command: process.execPath,
+        args: [mockServerPath],
+      },
+    });
+
+    await expect(
+      (svc as any).validateAgentTeamsMcpRuntime('/fake/claude', tempRoot, process.env, configPath)
+    ).rejects.toThrow('mock lead_briefing failure');
   });
 });

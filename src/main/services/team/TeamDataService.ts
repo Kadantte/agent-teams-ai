@@ -241,7 +241,7 @@ export class TeamDataService {
     kanbanTaskState?: KanbanState['tasks'][string]
   ): TeamTaskWithKanban {
     const reviewState = this.resolveTaskReviewState(task);
-    const reviewer = kanbanTaskState?.reviewer ?? this.resolveReviewerFromHistory(task) ?? null;
+    const reviewer = this.resolveReviewerFromHistory(task, kanbanTaskState, reviewState) ?? null;
     return {
       ...task,
       reviewState,
@@ -251,23 +251,45 @@ export class TeamDataService {
   }
 
   /**
-   * Extract reviewer name from task history events as a fallback
-   * when kanban state doesn't have it (e.g. review done via MCP agent-teams).
+   * Extract reviewer name from the current review cycle history.
+   * For legacy boards that stored reviewer only in kanban state, preserve that
+   * value as a migration fallback while the task is still actively in review.
    */
-  private resolveReviewerFromHistory(task: TeamTask): string | null {
-    if (!task.historyEvents?.length) return null;
-    for (let i = task.historyEvents.length - 1; i >= 0; i--) {
-      const event = task.historyEvents[i];
-      if (event.type === 'review_approved' && event.actor) {
-        return event.actor;
-      }
-      if (event.type === 'review_started' && event.actor) {
-        return event.actor;
-      }
-      if (event.type === 'review_requested' && event.reviewer) {
-        return event.reviewer;
+  private resolveReviewerFromHistory(
+    task: TeamTask,
+    kanbanTaskState?: KanbanState['tasks'][string],
+    reviewState: 'none' | 'review' | 'needsFix' | 'approved' = this.resolveTaskReviewState(task)
+  ): string | null {
+    if (task.historyEvents?.length) {
+      for (let i = task.historyEvents.length - 1; i >= 0; i--) {
+        const event = task.historyEvents[i];
+        if (event.type === 'review_started' && event.actor) {
+          return event.actor;
+        }
+        if (event.type === 'review_requested' && event.reviewer) {
+          return event.reviewer;
+        }
+        if (event.type === 'review_approved' || event.type === 'review_changes_requested') {
+          break;
+        }
+        if (event.type === 'status_changed' && event.to === 'in_progress') {
+          break;
+        }
+        if (event.type === 'task_created') {
+          break;
+        }
       }
     }
+
+    if (
+      reviewState === 'review' &&
+      kanbanTaskState?.column === 'review' &&
+      typeof kanbanTaskState.reviewer === 'string' &&
+      kanbanTaskState.reviewer.trim().length > 0
+    ) {
+      return kanbanTaskState.reviewer.trim();
+    }
+
     return null;
   }
 

@@ -7,6 +7,7 @@ const { AGENT_TEAMS_MCP_TOOL_GROUPS, AGENT_TEAMS_REGISTERED_TOOL_NAMES } =
 
 import { registerCrossTeamTools } from './crossTeamTools';
 import { registerKanbanTools } from './kanbanTools';
+import { registerLeadTools } from './leadTools';
 import { registerMessageTools } from './messageTools';
 import { registerProcessTools } from './processTools';
 import { registerReviewTools } from './reviewTools';
@@ -15,6 +16,7 @@ import { registerTaskTools } from './taskTools';
 
 const REGISTRATION_BY_GROUP = {
   task: registerTaskTools,
+  lead: registerLeadTools,
   kanban: registerKanbanTools,
   review: registerReviewTools,
   message: registerMessageTools,
