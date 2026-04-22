@@ -32,20 +32,43 @@ interface FailedSpawnDetail {
   reason: string | null;
 }
 
-function countPermissionBlockedMembers(memberSpawnStatuses: MemberSpawnStatusCollection): number {
-  if (!memberSpawnStatuses) {
-    return 0;
+function countPermissionBlockedMembers(params: {
+  memberSpawnStatuses: MemberSpawnStatusCollection;
+  memberSpawnSnapshotStatuses?: MemberSpawnStatusesSnapshot['statuses'];
+}): number {
+  const names = new Set<string>();
+  if (params.memberSpawnStatuses instanceof Map) {
+    for (const name of params.memberSpawnStatuses.keys()) {
+      names.add(name);
+    }
+  } else if (params.memberSpawnStatuses) {
+    for (const name of Object.keys(params.memberSpawnStatuses)) {
+      names.add(name);
+    }
   }
-  const entries =
-    memberSpawnStatuses instanceof Map
-      ? [...memberSpawnStatuses.values()]
-      : Object.values(memberSpawnStatuses);
+  for (const name of Object.keys(params.memberSpawnSnapshotStatuses ?? {})) {
+    names.add(name);
+  }
 
-  return entries.filter(
-    (entry) =>
+  let count = 0;
+  for (const name of names) {
+    const liveEntry =
+      params.memberSpawnStatuses instanceof Map
+        ? params.memberSpawnStatuses.get(name)
+        : params.memberSpawnStatuses?.[name];
+    const snapshotEntry = params.memberSpawnSnapshotStatuses?.[name];
+    const entry = liveEntry ?? snapshotEntry;
+    if (!entry) {
+      continue;
+    }
+    if (
       entry.launchState === 'runtime_pending_permission' ||
       (entry.pendingPermissionRequestIds?.length ?? 0) > 0
-  ).length;
+    ) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function buildAwaitingPermissionPhrase(count: number): string {
@@ -185,7 +208,9 @@ export function buildTeamProvisioningPresentation({
   progress: TeamProvisioningProgress | null | undefined;
   members: readonly ProvisioningMemberLike[];
   memberSpawnStatuses?: MemberSpawnStatusCollection;
-  memberSpawnSnapshot?: Pick<MemberSpawnStatusesSnapshot, 'expectedMembers' | 'summary'>;
+  memberSpawnSnapshot?: Pick<MemberSpawnStatusesSnapshot, 'expectedMembers' | 'summary'> & {
+    statuses?: MemberSpawnStatusesSnapshot['statuses'];
+  };
 }): TeamProvisioningPresentation | null {
   if (!progress) {
     return null;
@@ -223,7 +248,10 @@ export function buildTeamProvisioningPresentation({
     failedSpawnCount,
     expectedTeammateCount
   );
-  const permissionBlockedCount = countPermissionBlockedMembers(memberSpawnStatuses);
+  const permissionBlockedCount = countPermissionBlockedMembers({
+    memberSpawnStatuses,
+    memberSpawnSnapshotStatuses: memberSpawnSnapshot?.statuses,
+  });
 
   const { allTeammatesConfirmedAlive, hasMembersStillJoining, remainingJoinCount } =
     getLaunchJoinState({

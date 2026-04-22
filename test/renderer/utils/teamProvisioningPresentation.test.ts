@@ -460,6 +460,71 @@ describe('buildTeamProvisioningPresentation', () => {
     expect(presentation?.panelMessage).toBe('1 teammate awaiting permission approval');
   });
 
+  it('trusts persisted snapshot permission state when live member spawn statuses are absent', () => {
+    const presentation = buildTeamProvisioningPresentation({
+      progress: {
+        runId: 'run-4f',
+        teamName: 'opencode-team',
+        state: 'ready',
+        startedAt: '2026-04-13T10:00:00.000Z',
+        updatedAt: '2026-04-13T10:00:08.000Z',
+        message: 'Launch completed',
+        messageSeverity: undefined,
+        pid: 4321,
+        cliLogsTail: '',
+        assistantOutput: '',
+      },
+      members: [
+        {
+          name: 'team-lead',
+          agentType: 'team-lead',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+        {
+          name: 'bob',
+          agentType: 'engineer',
+          status: 'unknown',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+      ],
+      memberSpawnStatuses: {},
+      memberSpawnSnapshot: {
+        expectedMembers: ['bob'],
+        statuses: {
+          bob: {
+            status: 'online',
+            launchState: 'runtime_pending_bootstrap',
+            updatedAt: '2026-04-13T10:00:07.000Z',
+            runtimeAlive: true,
+            livenessSource: 'process',
+            bootstrapConfirmed: false,
+            hardFailure: false,
+            agentToolAccepted: true,
+            pendingPermissionRequestIds: ['perm_1'],
+            firstSpawnAcceptedAt: '2026-04-13T10:00:01.000Z',
+          },
+        },
+        summary: {
+          confirmedCount: 0,
+          pendingCount: 1,
+          failedCount: 0,
+          runtimeAlivePendingCount: 1,
+        },
+      },
+    });
+
+    expect(presentation?.compactTitle).toBe('Finishing launch');
+    expect(presentation?.compactDetail).toBe('1 teammate awaiting permission approval');
+    expect(presentation?.panelMessage).toBe('1 teammate awaiting permission approval');
+  });
+
   it('keeps a generic failed teammate message while launch is still active if only persisted failure counts remain', () => {
     const presentation = buildTeamProvisioningPresentation({
       progress: {
