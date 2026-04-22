@@ -9,8 +9,10 @@ import {
   getOpenCodeLaneScopedRuntimeFilePath,
   getOpenCodeRuntimeLaneIndexPath,
   getOpenCodeTeamRuntimeDirectory,
+  inspectOpenCodeRuntimeLaneStorage,
   migrateLegacyOpenCodeRuntimeState,
   readOpenCodeRuntimeLaneIndex,
+  recoverStaleOpenCodeRuntimeLaneIndexEntry,
   upsertOpenCodeRuntimeLaneIndexEntry,
 } from '../../../../src/main/services/team/opencode/store/OpenCodeRuntimeManifestEvidenceReader';
 
@@ -236,6 +238,55 @@ describe('OpenCodeRuntimeManifestEvidenceReader migration', () => {
       highWatermark: 11,
       activeRunId: 'legacy-run',
       capabilitySnapshotId: 'cap-1',
+    });
+  });
+
+  it('reports missing lane storage when an active lane index entry has no lane dir or state', async () => {
+    const teamName = 'team-epsilon';
+    const laneId = 'secondary:opencode:alice';
+
+    await upsertOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: tempDir,
+      teamName,
+      laneId,
+      state: 'active',
+    });
+
+    await expect(
+      inspectOpenCodeRuntimeLaneStorage({
+        teamsBasePath: tempDir,
+        teamName,
+        laneId,
+      })
+    ).resolves.toEqual({
+      laneDirectoryExists: false,
+      hasStateOnDisk: false,
+      fileNames: [],
+    });
+
+    const result = await recoverStaleOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: tempDir,
+      teamName,
+      laneId,
+    });
+
+    expect(result).toEqual({
+      stale: true,
+      degraded: true,
+      diagnostics: [
+        `OpenCode lane ${laneId} is marked active in lanes.json, but no lane state exists on disk.`,
+      ],
+    });
+    await expect(readOpenCodeRuntimeLaneIndex(tempDir, teamName)).resolves.toMatchObject({
+      lanes: {
+        [laneId]: {
+          laneId,
+          state: 'degraded',
+          diagnostics: [
+            `OpenCode lane ${laneId} is marked active in lanes.json, but no lane state exists on disk.`,
+          ],
+        },
+      },
     });
   });
 });

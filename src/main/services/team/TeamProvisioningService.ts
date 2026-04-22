@@ -166,6 +166,7 @@ import {
   getOpenCodeTeamRuntimeDirectory,
   migrateLegacyOpenCodeRuntimeState,
   readOpenCodeRuntimeLaneIndex,
+  recoverStaleOpenCodeRuntimeLaneIndexEntry,
   removeOpenCodeRuntimeLaneIndexEntry,
   upsertOpenCodeRuntimeLaneIndexEntry,
 } from './opencode/store/OpenCodeRuntimeManifestEvidenceReader';
@@ -6063,12 +6064,7 @@ export class TeamProvisioningService {
       );
     }
     if (!this.isCurrentTrackedRun(run)) return;
-    this.teamChangeEmitter?.({
-      type: 'member-spawn',
-      teamName: run.teamName,
-      runId: run.runId,
-      detail: memberName,
-    });
+    this.emitMemberSpawnChange(run, memberName);
     if (run.isLaunch) {
       void this.persistLaunchStateSnapshot(run, run.provisioningComplete ? 'finished' : 'active');
     }
@@ -6115,13 +6111,15 @@ export class TeamProvisioningService {
     await this.persistLaunchStateSnapshot(run, run.provisioningComplete ? 'finished' : 'active');
 
     const persisted = await this.launchStateStore.read(teamName);
-    const liveSnapshot = snapshotFromRuntimeMemberStatuses({
-      teamName: run.teamName,
-      expectedMembers: run.expectedMembers,
-      leadSessionId: run.detectedSessionId ?? undefined,
-      launchPhase: run.provisioningComplete ? 'finished' : 'active',
-      statuses: this.buildRuntimeSpawnStatusRecord(run),
-    });
+    const liveSnapshot =
+      this.buildLiveLaunchSnapshotForRun(run, run.provisioningComplete ? 'finished' : 'active') ??
+      snapshotFromRuntimeMemberStatuses({
+        teamName: run.teamName,
+        expectedMembers: run.expectedMembers,
+        leadSessionId: run.detectedSessionId ?? undefined,
+        launchPhase: run.provisioningComplete ? 'finished' : 'active',
+        statuses: this.buildRuntimeSpawnStatusRecord(run),
+      });
     const snapshot = persisted ?? liveSnapshot;
     const statuses = await this.attachLiveRuntimeMetadataToStatuses(
       teamName,
@@ -9689,6 +9687,9 @@ export class TeamProvisioningService {
       this.provisioningRunByTeam.set(request.teamName, runId);
       run.onProgress(run.progress);
       await this.clearPersistedLaunchState(request.teamName);
+      for (const lane of run.mixedSecondaryLanes ?? []) {
+        await this.publishMixedSecondaryLaneStatusChange(run, lane);
+      }
 
       // Read existing tasks to include in teammate prompts for work resumption
       const taskReader = new TeamTaskReader();
@@ -11813,6 +11814,53 @@ export class TeamProvisioningService {
     return statuses;
   }
 
+  private buildLiveLaunchSnapshotForRun(
+    run: ProvisioningRun,
+    launchPhase: PersistedTeamLaunchPhase = run.provisioningComplete ? 'finished' : 'active'
+  ): PersistedTeamLaunchSnapshot | null {
+    const mixedSnapshot = this.buildMixedPersistedLaunchSnapshotForRun(run, launchPhase);
+    if (mixedSnapshot) {
+      return mixedSnapshot;
+    }
+
+    if (!run.isLaunch || !run.expectedMembers || run.expectedMembers.length === 0) {
+      return null;
+    }
+
+    return snapshotFromRuntimeMemberStatuses({
+      teamName: run.teamName,
+      expectedMembers: run.expectedMembers,
+      leadSessionId: run.detectedSessionId ?? undefined,
+      launchPhase,
+      statuses: this.buildRuntimeSpawnStatusRecord(run),
+    });
+  }
+
+  private emitMemberSpawnChange(
+    run: Pick<ProvisioningRun, 'teamName' | 'runId'>,
+    memberName: string
+  ) {
+    this.teamChangeEmitter?.({
+      type: 'member-spawn',
+      teamName: run.teamName,
+      runId: run.runId,
+      detail: memberName,
+    });
+  }
+
+  private async publishMixedSecondaryLaneStatusChange(
+    run: ProvisioningRun,
+    lane: MixedSecondaryRuntimeLaneState
+  ): Promise<void> {
+    if (run.isLaunch) {
+      await this.persistLaunchStateSnapshot(run, this.getMixedSecondaryLaunchPhase(run));
+    }
+    if (!this.isCurrentTrackedRun(run)) {
+      return;
+    }
+    this.emitMemberSpawnChange(run, lane.member.name);
+  }
+
   private buildMixedPersistedLaunchSnapshotForRun(
     run: ProvisioningRun,
     launchPhase: PersistedTeamLaunchPhase
@@ -11888,26 +11936,13 @@ export class TeamProvisioningService {
       ? 'finished'
       : 'active'
   ): Promise<PersistedTeamLaunchSnapshot | null> {
-    const mixedSnapshot = this.buildMixedPersistedLaunchSnapshotForRun(run, launchPhase);
-    if (mixedSnapshot) {
-      await this.launchStateStore.write(run.teamName, mixedSnapshot);
-      return mixedSnapshot;
-    }
-
-    if (!run.isLaunch || !run.expectedMembers || run.expectedMembers.length === 0) {
+    const snapshot = this.buildLiveLaunchSnapshotForRun(run, launchPhase);
+    if (!snapshot) {
       if (run.isLaunch) {
         await this.clearPersistedLaunchState(run.teamName);
       }
       return null;
     }
-
-    const snapshot = snapshotFromRuntimeMemberStatuses({
-      teamName: run.teamName,
-      expectedMembers: run.expectedMembers,
-      leadSessionId: run.detectedSessionId ?? undefined,
-      launchPhase,
-      statuses: this.buildRuntimeSpawnStatusRecord(run),
-    });
 
     if (snapshot.teamLaunchState === 'clean_success' && launchPhase !== 'active') {
       await this.clearPersistedLaunchState(run.teamName);
@@ -11949,6 +11984,7 @@ export class TeamProvisioningService {
       };
       lane.warnings = [];
       lane.diagnostics = [message];
+      await this.publishMixedSecondaryLaneStatusChange(run, lane);
       return;
     }
 
@@ -11977,8 +12013,7 @@ export class TeamProvisioningService {
       memberName: lane.member.name,
       cwd: run.request.cwd,
     });
-
-    await this.persistLaunchStateSnapshot(run, this.getMixedSecondaryLaunchPhase(run));
+    await this.publishMixedSecondaryLaneStatusChange(run, lane);
     const previousLaunchState = await this.launchStateStore.read(run.teamName);
 
     try {
@@ -12050,7 +12085,7 @@ export class TeamProvisioningService {
       this.deleteSecondaryRuntimeRun(run.teamName, lane.laneId);
     }
 
-    await this.persistLaunchStateSnapshot(run, this.getMixedSecondaryLaunchPhase(run));
+    await this.publishMixedSecondaryLaneStatusChange(run, lane);
   }
 
   private async stopSingleMixedSecondaryRuntimeLane(
@@ -12129,6 +12164,7 @@ export class TeamProvisioningService {
           diagnostics: ['OpenCode runtime adapter is not registered for mixed team launch.'],
         };
         lane.diagnostics = lane.result.diagnostics;
+        await this.publishMixedSecondaryLaneStatusChange(run, lane);
       }
       return this.persistLaunchStateSnapshot(run, 'finished');
     }
@@ -12140,12 +12176,187 @@ export class TeamProvisioningService {
     return this.persistLaunchStateSnapshot(run, this.getMixedSecondaryLaunchPhase(run));
   }
 
+  private async recoverStaleMixedSecondaryLaunchSnapshot(
+    teamName: string,
+    bootstrapSnapshot: PersistedTeamLaunchSnapshot | null,
+    persistedSnapshot: PersistedTeamLaunchSnapshot | null
+  ): Promise<PersistedTeamLaunchSnapshot | null> {
+    if (persistedSnapshot && this.hasMixedLaunchMetadata(persistedSnapshot)) {
+      return persistedSnapshot;
+    }
+
+    const teamMeta = await this.teamMetaStore.getMeta(teamName).catch(() => null);
+    const leadProviderId = normalizeOptionalTeamProviderId(teamMeta?.providerId);
+    if (!leadProviderId || leadProviderId === 'opencode') {
+      return null;
+    }
+
+    const membersMeta = await this.membersMetaStore.getMeta(teamName).catch(() => null);
+    const activeMembers = (membersMeta?.members ?? []).filter(
+      (member) => !member.removedAt && !isLeadMember({ name: member.name })
+    );
+    if (activeMembers.length === 0) {
+      return null;
+    }
+
+    const laneIndex = await readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName).catch(
+      () => ({
+        version: 1 as const,
+        updatedAt: nowIso(),
+        lanes: {} as Record<
+          string,
+          {
+            laneId: string;
+            state: 'active' | 'stopped' | 'degraded';
+            updatedAt: string;
+            diagnostics?: string[];
+          }
+        >,
+      })
+    );
+    const bootstrapStatuses = snapshotToMemberSpawnStatuses(bootstrapSnapshot);
+    const leadDefaults = {
+      providerId: leadProviderId,
+      providerBackendId:
+        migrateProviderBackendId(
+          leadProviderId,
+          teamMeta?.providerBackendId ?? membersMeta?.providerBackendId
+        ) ?? null,
+      selectedFastMode: teamMeta?.fastMode,
+      resolvedFastMode:
+        typeof teamMeta?.launchIdentity?.resolvedFastMode === 'boolean'
+          ? teamMeta.launchIdentity.resolvedFastMode
+          : null,
+      launchIdentity: teamMeta?.launchIdentity ?? null,
+    };
+    const primaryMembers: TeamMember[] = [];
+    const secondaryMembers: Array<{
+      laneId: string;
+      member: TeamMember;
+      leadDefaults: typeof leadDefaults;
+      evidence?: {
+        launchState?: MemberLaunchState;
+        agentToolAccepted?: boolean;
+        runtimeAlive?: boolean;
+        bootstrapConfirmed?: boolean;
+        hardFailure?: boolean;
+        hardFailureReason?: string;
+        diagnostics?: string[];
+      };
+      pendingReason?: string;
+    }> = [];
+    let recoveredAny = false;
+
+    for (const member of activeMembers) {
+      const laneIdentity = buildPlannedMemberLaneIdentity({
+        leadProviderId,
+        member: {
+          name: member.name,
+          providerId: normalizeOptionalTeamProviderId(member.providerId),
+        },
+      });
+
+      if (
+        laneIdentity.laneKind !== 'secondary' ||
+        laneIdentity.laneOwnerProviderId !== 'opencode'
+      ) {
+        primaryMembers.push(member);
+        continue;
+      }
+
+      let laneEntry = laneIndex.lanes[laneIdentity.laneId];
+      if (laneEntry?.state === 'active') {
+        const recovery = await recoverStaleOpenCodeRuntimeLaneIndexEntry({
+          teamsBasePath: getTeamsBasePath(),
+          teamName,
+          laneId: laneIdentity.laneId,
+        });
+        if (recovery.stale) {
+          recoveredAny = true;
+          laneEntry = {
+            laneId: laneIdentity.laneId,
+            state: 'degraded',
+            updatedAt: nowIso(),
+            diagnostics: recovery.diagnostics,
+          };
+        }
+      }
+
+      if (laneEntry?.state === 'degraded') {
+        recoveredAny = true;
+        const diagnostics = laneEntry.diagnostics?.length
+          ? [...laneEntry.diagnostics]
+          : [`OpenCode lane ${laneIdentity.laneId} is degraded and requires stop + relaunch.`];
+        secondaryMembers.push({
+          laneId: laneIdentity.laneId,
+          member,
+          leadDefaults,
+          evidence: {
+            launchState: 'failed_to_start',
+            agentToolAccepted: false,
+            runtimeAlive: false,
+            bootstrapConfirmed: false,
+            hardFailure: true,
+            hardFailureReason: diagnostics[0],
+            diagnostics,
+          },
+        });
+        continue;
+      }
+
+      secondaryMembers.push({
+        laneId: laneIdentity.laneId,
+        member,
+        leadDefaults,
+        pendingReason: 'Waiting for OpenCode secondary lane recovery.',
+      });
+    }
+
+    if (!recoveredAny) {
+      return null;
+    }
+
+    const primaryStatuses = Object.fromEntries(
+      primaryMembers.map((member) => [
+        member.name,
+        bootstrapStatuses[member.name] ?? createInitialMemberSpawnStatusEntry(),
+      ])
+    );
+    const recoveredSnapshot = this.runtimeLaneCoordinator.buildAggregateLaunchSnapshot({
+      teamName,
+      leadSessionId: persistedSnapshot?.leadSessionId ?? bootstrapSnapshot?.leadSessionId,
+      launchPhase:
+        persistedSnapshot?.launchPhase === 'active'
+          ? 'active'
+          : bootstrapSnapshot?.launchPhase === 'active'
+            ? 'active'
+            : 'reconciled',
+      leadDefaults,
+      primaryMembers,
+      primaryStatuses,
+      secondaryMembers,
+    });
+    await this.launchStateStore.write(teamName, recoveredSnapshot);
+    return recoveredSnapshot;
+  }
+
   private async reconcilePersistedLaunchState(teamName: string): Promise<{
     snapshot: ReturnType<typeof createPersistedLaunchSnapshot> | null;
     statuses: Record<string, MemberSpawnStatusEntry>;
   }> {
     const bootstrapSnapshot = await readBootstrapLaunchSnapshot(teamName);
     const persisted = await this.launchStateStore.read(teamName);
+    const recoveredMixedSnapshot = await this.recoverStaleMixedSecondaryLaunchSnapshot(
+      teamName,
+      bootstrapSnapshot,
+      persisted
+    );
+    if (recoveredMixedSnapshot) {
+      return {
+        snapshot: recoveredMixedSnapshot,
+        statuses: snapshotToMemberSpawnStatuses(recoveredMixedSnapshot),
+      };
+    }
     const preferredSnapshot = choosePreferredLaunchSnapshot(bootstrapSnapshot, persisted);
     if (preferredSnapshot && preferredSnapshot === bootstrapSnapshot) {
       return {

@@ -153,6 +153,37 @@ export function getOpenCodeRuntimeManifestPath(
   );
 }
 
+export async function inspectOpenCodeRuntimeLaneStorage(params: {
+  teamsBasePath: string;
+  teamName: string;
+  laneId: string;
+}): Promise<{
+  laneDirectoryExists: boolean;
+  hasStateOnDisk: boolean;
+  fileNames: string[];
+}> {
+  const laneDir = getOpenCodeTeamRuntimeLaneDirectory(
+    params.teamsBasePath,
+    params.teamName,
+    params.laneId
+  );
+  const laneDirectoryExists = await fileExists(laneDir);
+  if (!laneDirectoryExists) {
+    return {
+      laneDirectoryExists: false,
+      hasStateOnDisk: false,
+      fileNames: [],
+    };
+  }
+
+  const fileNames = (await readdir(laneDir).catch(() => [] as string[])).sort();
+  return {
+    laneDirectoryExists: true,
+    hasStateOnDisk: fileNames.length > 0,
+    fileNames,
+  };
+}
+
 export function getOpenCodeLaneScopedRuntimeFilePath(params: {
   teamsBasePath: string;
   teamName: string;
@@ -282,6 +313,51 @@ export async function clearOpenCodeRuntimeLaneStorage(params: {
     { recursive: true, force: true }
   );
   await removeOpenCodeRuntimeLaneIndexEntry(params);
+}
+
+export async function recoverStaleOpenCodeRuntimeLaneIndexEntry(params: {
+  teamsBasePath: string;
+  teamName: string;
+  laneId: string;
+}): Promise<{
+  stale: boolean;
+  degraded: boolean;
+  diagnostics: string[];
+}> {
+  const index = await readOpenCodeRuntimeLaneIndex(params.teamsBasePath, params.teamName);
+  const entry = index.lanes[params.laneId];
+  if (!entry || entry.state !== 'active') {
+    return {
+      stale: false,
+      degraded: false,
+      diagnostics: [],
+    };
+  }
+
+  const storage = await inspectOpenCodeRuntimeLaneStorage(params);
+  if (storage.hasStateOnDisk) {
+    return {
+      stale: false,
+      degraded: false,
+      diagnostics: [],
+    };
+  }
+
+  const diagnostics = [
+    `OpenCode lane ${params.laneId} is marked active in lanes.json, but no lane state exists on disk.`,
+  ];
+  await upsertOpenCodeRuntimeLaneIndexEntry({
+    teamsBasePath: params.teamsBasePath,
+    teamName: params.teamName,
+    laneId: params.laneId,
+    state: 'degraded',
+    diagnostics,
+  });
+  return {
+    stale: true,
+    degraded: true,
+    diagnostics,
+  };
 }
 
 export async function migrateLegacyOpenCodeRuntimeState(params: {

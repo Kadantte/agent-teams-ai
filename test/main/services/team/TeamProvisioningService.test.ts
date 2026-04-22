@@ -268,6 +268,54 @@ function writeBootstrapState(
   );
 }
 
+function writeTeamMeta(
+  teamName: string,
+  overrides: Record<string, unknown> = {}
+): void {
+  const teamDir = path.join(tempTeamsBase, teamName);
+  fs.mkdirSync(teamDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(teamDir, 'team.meta.json'),
+    `${JSON.stringify(
+      {
+        version: 1,
+        cwd: '/Users/test/proj',
+        providerId: 'codex',
+        providerBackendId: 'codex-native',
+        model: 'gpt-5.4',
+        effort: 'medium',
+        createdAt: Date.now(),
+        ...overrides,
+      },
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
+}
+
+function writeMembersMeta(
+  teamName: string,
+  members: Record<string, unknown>[],
+  providerBackendId = 'codex-native'
+): void {
+  const teamDir = path.join(tempTeamsBase, teamName);
+  fs.mkdirSync(teamDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(teamDir, 'members.meta.json'),
+    `${JSON.stringify(
+      {
+        version: 1,
+        providerBackendId,
+        members,
+      },
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
+}
+
 function createMemberSpawnStatusEntry(
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
@@ -1733,6 +1781,7 @@ describe('TeamProvisioningService', () => {
       (svc as any).launchStateStore = {
         read: vi.fn(async () => null),
         write: vi.fn(async () => {}),
+        clear: vi.fn(async () => {}),
       };
 
       const run = createMemberSpawnRun({
@@ -4930,6 +4979,157 @@ describe('TeamProvisioningService', () => {
       hardFailure: false,
       hardFailureReason: undefined,
       agentToolAccepted: true,
+    });
+  });
+
+  it('recovers stale mixed secondary lanes when lanes.json says active but lane state is missing', async () => {
+    const teamName = 'signal-ops-6212';
+    writeTeamMeta(teamName, {
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
+      model: 'gpt-5.4',
+    });
+    writeMembersMeta(teamName, [
+      {
+        name: 'atlas',
+        providerId: 'opencode',
+        model: 'opencode/nemotron-3-super-free',
+      },
+      {
+        name: 'bob',
+        providerId: 'codex',
+        model: 'gpt-5.4',
+      },
+      {
+        name: 'nova',
+        providerId: 'codex',
+        model: 'gpt-5.4',
+      },
+      {
+        name: 'tom',
+        providerId: 'opencode',
+        model: 'opencode/minimax-m2.5-free',
+      },
+    ]);
+    writeLaunchConfig(teamName, '/Users/test/proj', 'lead-session', ['bob', 'nova']);
+    writeBootstrapState(teamName, [
+      { name: 'bob', status: 'registered' },
+      { name: 'nova', status: 'registered' },
+    ]);
+    await upsertOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: tempTeamsBase,
+      teamName,
+      laneId: 'secondary:opencode:atlas',
+      state: 'active',
+    });
+    await upsertOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: tempTeamsBase,
+      teamName,
+      laneId: 'secondary:opencode:tom',
+      state: 'active',
+    });
+
+    const svc = new TeamProvisioningService();
+    const result = await svc.getMemberSpawnStatuses(teamName);
+
+    expect(result.teamLaunchState).toBe('partial_failure');
+    expect(result.launchPhase).toBe('reconciled');
+    expect(result.expectedMembers).toEqual(expect.arrayContaining(['atlas', 'bob', 'nova', 'tom']));
+    expect(result.statuses.atlas).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      error: expect.stringContaining('no lane state exists on disk'),
+    });
+    expect(result.statuses.tom).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      error: expect.stringContaining('no lane state exists on disk'),
+    });
+    await expect(readOpenCodeRuntimeLaneIndex(tempTeamsBase, teamName)).resolves.toMatchObject({
+      lanes: {
+        'secondary:opencode:atlas': {
+          state: 'degraded',
+        },
+        'secondary:opencode:tom': {
+          state: 'degraded',
+        },
+      },
+    });
+    await expect(fsPromises.readFile(getTeamLaunchStatePath(teamName), 'utf8')).resolves.toContain(
+      '"secondary:opencode:atlas"'
+    );
+  });
+
+  it('includes queued OpenCode secondary lanes in live spawn statuses before the final mixed snapshot settles', async () => {
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'refreshMemberSpawnStatusesFromLeadInbox').mockResolvedValue(undefined);
+    vi.spyOn(svc as any, 'maybeAuditMemberSpawnStatuses').mockResolvedValue(undefined);
+
+    const run = createMemberSpawnRun({
+      teamName: 'mixed-live-team',
+      runId: 'run-mixed-live-1',
+      expectedMembers: ['bob'],
+      memberSpawnStatuses: new Map([
+        [
+          'bob',
+          createMemberSpawnStatusEntry({
+            status: 'online',
+            launchState: 'confirmed_alive',
+            runtimeAlive: true,
+            bootstrapConfirmed: true,
+            livenessSource: 'heartbeat',
+          }),
+        ],
+      ]),
+    });
+    run.isLaunch = true;
+    run.request = {
+      teamName: 'mixed-live-team',
+      cwd: '/tmp/mixed-live-team',
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
+      model: 'gpt-5.4',
+      members: [],
+    };
+    run.effectiveMembers = [
+      {
+        name: 'bob',
+        providerId: 'codex',
+        model: 'gpt-5.4',
+      },
+    ];
+    run.mixedSecondaryLanes = [
+      {
+        laneId: 'secondary:opencode:atlas',
+        providerId: 'opencode',
+        member: {
+          name: 'atlas',
+          providerId: 'opencode',
+          model: 'opencode/nemotron-3-super-free',
+        },
+        runId: null,
+        state: 'queued',
+        result: null,
+        warnings: [],
+        diagnostics: [],
+      },
+    ];
+    run.detectedSessionId = 'lead-session';
+
+    (svc as any).runs.set(run.runId, run);
+    (svc as any).provisioningRunByTeam.set(run.teamName, run.runId);
+
+    const result = await svc.getMemberSpawnStatuses(run.teamName);
+
+    expect(result.teamLaunchState).toBe('partial_pending');
+    expect(result.expectedMembers).toEqual(expect.arrayContaining(['bob', 'atlas']));
+    expect(result.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+    });
+    expect(result.statuses.atlas).toMatchObject({
+      status: 'spawning',
+      launchState: 'starting',
     });
   });
 });
