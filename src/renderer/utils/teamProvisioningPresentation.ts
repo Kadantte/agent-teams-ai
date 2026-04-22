@@ -108,6 +108,19 @@ function buildFailedSpawnCompactDetail(
   return `${failedSpawnDetails.length} teammates failed to start`;
 }
 
+function buildGenericFailedSpawnPanelMessage(
+  failedSpawnCount: number,
+  expectedTeammateCount: number
+): string | null {
+  if (failedSpawnCount <= 0) {
+    return null;
+  }
+  if (failedSpawnCount === 1) {
+    return '1 teammate failed to start';
+  }
+  return `${failedSpawnCount}/${Math.max(expectedTeammateCount, failedSpawnCount)} teammates failed to start`;
+}
+
 export interface TeamProvisioningPresentation {
   progress: TeamProvisioningProgress;
   isActive: boolean;
@@ -184,6 +197,10 @@ export function buildTeamProvisioningPresentation({
   const failedSpawnDetails = getFailedSpawnDetails(memberSpawnStatuses);
   const failedSpawnPanelMessage = buildFailedSpawnPanelMessage(failedSpawnDetails);
   const failedSpawnCompactDetail = buildFailedSpawnCompactDetail(failedSpawnDetails);
+  const genericFailedSpawnPanelMessage = buildGenericFailedSpawnPanelMessage(
+    failedSpawnCount,
+    expectedTeammateCount
+  );
 
   const { allTeammatesConfirmedAlive, hasMembersStillJoining, remainingJoinCount } =
     getLaunchJoinState({
@@ -220,7 +237,7 @@ export function buildTeamProvisioningPresentation({
       hasMembersStillJoining,
       remainingJoinCount,
       panelTitle: 'Launch failed',
-      panelMessage: progress.error ?? failedSpawnPanelMessage ?? null,
+      panelMessage: progress.error ?? failedSpawnPanelMessage ?? genericFailedSpawnPanelMessage,
       panelTone: 'error',
       defaultLiveOutputOpen: true,
       compactTitle: 'Launch failed',
@@ -245,7 +262,7 @@ export function buildTeamProvisioningPresentation({
             : `All ${expectedTeammateCount} teammates joined`;
     const readyDetailMessage =
       failedSpawnCount > 0
-        ? (failedSpawnPanelMessage ?? progress.message)
+        ? (failedSpawnPanelMessage ?? genericFailedSpawnPanelMessage ?? progress.message)
         : expectedTeammateCount === 0
           ? 'Team provisioned - lead online'
           : allTeammatesConfirmedAlive
@@ -316,7 +333,9 @@ export function buildTeamProvisioningPresentation({
       remainingJoinCount,
       panelTitle: 'Launching team',
       panelMessage:
-        failedSpawnCount > 0 ? (failedSpawnPanelMessage ?? progress.message) : progress.message,
+        failedSpawnCount > 0
+          ? (failedSpawnPanelMessage ?? genericFailedSpawnPanelMessage ?? progress.message)
+          : progress.message,
       panelMessageSeverity: failedSpawnCount > 0 ? 'warning' : progress.messageSeverity,
       defaultLiveOutputOpen: false,
       compactTitle: 'Launching team',

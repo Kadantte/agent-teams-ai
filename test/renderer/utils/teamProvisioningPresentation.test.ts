@@ -155,6 +155,57 @@ describe('buildTeamProvisioningPresentation', () => {
     expect(presentation?.compactDetail).toBe('jack failed to start');
   });
 
+  it('keeps a generic failed teammate message when only persisted failure counts remain', () => {
+    const presentation = buildTeamProvisioningPresentation({
+      progress: {
+        runId: 'run-3b',
+        teamName: 'codex-team',
+        state: 'ready',
+        startedAt: '2026-04-13T10:00:00.000Z',
+        updatedAt: '2026-04-13T10:00:08.000Z',
+        message: 'Launch completed',
+        messageSeverity: undefined,
+        pid: 4321,
+        cliLogsTail: '',
+        assistantOutput: '',
+      },
+      members: [
+        {
+          name: 'team-lead',
+          agentType: 'team-lead',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+        {
+          name: 'jack',
+          agentType: 'engineer',
+          status: 'unknown',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+      ],
+      memberSpawnStatuses: {},
+      memberSpawnSnapshot: {
+        expectedMembers: ['jack'],
+        summary: {
+          confirmedCount: 0,
+          pendingCount: 0,
+          failedCount: 1,
+          runtimeAlivePendingCount: 0,
+        },
+      },
+    });
+
+    expect(presentation?.successMessage).toBe('Launch finished with errors - 1/1 teammates failed to start');
+    expect(presentation?.panelMessage).toBe('1 teammate failed to start');
+    expect(presentation?.compactDetail).toBe('1 teammate failed to start');
+  });
+
   it('prefers live member spawn statuses over a stale persisted launch summary', () => {
     const presentation = buildTeamProvisioningPresentation({
       progress: {
@@ -216,6 +267,57 @@ describe('buildTeamProvisioningPresentation', () => {
     expect(presentation?.compactTitle).toBe('Finishing launch');
     expect(presentation?.compactDetail).toBe('1 teammate still joining');
     expect(presentation?.panelMessage).toBe('1 teammate still joining');
+  });
+
+  it('keeps a generic failed teammate message while launch is still active if only persisted failure counts remain', () => {
+    const presentation = buildTeamProvisioningPresentation({
+      progress: {
+        runId: 'run-4b',
+        teamName: 'codex-team',
+        state: 'assembling',
+        startedAt: '2026-04-13T10:00:00.000Z',
+        updatedAt: '2026-04-13T10:00:05.000Z',
+        message: 'Finalizing launch...',
+        messageSeverity: undefined,
+        pid: 4321,
+        cliLogsTail: '',
+        assistantOutput: '',
+      },
+      members: [
+        {
+          name: 'team-lead',
+          agentType: 'team-lead',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+        {
+          name: 'jack',
+          agentType: 'engineer',
+          status: 'unknown',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+      ],
+      memberSpawnStatuses: {},
+      memberSpawnSnapshot: {
+        expectedMembers: ['jack'],
+        summary: {
+          confirmedCount: 0,
+          pendingCount: 0,
+          failedCount: 1,
+          runtimeAlivePendingCount: 0,
+        },
+      },
+    });
+
+    expect(presentation?.panelMessage).toBe('1 teammate failed to start');
+    expect(presentation?.compactDetail).toBe('1 teammate failed to start');
+    expect(presentation?.compactTone).toBe('warning');
   });
 
   it('prefers live confirmed teammates over a stale persisted launch summary', () => {
