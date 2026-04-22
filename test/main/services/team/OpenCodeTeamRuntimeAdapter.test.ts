@@ -303,6 +303,72 @@ describe('OpenCodeTeamRuntimeAdapter', () => {
       },
     });
   });
+
+  it('keeps missing bridge members in bootstrap pending even when another member blocks on permission', async () => {
+    const launchOpenCodeTeam = vi.fn(async () => ({
+      runId: 'run-1',
+      teamLaunchState: 'permission_blocked',
+      members: {
+        alice: {
+          sessionId: 'oc-session-1',
+          launchState: 'permission_blocked',
+          pendingPermissionRequestIds: ['perm-1'],
+          diagnostics: ['waiting for permission approval'],
+          runtimePid: 123,
+          model: 'openai/gpt-5.4-mini',
+          evidence: [
+            { kind: 'required_tools_proven', observedAt: '2026-04-21T00:00:00.000Z' },
+            { kind: 'delivery_ready', observedAt: '2026-04-21T00:00:00.000Z' },
+            { kind: 'permission_blocked', observedAt: '2026-04-21T00:00:00.000Z' },
+          ],
+        },
+      },
+      warnings: [],
+      diagnostics: [],
+    }) satisfies OpenCodeLaunchTeamCommandData);
+    const adapter = new OpenCodeTeamRuntimeAdapter(
+      bridgePort(readiness({ state: 'ready', launchAllowed: true }), {
+        getLastOpenCodeRuntimeSnapshot: vi.fn(() => ({
+          providerId: 'opencode' as const,
+          binaryPath: '/opt/homebrew/bin/opencode',
+          binaryFingerprint: 'version:1.14.19',
+          version: '1.14.19',
+          capabilitySnapshotId: 'cap-1',
+        })),
+        launchOpenCodeTeam,
+      }),
+      { launchMode: 'dogfood' }
+    );
+
+    const result = await adapter.launch(
+      launchInput({
+        expectedMembers: [
+          ...launchInput().expectedMembers,
+          {
+            name: 'bob',
+            providerId: 'opencode',
+            model: 'openai/gpt-5.4-mini',
+            cwd: '/repo',
+          },
+        ],
+      })
+    );
+
+    expect(result.teamLaunchState).toBe('partial_pending');
+    expect(result.members.alice?.launchState).toBe('runtime_pending_permission');
+    expect(result.members.bob).toMatchObject({
+      providerId: 'opencode',
+      launchState: 'runtime_pending_bootstrap',
+      runtimeAlive: false,
+      agentToolAccepted: false,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+      pendingPermissionRequestIds: undefined,
+    });
+    expect(result.members.bob?.diagnostics).toContain(
+      'OpenCode bridge response did not include bob; keeping the member pending until lane state materializes.'
+    );
+  });
 });
 
 function bridgePort(

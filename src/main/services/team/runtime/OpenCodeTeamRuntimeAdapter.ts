@@ -375,9 +375,7 @@ function mapOpenCodeLaunchDataToRuntimeResult(
         ? bridgeMember.launchState
         : data.teamLaunchState === 'failed'
           ? 'failed'
-          : data.teamLaunchState === 'permission_blocked'
-            ? 'permission_blocked'
-            : 'created';
+          : 'created';
       return [
         member.name,
         mapBridgeMemberToRuntimeEvidence(
