@@ -106,13 +106,19 @@ export function getLaunchJoinMilestonesFromMembers({
   memberSpawnSnapshot?: Pick<MemberSpawnStatusesSnapshot, 'expectedMembers' | 'summary'>;
 }): LaunchJoinMilestones {
   const teammates = members.filter((member) => !member.removedAt && !isLeadMember(member));
-  const activeTeammateNames = new Set(teammates.map((member) => member.name));
+  const activeTeammateNames = teammates.map((member) => member.name);
+  const activeTeammateNameSet = new Set(activeTeammateNames);
   const teammateNames =
     memberSpawnSnapshot?.expectedMembers?.length && memberSpawnSnapshot.expectedMembers.length > 0
-      ? memberSpawnSnapshot.expectedMembers.filter((memberName) =>
-          activeTeammateNames.has(memberName)
+      ? Array.from(
+          new Set([
+            ...memberSpawnSnapshot.expectedMembers.filter((memberName) =>
+              activeTeammateNameSet.has(memberName)
+            ),
+            ...activeTeammateNames,
+          ])
         )
-      : teammates.map((member) => member.name);
+      : activeTeammateNames;
   const expectedTeammateCount = teammateNames.length;
   const snapshotSummary = memberSpawnSnapshot?.summary;
   const liveSummary = summarizeLiveLaunchJoinMilestones({
@@ -145,6 +151,8 @@ export function getLaunchJoinMilestonesFromMembers({
       liveSummary.failedSpawnCount > snapshotMilestones.failedSpawnCount ||
       liveSummary.heartbeatConfirmedCount > snapshotMilestones.heartbeatConfirmedCount ||
       liveSummary.processOnlyAliveCount > snapshotMilestones.processOnlyAliveCount ||
+      (snapshotMilestones.failedSpawnCount === 0 &&
+        liveSummary.pendingSpawnCount > snapshotMilestones.pendingSpawnCount) ||
       liveAccountedFor > snapshotAccountedFor;
 
     return liveSummaryIsMoreAdvanced

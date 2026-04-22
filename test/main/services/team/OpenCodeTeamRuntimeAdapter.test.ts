@@ -209,7 +209,8 @@ describe('OpenCodeTeamRuntimeAdapter', () => {
     expect(result.members.bob).toMatchObject({
       providerId: 'opencode',
       launchState: 'runtime_pending_bootstrap',
-      runtimeAlive: true,
+      runtimeAlive: false,
+      agentToolAccepted: false,
       bootstrapConfirmed: false,
       hardFailure: false,
     });

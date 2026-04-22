@@ -456,4 +456,84 @@ describe('buildTeamProvisioningPresentation', () => {
     expect(presentation?.panelMessage).toBeNull();
     expect(presentation?.currentStepIndex).toBe(4);
   });
+
+  it('keeps active teammates that are missing from persisted expectedMembers', () => {
+    const presentation = buildTeamProvisioningPresentation({
+      progress: {
+        runId: 'run-7',
+        teamName: 'codex-team',
+        state: 'ready',
+        startedAt: '2026-04-13T10:00:00.000Z',
+        updatedAt: '2026-04-13T10:00:08.000Z',
+        message: 'Launch completed',
+        messageSeverity: undefined,
+        pid: 4321,
+        cliLogsTail: '',
+        assistantOutput: '',
+      },
+      members: [
+        {
+          name: 'team-lead',
+          agentType: 'team-lead',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+        {
+          name: 'alice',
+          agentType: 'reviewer',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+        {
+          name: 'bob',
+          agentType: 'developer',
+          status: 'unknown',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+      ],
+      memberSpawnStatuses: {
+        alice: {
+          status: 'online',
+          launchState: 'confirmed_alive',
+          updatedAt: '2026-04-13T10:00:07.000Z',
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+          agentToolAccepted: true,
+        },
+        bob: {
+          status: 'waiting',
+          launchState: 'starting',
+          updatedAt: '2026-04-13T10:00:07.000Z',
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+          agentToolAccepted: false,
+        },
+      },
+      memberSpawnSnapshot: {
+        expectedMembers: ['alice'],
+        summary: {
+          confirmedCount: 1,
+          pendingCount: 0,
+          failedCount: 0,
+          runtimeAlivePendingCount: 0,
+        },
+      },
+    });
+
+    expect(presentation?.compactTitle).toBe('Finishing launch');
+    expect(presentation?.compactDetail).toBe('1 teammate still joining');
+    expect(presentation?.panelMessage).toBe('1 teammate still joining');
+    expect(presentation?.currentStepIndex).toBe(2);
+  });
 });

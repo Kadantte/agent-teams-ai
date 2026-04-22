@@ -385,6 +385,7 @@ function mapOpenCodeLaunchDataToRuntimeResult(
           fallbackLaunchState,
           bridgeMember?.sessionId,
           bridgeMember?.runtimePid,
+          bridgeMember != null,
           [
             ...(bridgeMember
               ? []
@@ -425,11 +426,13 @@ function mapBridgeMemberToRuntimeEvidence(
   launchState: OpenCodeTeamMemberLaunchBridgeState,
   sessionId: string | undefined,
   runtimePid: number | undefined,
+  runtimeMaterialized: boolean,
   diagnostics: string[]
 ): TeamRuntimeMemberLaunchEvidence {
   const confirmed = launchState === 'confirmed_alive';
   const createdOrBlocked = launchState === 'created' || launchState === 'permission_blocked';
   const failed = launchState === 'failed';
+  const pendingRuntimeObserved = createdOrBlocked && runtimeMaterialized;
   return {
     memberName,
     providerId: 'opencode',
@@ -438,8 +441,8 @@ function mapBridgeMemberToRuntimeEvidence(
       : confirmed
         ? 'confirmed_alive'
         : 'runtime_pending_bootstrap',
-    agentToolAccepted: confirmed || createdOrBlocked,
-    runtimeAlive: confirmed || createdOrBlocked,
+    agentToolAccepted: confirmed || pendingRuntimeObserved,
+    runtimeAlive: confirmed || pendingRuntimeObserved,
     bootstrapConfirmed: confirmed,
     hardFailure: failed,
     hardFailureReason: failed ? 'OpenCode bridge reported member launch failure' : undefined,
