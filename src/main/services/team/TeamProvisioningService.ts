@@ -11858,6 +11858,7 @@ export class TeamProvisioningService {
     },
     snapshot?: PersistedTeamLaunchSnapshot | null
   ): string {
+    const expectedTeammateCount = snapshot?.expectedMembers.length ?? run.expectedMembers.length;
     const permissionPendingCount = snapshot
       ? this.countSnapshotPermissionPendingMembers(snapshot)
       : this.countRunPermissionPendingMembers(run);
@@ -11880,15 +11881,15 @@ export class TeamProvisioningService {
     if (launchSummary.confirmedCount === 0) {
       const allRuntimeAlive =
         launchSummary.runtimeAlivePendingCount > 0 &&
-        launchSummary.runtimeAlivePendingCount === run.expectedMembers.length;
+        launchSummary.runtimeAlivePendingCount === expectedTeammateCount;
       return allRuntimeAlive
         ? `${prefix} — teammates online`
         : launchSummary.runtimeAlivePendingCount > 0
-          ? `${prefix} — ${launchSummary.runtimeAlivePendingCount}/${run.expectedMembers.length} teammate${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online${stillStartingCount > 0 ? `, ${stillStartingCount} still starting` : ''}`
+          ? `${prefix} — ${launchSummary.runtimeAlivePendingCount}/${expectedTeammateCount} teammate${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online${stillStartingCount > 0 ? `, ${stillStartingCount} still starting` : ''}`
           : `${prefix} — teammates are still starting`;
     }
 
-    return `${prefix} — ${launchSummary.confirmedCount}/${run.expectedMembers.length} teammates made contact${launchSummary.runtimeAlivePendingCount > 0 ? `, ${launchSummary.runtimeAlivePendingCount} teammate${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online` : ''}${stillStartingCount > 0 ? `${launchSummary.runtimeAlivePendingCount > 0 ? ', ' : ', '}${stillStartingCount} still joining` : ''}`;
+    return `${prefix} — ${launchSummary.confirmedCount}/${expectedTeammateCount} teammates made contact${launchSummary.runtimeAlivePendingCount > 0 ? `, ${launchSummary.runtimeAlivePendingCount} teammate${launchSummary.runtimeAlivePendingCount === 1 ? '' : 's'} online` : ''}${stillStartingCount > 0 ? `${launchSummary.runtimeAlivePendingCount > 0 ? ', ' : ', '}${stillStartingCount} still joining` : ''}`;
   }
 
   private buildAggregatePendingLaunchMessage(
