@@ -51,39 +51,18 @@ function getSpawnEntry(
   return memberSpawnStatuses[memberName];
 }
 
-export function getLaunchJoinMilestonesFromMembers({
-  members,
-  memberSpawnStatuses,
-  memberSpawnSnapshot,
-}: {
-  members: readonly LaunchJoinMemberLike[];
+function summarizeLiveLaunchJoinMilestones(params: {
+  teammateNames: readonly string[];
   memberSpawnStatuses?: MemberSpawnStatusCollection;
-  memberSpawnSnapshot?: Pick<MemberSpawnStatusesSnapshot, 'expectedMembers' | 'summary'>;
-}): LaunchJoinMilestones {
-  const teammates = members.filter((member) => !member.removedAt && !isLeadMember(member));
-  const expectedTeammateCount = memberSpawnSnapshot?.expectedMembers?.length ?? teammates.length;
-  const snapshotSummary = memberSpawnSnapshot?.summary;
-
-  if (snapshotSummary) {
-    return {
-      expectedTeammateCount,
-      heartbeatConfirmedCount: snapshotSummary.confirmedCount,
-      processOnlyAliveCount: snapshotSummary.runtimeAlivePendingCount,
-      pendingSpawnCount: Math.max(
-        0,
-        snapshotSummary.pendingCount - snapshotSummary.runtimeAlivePendingCount
-      ),
-      failedSpawnCount: snapshotSummary.failedCount,
-    };
-  }
-
+}): Omit<LaunchJoinMilestones, 'expectedTeammateCount'> {
+  const { teammateNames, memberSpawnStatuses } = params;
   let heartbeatConfirmedCount = 0;
   let processOnlyAliveCount = 0;
   let pendingSpawnCount = 0;
   let failedSpawnCount = 0;
 
-  for (const member of teammates) {
-    const entry = getSpawnEntry(memberSpawnStatuses, member.name);
+  for (const memberName of teammateNames) {
+    const entry = getSpawnEntry(memberSpawnStatuses, memberName);
     if (!entry) {
       pendingSpawnCount += 1;
       continue;
@@ -110,11 +89,72 @@ export function getLaunchJoinMilestonesFromMembers({
   }
 
   return {
-    expectedTeammateCount,
     heartbeatConfirmedCount,
     processOnlyAliveCount,
     pendingSpawnCount,
     failedSpawnCount,
+  };
+}
+
+export function getLaunchJoinMilestonesFromMembers({
+  members,
+  memberSpawnStatuses,
+  memberSpawnSnapshot,
+}: {
+  members: readonly LaunchJoinMemberLike[];
+  memberSpawnStatuses?: MemberSpawnStatusCollection;
+  memberSpawnSnapshot?: Pick<MemberSpawnStatusesSnapshot, 'expectedMembers' | 'summary'>;
+}): LaunchJoinMilestones {
+  const teammates = members.filter((member) => !member.removedAt && !isLeadMember(member));
+  const teammateNames =
+    memberSpawnSnapshot?.expectedMembers?.length && memberSpawnSnapshot.expectedMembers.length > 0
+      ? memberSpawnSnapshot.expectedMembers
+      : teammates.map((member) => member.name);
+  const expectedTeammateCount = teammateNames.length;
+  const snapshotSummary = memberSpawnSnapshot?.summary;
+  const liveSummary = summarizeLiveLaunchJoinMilestones({
+    teammateNames,
+    memberSpawnStatuses,
+  });
+
+  if (snapshotSummary) {
+    const snapshotMilestones = {
+      expectedTeammateCount,
+      heartbeatConfirmedCount: snapshotSummary.confirmedCount,
+      processOnlyAliveCount: snapshotSummary.runtimeAlivePendingCount,
+      pendingSpawnCount: Math.max(
+        0,
+        snapshotSummary.pendingCount - snapshotSummary.runtimeAlivePendingCount
+      ),
+      failedSpawnCount: snapshotSummary.failedCount,
+    };
+
+    const snapshotAccountedFor =
+      snapshotMilestones.heartbeatConfirmedCount +
+      snapshotMilestones.processOnlyAliveCount +
+      snapshotMilestones.failedSpawnCount;
+    const liveAccountedFor =
+      liveSummary.heartbeatConfirmedCount +
+      liveSummary.processOnlyAliveCount +
+      liveSummary.failedSpawnCount;
+
+    const liveSummaryIsMoreAdvanced =
+      liveSummary.failedSpawnCount > snapshotMilestones.failedSpawnCount ||
+      liveSummary.heartbeatConfirmedCount > snapshotMilestones.heartbeatConfirmedCount ||
+      liveSummary.processOnlyAliveCount > snapshotMilestones.processOnlyAliveCount ||
+      liveAccountedFor > snapshotAccountedFor;
+
+    return liveSummaryIsMoreAdvanced
+      ? {
+          expectedTeammateCount,
+          ...liveSummary,
+        }
+      : snapshotMilestones;
+  }
+
+  return {
+    expectedTeammateCount,
+    ...liveSummary,
   };
 }
 
