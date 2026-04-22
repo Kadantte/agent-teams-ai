@@ -82,8 +82,14 @@ export const MemberDetailHeader = ({
     leadActivity,
   });
   const presenceLabel = launchPresentation.presenceLabel;
+  const launchVisualState = launchPresentation.launchVisualState;
+  const launchStatusLabel = launchPresentation.launchStatusLabel;
   const dotClass = launchPresentation.dotClass;
   const runtimeAdvisoryTitle = launchPresentation.runtimeAdvisoryTitle;
+  const badgeLabel =
+    launchVisualState === 'runtime_pending' || launchVisualState === 'permission_pending'
+      ? (launchStatusLabel ?? presenceLabel)
+      : presenceLabel;
 
   const canEditRole =
     !isLeadMember(member) && !member.removedAt && !isTeamProvisioning && !!onUpdateRole;
@@ -144,7 +150,7 @@ export const MemberDetailHeader = ({
                   className="px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--color-text-muted)]"
                   title={runtimeAdvisoryTitle}
                 >
-                  {presenceLabel}
+                  {badgeLabel}
                 </Badge>
                 {/* NOTE: lead context token display disabled — usage formula is inaccurate */}
               </>

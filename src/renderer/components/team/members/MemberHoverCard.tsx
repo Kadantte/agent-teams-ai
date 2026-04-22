@@ -121,8 +121,14 @@ export const MemberHoverCard = ({
     leadActivity: isLeadMember(member) ? leadActivity : undefined,
   });
   const presenceLabel = launchPresentation.presenceLabel;
+  const launchVisualState = launchPresentation.launchVisualState;
+  const launchStatusLabel = launchPresentation.launchStatusLabel;
   const dotClass = launchPresentation.dotClass;
   const runtimeAdvisoryTitle = launchPresentation.runtimeAdvisoryTitle;
+  const badgeLabel =
+    launchVisualState === 'runtime_pending' || launchVisualState === 'permission_pending'
+      ? (launchStatusLabel ?? presenceLabel)
+      : presenceLabel;
   const currentTask: TeamTaskWithKanban | null = member.currentTaskId
     ? (tasks.find((t) => t.id === member.currentTaskId) ?? null)
     : null;
@@ -172,7 +178,7 @@ export const MemberHoverCard = ({
                     border: `1px solid ${getThemedBorder(colors, isLight)}40`,
                   }}
                 >
-                  {presenceLabel}
+                  {badgeLabel}
                 </Badge>
               </div>
               {roleLabel && (
