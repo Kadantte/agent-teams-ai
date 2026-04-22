@@ -11888,11 +11888,10 @@ export class TeamProvisioningService {
         return false;
       }
       const member = snapshot.members[memberName];
-      return (
-        member &&
-        member.launchState !== 'confirmed_alive' &&
-        member.launchState !== 'failed_to_start'
-      );
+      if (!member) {
+        return true;
+      }
+      return member.launchState !== 'confirmed_alive' && member.launchState !== 'failed_to_start';
     });
     if (secondaryPendingMembers.length === 0) {
       return this.buildPendingBootstrapStatusMessage(prefix, run, launchSummary);

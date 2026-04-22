@@ -77,7 +77,11 @@ export function resolveMemberRuntimeSummary(
   }
 
   if (isMemberLaunchPending(spawnEntry)) {
-    return undefined;
+    if (!configuredModel.length && !memorySuffix) {
+      return undefined;
+    }
+    const summary = formatTeamModelSummary(configuredProvider, configuredModel, configuredEffort);
+    return `${summary}${backendLabel ? ` · ${backendLabel}` : ''}${memorySuffix}`;
   }
 
   const summary = formatTeamModelSummary(configuredProvider, configuredModel, configuredEffort);
