@@ -3071,8 +3071,6 @@ describe('Team agent launch matrix safe e2e', () => {
     await waitForCondition(() =>
       run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
     );
-    await waitForCondition(() => run.memberSpawnStatuses.get('bob')?.launchState === 'failed_to_start');
-    await waitForCondition(() => run.memberSpawnStatuses.get('tom')?.launchState === 'confirmed_alive');
 
     const statuses = await svc.getMemberSpawnStatuses(teamName);
     expect(statuses.teamLaunchState).toBe('partial_failure');
