@@ -54,7 +54,7 @@ describe('ProvisioningProviderStatusList', () => {
               status: 'failed',
               backendSummary: 'Codex native',
               details: [
-                '5.4 Mini - verified',
+                '5.4 Mini - available for launch',
                 '5.1 Codex Max - unavailable - Not available on this Codex native runtime',
               ],
             },
@@ -65,9 +65,9 @@ describe('ProvisioningProviderStatusList', () => {
     });
 
     expect(host.textContent).toContain(
-      'Codex (Codex native): Selected model checks - 1 model unavailable, 1 verified'
+      'Codex (Codex native): Selected model checks - 1 model unavailable, 1 available'
     );
-    expect(host.textContent).toContain('5.4 Mini - verified');
+    expect(host.textContent).toContain('5.4 Mini - available for launch');
     expect(host.textContent).toContain(
       '5.1 Codex Max - unavailable - Not available on this Codex native runtime'
     );
@@ -124,6 +124,43 @@ describe('ProvisioningProviderStatusList', () => {
       'Codex (Codex native): Selected model checks - 1 model timed out'
     );
     expect(host.textContent).toContain('5.3 Codex - check failed - Model verification timed out');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('does not count generic one-shot diagnostic timeouts as model timeouts', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(ProvisioningProviderStatusList, {
+          checks: [
+            {
+              providerId: 'anthropic',
+              status: 'notes',
+              details: [
+                'One-shot diagnostic timed out after runtime readiness passed. This does not mark selected models unavailable. Details: Model verification timed out',
+                'Opus 4.6 - available for launch',
+                'Opus 4.7 - available for launch',
+              ],
+            },
+          ],
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Anthropic: Selected model checks - 2 available');
+    expect(host.textContent).not.toContain('1 model timed out');
+    expect(host.textContent).toContain(
+      'One-shot diagnostic timed out after runtime readiness passed'
+    );
 
     await act(async () => {
       root.unmount();

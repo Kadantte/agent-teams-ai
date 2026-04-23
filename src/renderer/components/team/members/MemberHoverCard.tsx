@@ -124,11 +124,15 @@ export const MemberHoverCard = ({
   const launchVisualState = launchPresentation.launchVisualState;
   const launchStatusLabel = launchPresentation.launchStatusLabel;
   const dotClass = launchPresentation.dotClass;
+  const runtimeAdvisoryLabel = launchPresentation.runtimeAdvisoryLabel;
   const runtimeAdvisoryTitle = launchPresentation.runtimeAdvisoryTitle;
+  const runtimeAdvisoryTone = launchPresentation.runtimeAdvisoryTone;
   const badgeLabel =
-    launchVisualState === 'runtime_pending' || launchVisualState === 'permission_pending'
-      ? (launchStatusLabel ?? presenceLabel)
-      : presenceLabel;
+    runtimeAdvisoryTone === 'error' && runtimeAdvisoryLabel
+      ? runtimeAdvisoryLabel
+      : launchVisualState === 'runtime_pending' || launchVisualState === 'permission_pending'
+        ? (launchStatusLabel ?? presenceLabel)
+        : presenceLabel;
   const currentTask: TeamTaskWithKanban | null = member.currentTaskId
     ? (tasks.find((t) => t.id === member.currentTaskId) ?? null)
     : null;
@@ -173,9 +177,18 @@ export const MemberHoverCard = ({
                   className="shrink-0 px-1.5 py-0 text-[10px] font-normal leading-tight"
                   title={runtimeAdvisoryTitle}
                   style={{
-                    backgroundColor: getThemedBadge(colors, isLight),
-                    color: getThemedText(colors, isLight),
-                    border: `1px solid ${getThemedBorder(colors, isLight)}40`,
+                    backgroundColor:
+                      runtimeAdvisoryTone === 'error'
+                        ? 'rgba(239, 68, 68, 0.16)'
+                        : getThemedBadge(colors, isLight),
+                    color:
+                      runtimeAdvisoryTone === 'error'
+                        ? 'rgb(252, 165, 165)'
+                        : getThemedText(colors, isLight),
+                    border:
+                      runtimeAdvisoryTone === 'error'
+                        ? '1px solid rgba(248, 113, 113, 0.35)'
+                        : `1px solid ${getThemedBorder(colors, isLight)}40`,
                   }}
                 >
                   {badgeLabel}

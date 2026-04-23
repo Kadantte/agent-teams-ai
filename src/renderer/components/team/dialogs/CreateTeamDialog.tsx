@@ -26,7 +26,6 @@ import {
   normalizeProviderForMode,
   validateMemberNameInline,
 } from '@renderer/components/team/members/MembersEditorSection';
-import type { MemberDraft } from '@renderer/components/team/members/MembersEditorSection';
 import { TeamRosterEditorSection } from '@renderer/components/team/members/TeamRosterEditorSection';
 import { AutoResizeTextarea } from '@renderer/components/ui/auto-resize-textarea';
 import { Button } from '@renderer/components/ui/button';
@@ -53,18 +52,18 @@ import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
 import {
   applyStoredCreateTeamMemberRuntimePreferences,
-  getStoredCreateTeamMemberRuntimePreferences,
   getStoredCreateTeamEffort,
   getStoredCreateTeamFastMode as getStoredTeamFastMode,
   getStoredCreateTeamLimitContext,
+  getStoredCreateTeamMemberRuntimePreferences,
   getStoredCreateTeamModel as getStoredTeamModel,
   getStoredCreateTeamProvider as getStoredTeamProvider,
   getStoredCreateTeamSkipPermissions,
   migrateLegacyCreateTeamPreferences,
-  setStoredCreateTeamMemberRuntimePreferences,
   setStoredCreateTeamEffort,
   setStoredCreateTeamFastMode,
   setStoredCreateTeamLimitContext,
+  setStoredCreateTeamMemberRuntimePreferences,
   setStoredCreateTeamModel,
   setStoredCreateTeamProvider,
   setStoredCreateTeamSkipPermissions,
@@ -80,6 +79,7 @@ import {
   normalizeExplicitTeamModelForUi,
 } from '@renderer/utils/teamModelAvailability';
 import { getTeamProviderLabel as getCatalogTeamProviderLabel } from '@renderer/utils/teamModelCatalog';
+import { isEphemeralProjectPath } from '@shared/utils/ephemeralProjectPath';
 import { DEFAULT_PROVIDER_MODEL_SELECTION } from '@shared/utils/providerModelSelection';
 import { resolveTeamLeadColorName } from '@shared/utils/teamMemberColors';
 import { isTeamProviderId, normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
@@ -100,14 +100,14 @@ import {
   runProviderPrepareDiagnostics,
 } from './providerPrepareDiagnostics';
 import {
-  getShortLivedProviderPrepareModelResults,
-  storeShortLivedProviderPrepareModelResults,
-} from './providerPrepareShortLivedCache';
-import {
   buildProviderPrepareMembersSignature,
   buildProviderPrepareRequestSignature,
   buildProviderPrepareRuntimeStatusSignature,
 } from './providerPrepareRequestSignature';
+import {
+  getShortLivedProviderPrepareModelResults,
+  storeShortLivedProviderPrepareModelResults,
+} from './providerPrepareShortLivedCache';
 import { getProvisioningModelIssue } from './provisioningModelIssues';
 import {
   deriveEffectiveProvisioningPrepareState,
@@ -123,6 +123,8 @@ import {
 import { SkipPermissionsCheckbox } from './SkipPermissionsCheckbox';
 import { computeEffectiveTeamModel } from './TeamModelSelector';
 import { getNextSuggestedTeamName } from './teamNameSets';
+
+import type { MemberDraft } from '@renderer/components/team/members/MembersEditorSection';
 
 const TEAM_COLOR_NAMES = [
   'blue',
@@ -145,15 +147,6 @@ import type {
   TeamProviderId,
   TeamProvisioningMemberInput,
 } from '@shared/types';
-
-function isEphemeralRenderedProjectPath(projectPath: string | null | undefined): boolean {
-  const normalized = normalizePath(projectPath ?? '').toLowerCase();
-  return (
-    normalized.includes('rendered_mcp_') ||
-    normalized.includes('rendered_mcp_config') ||
-    normalized.includes('/portable-mcp-live')
-  );
-}
 
 function getProviderLabel(providerId: TeamProviderId): string {
   return getCatalogTeamProviderLabel(providerId) ?? 'Anthropic';
@@ -523,7 +516,10 @@ export const CreateTeamDialog = ({
     [members]
   );
 
-  const effectiveCwd = cwdMode === 'project' ? selectedProjectPath.trim() : customCwd.trim();
+  const selectedProjectCwd = isEphemeralProjectPath(selectedProjectPath)
+    ? ''
+    : selectedProjectPath.trim();
+  const effectiveCwd = cwdMode === 'project' ? selectedProjectCwd : customCwd.trim();
   const dialogTeamNameKey = sanitizeTeamName(teamName.trim());
   /** All taken names: existing teams + teams currently being provisioned. */
   const allTakenTeamNames = useMemo(
@@ -913,7 +909,9 @@ export const CreateTeamDialog = ({
     let cancelled = false;
     void (async () => {
       try {
-        const nextProjects = await api.getProjects();
+        const nextProjects = (await api.getProjects()).filter(
+          (project) => !isEphemeralProjectPath(project.path)
+        );
         if (cancelled) {
           return;
         }
@@ -921,10 +919,14 @@ export const CreateTeamDialog = ({
         // If defaultProjectPath is set but not in the fetched list (e.g. new project
         // without Claude sessions), add it as a synthetic entry so the Combobox can
         // display and select it.
+        const normalizedDefaultProjectPath = defaultProjectPath
+          ? normalizePath(defaultProjectPath)
+          : null;
         if (
           defaultProjectPath &&
-          !isEphemeralRenderedProjectPath(defaultProjectPath) &&
-          !nextProjects.some((p) => normalizePath(p.path) === defaultProjectPath)
+          normalizedDefaultProjectPath &&
+          !isEphemeralProjectPath(defaultProjectPath) &&
+          !nextProjects.some((p) => normalizePath(p.path) === normalizedDefaultProjectPath)
         ) {
           const folderName =
             defaultProjectPath.split(/[/\\]/).filter(Boolean).pop() ?? defaultProjectPath;
@@ -1066,24 +1068,31 @@ export const CreateTeamDialog = ({
     if (cwdMode !== 'project') {
       return;
     }
-    if (selectedProjectPath || projects.length === 0) {
+    if (selectedProjectPath) {
       return;
     }
-    if (defaultProjectPath && !isEphemeralRenderedProjectPath(defaultProjectPath)) {
-      const match = projects.find((p) => normalizePath(p.path) === defaultProjectPath);
+    const selectableProjects = projects.filter((project) => !isEphemeralProjectPath(project.path));
+    if (selectableProjects.length === 0) {
+      return;
+    }
+    if (defaultProjectPath && !isEphemeralProjectPath(defaultProjectPath)) {
+      const normalizedDefaultProjectPath = normalizePath(defaultProjectPath);
+      const match = selectableProjects.find(
+        (p) => normalizePath(p.path) === normalizedDefaultProjectPath
+      );
       if (match) {
         setSelectedProjectPath(match.path);
         return;
       }
     }
-    setSelectedProjectPath(projects[0].path);
+    setSelectedProjectPath(selectableProjects[0].path);
   }, [open, cwdMode, projects, selectedProjectPath, defaultProjectPath]);
 
   useEffect(() => {
     if (!open || cwdMode !== 'project' || !selectedProjectPath) {
       return;
     }
-    if (!isEphemeralRenderedProjectPath(selectedProjectPath)) {
+    if (!isEphemeralProjectPath(selectedProjectPath)) {
       return;
     }
     setSelectedProjectPath('');

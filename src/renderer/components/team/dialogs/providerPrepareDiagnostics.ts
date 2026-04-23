@@ -75,6 +75,10 @@ function buildModelSuccessLine(providerId: TeamProviderId, modelId: string): str
   return `${getModelLabel(providerId, modelId)} - verified`;
 }
 
+function buildModelAvailableLine(providerId: TeamProviderId, modelId: string): string {
+  return `${getModelLabel(providerId, modelId)} - available for launch`;
+}
+
 function buildModelCompatibilityPendingLine(providerId: TeamProviderId, modelId: string): string {
   return `${getModelLabel(providerId, modelId)} - compatible, deep verification pending...`;
 }
@@ -132,6 +136,11 @@ function stripSelectedModelPrefix(modelId: string, message: string): string {
     new RegExp(`^Selected model ${escapeRegExp(modelId)} is unavailable\\.\\s*`, 'i'),
     new RegExp(`^Selected model ${escapeRegExp(modelId)} could not be verified\\.\\s*`, 'i'),
     new RegExp(`^Selected model ${escapeRegExp(modelId)} verified for launch\\.\\s*`, 'i'),
+    new RegExp(`^Selected model ${escapeRegExp(modelId)} is available for launch\\.\\s*`, 'i'),
+    new RegExp(
+      `^Selected model ${escapeRegExp(modelId)} is compatible\\. Deep verification pending\\.\\s*`,
+      'i'
+    ),
   ];
   for (const pattern of patterns) {
     if (pattern.test(trimmed)) {
@@ -389,6 +398,28 @@ function resolveModelResultFromBatch(
     };
   }
 
+  const hasAvailableLine = modelScopedEntries.some((entry) =>
+    /selected model .* is available for launch\./i.test(entry)
+  );
+  if (hasAvailableLine) {
+    return {
+      status: 'ready',
+      line: buildModelAvailableLine(providerId, modelId),
+      warningLine: null,
+    };
+  }
+
+  const hasCompatibilityLine = modelScopedEntries.some((entry) =>
+    /selected model .* is compatible\. deep verification pending\./i.test(entry)
+  );
+  if (hasCompatibilityLine) {
+    return {
+      status: 'notes',
+      line: buildModelCompatibilityPendingLine(providerId, modelId),
+      warningLine: null,
+    };
+  }
+
   const hasUnavailableLine = modelScopedEntries.some((entry) =>
     /selected model .* is unavailable\./i.test(entry)
   );
@@ -421,16 +452,10 @@ function resolveModelResultFromBatch(
   }
 
   if (result.ready && (result.warnings?.length ?? 0) > 0 && !hasModelScopedEntries) {
-    const line = buildModelFailureLine(
-      providerId,
-      modelId,
-      'check failed',
-      'Verification did not complete after runtime preflight warning'
-    );
     return {
       status: 'notes',
-      line,
-      warningLine: line,
+      line: buildModelCompatibilityPendingLine(providerId, modelId),
+      warningLine: null,
     };
   }
 
@@ -472,6 +497,20 @@ function resolveModelResultFromCompatibilityBatch(
   );
   if (hasCompatibilityLine || (result.ready && modelScopedEntries.length === 0)) {
     return { kind: 'compatible' };
+  }
+
+  const hasAvailableLine = modelScopedEntries.some((entry) =>
+    /selected model .* is available for launch\./i.test(entry)
+  );
+  if (hasAvailableLine) {
+    return {
+      kind: 'terminal',
+      result: {
+        status: 'ready',
+        line: buildModelAvailableLine(providerId, modelId),
+        warningLine: null,
+      },
+    };
   }
 
   const hasUnavailableLine = modelScopedEntries.some((entry) =>
@@ -856,30 +895,31 @@ export async function runProviderPrepareDiagnostics({
       }
     } else {
       try {
-        const batchedModelResult = await prepareProvisioning(
+        const compatibilityResult = await prepareProvisioning(
           cwd,
           providerId,
           [providerId],
           uncachedModelIds,
-          limitContext
+          limitContext,
+          'compatibility'
         );
-        runtimeDetailLines = createRuntimeDetailLines(batchedModelResult).filter(
+        runtimeDetailLines = createRuntimeDetailLines(compatibilityResult).filter(
           (entry) => !isModelScopedEntryForAnyModel(uncachedModelIds, entry)
         );
-        runtimeWarnings = [...(batchedModelResult.warnings ?? [])].filter(
+        runtimeWarnings = [...(compatibilityResult.warnings ?? [])].filter(
           (entry) => !isModelScopedEntryForAnyModel(uncachedModelIds, entry)
         );
 
         const hasModelScopedEntries = uncachedModelIds.some(
-          (modelId) => getModelScopedEntries(modelId, batchedModelResult).length > 0
+          (modelId) => getModelScopedEntries(modelId, compatibilityResult).length > 0
         );
         const hasNonModelScopedDiagnostics =
           runtimeDetailLines.length > 0 || runtimeWarnings.length > 0;
         const hasSingleModelFallbackReason =
           uncachedModelIds.length === 1 &&
-          looksLikeSingleModelBatchFailure(uncachedModelIds[0], batchedModelResult);
+          looksLikeSingleModelBatchFailure(uncachedModelIds[0], compatibilityResult);
         if (
-          !batchedModelResult.ready &&
+          !compatibilityResult.ready &&
           !hasModelScopedEntries &&
           (uncachedModelIds.length > 1 ||
             (!hasNonModelScopedDiagnostics && !hasSingleModelFallbackReason))
@@ -888,7 +928,7 @@ export async function runProviderPrepareDiagnostics({
             status: 'failed',
             details: [
               ...runtimeDetailLines,
-              ...(batchedModelResult.message ? [batchedModelResult.message] : []),
+              ...(compatibilityResult.message ? [compatibilityResult.message] : []),
             ],
             warnings: runtimeWarnings,
             modelResultsById: {},
@@ -905,10 +945,45 @@ export async function runProviderPrepareDiagnostics({
             resolveModelResultFromBatch(
               providerId,
               modelId,
-              batchedModelResult,
+              compatibilityResult,
               uncachedModelIds.length === 1
             )
           );
+        }
+
+        emitProgress();
+
+        if (!hasFailure) {
+          try {
+            const deepResult = await prepareProvisioning(
+              cwd,
+              providerId,
+              [providerId],
+              undefined,
+              limitContext,
+              'deep'
+            );
+            runtimeDetailLines = createRuntimeDetailLines(deepResult).filter(
+              (entry) => !isModelScopedEntryForAnyModel(uncachedModelIds, entry)
+            );
+            runtimeWarnings = [...(deepResult.warnings ?? [])].filter(
+              (entry) => !isModelScopedEntryForAnyModel(uncachedModelIds, entry)
+            );
+            if (
+              !deepResult.ready &&
+              runtimeDetailLines.length === 0 &&
+              runtimeWarnings.length === 0
+            ) {
+              runtimeWarnings = deepResult.message ? [deepResult.message] : [];
+            }
+          } catch (deepError) {
+            hasNotes = true;
+            runtimeWarnings = [
+              normalizeModelReason(
+                deepError instanceof Error ? deepError.message.trim() : String(deepError).trim()
+              ) ?? 'One-shot diagnostic failed',
+            ];
+          }
         }
       } catch (error) {
         hasNotes = true;

@@ -29,7 +29,7 @@ vi.mock('@main/services/infrastructure/NotificationManager', () => ({
   },
 }));
 
-const execCliMock = vi.fn(async (_binaryPath: string | null, args: string[]) => {
+const defaultExecCliMockImplementation = async (_binaryPath: string | null, args: string[]) => {
   if (args[0] === 'model') {
     return {
       stdout: JSON.stringify({
@@ -48,7 +48,11 @@ const execCliMock = vi.fn(async (_binaryPath: string | null, args: string[]) => 
           },
           codex: {
             defaultModel: 'gpt-5.4-mini',
-            models: [{ id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', description: 'Codex default' }],
+            models: [
+              { id: 'gpt-5.4', label: 'GPT-5.4', description: 'Codex selected model' },
+              { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', description: 'Codex default' },
+              { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', description: 'Codex model' },
+            ],
           },
           gemini: {
             defaultModel: 'gemini-2.5-pro',
@@ -83,7 +87,8 @@ const execCliMock = vi.fn(async (_binaryPath: string | null, args: string[]) => 
   }
 
   return { stdout: '', stderr: '', exitCode: 0 };
-});
+};
+const execCliMock = vi.fn(defaultExecCliMockImplementation);
 vi.mock('@main/utils/childProcess', () => ({
   execCli: (...args: Parameters<typeof execCliMock>) => execCliMock(...args),
   spawnCli: vi.fn(),
@@ -258,7 +263,8 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    execCliMock.mockClear();
+    execCliMock.mockReset();
+    execCliMock.mockImplementation(defaultExecCliMockImplementation);
     addTeamNotificationMock.mockResolvedValue(null);
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-team-prepare-'));
     vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/fake/claude');
@@ -292,6 +298,85 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     await svc.prepareForProvisioning(missingCwd, { forceFresh: true });
 
     expect(fs.existsSync(missingCwd)).toBe(false);
+  });
+
+  it('skips advisory one-shot diagnostics when the prepare cwd is missing', async () => {
+    const svc = new TeamProvisioningService();
+    const missingCwd = path.join(tempRoot, 'missing-project');
+    const spawnProbe = vi.spyOn(svc as any, 'spawnProbe');
+
+    const result = await (svc as any).runProviderOneShotDiagnostic(
+      '/fake/claude',
+      missingCwd,
+      {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      'codex'
+    );
+
+    expect(result).toEqual({});
+    expect(spawnProbe).not.toHaveBeenCalled();
+  });
+
+  it('does not add one-shot ENOENT warnings after a missing cwd preflight warning', async () => {
+    const svc = new TeamProvisioningService();
+    const missingCwd = path.join(tempRoot, 'missing-project');
+    vi.spyOn(svc as any, 'getCachedOrProbeResult').mockResolvedValue({
+      claudePath: '/fake/claude',
+      authSource: 'codex_runtime',
+      warning: `Working directory does not exist: ${missingCwd}`,
+    });
+    vi.spyOn(svc as any, 'buildProvisioningEnv').mockResolvedValue({
+      env: {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      authSource: 'codex_runtime',
+      geminiRuntimeAuth: null,
+    });
+    vi.spyOn(svc as any, 'readRuntimeProviderLaunchFacts').mockResolvedValue({
+      defaultModel: null,
+      modelIds: new Set(['gpt-5.4']),
+      modelCatalog: null,
+      runtimeCapabilities: null,
+      providerStatus: null,
+    });
+    const spawnProbe = vi.spyOn(svc as any, 'spawnProbe');
+
+    const result = await svc.prepareForProvisioning(missingCwd, {
+      forceFresh: true,
+      providerId: 'codex',
+      modelIds: ['gpt-5.4'],
+      modelVerificationMode: 'deep',
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.details).toContain('Selected model gpt-5.4 is available for launch.');
+    expect(result.warnings).toEqual([`Working directory does not exist: ${missingCwd}`]);
+    expect(result.warnings?.join('\n')).not.toContain('One-shot diagnostic');
+    expect(result.warnings?.join('\n')).not.toContain('ENOENT');
+    expect(spawnProbe).not.toHaveBeenCalled();
+  });
+
+  it('does not misclassify binary ENOENT as a missing cwd when cwd exists', async () => {
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'spawnProbe').mockRejectedValue(new Error('spawn /missing/cli ENOENT'));
+
+    const result = await (svc as any).probeClaudeRuntime(
+      '/missing/cli',
+      tempRoot,
+      {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      'codex',
+      []
+    );
+
+    expect(result.warning).toContain('binary failed to start');
+    expect(result.warning).toContain('spawn /missing/cli ENOENT');
+    expect(result.warning).not.toContain('Working directory does not exist');
   });
 
   it('blocks OpenCode prepare without probing the legacy Claude stream-json runtime', async () => {
@@ -506,10 +591,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     });
 
     await vi.waitFor(() =>
-      expect(started).toEqual([
-        'opencode/minimax-m2.5-free',
-        'opencode/nemotron-3-super-free',
-      ])
+      expect(started).toEqual(['opencode/minimax-m2.5-free', 'opencode/nemotron-3-super-free'])
     );
     expect(maxActiveCount).toBe(2);
     expect(releases.has('opencode/big-pickle')).toBe(false);
@@ -555,10 +637,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
           state: 'ready',
           launchAllowed: true,
           modelId: 'openrouter/minimax-m2.5-free',
-          availableModels: [
-            'opencode/minimax-m2.5-free',
-            'opencode/nemotron-3-super-free',
-          ],
+          availableModels: ['opencode/minimax-m2.5-free', 'opencode/nemotron-3-super-free'],
           opencodeVersion: '1.0.0',
           installMethod: 'unknown',
           binaryPath: 'opencode',
@@ -677,7 +756,9 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     });
 
     expect(result.ready).toBe(false);
-    expect(result.details).toEqual(['Selected model opencode/minimax-m2.5-free verified for launch.']);
+    expect(result.details).toEqual([
+      'Selected model opencode/minimax-m2.5-free verified for launch.',
+    ]);
     expect(result.message).toBe(
       'Selected model opencode/nemotron-3-super-free is unavailable. bridge exploded'
     );
@@ -735,7 +816,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     ]);
   });
 
-  it('verifies the selected Codex model during prepare and records a success detail', async () => {
+  it('checks the selected Codex model from the runtime catalog during prepare', async () => {
     const svc = new TeamProvisioningService();
     vi.spyOn(svc as any, 'getCachedOrProbeResult').mockResolvedValue({
       claudePath: '/fake/claude',
@@ -762,18 +843,11 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     });
 
     expect(result.ready).toBe(true);
-    expect(result.details).toContain('Selected model gpt-5.4 verified for launch.');
-    expect(spawnProbe).toHaveBeenCalledWith(
-      '/fake/claude',
-      expect.arrayContaining(['--model', 'gpt-5.4']),
-      tempRoot,
-      expect.any(Object),
-      60_000,
-      expect.any(Object)
-    );
+    expect(result.details).toContain('Selected model gpt-5.4 is available for launch.');
+    expect(spawnProbe).not.toHaveBeenCalled();
   });
 
-  it('verifies the resolved Codex default model during prepare', async () => {
+  it('checks the Codex default model without running a print-mode probe', async () => {
     const svc = new TeamProvisioningService();
     vi.spyOn(svc as any, 'getCachedOrProbeResult').mockResolvedValue({
       claudePath: '/fake/claude',
@@ -802,19 +876,12 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
 
     expect(result.ready).toBe(true);
     expect(result.details).toContain(
-      `Selected model ${DEFAULT_PROVIDER_MODEL_SELECTION} verified for launch.`
+      `Selected model ${DEFAULT_PROVIDER_MODEL_SELECTION} is available for launch.`
     );
-    expect(spawnProbe).toHaveBeenCalledWith(
-      '/fake/claude',
-      expect.arrayContaining(['--model', 'gpt-5.4-mini']),
-      tempRoot,
-      expect.any(Object),
-      60_000,
-      expect.any(Object)
-    );
+    expect(spawnProbe).not.toHaveBeenCalled();
   });
 
-  it('verifies the resolved Anthropic default model during prepare with limitContext', async () => {
+  it('checks the Anthropic default model during prepare with limitContext without print mode', async () => {
     const svc = new TeamProvisioningService();
     vi.spyOn(svc as any, 'getCachedOrProbeResult').mockResolvedValue({
       claudePath: '/fake/claude',
@@ -843,16 +910,49 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
 
     expect(result.ready).toBe(true);
     expect(result.details).toContain(
-      `Selected model ${DEFAULT_PROVIDER_MODEL_SELECTION} verified for launch.`
+      `Selected model ${DEFAULT_PROVIDER_MODEL_SELECTION} is available for launch.`
     );
-    expect(spawnProbe).toHaveBeenCalledWith(
-      '/fake/claude',
-      expect.arrayContaining(['--model', 'opus']),
-      tempRoot,
-      expect.any(Object),
-      60_000,
-      expect.any(Object)
+    expect(spawnProbe).not.toHaveBeenCalled();
+  });
+
+  it('keeps Anthropic selected-model prepare terminal when compatibility mode is requested', async () => {
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'getCachedOrProbeResult').mockResolvedValue({
+      claudePath: '/fake/claude',
+      authSource: 'oauth_token',
+    });
+    const verifySelectedProviderModels = vi
+      .spyOn(svc as any, 'verifySelectedProviderModels')
+      .mockResolvedValue({
+        details: [
+          'Selected model opus verified for launch.',
+          'Selected model sonnet verified for launch.',
+        ],
+        warnings: [],
+        blockingMessages: [],
+      });
+    const runProviderOneShotDiagnostic = vi.spyOn(svc as any, 'runProviderOneShotDiagnostic');
+
+    const result = await svc.prepareForProvisioning(tempRoot, {
+      forceFresh: true,
+      providerId: 'anthropic',
+      modelIds: ['opus', 'sonnet'],
+      modelVerificationMode: 'compatibility',
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.details).toEqual([
+      'Selected model opus verified for launch.',
+      'Selected model sonnet verified for launch.',
+    ]);
+    expect(result.details?.some((line) => line.includes('compatible'))).toBe(false);
+    expect(verifySelectedProviderModels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: 'anthropic',
+        modelIds: ['opus', 'sonnet'],
+      })
     );
+    expect(runProviderOneShotDiagnostic).not.toHaveBeenCalled();
   });
 
   it('falls back from an unavailable Anthropic 1M launch id to the base model during prepare', async () => {
@@ -902,15 +1002,8 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     });
 
     expect(result.ready).toBe(true);
-    expect(result.details).toContain('Selected model opus[1m] verified for launch.');
-    expect(spawnProbe).toHaveBeenCalledWith(
-      '/fake/claude',
-      expect.arrayContaining(['--model', 'opus']),
-      tempRoot,
-      expect.any(Object),
-      60_000,
-      expect.any(Object)
-    );
+    expect(result.details).toContain('Selected model opus[1m] is available for launch.');
+    expect(spawnProbe).not.toHaveBeenCalled();
   });
 
   it('fails prepare when the selected Codex model is unavailable', async () => {
@@ -927,11 +1020,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
       authSource: 'codex_runtime',
       geminiRuntimeAuth: null,
     });
-    vi.spyOn(svc as any, 'spawnProbe').mockRejectedValue(
-      new Error(
-        "The 'gpt-5.2-codex' model is not supported when using Codex with a ChatGPT account."
-      )
-    );
+    const spawnProbe = vi.spyOn(svc as any, 'spawnProbe');
 
     const result = await svc.prepareForProvisioning(tempRoot, {
       forceFresh: true,
@@ -941,10 +1030,11 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
 
     expect(result.ready).toBe(false);
     expect(result.message).toContain('Selected model gpt-5.2-codex is unavailable.');
-    expect(result.message).toContain('Not available on this Codex native runtime');
+    expect(result.message).toContain('was not found in the live provider catalog');
+    expect(spawnProbe).not.toHaveBeenCalled();
   });
 
-  it('keeps timed out Codex model verification as a warning with a clean generic reason', async () => {
+  it('keeps timed out Codex one-shot diagnostics as a runtime warning', async () => {
     const svc = new TeamProvisioningService();
     vi.spyOn(svc as any, 'getCachedOrProbeResult').mockResolvedValue({
       claudePath: '/fake/claude',
@@ -960,7 +1050,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     });
     vi.spyOn(svc as any, 'spawnProbe').mockRejectedValue(
       new Error(
-        'Timeout running: orchestrator-cli -p Output only the single word PONG. --output-format text --model gpt-5.3-codex --max-turns 1 --no-session-persistence'
+        'Timeout running: orchestrator-cli -p Output only the single word PONG. --output-format text --model haiku --max-turns 1 --no-session-persistence'
       )
     );
 
@@ -968,11 +1058,16 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
       forceFresh: true,
       providerId: 'codex',
       modelIds: ['gpt-5.3-codex'],
+      modelVerificationMode: 'deep',
     });
 
     expect(result.ready).toBe(true);
-    expect(result.warnings).toContain(
-      'Selected model gpt-5.3-codex could not be verified. Model verification timed out'
+    expect(result.details).toContain('Selected model gpt-5.3-codex is available for launch.');
+    expect(result.warnings?.join('\n')).toContain(
+      'One-shot diagnostic timed out after runtime readiness passed'
+    );
+    expect(result.warnings?.join('\n')).not.toContain(
+      'Selected model gpt-5.3-codex could not be verified'
     );
   });
 
@@ -996,21 +1091,179 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     );
   });
 
-  it('includes CLI output in generic preflight failures', async () => {
+  it('uses runtime status for codex primary preflight without print mode', async () => {
     const svc = new TeamProvisioningService();
-    vi.spyOn(svc as any, 'spawnProbe')
-      .mockResolvedValueOnce({
-        stdout: 'orchestrator-cli 1.2.3',
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: 'upstream unavailable',
-        stderr: 'request id: req_123',
-        exitCode: 1,
-      });
+    const spawnProbe = vi.spyOn(svc as any, 'spawnProbe').mockResolvedValue({
+      stdout: 'orchestrator-cli 1.2.3',
+      stderr: '',
+      exitCode: 0,
+    });
 
-    const result = await (svc as any).probeClaudeRuntime(
+    const result = await svc.prepareForProvisioning(tempRoot, {
+      forceFresh: true,
+      providerId: 'codex',
+    });
+
+    expect(result.ready).toBe(true);
+    expect(execCliMock).toHaveBeenCalledWith(
+      '/fake/claude',
+      ['runtime', 'status', '--json', '--provider', 'codex'],
+      expect.objectContaining({ cwd: tempRoot })
+    );
+    expect(spawnProbe).toHaveBeenCalledTimes(1);
+    const spawnedArgLists = spawnProbe.mock.calls.map((call) => call[1] as string[]);
+    expect(spawnedArgLists.some((args) => args.includes('-p'))).toBe(false);
+  });
+
+  it('passes provider launch args before codex runtime status subcommands', async () => {
+    execCliMock.mockResolvedValue({
+      stdout: JSON.stringify({
+        providers: {
+          codex: {
+            supported: true,
+            authenticated: true,
+            capabilities: { teamLaunch: true, oneShot: true },
+          },
+        },
+      }),
+      stderr: '',
+      exitCode: 0,
+    });
+
+    const svc = new TeamProvisioningService();
+    const result = await (svc as any).probeProviderRuntimeControlPlane({
+      claudePath: '/fake/claude',
+      cwd: tempRoot,
+      env: {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      providerId: 'codex',
+      providerArgs: ['--settings', '{"codex":{"forced_login_method":"chatgpt"}}'],
+    });
+
+    expect(result.warning).toBeUndefined();
+    expect(execCliMock).toHaveBeenCalledWith(
+      '/fake/claude',
+      [
+        '--settings',
+        '{"codex":{"forced_login_method":"chatgpt"}}',
+        'runtime',
+        'status',
+        '--json',
+        '--provider',
+        'codex',
+      ],
+      expect.objectContaining({ cwd: tempRoot })
+    );
+  });
+
+  it('falls back from runtime status timeout to auth status and still checks selected models', async () => {
+    execCliMock.mockImplementation(async (_binaryPath: string | null, args: string[]) => {
+      if (args[0] === 'runtime' && args[1] === 'status') {
+        throw new Error('Timeout running: orchestrator-cli runtime status --json --provider codex');
+      }
+      if (args[0] === 'auth') {
+        return {
+          stdout: JSON.stringify({ loggedIn: true, authMethod: 'chatgpt' }),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      if (args[0] === 'model') {
+        return {
+          stdout: JSON.stringify({
+            schemaVersion: 1,
+            providers: {
+              codex: {
+                defaultModel: 'gpt-5.4-mini',
+                models: [{ id: 'gpt-5.4', label: 'GPT-5.4' }],
+              },
+            },
+          }),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'spawnProbe').mockResolvedValue({
+      stdout: 'orchestrator-cli 1.2.3',
+      stderr: '',
+      exitCode: 0,
+    });
+
+    const result = await svc.prepareForProvisioning(tempRoot, {
+      forceFresh: true,
+      providerId: 'codex',
+      modelIds: ['gpt-5.4'],
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.details).toContain('Selected model gpt-5.4 is available for launch.');
+    expect(result.warnings?.join('\n')).toContain('runtime status was unavailable');
+    expect(execCliMock).toHaveBeenCalledWith(
+      '/fake/claude',
+      ['auth', 'status', '--json', '--provider', 'codex'],
+      expect.objectContaining({ cwd: tempRoot })
+    );
+  });
+
+  it('passes provider launch args before auth status fallback subcommands', async () => {
+    execCliMock.mockImplementation(async (_binaryPath: string | null, args: string[]) => {
+      if (args.includes('runtime')) {
+        throw new Error('runtime status failed');
+      }
+      if (args.includes('auth')) {
+        return {
+          stdout: JSON.stringify({ loggedIn: true, authMethod: 'chatgpt' }),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+
+    const svc = new TeamProvisioningService();
+    const result = await (svc as any).probeProviderRuntimeControlPlane({
+      claudePath: '/fake/claude',
+      cwd: tempRoot,
+      env: {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      providerId: 'codex',
+      providerArgs: ['--settings', '{"codex":{"forced_login_method":"chatgpt"}}'],
+    });
+
+    expect(result.warning).toContain('runtime status was unavailable');
+    expect(execCliMock).toHaveBeenNthCalledWith(
+      2,
+      '/fake/claude',
+      [
+        '--settings',
+        '{"codex":{"forced_login_method":"chatgpt"}}',
+        'auth',
+        'status',
+        '--json',
+        '--provider',
+        'codex',
+      ],
+      expect.objectContaining({ cwd: tempRoot })
+    );
+  });
+
+  it('includes CLI output in advisory one-shot diagnostic failures', async () => {
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'spawnProbe').mockResolvedValueOnce({
+      stdout: 'upstream unavailable',
+      stderr: 'request id: req_123',
+      exitCode: 1,
+    });
+
+    const result = await (svc as any).runProviderOneShotDiagnostic(
       '/fake/claude',
       tempRoot,
       {
@@ -1020,27 +1273,21 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
       'codex'
     );
 
+    expect(result.warning).toContain('One-shot diagnostic failed after runtime readiness passed');
     expect(result.warning).toContain('preflight check failed (exit code 1). Details:');
     expect(result.warning).toContain('upstream unavailable');
     expect(result.warning).toContain('request id: req_123');
   });
 
-  it('passes provider launch args into codex preflight ping probes', async () => {
+  it('passes provider launch args before codex advisory one-shot probe flags', async () => {
     const svc = new TeamProvisioningService();
-    const spawnProbe = vi
-      .spyOn(svc as any, 'spawnProbe')
-      .mockResolvedValueOnce({
-        stdout: 'orchestrator-cli 1.2.3',
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: 'PONG',
-        stderr: '',
-        exitCode: 0,
-      });
+    const spawnProbe = vi.spyOn(svc as any, 'spawnProbe').mockResolvedValueOnce({
+      stdout: 'PONG',
+      stderr: '',
+      exitCode: 0,
+    });
 
-    const result = await (svc as any).probeClaudeRuntime(
+    const result = await (svc as any).runProviderOneShotDiagnostic(
       '/fake/claude',
       tempRoot,
       {
@@ -1053,12 +1300,21 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
 
     expect(result.warning).toBeUndefined();
     expect(spawnProbe).toHaveBeenNthCalledWith(
-      2,
+      1,
       '/fake/claude',
-      expect.arrayContaining([
+      [
         '--settings',
         '{"codex":{"forced_login_method":"chatgpt"}}',
-      ]),
+        '-p',
+        'Output only the single word PONG.',
+        '--output-format',
+        'text',
+        '--model',
+        'gpt-5.4-mini',
+        '--max-turns',
+        '1',
+        '--no-session-persistence',
+      ],
       tempRoot,
       expect.any(Object),
       60_000,
@@ -1132,7 +1388,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     );
   });
 
-  it('passes provider launch args into selected codex model probes', async () => {
+  it('passes provider launch args into selected codex catalog checks', async () => {
     const svc = new TeamProvisioningService();
     vi.spyOn(svc as any, 'buildProvisioningEnv').mockResolvedValue({
       env: {
@@ -1152,11 +1408,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
         runtimeCapabilities: null,
         providerStatus: null,
       });
-    const spawnProbe = vi.spyOn(svc as any, 'spawnProbe').mockResolvedValue({
-      stdout: 'PONG',
-      stderr: '',
-      exitCode: 0,
-    });
+    const spawnProbe = vi.spyOn(svc as any, 'spawnProbe');
 
     const result = await (svc as any).verifySelectedProviderModels({
       claudePath: '/fake/claude',
@@ -1166,23 +1418,111 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
       limitContext: false,
     });
 
-    expect(result.details).toEqual(['Selected model gpt-5.4 verified for launch.']);
+    expect(result.details).toEqual(['Selected model gpt-5.4 is available for launch.']);
     expect(readRuntimeProviderLaunchFacts).toHaveBeenCalledWith(
       expect.objectContaining({
         providerArgs: ['--settings', '{"codex":{"forced_login_method":"chatgpt"}}'],
       })
     );
-    expect(spawnProbe).toHaveBeenCalledWith(
+    expect(spawnProbe).not.toHaveBeenCalled();
+  });
+
+  it('passes provider launch args before model-list catalog subcommands', async () => {
+    execCliMock.mockImplementation(async (_binaryPath: string | null, args: string[]) => {
+      if (args.includes('model')) {
+        return {
+          stdout: JSON.stringify({
+            schemaVersion: 1,
+            providers: {
+              codex: {
+                defaultModel: 'gpt-5.4-mini',
+                models: [{ id: 'gpt-5.4', label: 'GPT-5.4' }],
+              },
+            },
+          }),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      if (args.includes('runtime')) {
+        return {
+          stdout: JSON.stringify({
+            providers: {
+              codex: {
+                runtimeCapabilities: {
+                  modelCatalog: { dynamic: false, source: 'runtime' },
+                },
+              },
+            },
+          }),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+
+    const svc = new TeamProvisioningService();
+    await (svc as any).readRuntimeProviderLaunchFacts({
+      claudePath: '/fake/claude',
+      cwd: tempRoot,
+      providerId: 'codex',
+      env: {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      providerArgs: ['--settings', '{"codex":{"forced_login_method":"chatgpt"}}'],
+      limitContext: false,
+    });
+
+    expect(execCliMock).toHaveBeenCalledWith(
       '/fake/claude',
-      expect.arrayContaining([
+      [
         '--settings',
         '{"codex":{"forced_login_method":"chatgpt"}}',
-      ]),
-      tempRoot,
-      expect.any(Object),
-      60_000,
-      expect.any(Object)
+        'model',
+        'list',
+        '--json',
+        '--provider',
+        'codex',
+      ],
+      expect.objectContaining({ cwd: tempRoot })
     );
+  });
+
+  it('keeps missing models compatible when the runtime catalog is dynamic', async () => {
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'buildProvisioningEnv').mockResolvedValue({
+      env: {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      authSource: 'codex_runtime',
+      geminiRuntimeAuth: null,
+    });
+    vi.spyOn(svc as any, 'readRuntimeProviderLaunchFacts').mockResolvedValue({
+      defaultModel: null,
+      modelIds: new Set(),
+      modelCatalog: null,
+      runtimeCapabilities: { modelCatalog: { dynamic: true, source: 'runtime' } },
+      providerStatus: null,
+    });
+    const spawnProbe = vi.spyOn(svc as any, 'spawnProbe');
+
+    const result = await (svc as any).verifySelectedProviderModels({
+      claudePath: '/fake/claude',
+      cwd: tempRoot,
+      providerId: 'codex',
+      modelIds: ['future-model'],
+      limitContext: false,
+    });
+
+    expect(result).toEqual({
+      details: ['Selected model future-model is compatible. Deep verification pending.'],
+      warnings: [],
+      blockingMessages: [],
+    });
+    expect(spawnProbe).not.toHaveBeenCalled();
   });
 
   it('maps ANTHROPIC_AUTH_TOKEN into ANTHROPIC_API_KEY for headless preflight', async () => {

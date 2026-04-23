@@ -1,11 +1,10 @@
 import React from 'react';
 
-import { getTeamProviderLabel as getCatalogTeamProviderLabel } from '@renderer/utils/teamModelCatalog';
 import { formatProviderBackendLabel } from '@renderer/utils/providerBackendIdentity';
+import { getTeamProviderLabel as getCatalogTeamProviderLabel } from '@renderer/utils/teamModelCatalog';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
-import type { TeamProviderId } from '@shared/types';
-import type { CliProviderStatus } from '@shared/types';
+import type { CliProviderStatus, TeamProviderId } from '@shared/types';
 
 export type ProvisioningProviderCheckStatus = 'pending' | 'checking' | 'ready' | 'notes' | 'failed';
 export type ProvisioningPrepareState = 'idle' | 'loading' | 'ready' | 'failed';
@@ -141,12 +140,32 @@ type ProvisioningDetailSummary =
   | 'Runtime provider is not configured'
   | 'CLI preflight failed'
   | 'Selected model compatibility pending'
+  | 'Selected model available'
   | 'Selected model verified'
   | 'Selected model unavailable'
   | 'Selected model verification timed out'
   | 'Selected model check failed'
   | 'Ready with notes'
   | 'Needs attention';
+
+function isSelectedModelDetail(lower: string): boolean {
+  return lower.includes('selected model');
+}
+
+function isFormattedModelDetail(lower: string): boolean {
+  return (
+    lower.includes(' - checking...') ||
+    lower.includes(' - verified') ||
+    lower.includes(' - available for launch') ||
+    lower.includes(' - compatible, deep verification pending') ||
+    lower.includes(' - unavailable') ||
+    lower.includes(' - check failed')
+  );
+}
+
+function isModelDetail(lower: string): boolean {
+  return isSelectedModelDetail(lower) || isFormattedModelDetail(lower);
+}
 
 function getStatusLabel(status: ProvisioningProviderCheckStatus): string {
   switch (status) {
@@ -199,32 +218,38 @@ function summarizeDetail(
   if (lower.includes('claude cli preflight check failed')) {
     return 'CLI preflight failed';
   }
-  if (lower.includes('compatible, deep verification pending')) {
+  if (isModelDetail(lower) && lower.includes('compatible, deep verification pending')) {
     return 'Selected model compatibility pending';
   }
-  if (lower.includes('selected model') && lower.includes('verified for launch')) {
+  if (isSelectedModelDetail(lower) && lower.includes('verified for launch')) {
     return 'Selected model verified';
   }
-  if (lower.includes('selected model') && lower.includes('is unavailable')) {
+  if (isSelectedModelDetail(lower) && lower.includes('available for launch')) {
+    return 'Selected model available';
+  }
+  if (isSelectedModelDetail(lower) && lower.includes('is unavailable')) {
     return 'Selected model unavailable';
   }
   if (
-    lower.includes('selected model') &&
+    isSelectedModelDetail(lower) &&
     lower.includes('could not be verified') &&
     lower.includes('timed out')
   ) {
     return 'Selected model verification timed out';
   }
-  if (lower.includes('selected model') && lower.includes('could not be verified')) {
+  if (isSelectedModelDetail(lower) && lower.includes('could not be verified')) {
     return 'Selected model check failed';
   }
   if (lower.includes(' - verified')) {
     return 'Selected model verified';
   }
+  if (lower.includes(' - available for launch')) {
+    return 'Selected model available';
+  }
   if (lower.includes(' - unavailable -')) {
     return 'Selected model unavailable';
   }
-  if (lower.includes('timed out')) {
+  if (lower.includes(' - check failed') && lower.includes('timed out')) {
     return 'Selected model verification timed out';
   }
   if (lower.includes(' - check failed -')) {
@@ -242,6 +267,7 @@ function summarizeDetail(
 
 function getModelDetailSummary(details: string[]): string | null {
   let compatibilityPendingCount = 0;
+  let availableCount = 0;
   let verifiedCount = 0;
   let unavailableCount = 0;
   let timedOutCount = 0;
@@ -250,23 +276,46 @@ function getModelDetailSummary(details: string[]): string | null {
 
   for (const detail of details) {
     const lower = detail.toLowerCase();
+    if (!isModelDetail(lower)) {
+      continue;
+    }
     if (lower.includes('compatible, deep verification pending')) {
       compatibilityPendingCount += 1;
       continue;
     }
-    if (lower.includes(' - verified')) {
+    if (
+      lower.includes(' - available for launch') ||
+      (isSelectedModelDetail(lower) && lower.includes('is available for launch'))
+    ) {
+      availableCount += 1;
+      continue;
+    }
+    if (
+      lower.includes(' - verified') ||
+      (isSelectedModelDetail(lower) && lower.includes('verified for launch'))
+    ) {
       verifiedCount += 1;
       continue;
     }
-    if (lower.includes(' - unavailable -')) {
+    if (
+      lower.includes(' - unavailable -') ||
+      (isSelectedModelDetail(lower) && lower.includes('is unavailable'))
+    ) {
       unavailableCount += 1;
       continue;
     }
-    if (lower.includes('timed out')) {
+    if (
+      lower.includes('timed out') &&
+      (lower.includes('check failed') ||
+        (isSelectedModelDetail(lower) && lower.includes('could not be verified')))
+    ) {
       timedOutCount += 1;
       continue;
     }
-    if (lower.includes(' - check failed -')) {
+    if (
+      lower.includes(' - check failed -') ||
+      (isSelectedModelDetail(lower) && lower.includes('could not be verified'))
+    ) {
       checkFailedCount += 1;
       continue;
     }
@@ -290,6 +339,9 @@ function getModelDetailSummary(details: string[]): string | null {
   }
   if (checkingCount > 0) {
     parts.push(`${checkingCount} checking`);
+  }
+  if (availableCount > 0) {
+    parts.push(`${availableCount} available`);
   }
   if (verifiedCount > 0) {
     parts.push(`${verifiedCount} verified`);
@@ -337,7 +389,7 @@ function getDetailTone(
   status: ProvisioningProviderCheckStatus
 ): 'success' | 'failure' | 'checking' | 'neutral' {
   const summary = summarizeDetail(detail, status);
-  if (summary === 'Selected model verified') {
+  if (summary === 'Selected model verified' || summary === 'Selected model available') {
     return 'success';
   }
   if (summary === 'Selected model verification timed out') {

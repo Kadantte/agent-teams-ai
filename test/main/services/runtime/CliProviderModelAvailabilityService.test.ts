@@ -153,7 +153,7 @@ describe('CliProviderModelAvailabilityService', () => {
     });
   });
 
-  it('passes provider launch args into codex model probes', async () => {
+  it('passes provider launch args before codex model probe flags', async () => {
     buildProviderAwareCliEnvMock.mockResolvedValue({
       env: { HOME: '/Users/tester' },
       providerArgs: ['--settings', '{"codex":{"forced_login_method":"chatgpt"}}'],
@@ -167,10 +167,19 @@ describe('CliProviderModelAvailabilityService', () => {
     await vi.waitFor(() => {
       expect(execCliMock).toHaveBeenCalledWith(
         '/usr/local/bin/claude',
-        expect.arrayContaining([
+        [
           '--settings',
           '{"codex":{"forced_login_method":"chatgpt"}}',
-        ]),
+          '-p',
+          'Output only the single word PONG.',
+          '--output-format',
+          'text',
+          '--model',
+          'gpt-5.4',
+          '--max-turns',
+          '1',
+          '--no-session-persistence',
+        ],
         expect.objectContaining({
           env: { HOME: '/Users/tester' },
         })

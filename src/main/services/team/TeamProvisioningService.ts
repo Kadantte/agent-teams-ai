@@ -101,12 +101,9 @@ import {
 } from '../runtime/geminiRuntimeAuth';
 import { buildProviderAwareCliEnv } from '../runtime/providerAwareCliEnv';
 import {
-  buildProviderModelProbeArgs,
   buildProviderPreflightPingArgs,
-  classifyProviderModelProbeFailure,
   getProviderModelProbeExpectedOutput,
   getProviderModelProbeTimeoutMs,
-  isProviderModelProbeSuccessOutput,
   normalizeProviderModelProbeFailureReason,
 } from '../runtime/providerModelProbe';
 import { resolveTeamProviderId } from '../runtime/providerRuntimeEnv';
@@ -438,7 +435,6 @@ const PREFLIGHT_BINARY_TIMEOUT_MS = 8000;
 const PREFLIGHT_AUTH_RETRY_DELAY_MS = 2000;
 const PREFLIGHT_AUTH_MAX_RETRIES = 2;
 const OPENCODE_PREFLIGHT_MODEL_PROBE_CONCURRENCY = 2;
-const PROVIDER_MODEL_PROBE_CONCURRENCY = 2;
 
 function applyDistinctProvisioningMemberColors<
   T extends { name: string; color?: string; removedAt?: number },
@@ -521,6 +517,10 @@ function getPreflightTimeoutMs(providerId: TeamProviderId | undefined): number {
   return getProviderModelProbeTimeoutMs(providerId);
 }
 
+function buildProviderCliCommandArgs(providerArgs: string[], args: string[]): string[] {
+  return [...providerArgs, ...args];
+}
+
 interface ProviderModelListCommandResponse {
   schemaVersion?: number;
   providers?: Record<
@@ -533,6 +533,12 @@ interface ProviderModelListCommandResponse {
 }
 
 interface RuntimeStatusCommandResponse {
+  providers?: Record<string, Partial<CliProviderStatus>>;
+}
+
+interface AuthStatusCommandResponse {
+  loggedIn?: boolean;
+  authMethod?: string | null;
   providers?: Record<string, Partial<CliProviderStatus>>;
 }
 
@@ -698,21 +704,6 @@ function isProbeTimeoutMessage(message: string): boolean {
     lower.includes('timed out') ||
     lower.includes('did not complete') ||
     lower.includes('etimedout')
-  );
-}
-
-function isTransientModelProbeMessage(message: string): boolean {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes('timeout') ||
-    lower.includes('timed out') ||
-    lower.includes('etimedout') ||
-    lower.includes('econnreset') ||
-    lower.includes('429') ||
-    lower.includes('500') ||
-    lower.includes('502') ||
-    lower.includes('503') ||
-    lower.includes('504')
   );
 }
 
@@ -1819,6 +1810,18 @@ async function ensureCwdExists(cwd: string): Promise<void> {
 function isMissingCwdSpawnError(message: string): boolean {
   const lower = message.toLowerCase();
   return lower.includes('spawn ') && lower.includes(' enoent');
+}
+
+async function pathExistsAsDirectory(candidatePath: string): Promise<boolean> {
+  try {
+    const stat = await fs.promises.stat(candidatePath);
+    return stat.isDirectory();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /** @deprecated Use wrapAgentBlock from @shared/constants/agentBlocks instead. */
@@ -3389,18 +3392,12 @@ function isTransientProbeWarning(warning: string): boolean {
   return (
     lower.includes('timeout running:') ||
     lower.includes('did not complete') ||
+    lower.includes('runtime status was unavailable') ||
+    lower.includes('runtime status check did not complete') ||
     lower.includes('timed out') ||
     lower.includes('etimedout') ||
     lower.includes('econnreset') ||
     lower.includes('eai_again')
-  );
-}
-
-function isRecoverableGenericPreflightWarning(warning: string): boolean {
-  const lower = warning.toLowerCase();
-  return (
-    lower.includes('preflight check failed') ||
-    lower.includes('preflight ping completed but did not return the expected pong')
   );
 }
 
@@ -3570,7 +3567,13 @@ export class TeamProvisioningService {
     const providerArgs = params.providerArgs ?? [];
     const modelListPromise = execCli(
       params.claudePath,
-      ['model', 'list', '--json', '--provider', params.providerId, ...providerArgs],
+      buildProviderCliCommandArgs(providerArgs, [
+        'model',
+        'list',
+        '--json',
+        '--provider',
+        params.providerId,
+      ]),
       {
         cwd: params.cwd,
         env: params.env,
@@ -3581,7 +3584,13 @@ export class TeamProvisioningService {
       params.providerId === 'codex' || params.providerId === 'anthropic'
         ? execCli(
             params.claudePath,
-            ['runtime', 'status', '--json', '--provider', params.providerId, ...providerArgs],
+            buildProviderCliCommandArgs(providerArgs, [
+              'runtime',
+              'status',
+              '--json',
+              '--provider',
+              params.providerId,
+            ]),
             {
               cwd: params.cwd,
               env: params.env,
@@ -7425,8 +7434,39 @@ export class TeamProvisioningService {
         blockingMessages.push(...modelVerification.blockingMessages);
       };
 
+      const appendOneShotDiagnostic = async (): Promise<void> => {
+        if (opts?.modelVerificationMode !== 'deep') {
+          return;
+        }
+        const envResolution = await this.buildProvisioningEnv(providerId);
+        if (envResolution.warning) {
+          warnings.push(
+            providerIds.length > 1
+              ? `${providerLabel}: ${envResolution.warning}`
+              : envResolution.warning
+          );
+          return;
+        }
+        const diagnostic = await this.runProviderOneShotDiagnostic(
+          probeResult.claudePath,
+          targetCwd,
+          envResolution.env,
+          providerId,
+          envResolution.providerArgs
+        );
+        if (diagnostic.warning) {
+          warnings.push(
+            providerIds.length > 1 ? `${providerLabel}: ${diagnostic.warning}` : diagnostic.warning
+          );
+        }
+      };
+
       if (!probeResult.warning) {
+        const blockingCountBeforeModelChecks = blockingMessages.length;
         await appendSelectedModelVerification();
+        if (blockingMessages.length === blockingCountBeforeModelChecks) {
+          await appendOneShotDiagnostic();
+        }
         continue;
       }
 
@@ -7455,13 +7495,15 @@ export class TeamProvisioningService {
         } else {
           // Preflight warnings (including timeouts) should not block provisioning.
           warnings.push(prefixedWarning);
+          const blockingCountBeforeModelChecks = blockingMessages.length;
+          if (!isBlockingPreflightWarning && selectedModelIds.length > 0) {
+            await appendSelectedModelVerification();
+          }
           if (
             !isBlockingPreflightWarning &&
-            (isTransientProbeWarning(probeResult.warning) ||
-              isRecoverableGenericPreflightWarning(probeResult.warning)) &&
-            selectedModelIds.length > 0
+            blockingMessages.length === blockingCountBeforeModelChecks
           ) {
-            await appendSelectedModelVerification();
+            await appendOneShotDiagnostic();
           }
         }
       }
@@ -7826,6 +7868,89 @@ export class TeamProvisioningService {
     };
   }
 
+  private resolveProviderCompatibilityModel(params: {
+    providerId: TeamProviderId;
+    requestedModelId: string;
+    runtimeFacts: RuntimeProviderLaunchFacts;
+    limitContext: boolean;
+  }):
+    | { kind: 'available'; resolvedModelId: string | null }
+    | { kind: 'compatible'; reason: string }
+    | { kind: 'unavailable'; reason: string } {
+    const trimmedModelId = params.requestedModelId.trim();
+    if (!trimmedModelId) {
+      return {
+        kind: 'unavailable',
+        reason: 'Selected model id is empty.',
+      };
+    }
+
+    if (isDefaultProviderModelSelection(trimmedModelId)) {
+      return {
+        kind: 'available',
+        resolvedModelId: params.runtimeFacts.defaultModel,
+      };
+    }
+
+    const availableModels = params.runtimeFacts.modelIds;
+    let resolvedModelId: string | null = availableModels.has(trimmedModelId)
+      ? trimmedModelId
+      : null;
+
+    if (!resolvedModelId && params.providerId === 'anthropic') {
+      resolvedModelId =
+        resolveAnthropicLaunchModel({
+          selectedModel: trimmedModelId,
+          limitContext: params.limitContext,
+          availableLaunchModels: availableModels,
+          defaultLaunchModel: params.runtimeFacts.defaultModel,
+        }) ?? null;
+    }
+
+    if (!resolvedModelId && !trimmedModelId.includes('/')) {
+      const scopedMatches = Array.from(availableModels).filter(
+        (candidate) => candidate.split('/').at(-1) === trimmedModelId
+      );
+      if (scopedMatches.length === 1) {
+        resolvedModelId = scopedMatches[0];
+      } else if (scopedMatches.length > 1) {
+        return {
+          kind: 'unavailable',
+          reason:
+            `Selected model ${trimmedModelId} matched multiple live provider models: ` +
+            scopedMatches.join(', '),
+        };
+      }
+    }
+
+    if (resolvedModelId && (availableModels.size === 0 || availableModels.has(resolvedModelId))) {
+      return {
+        kind: 'available',
+        resolvedModelId,
+      };
+    }
+
+    const dynamicCatalog = params.runtimeFacts.runtimeCapabilities?.modelCatalog?.dynamic === true;
+    const hasAuthoritativeCatalog =
+      availableModels.size > 0 ||
+      params.runtimeFacts.modelCatalog != null ||
+      params.runtimeFacts.runtimeCapabilities?.modelCatalog?.dynamic === false;
+
+    if (dynamicCatalog || !hasAuthoritativeCatalog) {
+      return {
+        kind: 'compatible',
+        reason: dynamicCatalog
+          ? 'Runtime catalog allows dynamic model launch.'
+          : 'Runtime model catalog was unavailable.',
+      };
+    }
+
+    return {
+      kind: 'unavailable',
+      reason: `Selected model ${trimmedModelId} was not found in the live provider catalog.`,
+    };
+  }
+
   private async verifySelectedProviderModels({
     claudePath,
     cwd,
@@ -7861,39 +7986,28 @@ export class TeamProvisioningService {
       providerArgs,
       limitContext,
     });
-    const probeOutcomeByResolvedModelId = new Map<
-      string,
-      { kind: 'ready' | 'warning' | 'unavailable'; reason?: string }
-    >();
-    let resolvedDefaultModelId: string | null | undefined;
-    const plannedModels: (
-      | { requestedModelId: string; targetModelId: string }
-      | {
-          requestedModelId: string;
-          immediateOutcome: { kind: 'ready' | 'warning' | 'unavailable'; reason?: string };
-        }
-    )[] = [];
 
     const recordOutcome = (
       requestedModelId: string,
-      outcome: { kind: 'ready' | 'warning' | 'unavailable'; reason?: string }
+      outcome:
+        | { kind: 'available'; resolvedModelId: string | null }
+        | { kind: 'compatible'; reason: string }
+        | { kind: 'unavailable'; reason: string }
     ): void => {
-      if (outcome.kind === 'ready') {
-        details.push(`Selected model ${requestedModelId} verified for launch.`);
+      if (outcome.kind === 'available') {
+        details.push(`Selected model ${requestedModelId} is available for launch.`);
         return;
       }
-      if (outcome.kind === 'unavailable') {
-        blockingMessages.push(
-          `Selected model ${requestedModelId} is unavailable. ${outcome.reason ?? 'Model verification failed'}`
+      if (outcome.kind === 'compatible') {
+        details.push(
+          `Selected model ${requestedModelId} is compatible. Deep verification pending.`
         );
         return;
       }
-      warnings.push(
-        `Selected model ${requestedModelId} could not be verified. ${outcome.reason ?? 'Model verification failed'}`
-      );
+      blockingMessages.push(`Selected model ${requestedModelId} is unavailable. ${outcome.reason}`);
     };
 
-    appendPreflightDebugLog('provider_model_probe_batch_start', {
+    appendPreflightDebugLog('provider_model_catalog_check_start', {
       providerId,
       cwd,
       modelIds,
@@ -7905,162 +8019,23 @@ export class TeamProvisioningService {
         continue;
       }
 
-      let targetModelId = label;
-      if (isDefaultProviderModelSelection(label)) {
-        if (resolvedDefaultModelId === undefined) {
-          resolvedDefaultModelId = runtimeFacts.defaultModel;
-          if (!resolvedDefaultModelId) {
-            try {
-              resolvedDefaultModelId = await this.resolveProviderDefaultModel(
-                claudePath,
-                cwd,
-                providerId,
-                env,
-                providerArgs,
-                limitContext
-              );
-            } catch {
-              resolvedDefaultModelId = null;
-            }
-          }
-        }
-        if (!resolvedDefaultModelId) {
-          plannedModels.push({
-            requestedModelId: label,
-            immediateOutcome: {
-              kind: 'warning',
-              reason: 'Could not resolve the runtime default model',
-            },
-          });
-          continue;
-        }
-        targetModelId = resolvedDefaultModelId;
-      } else if (providerId === 'anthropic') {
-        const resolvedAnthropicModel = resolveAnthropicLaunchModel({
-          selectedModel: label,
+      recordOutcome(
+        label,
+        this.resolveProviderCompatibilityModel({
+          providerId,
+          requestedModelId: label,
+          runtimeFacts,
           limitContext,
-          availableLaunchModels: runtimeFacts.modelIds,
-          defaultLaunchModel: runtimeFacts.defaultModel,
-        });
-        if (resolvedAnthropicModel) {
-          targetModelId = resolvedAnthropicModel;
-        }
-      }
-
-      plannedModels.push({
-        requestedModelId: label,
-        targetModelId,
-      });
+        })
+      );
     }
 
-    const uniqueTargetModelIds = Array.from(
-      new Set(
-        plannedModels.flatMap((entry) => ('targetModelId' in entry ? [entry.targetModelId] : []))
-      )
-    );
-
-    const runProbeForModel = async (
-      targetModelId: string
-    ): Promise<{ kind: 'ready' | 'warning' | 'unavailable'; reason?: string }> => {
-      const cachedOutcome = probeOutcomeByResolvedModelId.get(targetModelId);
-      if (cachedOutcome) {
-        return cachedOutcome;
-      }
-
-      const probeStartedAt = Date.now();
-      try {
-        const result = await this.spawnProbe(
-          claudePath,
-          [...buildProviderModelProbeArgs(targetModelId), ...providerArgs],
-          cwd,
-          env,
-          getProviderModelProbeTimeoutMs(providerId),
-          {
-            resolveOnOutputMatch: ({ stdout, stderr }) =>
-              isProviderModelProbeSuccessOutput(`${stdout}\n${stderr}`),
-          }
-        );
-        const combinedOutput = buildCombinedLogs(result.stdout, result.stderr).trim();
-        const outcome =
-          result.exitCode === 0 && isProviderModelProbeSuccessOutput(combinedOutput)
-            ? ({ kind: 'ready' } as const)
-            : classifyProviderModelProbeFailure(
-                  combinedOutput || `Probe exited with code ${result.exitCode ?? 'unknown'}.`
-                ) === 'unavailable'
-              ? ({
-                  kind: 'unavailable',
-                  reason: normalizeProviderModelProbeFailureReason(
-                    combinedOutput || `Probe exited with code ${result.exitCode ?? 'unknown'}.`
-                  ),
-                } as const)
-              : ({
-                  kind: 'warning',
-                  reason: normalizeProviderModelProbeFailureReason(
-                    combinedOutput || `Probe exited with code ${result.exitCode ?? 'unknown'}.`
-                  ),
-                } as const);
-        probeOutcomeByResolvedModelId.set(targetModelId, outcome);
-        appendPreflightDebugLog('provider_model_probe_result', {
-          providerId,
-          cwd,
-          targetModelId,
-          durationMs: Date.now() - probeStartedAt,
-          outcome,
-        });
-        return outcome;
-      } catch (error) {
-        const message = error instanceof Error ? error.message.trim() : String(error).trim();
-        const normalizedMessage = normalizeProviderModelProbeFailureReason(message);
-        const outcome =
-          classifyProviderModelProbeFailure(message) === 'unavailable' &&
-          !isTransientModelProbeMessage(message)
-            ? ({ kind: 'unavailable', reason: normalizedMessage } as const)
-            : ({ kind: 'warning', reason: normalizedMessage } as const);
-        probeOutcomeByResolvedModelId.set(targetModelId, outcome);
-        appendPreflightDebugLog('provider_model_probe_result', {
-          providerId,
-          cwd,
-          targetModelId,
-          durationMs: Date.now() - probeStartedAt,
-          outcome,
-        });
-        return outcome;
-      }
-    };
-
-    const workerCount = Math.min(PROVIDER_MODEL_PROBE_CONCURRENCY, uniqueTargetModelIds.length);
-    let nextProbeIndex = 0;
-    await Promise.all(
-      Array.from({ length: workerCount }, async () => {
-        while (true) {
-          const currentIndex = nextProbeIndex;
-          nextProbeIndex += 1;
-          if (currentIndex >= uniqueTargetModelIds.length) {
-            return;
-          }
-          await runProbeForModel(uniqueTargetModelIds[currentIndex]);
-        }
-      })
-    );
-
-    for (const entry of plannedModels) {
-      if ('immediateOutcome' in entry) {
-        recordOutcome(entry.requestedModelId, entry.immediateOutcome);
-        continue;
-      }
-
-      const outcome = probeOutcomeByResolvedModelId.get(entry.targetModelId) ?? {
-        kind: 'warning' as const,
-        reason: 'Model verification failed',
-      };
-      recordOutcome(entry.requestedModelId, outcome);
-    }
-
-    appendPreflightDebugLog('provider_model_probe_batch_complete', {
+    appendPreflightDebugLog('provider_model_catalog_check_complete', {
       providerId,
       cwd,
       modelIds,
       durationMs: Date.now() - startedAt,
+      modelCount: runtimeFacts.modelIds.size,
       details,
       warnings,
       blockingMessages,
@@ -8079,7 +8054,7 @@ export class TeamProvisioningService {
   ): Promise<string | null> {
     const { stdout } = await execCli(
       claudePath,
-      ['model', 'list', '--json', '--provider', 'all', ...providerArgs],
+      buildProviderCliCommandArgs(providerArgs, ['model', 'list', '--json', '--provider', 'all']),
       {
         cwd,
         env,
@@ -11877,6 +11852,48 @@ export class TeamProvisioningService {
     });
   }
 
+  private filterRemovedMembersFromLaunchSnapshot(
+    snapshot: PersistedTeamLaunchSnapshot,
+    metaMembers: Awaited<ReturnType<TeamMembersMetaStore['getMembers']>>
+  ): PersistedTeamLaunchSnapshot {
+    const removedNames = new Set(
+      metaMembers
+        .filter((member) => Boolean(member.removedAt))
+        .map((member) => member.name?.trim().toLowerCase() ?? '')
+        .filter((name) => name.length > 0)
+    );
+    if (removedNames.size === 0) {
+      return snapshot;
+    }
+
+    const isRemoved = (name: string | undefined): boolean => {
+      const normalized = name?.trim().toLowerCase() ?? '';
+      return normalized.length > 0 && removedNames.has(normalized);
+    };
+    const expectedMembers = this.getPersistedLaunchMemberNames(snapshot).filter(
+      (name) => !isRemoved(name)
+    );
+    const members: Record<string, PersistedTeamLaunchMemberState> = {};
+    for (const [memberName, member] of Object.entries(snapshot.members)) {
+      if (isRemoved(memberName) || isRemoved(member.name)) {
+        continue;
+      }
+      members[memberName] = { ...member };
+    }
+
+    return createPersistedLaunchSnapshot({
+      teamName: snapshot.teamName,
+      expectedMembers,
+      bootstrapExpectedMembers: snapshot.bootstrapExpectedMembers?.filter(
+        (name) => !isRemoved(name)
+      ),
+      leadSessionId: snapshot.leadSessionId,
+      launchPhase: snapshot.launchPhase,
+      members,
+      updatedAt: snapshot.updatedAt,
+    });
+  }
+
   private findEffectiveRunMemberModel(
     run: ProvisioningRun | null,
     memberName: string
@@ -13234,25 +13251,39 @@ export class TeamProvisioningService {
   }> {
     const bootstrapSnapshot = await readBootstrapLaunchSnapshot(teamName);
     const persisted = await this.launchStateStore.read(teamName);
+    const metaMembers = await this.membersMetaStore.getMembers(teamName).catch(() => []);
     const recoveredMixedSnapshot = await this.recoverStaleMixedSecondaryLaunchSnapshot(
       teamName,
       bootstrapSnapshot,
       persisted
     );
     if (recoveredMixedSnapshot) {
+      const filteredSnapshot = this.filterRemovedMembersFromLaunchSnapshot(
+        recoveredMixedSnapshot,
+        metaMembers
+      );
       return {
-        snapshot: recoveredMixedSnapshot,
-        statuses: snapshotToMemberSpawnStatuses(recoveredMixedSnapshot),
+        snapshot: filteredSnapshot,
+        statuses: snapshotToMemberSpawnStatuses(filteredSnapshot),
       };
     }
-    const preferredSnapshot = choosePreferredLaunchSnapshot(bootstrapSnapshot, persisted);
-    if (preferredSnapshot && preferredSnapshot === bootstrapSnapshot) {
+    const filteredBootstrapSnapshot = bootstrapSnapshot
+      ? this.filterRemovedMembersFromLaunchSnapshot(bootstrapSnapshot, metaMembers)
+      : null;
+    const filteredPersisted = persisted
+      ? this.filterRemovedMembersFromLaunchSnapshot(persisted, metaMembers)
+      : null;
+    const preferredSnapshot = choosePreferredLaunchSnapshot(
+      filteredBootstrapSnapshot,
+      filteredPersisted
+    );
+    if (preferredSnapshot && preferredSnapshot === filteredBootstrapSnapshot) {
       return {
         snapshot: preferredSnapshot,
         statuses: snapshotToMemberSpawnStatuses(preferredSnapshot),
       };
     }
-    if (!persisted) {
+    if (!filteredPersisted) {
       return { snapshot: null, statuses: {} };
     }
 
@@ -13287,8 +13318,8 @@ export class TeamProvisioningService {
     }
 
     const liveAgentNames = await this.getLiveTeamAgentNames(teamName);
-    const nextMembers = { ...persisted.members };
-    const persistedMemberNames = this.getPersistedLaunchMemberNames(persisted);
+    const nextMembers = { ...filteredPersisted.members };
+    const persistedMemberNames = this.getPersistedLaunchMemberNames(filteredPersisted);
     const now = nowIso();
     for (const expected of persistedMemberNames) {
       const bootstrapMember = bootstrapSnapshot?.members[expected];
@@ -13431,8 +13462,8 @@ export class TeamProvisioningService {
     const reconciled = createPersistedLaunchSnapshot({
       teamName,
       expectedMembers: persistedMemberNames,
-      leadSessionId: persisted.leadSessionId,
-      launchPhase: persisted.launchPhase === 'active' ? 'active' : 'reconciled',
+      leadSessionId: filteredPersisted.leadSessionId,
+      launchPhase: filteredPersisted.launchPhase === 'active' ? 'active' : 'reconciled',
       members: nextMembers,
       updatedAt: now,
     });
@@ -18482,11 +18513,11 @@ export class TeamProvisioningService {
 
   /**
    * Two-stage preflight check:
-   * 1. `claude --version` — verifies binary is executable and returns version info.
-   *    (currently disabled for speed; keep commented for debugging)
-   * 2. `claude -p "ping"` — verifies that `-p` mode is actually authenticated.
-   *    This catches the common case where interactive `claude` works (OAuth/keychain)
-   *    but `-p` mode fails with "Not logged in" due to missing env vars.
+   * 1. `claude --version` verifies the binary is executable.
+   * 2. Runtime control-plane commands verify provider auth/team-launch readiness.
+   *
+   * Do not use `-p` here: full print mode can initialize MCP/plugin/LSP startup context
+   * before the first response, which makes Create Team preflight slow and flaky.
    */
   private async probeClaudeRuntime(
     claudePath: string,
@@ -18497,6 +18528,12 @@ export class TeamProvisioningService {
   ): Promise<{ warning?: string }> {
     const resolvedProviderId = resolveTeamProviderId(providerId);
     const cliCommandLabel = getConfiguredCliCommandLabel();
+    if (!(await pathExistsAsDirectory(cwd))) {
+      return {
+        warning: `Working directory does not exist: ${cwd}`,
+      };
+    }
+
     try {
       const versionProbe = await this.spawnProbe(
         claudePath,
@@ -18515,7 +18552,7 @@ export class TeamProvisioningService {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (isMissingCwdSpawnError(message)) {
+      if (isMissingCwdSpawnError(message) && !(await pathExistsAsDirectory(cwd))) {
         return {
           warning: `Working directory does not exist: ${cwd}`,
         };
@@ -18537,30 +18574,221 @@ export class TeamProvisioningService {
       };
     }
 
-    // Stage 1: verify binary works (awaited first for clearer errors)
-    // Important: keep this sequential with Stage 2 to avoid auth/credential-store races
-    // when multiple `claude` processes start simultaneously (most visible on Windows).
-    // const versionProbe = await this.spawnProbe(
-    //   claudePath,
-    //   ['--version'],
-    //   cwd,
-    //   env,
-    //   CLI_PREPARE_TIMEOUT_MS
-    // );
-    // if (versionProbe.exitCode !== 0) {
-    //   const errorText =
-    //     buildCombinedLogs(versionProbe.stdout, versionProbe.stderr) ||
-    //     `Claude CLI exited with code ${versionProbe.exitCode ?? 'unknown'} during warm-up`;
-    //   throw new Error(`Failed to warm up Claude CLI: ${errorText}`);
-    // }
+    if (resolvedProviderId === 'anthropic' || resolvedProviderId === 'codex') {
+      return await this.probeProviderRuntimeControlPlane({
+        claudePath,
+        cwd,
+        env,
+        providerId: resolvedProviderId,
+        providerArgs,
+      });
+    }
 
-    // Stage 2: verify `-p` mode auth actually works (with retry for stale locks after Ctrl+C)
+    return {};
+  }
+
+  private buildRuntimeProviderReadinessWarning(
+    providerId: TeamProviderId,
+    providerStatus: Partial<CliProviderStatus> | null | undefined
+  ): string | null {
+    const providerLabel = getTeamProviderLabel(providerId);
+    const detail = [providerStatus?.statusMessage?.trim(), providerStatus?.detailMessage?.trim()]
+      .filter((entry): entry is string => Boolean(entry))
+      .join(' ');
+
+    if (!providerStatus) {
+      return `${providerLabel} provider is not configured for runtime use. Runtime status did not include this provider.`;
+    }
+    if (providerStatus.supported === false) {
+      return `${providerLabel} provider is not configured for runtime use.${
+        detail ? ` ${detail}` : ''
+      }`;
+    }
+    if (providerStatus.authenticated === false) {
+      return `${providerLabel} provider is not authenticated.${detail ? ` ${detail}` : ''}`;
+    }
+    if (providerStatus.capabilities?.teamLaunch === false) {
+      return `${providerLabel} provider is not configured for runtime use. Team launch is unavailable.${
+        detail ? ` ${detail}` : ''
+      }`;
+    }
+
+    return null;
+  }
+
+  private extractAuthStatusReadiness(
+    providerId: TeamProviderId,
+    parsed: AuthStatusCommandResponse
+  ): {
+    authenticated: boolean | null;
+    providerStatus: Partial<CliProviderStatus> | null;
+  } {
+    const providerStatus = parsed.providers?.[providerId] ?? null;
+    if (typeof providerStatus?.authenticated === 'boolean') {
+      return {
+        authenticated: providerStatus.authenticated,
+        providerStatus,
+      };
+    }
+    if (typeof parsed.loggedIn === 'boolean') {
+      return {
+        authenticated: parsed.loggedIn,
+        providerStatus,
+      };
+    }
+    return {
+      authenticated: null,
+      providerStatus,
+    };
+  }
+
+  private async probeProviderRuntimeControlPlane({
+    claudePath,
+    cwd,
+    env,
+    providerId,
+    providerArgs,
+  }: {
+    claudePath: string;
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    providerId: TeamProviderId;
+    providerArgs: string[];
+  }): Promise<{ warning?: string }> {
+    const cliCommandLabel = getConfiguredCliCommandLabel();
+    const providerLabel = getTeamProviderLabel(providerId);
+
+    try {
+      const runtimeStatus = await execCli(
+        claudePath,
+        buildProviderCliCommandArgs(providerArgs, [
+          'runtime',
+          'status',
+          '--json',
+          '--provider',
+          providerId,
+        ]),
+        {
+          cwd,
+          env,
+          timeout: 8_000,
+        }
+      );
+      const parsed = extractJsonObjectFromCli<RuntimeStatusCommandResponse>(runtimeStatus.stdout);
+      const providerStatus = parsed.providers?.[providerId] ?? null;
+      const warning = this.buildRuntimeProviderReadinessWarning(providerId, providerStatus);
+      appendPreflightDebugLog('provider_runtime_control_plane_status', {
+        providerId,
+        cwd,
+        ready: !warning,
+        authenticated: providerStatus?.authenticated,
+        teamLaunch: providerStatus?.capabilities?.teamLaunch,
+        oneShot: providerStatus?.capabilities?.oneShot,
+        warning,
+      });
+      return warning ? { warning } : {};
+    } catch (runtimeStatusError) {
+      const runtimeStatusMessage =
+        runtimeStatusError instanceof Error
+          ? runtimeStatusError.message
+          : String(runtimeStatusError);
+      try {
+        const authStatus = await execCli(
+          claudePath,
+          buildProviderCliCommandArgs(providerArgs, [
+            'auth',
+            'status',
+            '--json',
+            '--provider',
+            providerId,
+          ]),
+          {
+            cwd,
+            env,
+            timeout: 8_000,
+          }
+        );
+        const parsed = extractJsonObjectFromCli<AuthStatusCommandResponse>(authStatus.stdout);
+        const authReadiness = this.extractAuthStatusReadiness(providerId, parsed);
+        const readinessWarning = authReadiness.providerStatus
+          ? this.buildRuntimeProviderReadinessWarning(providerId, authReadiness.providerStatus)
+          : null;
+        if (authReadiness.authenticated === false || readinessWarning) {
+          const authWarning =
+            readinessWarning ??
+            `${providerLabel} provider is not authenticated. Runtime auth status reported logged out.`;
+          appendPreflightDebugLog('provider_runtime_control_plane_auth_fallback', {
+            providerId,
+            cwd,
+            ready: false,
+            runtimeStatusError: runtimeStatusMessage,
+            warning: authWarning,
+          });
+          return { warning: authWarning };
+        }
+        if (authReadiness.authenticated === true) {
+          const warning =
+            `${cliCommandLabel} runtime status was unavailable, but auth status passed. ` +
+            `Proceeding with catalog checks. Details: ${runtimeStatusMessage}`;
+          appendPreflightDebugLog('provider_runtime_control_plane_auth_fallback', {
+            providerId,
+            cwd,
+            ready: true,
+            runtimeStatusError: runtimeStatusMessage,
+            warning,
+          });
+          return { warning };
+        }
+      } catch (authStatusError) {
+        const authStatusMessage =
+          authStatusError instanceof Error ? authStatusError.message : String(authStatusError);
+        appendPreflightDebugLog('provider_runtime_control_plane_auth_fallback', {
+          providerId,
+          cwd,
+          ready: false,
+          runtimeStatusError: runtimeStatusMessage,
+          authStatusError: authStatusMessage,
+        });
+        return {
+          warning:
+            `${cliCommandLabel} runtime status check did not complete. ` +
+            `Proceeding with catalog checks. Details: ${runtimeStatusMessage}; auth status failed: ${authStatusMessage}`,
+        };
+      }
+
+      return {
+        warning:
+          `${cliCommandLabel} runtime status was unavailable and auth status did not report ${providerLabel} authentication. ` +
+          `Proceeding with catalog checks. Details: ${runtimeStatusMessage}`,
+      };
+    }
+  }
+
+  private async runProviderOneShotDiagnostic(
+    claudePath: string,
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+    providerId: TeamProviderId | undefined = 'anthropic',
+    providerArgs: string[] = []
+  ): Promise<{ warning?: string }> {
+    const cliCommandLabel = getConfiguredCliCommandLabel();
+    const resolvedProviderId = resolveTeamProviderId(providerId);
+
+    if (!(await pathExistsAsDirectory(cwd))) {
+      appendPreflightDebugLog('provider_one_shot_diagnostic_skipped', {
+        providerId: resolvedProviderId,
+        cwd,
+        reason: 'missing_cwd',
+      });
+      return {};
+    }
+
     for (let attempt = 1; attempt <= PREFLIGHT_AUTH_MAX_RETRIES; attempt++) {
       let pingProbe: { exitCode: number | null; stdout: string; stderr: string } | null = null;
       try {
         pingProbe = await this.spawnProbe(
           claudePath,
-          [...getPreflightPingArgs(providerId), ...providerArgs],
+          buildProviderCliCommandArgs(providerArgs, getPreflightPingArgs(providerId)),
           cwd,
           env,
           getPreflightTimeoutMs(providerId),
@@ -18575,16 +18803,19 @@ export class TeamProvisioningService {
         const message = error instanceof Error ? error.message : String(error);
         if (!isProbeTimeoutMessage(message) && attempt < PREFLIGHT_AUTH_MAX_RETRIES) {
           logger.warn(
-            `Preflight ping failed (attempt ${attempt}/${PREFLIGHT_AUTH_MAX_RETRIES}), ` +
+            `One-shot diagnostic failed (attempt ${attempt}/${PREFLIGHT_AUTH_MAX_RETRIES}), ` +
               `retrying in ${PREFLIGHT_AUTH_RETRY_DELAY_MS}ms: ${message}`
           );
           await new Promise((resolve) => setTimeout(resolve, PREFLIGHT_AUTH_RETRY_DELAY_MS));
           continue;
         }
+        const normalizedMessage = normalizeProviderModelProbeFailureReason(message);
         return {
           warning:
-            `Preflight check for \`${cliCommandLabel} -p\` did not complete. ` +
-            `Proceeding anyway. Details: ${message}`,
+            (isProbeTimeoutMessage(message)
+              ? 'One-shot diagnostic timed out after runtime readiness passed. '
+              : 'One-shot diagnostic did not complete after runtime readiness passed. ') +
+            `This does not mark selected models unavailable. Details: ${normalizedMessage}`,
         };
       }
 
@@ -18593,8 +18824,8 @@ export class TeamProvisioningService {
 
       if (isAuthFailure && attempt < PREFLIGHT_AUTH_MAX_RETRIES) {
         logger.warn(
-          `Preflight auth failure detected (attempt ${attempt}/${PREFLIGHT_AUTH_MAX_RETRIES}), ` +
-            `retrying in ${PREFLIGHT_AUTH_RETRY_DELAY_MS}ms — likely stale locks from interrupted process`
+          `One-shot diagnostic auth failure detected (attempt ${attempt}/${PREFLIGHT_AUTH_MAX_RETRIES}), ` +
+            `retrying in ${PREFLIGHT_AUTH_RETRY_DELAY_MS}ms - likely stale locks from interrupted process`
         );
         await new Promise((resolve) => setTimeout(resolve, PREFLIGHT_AUTH_RETRY_DELAY_MS));
         continue;
@@ -18617,7 +18848,11 @@ export class TeamProvisioningService {
           : normalizedOutput
             ? `${cliCommandLabel} preflight check failed (exit code ${pingProbe.exitCode ?? 'unknown'}). Details: ${normalizedOutput}`
             : `${cliCommandLabel} preflight check failed (exit code ${pingProbe.exitCode ?? 'unknown'}).`;
-        return { warning: hint };
+        return {
+          warning:
+            'One-shot diagnostic failed after runtime readiness passed. ' +
+            `This does not mark selected models unavailable. Details: ${hint}`,
+        };
       }
 
       const pongCandidate = pingProbe.stdout.trim() || pingProbe.stderr.trim();
@@ -18627,14 +18862,15 @@ export class TeamProvisioningService {
       if (!isPong) {
         return {
           warning:
-            'Preflight ping completed but did not return the expected PONG. ' +
+            'One-shot diagnostic completed but did not return the expected PONG. ' +
+            'This does not mark selected models unavailable. ' +
             `Output: ${combinedOutput || '(empty)'}`,
         };
       }
 
       if (attempt > 1) {
         logger.info(
-          `Preflight auth succeeded on attempt ${attempt} (previous attempt had auth failure)`
+          `One-shot diagnostic succeeded on attempt ${attempt} (previous attempt had auth failure)`
         );
       }
       return {};

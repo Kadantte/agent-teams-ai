@@ -734,10 +734,10 @@ export interface ResolvedTeamMember {
 }
 
 export interface MemberRuntimeAdvisory {
-  kind: 'sdk_retrying';
+  kind: 'sdk_retrying' | 'api_error';
   observedAt: string;
-  retryUntil: string;
-  retryDelayMs: number;
+  retryUntil?: string;
+  retryDelayMs?: number;
   reasonCode?:
     | 'quota_exhausted'
     | 'rate_limited'
@@ -747,6 +747,7 @@ export interface MemberRuntimeAdvisory {
     | 'backend_error'
     | 'unknown';
   message?: string;
+  statusCode?: number;
 }
 
 export interface TeamProcess {

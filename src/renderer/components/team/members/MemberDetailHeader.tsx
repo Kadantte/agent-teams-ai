@@ -85,11 +85,15 @@ export const MemberDetailHeader = ({
   const launchVisualState = launchPresentation.launchVisualState;
   const launchStatusLabel = launchPresentation.launchStatusLabel;
   const dotClass = launchPresentation.dotClass;
+  const runtimeAdvisoryLabel = launchPresentation.runtimeAdvisoryLabel;
   const runtimeAdvisoryTitle = launchPresentation.runtimeAdvisoryTitle;
+  const runtimeAdvisoryTone = launchPresentation.runtimeAdvisoryTone;
   const badgeLabel =
-    launchVisualState === 'runtime_pending' || launchVisualState === 'permission_pending'
-      ? (launchStatusLabel ?? presenceLabel)
-      : presenceLabel;
+    runtimeAdvisoryTone === 'error' && runtimeAdvisoryLabel
+      ? runtimeAdvisoryLabel
+      : launchVisualState === 'runtime_pending' || launchVisualState === 'permission_pending'
+        ? (launchStatusLabel ?? presenceLabel)
+        : presenceLabel;
 
   const canEditRole =
     !isLeadMember(member) && !member.removedAt && !isTeamProvisioning && !!onUpdateRole;
@@ -147,7 +151,11 @@ export const MemberDetailHeader = ({
               <>
                 <Badge
                   variant="secondary"
-                  className="px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--color-text-muted)]"
+                  className={`px-1.5 py-0.5 text-[10px] font-normal leading-none ${
+                    runtimeAdvisoryTone === 'error'
+                      ? 'bg-red-500/15 text-red-300'
+                      : 'text-[var(--color-text-muted)]'
+                  }`}
                   title={runtimeAdvisoryTitle}
                 >
                   {badgeLabel}

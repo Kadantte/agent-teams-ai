@@ -87,9 +87,7 @@ describe('memberHelpers spawn-aware presence', () => {
 
     expect(
       getSpawnAwareDotClass(member, 'spawning', 'starting', false, false, true, false, undefined)
-    ).toContain(
-      'bg-amber-400'
-    );
+    ).toContain('bg-amber-400');
 
     expect(getSpawnCardClass('spawning', 'starting', false, false)).toContain(
       'member-waiting-shimmer'
@@ -112,16 +110,7 @@ describe('memberHelpers spawn-aware presence', () => {
     ).toBe('offline');
 
     expect(
-      getSpawnAwareDotClass(
-        member,
-        'spawning',
-        'starting',
-        false,
-        false,
-        false,
-        false,
-        undefined
-      )
+      getSpawnAwareDotClass(member, 'spawning', 'starting', false, false, false, false, undefined)
     ).toContain('bg-red-400');
 
     expect(getSpawnCardClass('spawning', 'starting', false, false, false, false)).toBe('');
@@ -155,9 +144,9 @@ describe('memberHelpers spawn-aware presence', () => {
       )
     ).toContain('bg-zinc-400');
 
-    expect(getSpawnCardClass('online', 'runtime_pending_bootstrap', true, true, true, false)).toContain(
-      'member-waiting-shimmer'
-    );
+    expect(
+      getSpawnCardClass('online', 'runtime_pending_bootstrap', true, true, true, false)
+    ).toContain('member-waiting-shimmer');
   });
 
   it('shows confirmed teammates as ready instead of idle while launch is still settling', () => {
@@ -343,6 +332,59 @@ describe('memberHelpers spawn-aware presence', () => {
         'gemini'
       )
     ).toContain('Connection timed out while contacting provider.');
+  });
+
+  it('renders terminal API errors as errors instead of retrying status', () => {
+    expect(
+      getMemberRuntimeAdvisoryLabel(
+        {
+          kind: 'api_error',
+          observedAt: '2026-04-07T09:00:00.000Z',
+          reasonCode: 'auth_error',
+          statusCode: 500,
+          message: 'API Error: 500 {"error":{"message":"auth_unavailable: no auth available"}}',
+        },
+        'anthropic',
+        Date.parse('2026-04-07T09:00:00.000Z')
+      )
+    ).toBe('Anthropic auth error');
+
+    expect(
+      getMemberRuntimeAdvisoryTitle(
+        {
+          kind: 'api_error',
+          observedAt: '2026-04-07T09:00:00.000Z',
+          reasonCode: 'auth_error',
+          statusCode: 500,
+          message: 'auth_unavailable: no auth available',
+        },
+        'anthropic'
+      )
+    ).toContain('Anthropic authentication error');
+  });
+
+  it('marks launch presentation as an error when the runtime has a terminal API error', () => {
+    const presentation = buildMemberLaunchPresentation({
+      member: { ...member, providerId: 'anthropic' },
+      spawnStatus: 'online',
+      spawnLaunchState: 'runtime_pending_bootstrap',
+      spawnLivenessSource: 'process',
+      spawnRuntimeAlive: true,
+      runtimeAdvisory: {
+        kind: 'api_error',
+        observedAt: '2026-04-07T09:00:00.000Z',
+        reasonCode: 'auth_error',
+        statusCode: 500,
+        message: 'auth_unavailable: no auth available',
+      },
+      isLaunchSettling: false,
+      isTeamAlive: true,
+      isTeamProvisioning: false,
+    });
+
+    expect(presentation.presenceLabel).toBe('Anthropic auth error');
+    expect(presentation.runtimeAdvisoryTone).toBe('error');
+    expect(presentation.dotClass).toContain('bg-red-400');
   });
 
   it('falls back to the existing generic retry wording when no structured reason is present', () => {

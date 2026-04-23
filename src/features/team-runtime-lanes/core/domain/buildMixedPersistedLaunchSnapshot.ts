@@ -160,6 +160,9 @@ function createPrimaryLaneMemberState(params: {
     bootstrapConfirmed: runtime?.bootstrapConfirmed === true,
     hardFailure: runtime?.hardFailure === true || runtime?.launchState === 'failed_to_start',
     hardFailureReason: runtime?.hardFailureReason ?? runtime?.error,
+    pendingPermissionRequestIds: runtime?.pendingPermissionRequestIds?.length
+      ? [...new Set(runtime.pendingPermissionRequestIds)]
+      : undefined,
     firstSpawnAcceptedAt: runtime?.firstSpawnAcceptedAt,
     lastHeartbeatAt: runtime?.lastHeartbeatAt,
     lastRuntimeAliveAt: runtime?.runtimeAlive ? params.updatedAt : undefined,

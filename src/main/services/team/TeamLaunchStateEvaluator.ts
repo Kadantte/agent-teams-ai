@@ -395,6 +395,22 @@ export function createPersistedLaunchSnapshot(params: {
   const members = params.members ?? {};
   const launchPhase = params.launchPhase ?? 'active';
 
+  for (const name of expectedMembers) {
+    if (members[name]) {
+      continue;
+    }
+    members[name] = {
+      name,
+      launchState: 'starting',
+      agentToolAccepted: false,
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+      lastEvaluatedAt: updatedAt,
+      diagnostics: [],
+    };
+  }
+
   // When the launch is over (finished/reconciled), members still in 'starting' state
   // (never spawned — agentToolAccepted is false) are unreachable and should be marked
   // as failed. Without this, they stay as 'pending' forever, causing the UI to show

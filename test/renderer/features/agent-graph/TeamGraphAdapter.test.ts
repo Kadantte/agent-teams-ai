@@ -1580,6 +1580,29 @@ describe('TeamGraphAdapter particles', () => {
     });
   });
 
+  it('does not project warning-only change presence as file changes', () => {
+    const adapter = TeamGraphAdapter.create();
+    const graph = adapter.adapt(
+      createBaseTeamData({
+        tasks: [
+          {
+            id: 'task-warning-only',
+            displayId: '#6',
+            subject: 'Needs attention without file diff',
+            owner: 'alice',
+            status: 'in_progress',
+            changePresence: 'needs_attention',
+          } as TeamTaskWithKanban,
+        ],
+      }),
+      'my-team'
+    );
+
+    expect(findNode(graph, 'task:my-team:task-warning-only')).toMatchObject({
+      changePresence: 'unknown',
+    });
+  });
+
   it('adds compact runtime labels for lead and members and refreshes when runtime changes', () => {
     const adapter = TeamGraphAdapter.create();
     adapter.adapt(createBaseTeamData(), 'my-team');

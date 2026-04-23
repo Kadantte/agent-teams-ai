@@ -487,6 +487,1163 @@ describe('Team agent launch matrix safe e2e', () => {
     });
   });
 
+  it('does not resurrect removed OpenCode secondary teammates in mixed Anthropic launch recovery', async () => {
+    const teamName = 'mixed-anthropic-removed-opencode-stale-state-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    await writeTeamMeta(teamName, projectPath, { primaryProviderId: 'anthropic' });
+    await writeMembersMeta(teamName, { primaryProviderId: 'anthropic', removedMembers: ['tom'] });
+    await writeMixedTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/minimax-m2.5-free',
+          laneId: 'secondary:opencode:bob',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        tom: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/nemotron-3-super-free',
+          laneId: 'secondary:opencode:tom',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'failed_to_start',
+          agentToolAccepted: false,
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: 'stale removed OpenCode lane failure',
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'bob']);
+    expect(statuses.teamLaunchState).toBe('clean_success');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      pendingCount: 0,
+      failedCount: 0,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toBeUndefined();
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'opencode',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/minimax-m2.5-free',
+    });
+    expect(runtimeSnapshot.members.tom).toBeUndefined();
+  });
+
+  it('keeps active suffixed OpenCode secondary teammates in mixed Anthropic recovery', async () => {
+    const teamName = 'mixed-anthropic-suffixed-opencode-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    await writeTeamMeta(teamName, projectPath, { primaryProviderId: 'anthropic' });
+    await writeMembersMeta(teamName, {
+      primaryProviderId: 'anthropic',
+      removedMembers: ['bob', 'tom'],
+      extraMembers: [
+        {
+          name: 'bob-2',
+          providerId: 'opencode',
+          model: 'opencode/minimax-m2.5-free',
+        },
+      ],
+    });
+    await writeMixedTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        'bob-2': mixedMemberState({
+          name: 'bob-2',
+          providerId: 'opencode',
+          model: 'opencode/minimax-m2.5-free',
+          laneId: 'secondary:opencode:bob-2',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'bob-2']);
+    expect(statuses.teamLaunchState).toBe('clean_success');
+    expect(statuses.statuses.bob).toBeUndefined();
+    expect(statuses.statuses.tom).toBeUndefined();
+    expect(statuses.statuses['bob-2']).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.bob).toBeUndefined();
+    expect(runtimeSnapshot.members.tom).toBeUndefined();
+    expect(runtimeSnapshot.members['bob-2']).toMatchObject({
+      providerId: 'opencode',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/minimax-m2.5-free',
+    });
+  });
+
+  it('ignores stale active OpenCode lane index entries for removed teammates in mixed Anthropic recovery', async () => {
+    const teamName = 'mixed-anthropic-removed-stale-lane-index-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    await writeTeamMeta(teamName, projectPath, { primaryProviderId: 'anthropic' });
+    await writeMembersMeta(teamName, {
+      primaryProviderId: 'anthropic',
+      removedMembers: ['bob', 'tom'],
+    });
+    await writeMixedTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+      },
+    });
+    await upsertOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: getTeamsBasePath(),
+      teamName,
+      laneId: 'secondary:opencode:bob',
+      state: 'active',
+    });
+    await upsertOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: getTeamsBasePath(),
+      teamName,
+      laneId: 'secondary:opencode:tom',
+      state: 'active',
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice']);
+    expect(statuses.teamLaunchState).toBe('clean_success');
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toBeUndefined();
+    expect(statuses.statuses.tom).toBeUndefined();
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      runtimeModel: 'haiku',
+    });
+    expect(runtimeSnapshot.members.bob).toBeUndefined();
+    expect(runtimeSnapshot.members.tom).toBeUndefined();
+    await expect(readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName)).resolves.toMatchObject({
+      lanes: {
+        'secondary:opencode:bob': { state: 'active' },
+        'secondary:opencode:tom': { state: 'active' },
+      },
+    });
+  });
+
+  it('recovers pure Anthropic status and model metadata from persisted state after service restart', async () => {
+    const teamName = 'pure-persisted-anthropic-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          name: 'bob',
+          providerId: 'anthropic',
+          model: 'sonnet',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'bob']);
+    expect(statuses.teamLaunchState).toBe('clean_success');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      pendingCount: 0,
+      failedCount: 0,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      alive: false,
+      runtimeModel: 'haiku',
+    });
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      alive: false,
+      runtimeModel: 'sonnet',
+    });
+  });
+
+  it('recovers pure Anthropic partial failure from persisted state after service restart', async () => {
+    const teamName = 'pure-persisted-anthropic-failure-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          name: 'bob',
+          providerId: 'anthropic',
+          model: 'sonnet',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'failed_to_start',
+          agentToolAccepted: false,
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: 'Anthropic pane exited before bootstrap',
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'bob']);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 0,
+      failedCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'Anthropic pane exited before bootstrap',
+    });
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      alive: false,
+      runtimeModel: 'sonnet',
+    });
+  });
+
+  it('does not resurrect removed pure Anthropic teammates from stale persisted launch state', async () => {
+    const teamName = 'pure-anthropic-removed-member-stale-state-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName, { removedMembers: ['bob'] });
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      expectedMembers: ['alice', 'bob'],
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          name: 'bob',
+          providerId: 'anthropic',
+          model: 'sonnet',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'failed_to_start',
+          agentToolAccepted: false,
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: 'stale removed member failure',
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice']);
+    expect(statuses.teamLaunchState).toBe('clean_success');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 0,
+      failedCount: 0,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toBeUndefined();
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      runtimeModel: 'haiku',
+    });
+    expect(runtimeSnapshot.members.bob).toBeUndefined();
+  });
+
+  it('keeps active suffixed pure Anthropic teammates when the removed base member is stale', async () => {
+    const teamName = 'pure-anthropic-suffixed-active-member-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName, {
+      removedMembers: ['bob'],
+      extraMembers: [{ name: 'bob-2', providerId: 'anthropic', model: 'sonnet' }],
+    });
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      expectedMembers: ['alice', 'bob-2'],
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        'bob-2': mixedMemberState({
+          name: 'bob-2',
+          providerId: 'anthropic',
+          model: 'sonnet',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'bob-2']);
+    expect(statuses.teamLaunchState).toBe('clean_success');
+    expect(statuses.statuses.bob).toBeUndefined();
+    expect(statuses.statuses['bob-2']).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.bob).toBeUndefined();
+    expect(runtimeSnapshot.members['bob-2']).toMatchObject({
+      providerId: 'anthropic',
+      runtimeModel: 'sonnet',
+    });
+  });
+
+  it('filters removed pure Anthropic teammates from bootstrap-only launch recovery', async () => {
+    const teamName = 'pure-anthropic-removed-bootstrap-state-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName, { removedMembers: ['bob'] });
+    await writeBootstrapState(teamName, [
+      {
+        name: 'alice',
+        status: 'bootstrap_confirmed',
+        lastAttemptAt: Date.parse('2026-04-23T10:00:00.000Z'),
+        lastObservedAt: Date.parse('2026-04-23T10:00:05.000Z'),
+      },
+      {
+        name: 'bob',
+        status: 'failed',
+        lastAttemptAt: Date.parse('2026-04-23T10:00:00.000Z'),
+        lastObservedAt: Date.parse('2026-04-23T10:00:04.000Z'),
+        failureReason: 'stale removed bootstrap failure',
+      },
+    ]);
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice']);
+    expect(statuses.teamLaunchState).toBe('clean_success');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 0,
+      failedCount: 0,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      bootstrapConfirmed: true,
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toBeUndefined();
+  });
+
+  it('recovers pure Anthropic runtime-pending bootstrap from persisted state after service restart', async () => {
+    const teamName = 'pure-persisted-anthropic-bootstrap-pending-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          name: 'bob',
+          providerId: 'anthropic',
+          model: 'sonnet',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'runtime_pending_bootstrap',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'bob']);
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 1,
+      failedCount: 0,
+      runtimeAlivePendingCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_bootstrap',
+      runtimeAlive: true,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+    });
+  });
+
+  it('recovers pure Anthropic runtime-pending permission from persisted state after service restart', async () => {
+    const teamName = 'pure-persisted-anthropic-permission-pending-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          name: 'bob',
+          providerId: 'anthropic',
+          model: 'sonnet',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'runtime_pending_permission',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+          pendingPermissionRequestIds: ['perm-bob'],
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'bob']);
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 1,
+      failedCount: 0,
+      runtimeAlivePendingCount: 1,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_permission',
+      runtimeAlive: true,
+      pendingPermissionRequestIds: ['perm-bob'],
+      hardFailure: false,
+    });
+  });
+
+  it('keeps active pure Anthropic starting teammates pending after service restart', async () => {
+    const teamName = 'pure-active-anthropic-starting-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      launchPhase: 'active',
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          name: 'bob',
+          providerId: 'anthropic',
+          model: 'sonnet',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'starting',
+          agentToolAccepted: false,
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.launchPhase).toBe('active');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 1,
+      failedCount: 0,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'spawning',
+      launchState: 'starting',
+      agentToolAccepted: false,
+      runtimeAlive: false,
+      hardFailure: false,
+    });
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'anthropic',
+      alive: false,
+      runtimeModel: 'sonnet',
+    });
+  });
+
+  it('fails finished pure Anthropic starting teammates after service restart', async () => {
+    const teamName = 'pure-finished-anthropic-never-spawned-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      launchPhase: 'finished',
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          name: 'bob',
+          providerId: 'anthropic',
+          model: 'sonnet',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'starting',
+          agentToolAccepted: false,
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.launchPhase).toBe('finished');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 0,
+      failedCount: 1,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      agentToolAccepted: false,
+      runtimeAlive: false,
+      hardFailure: true,
+      hardFailureReason: 'Teammate was never spawned during launch.',
+    });
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'anthropic',
+      alive: false,
+      runtimeModel: 'sonnet',
+    });
+  });
+
+  it('keeps active pure Anthropic missing member state pending after service restart', async () => {
+    const teamName = 'pure-active-anthropic-missing-state-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      launchPhase: 'active',
+      expectedMembers: ['alice', 'bob'],
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'bob']);
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.launchPhase).toBe('active');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 1,
+      failedCount: 0,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'spawning',
+      launchState: 'starting',
+      agentToolAccepted: false,
+      runtimeAlive: false,
+      hardFailure: false,
+    });
+  });
+
+  it('fails finished pure Anthropic missing member state after service restart', async () => {
+    const teamName = 'pure-finished-anthropic-missing-state-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      launchPhase: 'finished',
+      expectedMembers: ['alice', 'bob'],
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'bob']);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.launchPhase).toBe('finished');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 0,
+      failedCount: 1,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      agentToolAccepted: false,
+      runtimeAlive: false,
+      hardFailure: true,
+      hardFailureReason: 'Teammate was never spawned during launch.',
+    });
+  });
+
+  it('recovers legacy pure Anthropic partial launch marker without leaving missing teammates joining', async () => {
+    const teamName = 'legacy-pure-anthropic-partial-marker-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writeLegacyPartialLaunchState({
+      teamName,
+      expectedMembers: ['alice', 'bob'],
+      confirmedMembers: ['alice'],
+      missingMembers: ['bob'],
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'bob']);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.launchPhase).toBe('reconciled');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 0,
+      failedCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      agentToolAccepted: true,
+      runtimeAlive: false,
+      bootstrapConfirmed: true,
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      agentToolAccepted: true,
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: true,
+      hardFailureReason: 'Legacy partial launch marker reported teammate missing.',
+    });
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'anthropic',
+      alive: false,
+      runtimeModel: 'sonnet',
+    });
+  });
+
+  it('keeps finished pure Anthropic runtime-pending bootstrap teammates pending after service restart', async () => {
+    const teamName = 'pure-finished-anthropic-bootstrap-pending-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      launchPhase: 'finished',
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          name: 'bob',
+          providerId: 'anthropic',
+          model: 'sonnet',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'runtime_pending_bootstrap',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.launchPhase).toBe('finished');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 1,
+      failedCount: 0,
+      runtimeAlivePendingCount: 1,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_bootstrap',
+      agentToolAccepted: true,
+      runtimeAlive: true,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+    });
+  });
+
+  it('keeps finished pure Anthropic runtime-pending permission teammates pending after service restart', async () => {
+    const teamName = 'pure-finished-anthropic-permission-pending-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    await writePureAnthropicTeamLaunchState({
+      teamName,
+      launchPhase: 'finished',
+      members: {
+        alice: mixedMemberState({
+          name: 'alice',
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          name: 'bob',
+          providerId: 'anthropic',
+          model: 'sonnet',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'runtime_pending_permission',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+          pendingPermissionRequestIds: ['perm-bob'],
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.launchPhase).toBe('finished');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 1,
+      failedCount: 0,
+      runtimeAlivePendingCount: 1,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_permission',
+      agentToolAccepted: true,
+      runtimeAlive: true,
+      pendingPermissionRequestIds: ['perm-bob'],
+      hardFailure: false,
+    });
+  });
+
+  it('recovers mixed Anthropic and Gemini failure with split OpenCode lane truth after service restart', async () => {
+    const teamName = 'mixed-persisted-anthropic-gemini-failure-opencode-split-safe-e2e';
+    await writeMixedTeamConfig({
+      teamName,
+      projectPath,
+      includeGeminiPrimary: true,
+      primaryProviderId: 'anthropic',
+    });
+    await writeTeamMeta(teamName, projectPath, { primaryProviderId: 'anthropic' });
+    await writeMembersMeta(teamName, {
+      includeGeminiPrimary: true,
+      primaryProviderId: 'anthropic',
+    });
+    await writeMixedTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        reviewer: mixedMemberState({
+          providerId: 'gemini',
+          model: 'gemini-2.5-flash',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'gemini',
+          launchState: 'failed_to_start',
+          agentToolAccepted: false,
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: 'Gemini pane exited before bootstrap',
+        }),
+        bob: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/minimax-m2.5-free',
+          laneId: 'secondary:opencode:bob',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        tom: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/nemotron-3-super-free',
+          laneId: 'secondary:opencode:tom',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'runtime_pending_permission',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+          pendingPermissionRequestIds: ['perm-tom'],
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'reviewer', 'bob', 'tom']);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      pendingCount: 1,
+      failedCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.reviewer).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'Gemini pane exited before bootstrap',
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_permission',
+      hardFailure: false,
+      pendingPermissionRequestIds: ['perm-tom'],
+    });
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      runtimeModel: 'haiku',
+    });
+    expect(runtimeSnapshot.members.reviewer).toMatchObject({
+      providerId: 'gemini',
+      laneKind: 'primary',
+      alive: false,
+      runtimeModel: 'gemini-2.5-flash',
+    });
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'opencode',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/minimax-m2.5-free',
+    });
+    expect(runtimeSnapshot.members.tom).toMatchObject({
+      providerId: 'opencode',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/nemotron-3-super-free',
+    });
+  });
+
   it('recovers mixed Gemini failure and split OpenCode lane truth after service restart', async () => {
     const teamName = 'mixed-persisted-gemini-failure-opencode-split-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath, includeGeminiPrimary: true });
@@ -859,6 +2016,133 @@ describe('Team agent launch matrix safe e2e', () => {
       providerId: 'anthropic',
       laneKind: 'primary',
       runtimeModel: 'haiku',
+    });
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:bob',
+      laneKind: 'secondary',
+      alive: true,
+      restartable: false,
+      pid: sharedHostPid,
+      runtimeModel: 'opencode/minimax-m2.5-free',
+      rssBytes: sharedRssBytes,
+    });
+    expect(runtimeSnapshot.members.tom).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:tom',
+      laneKind: 'secondary',
+      alive: true,
+      restartable: false,
+      pid: sharedHostPid,
+      runtimeModel: 'opencode/nemotron-3-super-free',
+      rssBytes: sharedRssBytes,
+    });
+  });
+
+  it('keeps OpenCode side-lane pid and memory visible after Anthropic and Gemini mixed failure recovery', async () => {
+    const teamName = 'mixed-anthropic-gemini-failure-opencode-memory-safe-e2e';
+    const sharedHostPid = 51_515;
+    const sharedRssBytes = 219.2 * 1024 * 1024;
+    await writeMixedTeamConfig({
+      teamName,
+      projectPath,
+      includeGeminiPrimary: true,
+      primaryProviderId: 'anthropic',
+    });
+    await writeTeamMeta(teamName, projectPath, { primaryProviderId: 'anthropic' });
+    await writeMembersMeta(teamName, {
+      includeGeminiPrimary: true,
+      primaryProviderId: 'anthropic',
+    });
+    await writeMixedTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        reviewer: mixedMemberState({
+          providerId: 'gemini',
+          model: 'gemini-2.5-flash',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'gemini',
+          launchState: 'failed_to_start',
+          agentToolAccepted: false,
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: 'Gemini pane exited before bootstrap',
+        }),
+        bob: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/minimax-m2.5-free',
+          laneId: 'secondary:opencode:bob',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        tom: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/nemotron-3-super-free',
+          laneId: 'secondary:opencode:tom',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'runtime_pending_permission',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+          pendingPermissionRequestIds: ['perm-tom'],
+        }),
+      },
+    });
+    const svc = new TeamProvisioningService();
+    (svc as any).getLiveTeamAgentRuntimeMetadata = async () =>
+      new Map([
+        [
+          'bob',
+          {
+            alive: true,
+            metricsPid: sharedHostPid,
+            model: 'opencode/minimax-m2.5-free',
+          },
+        ],
+        [
+          'tom',
+          {
+            alive: true,
+            metricsPid: sharedHostPid,
+            model: 'opencode/nemotron-3-super-free',
+          },
+        ],
+      ]);
+    (svc as any).readProcessRssBytesByPid = async () => new Map([[sharedHostPid, sharedRssBytes]]);
+
+    const runtimeSnapshot = await svc.getTeamAgentRuntimeSnapshot(teamName);
+
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      runtimeModel: 'haiku',
+    });
+    expect(runtimeSnapshot.members.reviewer).toMatchObject({
+      providerId: 'gemini',
+      laneKind: 'primary',
+      alive: false,
+      runtimeModel: 'gemini-2.5-flash',
     });
     expect(runtimeSnapshot.members.bob).toMatchObject({
       providerId: 'opencode',
@@ -1286,6 +2570,126 @@ describe('Team agent launch matrix safe e2e', () => {
     });
   });
 
+  it('keeps Anthropic mixed launch pending while primary is still joining and OpenCode lanes are ready', async () => {
+    const teamName = 'mixed-anthropic-starting-opencode-ready-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+    run.memberSpawnStatuses.set('alice', {
+      status: 'starting',
+      launchState: 'starting',
+      agentToolAccepted: true,
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+      lastEvaluatedAt: '2026-04-23T10:00:00.000Z',
+      updatedAt: '2026-04-23T10:00:00.000Z',
+    });
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+    await waitForCondition(() => run.memberSpawnStatuses.get('bob')?.launchState === 'confirmed_alive');
+    await waitForCondition(() => run.memberSpawnStatuses.get('tom')?.launchState === 'confirmed_alive');
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      pendingCount: 1,
+      failedCount: 0,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'waiting',
+      launchState: 'runtime_pending_bootstrap',
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      bootstrapConfirmed: true,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      bootstrapConfirmed: true,
+    });
+  });
+
+  it('keeps Anthropic mixed launch pending while primary awaits permission and OpenCode lanes are ready', async () => {
+    const teamName = 'mixed-anthropic-permission-opencode-ready-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+    run.memberSpawnStatuses.set('alice', {
+      status: 'online',
+      launchState: 'runtime_pending_permission',
+      agentToolAccepted: true,
+      runtimeAlive: true,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+      pendingPermissionRequestIds: ['perm-alice'],
+      lastRuntimeAliveAt: '2026-04-23T10:00:00.000Z',
+      lastEvaluatedAt: '2026-04-23T10:00:00.000Z',
+      updatedAt: '2026-04-23T10:00:00.000Z',
+    });
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+    await waitForCondition(() => run.memberSpawnStatuses.get('bob')?.launchState === 'confirmed_alive');
+    await waitForCondition(() => run.memberSpawnStatuses.get('tom')?.launchState === 'confirmed_alive');
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      pendingCount: 1,
+      failedCount: 0,
+      runtimeAlivePendingCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_permission',
+      runtimeAlive: true,
+      bootstrapConfirmed: false,
+      pendingPermissionRequestIds: ['perm-alice'],
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      bootstrapConfirmed: true,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      bootstrapConfirmed: true,
+    });
+  });
+
   it('keeps Anthropic primary online while mixed OpenCode lanes split ready and bootstrap pending', async () => {
     const teamName = 'mixed-anthropic-opencode-split-bootstrap-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
@@ -1354,6 +2758,225 @@ describe('Team agent launch matrix safe e2e', () => {
       laneKind: 'secondary',
       alive: true,
       runtimeModel: 'opencode/nemotron-3-super-free',
+    });
+  });
+
+  it('keeps mixed Anthropic launch partial when Gemini primary fails and OpenCode lanes split ready and bootstrap pending', async () => {
+    const teamName = 'mixed-anthropic-gemini-failed-opencode-split-safe-e2e';
+    await writeMixedTeamConfig({
+      teamName,
+      projectPath,
+      includeGeminiPrimary: true,
+      primaryProviderId: 'anthropic',
+    });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'launching',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const reviewer = {
+      name: 'reviewer',
+      role: 'Reviewer',
+      providerId: 'gemini',
+      model: 'gemini-2.5-flash',
+    };
+    run.expectedMembers = ['alice', 'reviewer'];
+    run.effectiveMembers = [...run.effectiveMembers, reviewer];
+    run.allEffectiveMembers = [
+      ...run.effectiveMembers,
+      ...run.allEffectiveMembers.filter((member: { providerId?: string }) => member.providerId === 'opencode'),
+    ];
+    run.memberSpawnStatuses.set('reviewer', {
+      status: 'error',
+      launchState: 'failed_to_start',
+      agentToolAccepted: false,
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: true,
+      hardFailureReason: 'Gemini pane exited before bootstrap',
+      lastEvaluatedAt: '2026-04-23T10:00:00.000Z',
+      updatedAt: '2026-04-23T10:00:00.000Z',
+    });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(
+      () => run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+    await waitForCondition(() => run.memberSpawnStatuses.get('bob')?.launchState === 'confirmed_alive');
+    await waitForCondition(
+      () => run.memberSpawnStatuses.get('tom')?.launchState === 'runtime_pending_bootstrap'
+    );
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      pendingCount: 1,
+      failedCount: 1,
+      runtimeAlivePendingCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.reviewer).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'Gemini pane exited before bootstrap',
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      bootstrapConfirmed: true,
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_bootstrap',
+      runtimeAlive: true,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+    });
+
+    const runtimeSnapshot = await svc.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      alive: true,
+      runtimeModel: 'haiku',
+    });
+    expect(runtimeSnapshot.members.reviewer).toMatchObject({
+      providerId: 'gemini',
+      laneKind: 'primary',
+      alive: false,
+      runtimeModel: 'gemini-2.5-flash',
+    });
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'opencode',
+      laneKind: 'secondary',
+      alive: true,
+      runtimeModel: 'opencode/minimax-m2.5-free',
+    });
+    expect(runtimeSnapshot.members.tom).toMatchObject({
+      providerId: 'opencode',
+      laneKind: 'secondary',
+      alive: true,
+      runtimeModel: 'opencode/nemotron-3-super-free',
+    });
+  });
+
+  it('keeps OpenCode side-lane pid and memory visible during mixed Anthropic launch when Gemini failed and a sibling lane is still bootstrapping', async () => {
+    const teamName = 'mixed-anthropic-gemini-bootstrap-memory-safe-e2e';
+    const sharedHostPid = 52_525;
+    const sharedRssBytes = 221.7 * 1024 * 1024;
+    await writeMixedTeamConfig({
+      teamName,
+      projectPath,
+      includeGeminiPrimary: true,
+      primaryProviderId: 'anthropic',
+    });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'launching',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const reviewer = {
+      name: 'reviewer',
+      role: 'Reviewer',
+      providerId: 'gemini',
+      model: 'gemini-2.5-flash',
+    };
+    run.expectedMembers = ['alice', 'reviewer'];
+    run.effectiveMembers = [...run.effectiveMembers, reviewer];
+    run.allEffectiveMembers = [
+      ...run.effectiveMembers,
+      ...run.allEffectiveMembers.filter((member: { providerId?: string }) => member.providerId === 'opencode'),
+    ];
+    run.memberSpawnStatuses.set('reviewer', {
+      status: 'error',
+      launchState: 'failed_to_start',
+      agentToolAccepted: false,
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: true,
+      hardFailureReason: 'Gemini pane exited before bootstrap',
+      lastEvaluatedAt: '2026-04-23T10:00:00.000Z',
+      updatedAt: '2026-04-23T10:00:00.000Z',
+    });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(
+      () => run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+    await waitForCondition(() => run.memberSpawnStatuses.get('bob')?.launchState === 'confirmed_alive');
+    await waitForCondition(
+      () => run.memberSpawnStatuses.get('tom')?.launchState === 'runtime_pending_bootstrap'
+    );
+
+    ;(svc as any).getLiveTeamAgentRuntimeMetadata = async () =>
+      new Map([
+        [
+          'bob',
+          {
+            alive: true,
+            metricsPid: sharedHostPid,
+            model: 'opencode/minimax-m2.5-free',
+          },
+        ],
+        [
+          'tom',
+          {
+            alive: true,
+            metricsPid: sharedHostPid,
+            model: 'opencode/nemotron-3-super-free',
+          },
+        ],
+      ]);
+    ;(svc as any).readProcessRssBytesByPid = async () => new Map([[sharedHostPid, sharedRssBytes]]);
+
+    const runtimeSnapshot = await svc.getTeamAgentRuntimeSnapshot(teamName);
+
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      runtimeModel: 'haiku',
+    });
+    expect(runtimeSnapshot.members.reviewer).toMatchObject({
+      providerId: 'gemini',
+      laneKind: 'primary',
+      alive: false,
+      runtimeModel: 'gemini-2.5-flash',
+    });
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:bob',
+      laneKind: 'secondary',
+      alive: true,
+      restartable: false,
+      pid: sharedHostPid,
+      runtimeModel: 'opencode/minimax-m2.5-free',
+      rssBytes: sharedRssBytes,
+    });
+    expect(runtimeSnapshot.members.tom).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:tom',
+      laneKind: 'secondary',
+      alive: true,
+      restartable: false,
+      pid: sharedHostPid,
+      runtimeModel: 'opencode/nemotron-3-super-free',
+      rssBytes: sharedRssBytes,
     });
   });
 
@@ -1475,6 +3098,58 @@ describe('Team agent launch matrix safe e2e', () => {
     });
   });
 
+  it('keeps Anthropic primary online when a mixed OpenCode secondary lane fails', async () => {
+    const teamName = 'mixed-anthropic-secondary-failure-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'failed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+    await waitForCondition(() => run.memberSpawnStatuses.get('bob')?.launchState === 'failed_to_start');
+    await waitForCondition(() => run.memberSpawnStatuses.get('tom')?.launchState === 'confirmed_alive');
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      failedCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'fake_open_code_launch_failure',
+    });
+
+    const runtimeSnapshot = await svc.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      alive: true,
+      runtimeModel: 'haiku',
+    });
+  });
+
   it('keeps OpenCode secondary lanes online when the primary Codex member failed to spawn', async () => {
     const teamName = 'mixed-primary-failure-opencode-ready-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath });
@@ -1544,6 +3219,81 @@ describe('Team agent launch matrix safe e2e', () => {
     });
   });
 
+  it('keeps OpenCode secondary lanes online when the primary Anthropic member failed to spawn', async () => {
+    const teamName = 'mixed-anthropic-primary-failure-opencode-ready-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+    run.memberSpawnStatuses.set('alice', {
+      status: 'error',
+      launchState: 'failed_to_start',
+      agentToolAccepted: false,
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: true,
+      hardFailureReason: 'Anthropic pane exited before bootstrap',
+      lastEvaluatedAt: '2026-04-23T10:00:00.000Z',
+      updatedAt: '2026-04-23T10:00:00.000Z',
+    });
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+    await waitForCondition(() => run.memberSpawnStatuses.get('bob')?.launchState === 'confirmed_alive');
+    await waitForCondition(() => run.memberSpawnStatuses.get('tom')?.launchState === 'confirmed_alive');
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      failedCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'Anthropic pane exited before bootstrap',
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+
+    const runtimeSnapshot = await svc.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      alive: false,
+      runtimeModel: 'haiku',
+    });
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:bob',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/minimax-m2.5-free',
+    });
+    expect(runtimeSnapshot.members.tom).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:tom',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/nemotron-3-super-free',
+    });
+  });
+
   it('fails mixed OpenCode secondary lanes clearly when the runtime adapter is not registered', async () => {
     const teamName = 'mixed-missing-opencode-adapter-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath });
@@ -1579,6 +3329,52 @@ describe('Team agent launch matrix safe e2e', () => {
       launchState: 'failed_to_start',
       hardFailure: true,
       hardFailureReason: 'opencode_runtime_adapter_missing',
+    });
+  });
+
+  it('keeps Anthropic primary online when OpenCode secondary adapter is not registered', async () => {
+    const teamName = 'mixed-anthropic-missing-opencode-adapter-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const svc = new TeamProvisioningService();
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+
+    const snapshot = await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+
+    expect(snapshot).toMatchObject({
+      teamName,
+      teamLaunchState: 'partial_failure',
+    });
+    expect(run.mixedSecondaryLanes.map((lane: { state: string }) => lane.state)).toEqual([
+      'finished',
+      'finished',
+    ]);
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'opencode_runtime_adapter_missing',
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'opencode_runtime_adapter_missing',
+    });
+
+    const runtimeSnapshot = await svc.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      alive: true,
+      runtimeModel: 'haiku',
     });
   });
 
@@ -1634,6 +3430,78 @@ describe('Team agent launch matrix safe e2e', () => {
     });
   });
 
+  it('restarts one Anthropic mixed OpenCode secondary lane without touching other live teammates', async () => {
+    const teamName = 'mixed-anthropic-opencode-manual-restart-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+
+    adapter.setLaunchResult('partial_pending', { bob: 'permission' });
+
+    await svc.restartMember(teamName, 'bob');
+
+    await waitForCondition(() => adapter.launchInputs.length === 3);
+    expect(adapter.stopInputs).toHaveLength(1);
+    expect(adapter.stopInputs[0]).toMatchObject({
+      laneId: 'secondary:opencode:bob',
+      reason: 'relaunch',
+    });
+    expect(adapter.launchInputs.at(-1)).toMatchObject({
+      laneId: 'secondary:opencode:bob',
+      expectedMembers: [expect.objectContaining({ name: 'bob', providerId: 'opencode' })],
+    });
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_permission',
+      pendingPermissionRequestIds: ['perm-bob'],
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+
+    const runtimeSnapshot = await svc.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.alice).toMatchObject({
+      providerId: 'anthropic',
+      laneKind: 'primary',
+      runtimeModel: 'haiku',
+    });
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:bob',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/minimax-m2.5-free',
+    });
+    expect(runtimeSnapshot.members.tom).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:tom',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/nemotron-3-super-free',
+    });
+  });
+
   it('detaches one mixed OpenCode secondary lane and keeps remaining teammates launchable', async () => {
     const teamName = 'mixed-opencode-detach-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath });
@@ -1669,6 +3537,55 @@ describe('Team agent launch matrix safe e2e', () => {
     expect(statuses.statuses.alice).toMatchObject({
       status: 'online',
       launchState: 'confirmed_alive',
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    await expect(readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName)).resolves.toMatchObject({
+      lanes: {
+        'secondary:opencode:tom': { state: 'active' },
+      },
+    });
+  });
+
+  it('detaches one Anthropic mixed OpenCode secondary lane and keeps remaining teammates launchable', async () => {
+    const teamName = 'mixed-anthropic-opencode-detach-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+
+    await svc.detachOpenCodeOwnedMemberLane(teamName, 'bob');
+
+    expect(adapter.stopInputs).toHaveLength(1);
+    expect(adapter.stopInputs[0]).toMatchObject({
+      laneId: 'secondary:opencode:bob',
+      reason: 'cleanup',
+    });
+    expect(run.mixedSecondaryLanes.map((lane: { member: { name: string } }) => lane.member.name)).toEqual([
+      'tom',
+    ]);
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.expectedMembers).toEqual(['alice', 'tom']);
+    expect(statuses.statuses.bob).toBeUndefined();
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
     });
     expect(statuses.statuses.tom).toMatchObject({
       status: 'online',
@@ -1738,6 +3655,67 @@ describe('Team agent launch matrix safe e2e', () => {
     });
   });
 
+  it('shows Anthropic mixed OpenCode secondary lanes as spawning while runtime adapter launch is in flight', async () => {
+    const teamName = 'mixed-anthropic-live-inflight-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new BlockingOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+
+    const initialSnapshot = await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+
+    expect(initialSnapshot.teamLaunchState).toBe('partial_pending');
+    await waitForCondition(() => adapter.pendingLaunchInputs.length === 2);
+
+    const inFlightStatuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(inFlightStatuses.teamLaunchState).toBe('partial_pending');
+    expect(inFlightStatuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 2,
+      failedCount: 0,
+    });
+    expect(inFlightStatuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+    });
+    expect(inFlightStatuses.statuses.bob).toMatchObject({
+      status: 'spawning',
+      launchState: 'starting',
+      hardFailure: false,
+    });
+    expect(inFlightStatuses.statuses.tom).toMatchObject({
+      status: 'spawning',
+      launchState: 'starting',
+      hardFailure: false,
+    });
+
+    adapter.releaseLaunches();
+
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+    const finalStatuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(finalStatuses.teamLaunchState).toBe('clean_success');
+    expect(finalStatuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(finalStatuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+    });
+    expect(finalStatuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+    });
+  });
+
   it('does not double-dispatch mixed OpenCode secondary lanes when launch handoff is retried in flight', async () => {
     const teamName = 'mixed-retry-inflight-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath });
@@ -1789,6 +3767,62 @@ describe('Team agent launch matrix safe e2e', () => {
     });
   });
 
+  it('does not double-dispatch Anthropic mixed OpenCode secondary lanes when launch handoff is retried in flight', async () => {
+    const teamName = 'mixed-anthropic-retry-inflight-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new BlockingOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.pendingLaunchInputs.length === 2);
+    const firstLaneRunIds = run.mixedSecondaryLanes.map(
+      (lane: { runId: string | null }) => lane.runId
+    );
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+
+    expect(adapter.pendingLaunchInputs).toHaveLength(2);
+    expect(adapter.launchInputs).toHaveLength(0);
+    expect(run.mixedSecondaryLanes.map((lane: { state: string }) => lane.state)).toEqual([
+      'launching',
+      'launching',
+    ]);
+    expect(run.mixedSecondaryLanes.map((lane: { runId: string | null }) => lane.runId)).toEqual(
+      firstLaneRunIds
+    );
+
+    adapter.releaseLaunches();
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+
+    expect(adapter.launchInputs).toHaveLength(2);
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('clean_success');
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+    });
+  });
+
   it('does not dispatch mixed OpenCode secondary lanes after the primary launch run is cancelled', async () => {
     const teamName = 'mixed-cancel-before-handoff-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath });
@@ -1812,6 +3846,35 @@ describe('Team agent launch matrix safe e2e', () => {
       'queued',
       'queued',
     ]);
+  });
+
+  it('does not dispatch Anthropic mixed OpenCode secondary lanes after the primary launch run is cancelled', async () => {
+    const teamName = 'mixed-anthropic-cancel-before-handoff-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new BlockingOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+    run.cancelRequested = true;
+    run.processKilled = true;
+
+    const snapshot = await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+
+    expect(snapshot).toBeNull();
+    expect(adapter.pendingLaunchInputs).toHaveLength(0);
+    expect(adapter.launchInputs).toHaveLength(0);
+    expect(run.mixedSecondaryLanes.map((lane: { state: string }) => lane.state)).toEqual([
+      'queued',
+      'queued',
+    ]);
+    expect(run.memberSpawnStatuses.get('alice')).toMatchObject({
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
   });
 
   it('does not resurrect a stopped mixed launch when in-flight OpenCode lanes finish late', async () => {
@@ -1844,6 +3907,43 @@ describe('Team agent launch matrix safe e2e', () => {
     const statuses = await svc.getMemberSpawnStatuses(teamName);
     expect(svc.isTeamAlive(teamName)).toBe(false);
     expect(statuses.teamLaunchState).not.toBe('clean_success');
+    expect(statuses.statuses.bob?.launchState).not.toBe('confirmed_alive');
+    expect(statuses.statuses.tom?.launchState).not.toBe('confirmed_alive');
+  });
+
+  it('does not resurrect a stopped Anthropic mixed launch when in-flight OpenCode lanes finish late', async () => {
+    const teamName = 'mixed-anthropic-stop-inflight-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new BlockingOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.pendingLaunchInputs.length === 2);
+
+    svc.stopTeam(teamName);
+
+    await waitForCondition(() => !svc.isTeamAlive(teamName));
+    await waitForCondition(() => adapter.stopInputs.length === 2);
+    expect(adapter.stopInputs.map((input) => input.laneId).sort()).toEqual([
+      'secondary:opencode:bob',
+      'secondary:opencode:tom',
+    ]);
+
+    adapter.releaseLaunches();
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(svc.isTeamAlive(teamName)).toBe(false);
+    expect(statuses.teamLaunchState).not.toBe('clean_success');
+    expect(statuses.statuses.alice).toMatchObject({
+      hardFailure: false,
+    });
     expect(statuses.statuses.bob?.launchState).not.toBe('confirmed_alive');
     expect(statuses.statuses.tom?.launchState).not.toBe('confirmed_alive');
   });
@@ -1932,6 +4032,90 @@ describe('Team agent launch matrix safe e2e', () => {
     });
   });
 
+  it('does not let a stopped Anthropic run late result overwrite newer mixed launch truth', async () => {
+    const teamName = 'mixed-anthropic-late-old-result-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new BlockingOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const oldRun = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, oldRun);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(oldRun);
+    await waitForCondition(() => adapter.pendingLaunchInputs.length === 2);
+
+    svc.stopTeam(teamName);
+    await waitForCondition(() => !svc.isTeamAlive(teamName));
+    await waitForCondition(() => adapter.stopInputs.length === 2);
+
+    await writeMixedTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          providerId: 'anthropic',
+          model: 'haiku',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'anthropic',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        bob: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/minimax-m2.5-free',
+          laneId: 'secondary:opencode:bob',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'runtime_pending_permission',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+          pendingPermissionRequestIds: ['new-perm-bob'],
+        }),
+        tom: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/nemotron-3-super-free',
+          laneId: 'secondary:opencode:tom',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'failed_to_start',
+          agentToolAccepted: false,
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: 'new Anthropic run explicit failure',
+        }),
+      },
+    });
+
+    adapter.releaseLaunches();
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      launchState: 'runtime_pending_permission',
+      pendingPermissionRequestIds: ['new-perm-bob'],
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailureReason: 'new Anthropic run explicit failure',
+    });
+  });
+
   it('does not degrade stopped mixed launch lanes when in-flight OpenCode launch errors late', async () => {
     const teamName = 'mixed-stop-late-error-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath });
@@ -1956,6 +4140,43 @@ describe('Team agent launch matrix safe e2e', () => {
     });
     const statuses = await svc.getMemberSpawnStatuses(teamName);
     expect(statuses.teamLaunchState).not.toBe('partial_failure');
+    expect(statuses.statuses.bob).toMatchObject({
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob?.launchState).not.toBe('failed_to_start');
+    expect(statuses.statuses.tom).toMatchObject({
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom?.launchState).not.toBe('failed_to_start');
+  });
+
+  it('does not degrade stopped Anthropic mixed launch lanes when in-flight OpenCode launch errors late', async () => {
+    const teamName = 'mixed-anthropic-stop-late-error-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new RejectingBlockingOpenCodeRuntimeAdapter('late fake Anthropic bridge failure');
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.pendingLaunchInputs.length === 2);
+
+    svc.stopTeam(teamName);
+    await waitForCondition(() => !svc.isTeamAlive(teamName));
+    await waitForCondition(() => adapter.stopInputs.length === 2);
+
+    adapter.releaseLaunches();
+    await waitForCondition(() => adapter.rejectedLaunchCount === 2);
+
+    await expect(readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName)).resolves.toMatchObject({
+      lanes: {},
+    });
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).not.toBe('partial_failure');
+    expect(statuses.statuses.alice).toMatchObject({
+      hardFailure: false,
+    });
     expect(statuses.statuses.bob).toMatchObject({
       hardFailure: false,
     });
@@ -1999,6 +4220,42 @@ describe('Team agent launch matrix safe e2e', () => {
     expect(statuses.statuses.tom?.launchState).not.toBe('confirmed_alive');
   });
 
+  it('stops Anthropic mixed OpenCode secondary lanes when provisioning is cancelled mid-launch', async () => {
+    const teamName = 'mixed-anthropic-cancel-inflight-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new BlockingOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.pendingLaunchInputs.length === 2);
+
+    await svc.cancelProvisioning(run.runId);
+
+    await waitForCondition(() => adapter.stopInputs.length === 2);
+    expect(adapter.stopInputs.map((input) => input.laneId).sort()).toEqual([
+      'secondary:opencode:bob',
+      'secondary:opencode:tom',
+    ]);
+    expect(svc.isTeamAlive(teamName)).toBe(false);
+
+    adapter.releaseLaunches();
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).not.toBe('clean_success');
+    expect(statuses.statuses.alice).toMatchObject({
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob?.launchState).not.toBe('confirmed_alive');
+    expect(statuses.statuses.tom?.launchState).not.toBe('confirmed_alive');
+  });
+
   it('does not degrade mixed OpenCode lanes when in-flight launch errors after cancel', async () => {
     const teamName = 'mixed-cancel-late-error-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath });
@@ -2022,6 +4279,42 @@ describe('Team agent launch matrix safe e2e', () => {
     });
     const statuses = await svc.getMemberSpawnStatuses(teamName);
     expect(statuses.teamLaunchState).not.toBe('partial_failure');
+    expect(statuses.statuses.bob).toMatchObject({
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob?.launchState).not.toBe('failed_to_start');
+    expect(statuses.statuses.tom).toMatchObject({
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom?.launchState).not.toBe('failed_to_start');
+  });
+
+  it('does not degrade Anthropic mixed OpenCode lanes when in-flight launch errors after cancel', async () => {
+    const teamName = 'mixed-anthropic-cancel-late-error-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    const adapter = new RejectingBlockingOpenCodeRuntimeAdapter('late fake Anthropic cancel bridge failure');
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath, primaryProviderId: 'anthropic' });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.pendingLaunchInputs.length === 2);
+
+    await svc.cancelProvisioning(run.runId);
+    await waitForCondition(() => adapter.stopInputs.length === 2);
+
+    adapter.releaseLaunches();
+    await waitForCondition(() => adapter.rejectedLaunchCount === 2);
+
+    await expect(readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName)).resolves.toMatchObject({
+      lanes: {},
+    });
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).not.toBe('partial_failure');
+    expect(statuses.statuses.alice).toMatchObject({
+      hardFailure: false,
+    });
     expect(statuses.statuses.bob).toMatchObject({
       hardFailure: false,
     });
@@ -2100,7 +4393,6 @@ describe('Team agent launch matrix safe e2e', () => {
     svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
 
     const statuses = await svc.getMemberSpawnStatuses(teamName);
-
     expect(adapter.reconcileInputs.map((input) => input.laneId).sort()).toEqual([
       'secondary:opencode:bob',
       'secondary:opencode:tom',
@@ -2147,7 +4439,6 @@ describe('Team agent launch matrix safe e2e', () => {
     svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
 
     const statuses = await svc.getMemberSpawnStatuses(teamName);
-
     expect(adapter.reconcileInputs.map((input) => input.laneId).sort()).toEqual([
       'secondary:opencode:bob',
       'secondary:opencode:tom',
@@ -2211,6 +4502,144 @@ describe('Team agent launch matrix safe e2e', () => {
       failedCount: 0,
       runtimeAlivePendingCount: 1,
     });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_bootstrap',
+      runtimeAlive: true,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob?.launchState).not.toBe('failed_to_start');
+    expect(statuses.statuses.tom?.launchState).not.toBe('failed_to_start');
+    await expect(readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName)).resolves.toMatchObject({
+      lanes: {
+        'secondary:opencode:bob': { state: 'active' },
+        'secondary:opencode:tom': { state: 'active' },
+      },
+    });
+  });
+
+  it('recovers stale active Anthropic and Gemini configured OpenCode lanes into ready and permission-pending states before degrading them', async () => {
+    const teamName = 'mixed-anthropic-gemini-configured-runtime-recover-split-permission-safe-e2e';
+    await writeMixedTeamConfig({
+      teamName,
+      projectPath,
+      includeGeminiPrimary: true,
+      primaryProviderId: 'anthropic',
+    });
+    await writeTeamMeta(teamName, projectPath, { primaryProviderId: 'anthropic' });
+    await writeMembersMeta(teamName, {
+      includeGeminiPrimary: true,
+      primaryProviderId: 'anthropic',
+    });
+    await upsertOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: getTeamsBasePath(),
+      teamName,
+      laneId: 'secondary:opencode:bob',
+      state: 'active',
+    });
+    await upsertOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: getTeamsBasePath(),
+      teamName,
+      laneId: 'secondary:opencode:tom',
+      state: 'active',
+    });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'permission',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+
+    expect(adapter.reconcileInputs.map((input) => input.laneId).sort()).toEqual([
+      'secondary:opencode:bob',
+      'secondary:opencode:tom',
+    ]);
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 3,
+      failedCount: 0,
+    });
+    expect(statuses.expectedMembers).toEqual(expect.arrayContaining(['alice', 'reviewer', 'bob', 'tom']));
+    expect(statuses.statuses.alice?.launchState).not.toBe('failed_to_start');
+    expect(statuses.statuses.reviewer?.launchState).not.toBe('failed_to_start');
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_permission',
+      hardFailure: false,
+      pendingPermissionRequestIds: ['perm-tom'],
+    });
+    expect(statuses.statuses.bob?.launchState).not.toBe('failed_to_start');
+    expect(statuses.statuses.tom?.launchState).not.toBe('failed_to_start');
+    await expect(readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName)).resolves.toMatchObject({
+      lanes: {
+        'secondary:opencode:bob': { state: 'active' },
+        'secondary:opencode:tom': { state: 'active' },
+      },
+    });
+  });
+
+  it('recovers stale active Anthropic and Gemini configured OpenCode lanes into ready and bootstrap-pending states before degrading them', async () => {
+    const teamName = 'mixed-anthropic-gemini-configured-runtime-recover-split-bootstrap-safe-e2e';
+    await writeMixedTeamConfig({
+      teamName,
+      projectPath,
+      includeGeminiPrimary: true,
+      primaryProviderId: 'anthropic',
+    });
+    await writeTeamMeta(teamName, projectPath, { primaryProviderId: 'anthropic' });
+    await writeMembersMeta(teamName, {
+      includeGeminiPrimary: true,
+      primaryProviderId: 'anthropic',
+    });
+    await upsertOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: getTeamsBasePath(),
+      teamName,
+      laneId: 'secondary:opencode:bob',
+      state: 'active',
+    });
+    await upsertOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: getTeamsBasePath(),
+      teamName,
+      laneId: 'secondary:opencode:tom',
+      state: 'active',
+    });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'launching',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+
+    expect(adapter.reconcileInputs.map((input) => input.laneId).sort()).toEqual([
+      'secondary:opencode:bob',
+      'secondary:opencode:tom',
+    ]);
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 1,
+      pendingCount: 3,
+      failedCount: 0,
+      runtimeAlivePendingCount: 1,
+    });
+    expect(statuses.expectedMembers).toEqual(expect.arrayContaining(['alice', 'reviewer', 'bob', 'tom']));
+    expect(statuses.statuses.alice?.launchState).not.toBe('failed_to_start');
+    expect(statuses.statuses.reviewer?.launchState).not.toBe('failed_to_start');
     expect(statuses.statuses.bob).toMatchObject({
       status: 'online',
       launchState: 'confirmed_alive',
@@ -2775,6 +5204,48 @@ async function writeOpenCodeTeamConfig(input: {
   );
 }
 
+async function writePureAnthropicTeamConfig(input: {
+  teamName: string;
+  projectPath: string;
+}): Promise<void> {
+  const teamDir = path.join(getTeamsBasePath(), input.teamName);
+  await fs.mkdir(teamDir, { recursive: true });
+  await fs.writeFile(
+    path.join(teamDir, 'config.json'),
+    `${JSON.stringify(
+      {
+        name: input.teamName,
+        projectPath: input.projectPath,
+        providerId: 'anthropic',
+        model: 'sonnet',
+        members: [
+          {
+            name: 'team-lead',
+            agentType: 'team-lead',
+            providerId: 'anthropic',
+            model: 'sonnet',
+          },
+          {
+            name: 'alice',
+            role: 'Reviewer',
+            providerId: 'anthropic',
+            model: 'haiku',
+          },
+          {
+            name: 'bob',
+            role: 'Developer',
+            providerId: 'anthropic',
+            model: 'sonnet',
+          },
+        ],
+      },
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
+}
+
 async function writeMixedTeamConfig(input: {
   teamName: string;
   projectPath: string;
@@ -2910,6 +5381,85 @@ async function writeMixedTeamLaunchState(input: {
   );
 }
 
+async function writePureAnthropicTeamLaunchState(input: {
+  teamName: string;
+  launchPhase?: 'active' | 'finished' | 'reconciled';
+  expectedMembers?: string[];
+  members: Record<string, ReturnType<typeof mixedMemberState>>;
+}): Promise<void> {
+  const teamDir = path.join(getTeamsBasePath(), input.teamName);
+  await fs.mkdir(teamDir, { recursive: true });
+  const expectedMembers = input.expectedMembers ?? Object.keys(input.members);
+  const snapshot = createPersistedLaunchSnapshot({
+    teamName: input.teamName,
+    leadSessionId: 'lead-session',
+    launchPhase: input.launchPhase ?? 'active',
+    expectedMembers,
+    bootstrapExpectedMembers: expectedMembers,
+    members: input.members as any,
+  });
+  await fs.writeFile(
+    path.join(teamDir, 'launch-state.json'),
+    `${JSON.stringify(snapshot, null, 2)}\n`,
+    'utf8'
+  );
+}
+
+async function writeLegacyPartialLaunchState(input: {
+  teamName: string;
+  expectedMembers: string[];
+  confirmedMembers: string[];
+  missingMembers: string[];
+}): Promise<void> {
+  const teamDir = path.join(getTeamsBasePath(), input.teamName);
+  await fs.mkdir(teamDir, { recursive: true });
+  await fs.writeFile(
+    path.join(teamDir, 'launch-state.json'),
+    `${JSON.stringify(
+      {
+        state: 'partial_launch_failure',
+        expectedMembers: input.expectedMembers,
+        confirmedMembers: input.confirmedMembers,
+        missingMembers: input.missingMembers,
+        leadSessionId: 'lead-session',
+        updatedAt: '2026-04-23T10:00:00.000Z',
+      },
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
+}
+
+async function writeBootstrapState(
+  teamName: string,
+  members: Array<{
+    name: string;
+    status: string;
+    lastAttemptAt?: number;
+    lastObservedAt?: number;
+    failureReason?: string;
+  }>
+): Promise<void> {
+  const teamDir = path.join(getTeamsBasePath(), teamName);
+  await fs.mkdir(teamDir, { recursive: true });
+  await fs.writeFile(
+    path.join(teamDir, 'bootstrap-state.json'),
+    `${JSON.stringify(
+      {
+        version: 1,
+        teamName,
+        updatedAt: '2026-04-23T10:00:06.000Z',
+        phase: 'completed',
+        members,
+      },
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
+}
+
 function mixedMemberState(overrides: Record<string, unknown>): Record<string, unknown> {
   return {
     name: overrides.name,
@@ -2976,12 +5526,87 @@ async function writeTeamMeta(
   );
 }
 
+async function writePureAnthropicTeamMeta(
+  teamName: string,
+  projectPath: string
+): Promise<void> {
+  const teamDir = path.join(getTeamsBasePath(), teamName);
+  await fs.mkdir(teamDir, { recursive: true });
+  await fs.writeFile(
+    path.join(teamDir, 'team.meta.json'),
+    `${JSON.stringify(
+      {
+        version: 1,
+        cwd: projectPath,
+        providerId: 'anthropic',
+        model: 'sonnet',
+        effort: 'medium',
+        createdAt: Date.now(),
+      },
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
+}
+
+async function writePureAnthropicMembersMeta(
+  teamName: string,
+  options: {
+    removedMembers?: string[];
+    extraMembers?: Array<{ name: string; providerId: 'anthropic'; model: string }>;
+  } = {}
+): Promise<void> {
+  const teamDir = path.join(getTeamsBasePath(), teamName);
+  const removedMembers = new Set(options.removedMembers ?? []);
+  const extraMembers = options.extraMembers ?? [];
+  await fs.mkdir(teamDir, { recursive: true });
+  await fs.writeFile(
+    path.join(teamDir, 'members.meta.json'),
+    `${JSON.stringify(
+      {
+        version: 1,
+        members: [
+          {
+            name: 'alice',
+            providerId: 'anthropic',
+            model: 'haiku',
+            ...(removedMembers.has('alice') ? { removedAt: 1_777_000_000_000 } : {}),
+          },
+          {
+            name: 'bob',
+            providerId: 'anthropic',
+            model: 'sonnet',
+            ...(removedMembers.has('bob') ? { removedAt: 1_777_000_000_000 } : {}),
+          },
+          ...extraMembers.map((member) => ({
+            name: member.name,
+            providerId: member.providerId,
+            model: member.model,
+            ...(removedMembers.has(member.name) ? { removedAt: 1_777_000_000_000 } : {}),
+          })),
+        ],
+      },
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
+}
+
 async function writeMembersMeta(
   teamName: string,
-  options: { includeGeminiPrimary?: boolean; primaryProviderId?: MixedPrimaryProviderId } = {}
+  options: {
+    includeGeminiPrimary?: boolean;
+    primaryProviderId?: MixedPrimaryProviderId;
+    removedMembers?: string[];
+    extraMembers?: Array<{ name: string; providerId: 'opencode'; model: string }>;
+  } = {}
 ): Promise<void> {
   const teamDir = path.join(getTeamsBasePath(), teamName);
   const primary = getMixedPrimaryFixture(options.primaryProviderId);
+  const removedMembers = new Set(options.removedMembers ?? []);
+  const extraMembers = options.extraMembers ?? [];
   await fs.mkdir(teamDir, { recursive: true });
   await fs.writeFile(
     path.join(teamDir, 'members.meta.json'),
@@ -2997,6 +5622,7 @@ async function writeMembersMeta(
               ? { providerBackendId: primary.providerBackendId }
               : {}),
             model: primary.memberModel,
+            ...(removedMembers.has('alice') ? { removedAt: 1_777_000_000_000 } : {}),
           },
           ...(options.includeGeminiPrimary
             ? [
@@ -3004,6 +5630,7 @@ async function writeMembersMeta(
                   name: 'reviewer',
                   providerId: 'gemini',
                   model: 'gemini-2.5-flash',
+                  ...(removedMembers.has('reviewer') ? { removedAt: 1_777_000_000_000 } : {}),
                 },
               ]
             : []),
@@ -3011,12 +5638,20 @@ async function writeMembersMeta(
             name: 'bob',
             providerId: 'opencode',
             model: 'opencode/minimax-m2.5-free',
+            ...(removedMembers.has('bob') ? { removedAt: 1_777_000_000_000 } : {}),
           },
           {
             name: 'tom',
             providerId: 'opencode',
             model: 'opencode/nemotron-3-super-free',
+            ...(removedMembers.has('tom') ? { removedAt: 1_777_000_000_000 } : {}),
           },
+          ...extraMembers.map((member) => ({
+            name: member.name,
+            providerId: member.providerId,
+            model: member.model,
+            ...(removedMembers.has(member.name) ? { removedAt: 1_777_000_000_000 } : {}),
+          })),
         ],
       },
       null,

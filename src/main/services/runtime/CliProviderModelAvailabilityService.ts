@@ -274,7 +274,7 @@ export class CliProviderModelAvailabilityService {
       const { env, providerArgs } = await entry.cliEnvPromise;
       const { stdout } = await execCli(
         context.binaryPath,
-        [...buildProviderModelProbeArgs(modelId), ...providerArgs],
+        [...providerArgs, ...buildProviderModelProbeArgs(modelId)],
         {
           timeout: getProviderModelProbeTimeoutMs(context.provider.providerId),
           env,

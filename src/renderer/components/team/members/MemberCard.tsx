@@ -122,6 +122,7 @@ export const MemberCard = ({
   const dotClass = launchPresentation.dotClass;
   const runtimeAdvisoryLabel = launchPresentation.runtimeAdvisoryLabel;
   const runtimeAdvisoryTitle = launchPresentation.runtimeAdvisoryTitle;
+  const runtimeAdvisoryTone = launchPresentation.runtimeAdvisoryTone;
   const presenceLabel = launchPresentation.presenceLabel;
   const spawnCardClass = launchPresentation.cardClass;
   const launchVisualState = launchPresentation.launchVisualState;
@@ -236,12 +237,22 @@ export const MemberCard = ({
               ) : null}
               {!activityTask && isAwaitingReply ? (
                 <>
-                  <Loader2
-                    className={`size-3 shrink-0 animate-spin ${runtimeAdvisoryLabel ? 'text-amber-400' : ''}`}
-                    style={runtimeAdvisoryLabel ? undefined : { color: colors.border }}
-                  />
+                  {runtimeAdvisoryTone === 'error' ? (
+                    <AlertTriangle className="size-3 shrink-0 text-red-400" />
+                  ) : (
+                    <Loader2
+                      className={`size-3 shrink-0 animate-spin ${runtimeAdvisoryLabel ? 'text-amber-400' : ''}`}
+                      style={runtimeAdvisoryLabel ? undefined : { color: colors.border }}
+                    />
+                  )}
                   <span
-                    className={`shrink-0 text-[10px] ${runtimeAdvisoryLabel ? 'text-amber-300' : 'text-[var(--color-text-muted)]'}`}
+                    className={`shrink-0 text-[10px] ${
+                      runtimeAdvisoryTone === 'error'
+                        ? 'text-red-300'
+                        : runtimeAdvisoryLabel
+                          ? 'text-amber-300'
+                          : 'text-[var(--color-text-muted)]'
+                    }`}
                     title={runtimeAdvisoryTitle ?? 'Message sent, awaiting reply'}
                   >
                     {runtimeAdvisoryLabel ?? 'awaiting reply'}
@@ -308,10 +319,18 @@ export const MemberCard = ({
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="flex shrink-0 items-center gap-1">
-                  <AlertTriangle className="size-3.5 shrink-0 text-amber-400" />
+                  <AlertTriangle
+                    className={`size-3.5 shrink-0 ${
+                      runtimeAdvisoryTone === 'error' ? 'text-red-400' : 'text-amber-400'
+                    }`}
+                  />
                   <Badge
                     variant="secondary"
-                    className="shrink-0 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-normal leading-none text-amber-300"
+                    className={`shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none ${
+                      runtimeAdvisoryTone === 'error'
+                        ? 'bg-red-500/15 text-red-300'
+                        : 'bg-amber-500/15 text-amber-300'
+                    }`}
                     title={runtimeAdvisoryTitle}
                   >
                     {runtimeAdvisoryLabel}

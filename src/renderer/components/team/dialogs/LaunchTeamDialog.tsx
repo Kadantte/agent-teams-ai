@@ -69,6 +69,7 @@ import {
   normalizeExplicitTeamModelForUi,
 } from '@renderer/utils/teamModelAvailability';
 import { getTeamProviderLabel as getCatalogTeamProviderLabel } from '@renderer/utils/teamModelCatalog';
+import { isEphemeralProjectPath } from '@shared/utils/ephemeralProjectPath';
 import { migrateProviderBackendId } from '@shared/utils/providerBackend';
 import { DEFAULT_PROVIDER_MODEL_SELECTION } from '@shared/utils/providerModelSelection';
 import { isTeamProviderId, normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
@@ -105,14 +106,14 @@ import {
   runProviderPrepareDiagnostics,
 } from './providerPrepareDiagnostics';
 import {
-  getShortLivedProviderPrepareModelResults,
-  storeShortLivedProviderPrepareModelResults,
-} from './providerPrepareShortLivedCache';
-import {
   buildProviderPrepareModelChecksSignature,
   buildProviderPrepareRequestSignature,
   buildProviderPrepareRuntimeStatusSignature,
 } from './providerPrepareRequestSignature';
+import {
+  getShortLivedProviderPrepareModelResults,
+  storeShortLivedProviderPrepareModelResults,
+} from './providerPrepareShortLivedCache';
 import { getProvisioningModelIssue } from './provisioningModelIssues';
 import {
   deriveEffectiveProvisioningPrepareState,
@@ -1206,7 +1207,10 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   // Launch-only effects
   // ---------------------------------------------------------------------------
 
-  const effectiveCwd = cwdMode === 'project' ? selectedProjectPath.trim() : customCwd.trim();
+  const selectedProjectCwd = isEphemeralProjectPath(selectedProjectPath)
+    ? ''
+    : selectedProjectPath.trim();
+  const effectiveCwd = cwdMode === 'project' ? selectedProjectCwd : customCwd.trim();
   const prepareRuntimeStatusSignature = useMemo(
     () =>
       buildProviderPrepareRuntimeStatusSignature(
@@ -1445,14 +1449,16 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     let cancelled = false;
     void (async () => {
       try {
-        const apiProjects = await api.getProjects();
+        const apiProjects = (await api.getProjects()).filter(
+          (project) => !isEphemeralProjectPath(project.path)
+        );
         if (cancelled) return;
 
         const pathSet = new Set(apiProjects.map((p) => p.path));
         const extras: Project[] = [];
         for (const repo of repositoryGroups) {
           for (const wt of repo.worktrees) {
-            if (!pathSet.has(wt.path)) {
+            if (!isEphemeralProjectPath(wt.path) && !pathSet.has(wt.path)) {
               pathSet.add(wt.path);
               extras.push({
                 id: wt.id,
@@ -1485,16 +1491,31 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const defaultProjectPath = isLaunchMode ? props.defaultProjectPath : undefined;
 
   useEffect(() => {
-    if (!open || cwdMode !== 'project' || selectedProjectPath || projects.length === 0) return;
-    if (defaultProjectPath) {
-      const match = projects.find((p) => p.path === defaultProjectPath);
+    if (!open || cwdMode !== 'project' || selectedProjectPath) return;
+    const selectableProjects = projects.filter((project) => !isEphemeralProjectPath(project.path));
+    if (selectableProjects.length === 0) return;
+    if (defaultProjectPath && !isEphemeralProjectPath(defaultProjectPath)) {
+      const normalizedDefaultProjectPath = normalizePath(defaultProjectPath);
+      const match = selectableProjects.find(
+        (p) => normalizePath(p.path) === normalizedDefaultProjectPath
+      );
       if (match) {
         setSelectedProjectPath(match.path);
         return;
       }
     }
-    setSelectedProjectPath(projects[0].path);
+    setSelectedProjectPath(selectableProjects[0].path);
   }, [open, cwdMode, projects, selectedProjectPath, defaultProjectPath]);
+
+  useEffect(() => {
+    if (!open || cwdMode !== 'project' || !selectedProjectPath) {
+      return;
+    }
+    if (!isEphemeralProjectPath(selectedProjectPath)) {
+      return;
+    }
+    setSelectedProjectPath('');
+  }, [open, cwdMode, selectedProjectPath, setSelectedProjectPath]);
 
   // Pre-warm file list cache so @-mention file search is instant
   useFileListCacheWarmer(effectiveCwd || null);

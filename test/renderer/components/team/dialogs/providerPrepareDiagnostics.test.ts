@@ -54,19 +54,21 @@ describe('runProviderPrepareDiagnostics', () => {
   });
 
   it('returns a failed provider result immediately when runtime preflight fails', async () => {
-    const prepareProvisioning = vi.fn<
-      (
-        cwd?: string,
-        providerId?: TeamProviderId,
-        providerIds?: TeamProviderId[],
-        selectedModels?: string[],
-        limitContext?: boolean,
-        modelVerificationMode?: 'compatibility' | 'deep'
-      ) => Promise<TeamProvisioningPrepareResult>
-    >().mockResolvedValue({
-      ready: false,
-      message: 'Codex runtime is not authenticated.',
-    });
+    const prepareProvisioning = vi
+      .fn<
+        (
+          cwd?: string,
+          providerId?: TeamProviderId,
+          providerIds?: TeamProviderId[],
+          selectedModels?: string[],
+          limitContext?: boolean,
+          modelVerificationMode?: 'compatibility' | 'deep'
+        ) => Promise<TeamProvisioningPrepareResult>
+      >()
+      .mockResolvedValue({
+        ready: false,
+        message: 'Codex runtime is not authenticated.',
+      });
 
     const result = await runProviderPrepareDiagnostics({
       cwd: '/tmp/project',
@@ -265,8 +267,7 @@ describe('runProviderPrepareDiagnostics', () => {
     >((_, __, ___, selectedModels) => {
       return Promise.resolve({
         ready: false,
-        message:
-          `API Error: 400 {"type":"error","error":{"type":"api_error","message":"Codex API error (400): {\\"detail\\":\\"The 'gpt-5.1-codex-max' model is not supported when using Codex with a ChatGPT account.\\"}"}}`,
+        message: `API Error: 400 {"type":"error","error":{"type":"api_error","message":"Codex API error (400): {\\"detail\\":\\"The 'gpt-5.1-codex-max' model is not supported when using Codex with a ChatGPT account.\\"}"}}`,
       });
     });
 
@@ -378,9 +379,95 @@ describe('runProviderPrepareDiagnostics', () => {
     });
 
     expect(result.details).toEqual(['Default - verified']);
-    expect(prepareProvisioning).toHaveBeenNthCalledWith(1, '/tmp/project', 'anthropic', ['anthropic'], [
-      DEFAULT_PROVIDER_MODEL_SELECTION,
-    ], true);
+    expect(prepareProvisioning).toHaveBeenNthCalledWith(
+      1,
+      '/tmp/project',
+      'anthropic',
+      ['anthropic'],
+      [DEFAULT_PROVIDER_MODEL_SELECTION],
+      true,
+      'compatibility'
+    );
+  });
+
+  it('checks multiple Anthropic selected models without OpenCode compatibility-pending progress', async () => {
+    const progressUpdates: Array<{
+      status: 'checking' | 'ready' | 'notes' | 'failed';
+      details: string[];
+      completedCount: number;
+      totalCount: number;
+    }> = [];
+    const prepareProvisioning = vi.fn<
+      (
+        cwd?: string,
+        providerId?: TeamProviderId,
+        providerIds?: TeamProviderId[],
+        selectedModels?: string[],
+        limitContext?: boolean,
+        modelVerificationMode?: 'compatibility' | 'deep'
+      ) => Promise<TeamProvisioningPrepareResult>
+    >((_, __, ___, selectedModels, ____, modelVerificationMode) => {
+      if (selectedModels) {
+        expect(modelVerificationMode).toBe('compatibility');
+        expect(selectedModels).toEqual(['claude-test-a', 'claude-test-b']);
+        return Promise.resolve({
+          ready: true,
+          message: 'CLI is warmed up and ready to launch',
+          details: [
+            'Selected model claude-test-a verified for launch.',
+            'Selected model claude-test-b verified for launch.',
+          ],
+        });
+      }
+
+      expect(modelVerificationMode).toBe('deep');
+      return Promise.resolve({
+        ready: true,
+        message: 'CLI is warmed up and ready to launch',
+        details: [],
+      });
+    });
+
+    const result = await runProviderPrepareDiagnostics({
+      cwd: '/tmp/project',
+      providerId: 'anthropic',
+      selectedModelIds: ['claude-test-a', 'claude-test-b'],
+      prepareProvisioning,
+      onModelProgress: (progress) => progressUpdates.push(progress),
+    });
+
+    expect(result.status).toBe('ready');
+    expect(result.details).toEqual(['claude-test-a - verified', 'claude-test-b - verified']);
+    expect(progressUpdates[0]).toEqual({
+      status: 'checking',
+      completedCount: 0,
+      totalCount: 2,
+      details: ['claude-test-a - checking...', 'claude-test-b - checking...'],
+    });
+    expect(
+      progressUpdates
+        .flatMap((progress) => progress.details)
+        .some((line) => line.includes('compatible'))
+    ).toBe(false);
+    expect(prepareProvisioning).toHaveBeenCalledTimes(2);
+    expect(prepareProvisioning).toHaveBeenNthCalledWith(
+      1,
+      '/tmp/project',
+      'anthropic',
+      ['anthropic'],
+      ['claude-test-a', 'claude-test-b'],
+      undefined,
+      'compatibility'
+    );
+    expect(prepareProvisioning).toHaveBeenNthCalledWith(
+      2,
+      '/tmp/project',
+      'anthropic',
+      ['anthropic'],
+      undefined,
+      undefined,
+      'deep'
+    );
   });
 
   it('reuses cached model results and probes only newly selected models', async () => {
@@ -438,9 +525,15 @@ describe('runProviderPrepareDiagnostics', () => {
       '5.2 Codex - unavailable - Not available on this Codex native runtime',
     ]);
     expect(prepareProvisioning).toHaveBeenCalledTimes(1);
-    expect(prepareProvisioning).toHaveBeenNthCalledWith(1, '/tmp/project', 'codex', ['codex'], [
-      'gpt-5.2-codex',
-    ], undefined);
+    expect(prepareProvisioning).toHaveBeenNthCalledWith(
+      1,
+      '/tmp/project',
+      'codex',
+      ['codex'],
+      ['gpt-5.2-codex'],
+      undefined,
+      'compatibility'
+    );
   });
 
   it('suppresses a timed out runtime preflight note when that same model later verifies', async () => {
@@ -501,18 +594,16 @@ describe('runProviderPrepareDiagnostics', () => {
     });
 
     expect(result.status).toBe('notes');
-    expect(result.warnings).toEqual([
-      '5.4 - check failed - Verification did not complete after runtime preflight warning',
-    ]);
+    expect(result.warnings).toEqual(['orchestrator-cli preflight check failed (exit code 1).']);
     expect(result.details).toEqual([
-      '5.4 - check failed - Verification did not complete after runtime preflight warning',
+      'orchestrator-cli preflight check failed (exit code 1).',
+      '5.4 - compatible, deep verification pending...',
     ]);
     expect(result.modelResultsById).toEqual({
       'gpt-5.4': {
         status: 'notes',
-        line: '5.4 - check failed - Verification did not complete after runtime preflight warning',
-        warningLine:
-          '5.4 - check failed - Verification did not complete after runtime preflight warning',
+        line: '5.4 - compatible, deep verification pending...',
+        warningLine: null,
       },
     });
   });
@@ -530,7 +621,9 @@ describe('runProviderPrepareDiagnostics', () => {
         ready: true,
         message: 'CLI is ready to launch (see notes)',
         details: ['Selected model gpt-5.4 verified for launch.'],
-        warnings: ['orchestrator-cli preflight check failed (exit code 1). Details: upstream unavailable'],
+        warnings: [
+          'orchestrator-cli preflight check failed (exit code 1). Details: upstream unavailable',
+        ],
       });
     });
 
