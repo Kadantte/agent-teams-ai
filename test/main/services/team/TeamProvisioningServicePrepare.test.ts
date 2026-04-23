@@ -1025,6 +1025,47 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     expect(result.warning).toContain('request id: req_123');
   });
 
+  it('passes provider launch args into codex preflight ping probes', async () => {
+    const svc = new TeamProvisioningService();
+    const spawnProbe = vi
+      .spyOn(svc as any, 'spawnProbe')
+      .mockResolvedValueOnce({
+        stdout: 'orchestrator-cli 1.2.3',
+        stderr: '',
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: 'PONG',
+        stderr: '',
+        exitCode: 0,
+      });
+
+    const result = await (svc as any).probeClaudeRuntime(
+      '/fake/claude',
+      tempRoot,
+      {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      'codex',
+      ['--settings', '{"codex":{"forced_login_method":"chatgpt"}}']
+    );
+
+    expect(result.warning).toBeUndefined();
+    expect(spawnProbe).toHaveBeenNthCalledWith(
+      2,
+      '/fake/claude',
+      expect.arrayContaining([
+        '--settings',
+        '{"codex":{"forced_login_method":"chatgpt"}}',
+      ]),
+      tempRoot,
+      expect.any(Object),
+      60_000,
+      expect.any(Object)
+    );
+  });
+
   it('continues selected model verification after transient preflight warnings', async () => {
     const svc = new TeamProvisioningService();
     vi.spyOn(svc as any, 'getCachedOrProbeResult').mockResolvedValue({
@@ -1088,6 +1129,59 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     ]);
     expect(result.warnings).toContain(
       'orchestrator-cli preflight check failed (exit code 1). Details: upstream unavailable'
+    );
+  });
+
+  it('passes provider launch args into selected codex model probes', async () => {
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'buildProvisioningEnv').mockResolvedValue({
+      env: {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      authSource: 'codex_runtime',
+      geminiRuntimeAuth: null,
+      providerArgs: ['--settings', '{"codex":{"forced_login_method":"chatgpt"}}'],
+    });
+    const readRuntimeProviderLaunchFacts = vi
+      .spyOn(svc as any, 'readRuntimeProviderLaunchFacts')
+      .mockResolvedValue({
+        defaultModel: null,
+        modelIds: new Set(['gpt-5.4']),
+        modelCatalog: null,
+        runtimeCapabilities: null,
+        providerStatus: null,
+      });
+    const spawnProbe = vi.spyOn(svc as any, 'spawnProbe').mockResolvedValue({
+      stdout: 'PONG',
+      stderr: '',
+      exitCode: 0,
+    });
+
+    const result = await (svc as any).verifySelectedProviderModels({
+      claudePath: '/fake/claude',
+      cwd: tempRoot,
+      providerId: 'codex',
+      modelIds: ['gpt-5.4'],
+      limitContext: false,
+    });
+
+    expect(result.details).toEqual(['Selected model gpt-5.4 verified for launch.']);
+    expect(readRuntimeProviderLaunchFacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerArgs: ['--settings', '{"codex":{"forced_login_method":"chatgpt"}}'],
+      })
+    );
+    expect(spawnProbe).toHaveBeenCalledWith(
+      '/fake/claude',
+      expect.arrayContaining([
+        '--settings',
+        '{"codex":{"forced_login_method":"chatgpt"}}',
+      ]),
+      tempRoot,
+      expect.any(Object),
+      60_000,
+      expect.any(Object)
     );
   });
 

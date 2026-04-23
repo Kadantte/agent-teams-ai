@@ -3563,11 +3563,13 @@ export class TeamProvisioningService {
     cwd: string;
     providerId: TeamProviderId;
     env: NodeJS.ProcessEnv;
+    providerArgs?: string[];
     limitContext?: boolean;
   }): Promise<RuntimeProviderLaunchFacts> {
+    const providerArgs = params.providerArgs ?? [];
     const modelListPromise = execCli(
       params.claudePath,
-      ['model', 'list', '--json', '--provider', params.providerId],
+      ['model', 'list', '--json', '--provider', params.providerId, ...providerArgs],
       {
         cwd: params.cwd,
         env: params.env,
@@ -3578,7 +3580,7 @@ export class TeamProvisioningService {
       params.providerId === 'codex' || params.providerId === 'anthropic'
         ? execCli(
             params.claudePath,
-            ['runtime', 'status', '--json', '--provider', params.providerId],
+            ['runtime', 'status', '--json', '--provider', params.providerId, ...providerArgs],
             {
               cwd: params.cwd,
               env: params.env,
@@ -7434,11 +7436,11 @@ export class TeamProvisioningService {
         const isAuthFailure = this.isAuthFailureWarning(probeResult.warning, 'probe');
         const isBlockingPreflightWarning =
           authSource === 'configured_api_key_missing' ||
-          (((authSource === 'none' ||
+          ((authSource === 'none' ||
             authSource === 'codex_runtime' ||
             authSource === 'gemini_runtime') &&
             isAuthFailure) ||
-            isBinaryProbeWarning(probeResult.warning));
+          isBinaryProbeWarning(probeResult.warning);
         if (authSource === 'configured_api_key_missing') {
           blockingMessages.push(prefixedWarning);
         } else if (
@@ -7849,12 +7851,13 @@ export class TeamProvisioningService {
       return { details, warnings, blockingMessages };
     }
 
-    const { env } = await this.buildProvisioningEnv(providerId);
+    const { env, providerArgs = [] } = await this.buildProvisioningEnv(providerId);
     const runtimeFacts = await this.readRuntimeProviderLaunchFacts({
       claudePath,
       cwd,
       providerId,
       env,
+      providerArgs,
       limitContext,
     });
     const probeOutcomeByResolvedModelId = new Map<
@@ -7912,6 +7915,7 @@ export class TeamProvisioningService {
                 cwd,
                 providerId,
                 env,
+                providerArgs,
                 limitContext
               );
             } catch {
@@ -7966,7 +7970,7 @@ export class TeamProvisioningService {
       try {
         const result = await this.spawnProbe(
           claudePath,
-          buildProviderModelProbeArgs(targetModelId),
+          [...buildProviderModelProbeArgs(targetModelId), ...providerArgs],
           cwd,
           env,
           getProviderModelProbeTimeoutMs(providerId),
@@ -8069,13 +8073,18 @@ export class TeamProvisioningService {
     cwd: string,
     providerId: TeamProviderId,
     env: NodeJS.ProcessEnv,
+    providerArgs: string[] = [],
     limitContext: boolean
   ): Promise<string | null> {
-    const { stdout } = await execCli(claudePath, ['model', 'list', '--json', '--provider', 'all'], {
-      cwd,
-      env,
-      timeout: 10_000,
-    });
+    const { stdout } = await execCli(
+      claudePath,
+      ['model', 'list', '--json', '--provider', 'all', ...providerArgs],
+      {
+        cwd,
+        env,
+        timeout: 10_000,
+      }
+    );
     const parsed = extractJsonObjectFromCli<ProviderModelListCommandResponse>(stdout);
     const defaultModel = parsed.providers?.[providerId]?.defaultModel;
     const normalizedDefaultModel =
@@ -8145,6 +8154,7 @@ export class TeamProvisioningService {
           params.cwd,
           providerId,
           envResolution.env,
+          envResolution.providerArgs,
           params.limitContext === true
         );
         const normalized = resolvedDefaultModel?.trim();
@@ -8240,7 +8250,12 @@ export class TeamProvisioningService {
       const claudePath = await ClaudeBinaryResolver.resolve();
       if (!claudePath) return null;
 
-      const { env, authSource, warning } = await this.buildProvisioningEnv(providerId);
+      const {
+        env,
+        authSource,
+        providerArgs = [],
+        warning,
+      } = await this.buildProvisioningEnv(providerId);
       if (warning) {
         return {
           claudePath,
@@ -8249,7 +8264,7 @@ export class TeamProvisioningService {
         };
       }
 
-      const probe = await this.probeClaudeRuntime(claudePath, cwd, env, providerId);
+      const probe = await this.probeClaudeRuntime(claudePath, cwd, env, providerId, providerArgs);
       const result = {
         claudePath,
         authSource,
@@ -18476,7 +18491,8 @@ export class TeamProvisioningService {
     claudePath: string,
     cwd: string,
     env: NodeJS.ProcessEnv,
-    providerId: TeamProviderId | undefined = 'anthropic'
+    providerId: TeamProviderId | undefined = 'anthropic',
+    providerArgs: string[] = []
   ): Promise<{ warning?: string }> {
     const resolvedProviderId = resolveTeamProviderId(providerId);
     const cliCommandLabel = getConfiguredCliCommandLabel();
@@ -18543,7 +18559,7 @@ export class TeamProvisioningService {
       try {
         pingProbe = await this.spawnProbe(
           claudePath,
-          getPreflightPingArgs(providerId),
+          [...getPreflightPingArgs(providerId), ...providerArgs],
           cwd,
           env,
           getPreflightTimeoutMs(providerId),
