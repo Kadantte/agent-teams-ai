@@ -54,12 +54,15 @@ function getSpawnEntry(
 function summarizeLiveLaunchJoinMilestones(params: {
   teammateNames: readonly string[];
   memberSpawnStatuses?: MemberSpawnStatusCollection;
-}): Omit<LaunchJoinMilestones, 'expectedTeammateCount'> {
+}): Omit<LaunchJoinMilestones, 'expectedTeammateCount'> & {
+  observedTeammateCount: number;
+} {
   const { teammateNames, memberSpawnStatuses } = params;
   let heartbeatConfirmedCount = 0;
   let processOnlyAliveCount = 0;
   let pendingSpawnCount = 0;
   let failedSpawnCount = 0;
+  let observedTeammateCount = 0;
 
   for (const memberName of teammateNames) {
     const entry = getSpawnEntry(memberSpawnStatuses, memberName);
@@ -67,6 +70,7 @@ function summarizeLiveLaunchJoinMilestones(params: {
       pendingSpawnCount += 1;
       continue;
     }
+    observedTeammateCount += 1;
     if (entry.launchState === 'failed_to_start') {
       failedSpawnCount += 1;
       continue;
@@ -96,6 +100,7 @@ function summarizeLiveLaunchJoinMilestones(params: {
     processOnlyAliveCount,
     pendingSpawnCount,
     failedSpawnCount,
+    observedTeammateCount,
   };
 }
 
@@ -106,20 +111,28 @@ export function getLaunchJoinMilestonesFromMembers({
 }: {
   members: readonly LaunchJoinMemberLike[];
   memberSpawnStatuses?: MemberSpawnStatusCollection;
-  memberSpawnSnapshot?: Pick<MemberSpawnStatusesSnapshot, 'expectedMembers' | 'summary'>;
+  memberSpawnSnapshot?: Pick<MemberSpawnStatusesSnapshot, 'expectedMembers' | 'summary'> & {
+    statuses?: MemberSpawnStatusesSnapshot['statuses'];
+  };
 }): LaunchJoinMilestones {
+  const removedTeammateNameSet = new Set(
+    members
+      .filter((member) => member.removedAt && !isLeadMember(member))
+      .map((member) => member.name)
+  );
   const teammates = members.filter((member) => !member.removedAt && !isLeadMember(member));
   const activeTeammateNames = teammates.map((member) => member.name);
-  const activeTeammateNameSet = new Set(activeTeammateNames);
+  const snapshotExpectedNames = memberSpawnSnapshot?.expectedMembers ?? [];
+  const snapshotStatusNames = Object.keys(memberSpawnSnapshot?.statuses ?? {});
   const teammateNames =
-    memberSpawnSnapshot?.expectedMembers?.length && memberSpawnSnapshot.expectedMembers.length > 0
+    snapshotExpectedNames.length > 0 || snapshotStatusNames.length > 0
       ? Array.from(
-          new Set([
-            ...memberSpawnSnapshot.expectedMembers.filter((memberName) =>
-              activeTeammateNameSet.has(memberName)
-            ),
-            ...activeTeammateNames,
-          ])
+          new Set([...snapshotExpectedNames, ...snapshotStatusNames, ...activeTeammateNames])
+        ).filter(
+          (memberName) =>
+            memberName.trim().length > 0 &&
+            !isLeadMember({ name: memberName }) &&
+            !removedTeammateNameSet.has(memberName)
         )
       : activeTeammateNames;
   const expectedTeammateCount = teammateNames.length;
@@ -155,6 +168,7 @@ export function getLaunchJoinMilestonesFromMembers({
       liveSummary.heartbeatConfirmedCount > snapshotMilestones.heartbeatConfirmedCount ||
       liveSummary.processOnlyAliveCount > snapshotMilestones.processOnlyAliveCount ||
       (snapshotMilestones.failedSpawnCount === 0 &&
+        liveSummary.observedTeammateCount > 0 &&
         liveSummary.pendingSpawnCount > snapshotMilestones.pendingSpawnCount) ||
       liveAccountedFor > snapshotAccountedFor;
 
