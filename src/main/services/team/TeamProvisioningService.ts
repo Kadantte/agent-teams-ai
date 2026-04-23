@@ -5214,8 +5214,8 @@ export class TeamProvisioningService {
     reason: string;
   }): Promise<void> {
     const previous = await this.launchStateStore.read(input.teamName);
-    const expectedMembers = previous?.expectedMembers.length
-      ? previous.expectedMembers
+    const expectedMembers = previous
+      ? this.getPersistedLaunchMemberNames(previous)
       : this.readPersistedRuntimeMembers(input.teamName)
           .map((member) => (typeof member.name === 'string' ? member.name.trim() : ''))
           .filter((name) => name.length > 0 && name !== 'user' && !isLeadMember({ name }));

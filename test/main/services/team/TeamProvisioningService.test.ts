@@ -2620,6 +2620,70 @@ describe('TeamProvisioningService', () => {
       });
     });
 
+    it('preserves richer persisted expectedMembers when OpenCode runtime liveness updates a stale snapshot', async () => {
+      const svc = new TeamProvisioningService();
+      const previousSnapshot = {
+        version: 2 as const,
+        teamName: 'mixed-team',
+        updatedAt: '2026-04-22T12:00:00.000Z',
+        launchPhase: 'active' as const,
+        expectedMembers: ['bob'],
+        members: {
+          alice: {
+            name: 'alice',
+            launchState: 'confirmed_alive' as const,
+            agentToolAccepted: true,
+            runtimeAlive: true,
+            bootstrapConfirmed: true,
+            hardFailure: false,
+            lastEvaluatedAt: '2026-04-22T12:00:00.000Z',
+          },
+          bob: {
+            name: 'bob',
+            providerId: 'opencode' as const,
+            laneId: 'secondary:opencode:bob',
+            laneKind: 'secondary' as const,
+            laneOwnerProviderId: 'opencode' as const,
+            launchState: 'runtime_pending_bootstrap' as const,
+            agentToolAccepted: true,
+            runtimeAlive: true,
+            bootstrapConfirmed: false,
+            hardFailure: false,
+            lastEvaluatedAt: '2026-04-22T12:00:00.000Z',
+          },
+        },
+        summary: {
+          confirmedCount: 1,
+          pendingCount: 1,
+          failedCount: 0,
+          runtimeAlivePendingCount: 1,
+        },
+        teamLaunchState: 'partial_pending' as const,
+      };
+      const write = vi.fn(async () => {});
+
+      (svc as any).launchStateStore = {
+        read: vi.fn(async () => previousSnapshot),
+        write,
+      };
+
+      await (svc as any).updateOpenCodeRuntimeMemberLiveness({
+        teamName: 'mixed-team',
+        runId: 'run-member-spawn-1',
+        memberName: 'bob',
+        runtimeSessionId: 'session-bob',
+        observedAt: '2026-04-22T12:05:00.000Z',
+        diagnostics: ['native heartbeat'],
+        reason: 'OpenCode runtime heartbeat accepted',
+      });
+
+      expect(write).toHaveBeenCalledTimes(1);
+      const writtenSnapshot = (write.mock.calls[0] as unknown as [string, Record<string, unknown>] | undefined)?.[1] as
+        | { expectedMembers?: string[] }
+        | undefined;
+      expect(writtenSnapshot?.expectedMembers).toEqual(['bob', 'alice']);
+    });
+
     it('accepts secondary OpenCode lane evidence using the lane run id instead of the lead run id', async () => {
       const svc = new TeamProvisioningService();
 
