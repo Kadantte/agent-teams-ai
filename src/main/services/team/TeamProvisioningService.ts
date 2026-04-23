@@ -4694,25 +4694,20 @@ export class TeamProvisioningService {
     return Array.isArray(innerContent) ? (innerContent as Record<string, unknown>[]) : [];
   }
 
-  private hasCapturedVisibleMessageToUser(content: Record<string, unknown>[]): boolean {
+  private hasCapturedVisibleSendMessage(content: Record<string, unknown>[]): boolean {
     return content.some((part) => {
       if (!part || typeof part !== 'object') return false;
       if (part.type !== 'tool_use' || typeof part.name !== 'string') return false;
 
-      // Only native SendMessage(to="user") is guaranteed to be materialized as a
-      // visible outbound message by captureSendMessages().
-      // Keep this intentionally narrower than captureSendMessages(): if another tool path
-      // later starts creating its own user-visible row, expand this helper in lockstep.
       if (part.name !== 'SendMessage') return false;
 
       const input = part.input;
       if (!input || typeof input !== 'object') return false;
       const inp = input as Record<string, unknown>;
-      const target = (
-        typeof inp.recipient === 'string' ? inp.recipient : typeof inp.to === 'string' ? inp.to : ''
-      ).trim();
+      const target = (typeof inp.recipient === 'string' ? inp.recipient : '').trim();
+      const text = (typeof inp.content === 'string' ? inp.content : '').trim();
 
-      return target.toLowerCase() === 'user';
+      return target.length > 0 && text.length > 0;
     });
   }
 
@@ -14461,7 +14456,7 @@ export class TeamProvisioningService {
     if (msg.type === 'assistant') {
       const content = this.extractStreamContentBlocks(msg);
 
-      const hasCapturedVisibleMessageToUser = this.hasCapturedVisibleMessageToUser(content);
+      const hasCapturedVisibleSendMessage = this.hasCapturedVisibleSendMessage(content);
 
       const textParts = content
         .filter((part) => part.type === 'text' && typeof part.text === 'string')
@@ -14503,13 +14498,13 @@ export class TeamProvisioningService {
           }, capture.idleMs);
         } else if (run.provisioningComplete) {
           // Push each assistant text block as a separate live message (per-message pattern).
-          // When the same assistant message includes a user-visible message send, skip text —
+          // When the same assistant message includes SendMessage, skip narration because
           // captureSendMessages() handles the visible outbound message separately.
           if (
             !run.silentUserDmForward &&
             !run.suppressPostCompactReminderOutput &&
             !run.suppressGeminiPostLaunchHydrationOutput &&
-            !hasCapturedVisibleMessageToUser
+            !hasCapturedVisibleSendMessage
           ) {
             const cleanText = stripAgentBlocks(text).trim();
             if (cleanText.length > 0) {
@@ -14524,7 +14519,7 @@ export class TeamProvisioningService {
         } else {
           // Pre-ready: keep showing provisioning narration in the banner, but also mirror it
           // into the live cache so Messages/Activity can show the earliest assistant output.
-          if (!run.silentUserDmForward && !hasCapturedVisibleMessageToUser) {
+          if (!run.silentUserDmForward && !hasCapturedVisibleSendMessage) {
             const cleanText = stripAgentBlocks(text).trim();
             if (cleanText.length > 0) {
               this.pushLiveLeadTextMessage(

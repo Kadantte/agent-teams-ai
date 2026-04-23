@@ -204,7 +204,7 @@ export class OpenCodeTeamRuntimeAdapter implements TeamLaunchRuntimeAdapter {
       members: input.expectedMembers.map((member) => ({
         name: member.name,
         role: member.role?.trim() || member.workflow?.trim() || 'teammate',
-        prompt: buildMemberBootstrapPrompt(input, member.name),
+        prompt: buildMemberBootstrapPrompt(input, member),
       })),
       leadPrompt: input.prompt?.trim() ?? '',
       expectedCapabilitySnapshotId: runtimeSnapshot?.capabilitySnapshotId ?? null,
@@ -335,7 +335,7 @@ export class OpenCodeTeamRuntimeAdapter implements TeamLaunchRuntimeAdapter {
       teamName: input.teamName,
       projectPath: input.cwd,
       memberName: input.memberName,
-      text: input.text,
+      text: buildOpenCodeRuntimeMessageText(input),
       messageId: input.messageId,
       agent: 'teammate',
     });
@@ -587,12 +587,66 @@ function extractCheckpointNames(data: OpenCodeLaunchTeamCommandData): Set<string
   return names;
 }
 
-function buildMemberBootstrapPrompt(input: TeamRuntimeLaunchInput, memberName: string): string {
-  const shared = input.prompt?.trim();
-  if (shared) {
-    return shared;
+function buildMemberBootstrapPrompt(
+  input: TeamRuntimeLaunchInput,
+  member: TeamRuntimeLaunchInput['expectedMembers'][number]
+): string {
+  const teamPrompt = input.prompt?.trim();
+  const role = member.role?.trim() || member.workflow?.trim() || 'teammate';
+  const workflow = member.workflow?.trim();
+  return [
+    `You are ${member.name}, a ${role} on team "${input.teamName}".`,
+    teamPrompt ? `Team launch context:\n${teamPrompt}` : null,
+    workflow ? `Workflow:\n${workflow}` : null,
+    '',
+    'This OpenCode session is already attached by the desktop app. Do NOT create local team files, run join scripts, or search the project for a fake team registry.',
+    'Use the app MCP tools exposed by the "agent-teams" server for team communication and task state.',
+    'If available, your first app-team action is to call MCP tool agent-teams_member_briefing (or mcp__agent-teams__member_briefing if that is the exposed name) with:',
+    `{ "teamName": "${input.teamName}", "memberName": "${member.name}" }`,
+    'If that tool is not available, stay idle and wait for app-delivered instructions. Do not improvise a replacement workflow.',
+    '',
+    'When you need to message the human user, team lead, or another teammate, call MCP tool agent-teams_message_send (or mcp__agent-teams__message_send) with teamName, to, from, text, and optional summary.',
+    `Always set from="${member.name}" when sending a team message from this OpenCode teammate.`,
+    'Do not answer team/app messages only as plain assistant text when agent-teams_message_send is available.',
+  ]
+    .filter((line): line is string => line !== null)
+    .join('\n');
+}
+
+function buildOpenCodeRuntimeMessageText(input: OpenCodeTeamRuntimeMessageInput): string {
+  const replyRecipient = extractRequestedReplyRecipient(input.text);
+  const replyLine = replyRecipient
+    ? `For this message, if you reply, call agent-teams_message_send with to="${replyRecipient}" and from="${input.memberName}".`
+    : `If you reply, call agent-teams_message_send with the requested recipient and from="${input.memberName}".`;
+
+  return [
+    '<opencode_app_message_delivery>',
+    'You are running in OpenCode, not Claude Code or Codex native.',
+    'If the incoming message below mentions SendMessage, treat that as a UI abstraction for other runtimes. Do not import, require, create, or run a SendMessage script.',
+    'To make your reply visible in the app Messages UI, call MCP tool agent-teams_message_send (or mcp__agent-teams__message_send if that is the exposed name).',
+    `Use teamName="${input.teamName}". ${replyLine}`,
+    'Pass your human-readable reply as text and a short summary as summary. Do not answer only with plain assistant text when the tool is available.',
+    input.messageId
+      ? `The inbound app messageId is "${input.messageId}"; keep it only as context unless a tool explicitly asks for provenance.`
+      : null,
+    '</opencode_app_message_delivery>',
+    '',
+    input.text,
+  ]
+    .filter((line): line is string => line !== null)
+    .join('\n');
+}
+
+function extractRequestedReplyRecipient(text: string): string | null {
+  const replyRecipientMatch = /reply back to recipient "([^"]+)"/i.exec(text);
+  if (replyRecipientMatch?.[1]?.trim()) {
+    return replyRecipientMatch[1].trim();
   }
-  return `Join team "${input.teamName}" as "${memberName}" and wait for app MCP task delivery.`;
+  const destinationMatch = /destination must be exactly to="([^"]+)"/i.exec(text);
+  if (destinationMatch?.[1]?.trim()) {
+    return destinationMatch[1].trim();
+  }
+  return null;
 }
 
 function validateOpenCodeRuntimeMembers(

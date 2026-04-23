@@ -152,7 +152,9 @@ describe('OpenCodeTeamRuntimeAdapter', () => {
   });
 
   it('maps ready bridge launch data to successful runtime evidence only with required checkpoints', async () => {
-    const launchOpenCodeTeam = vi.fn(
+    const launchOpenCodeTeam = vi.fn<
+      NonNullable<OpenCodeTeamRuntimeBridgePort['launchOpenCodeTeam']>
+    >(
       async () =>
         ({
           runId: 'run-1',
@@ -208,8 +210,17 @@ describe('OpenCodeTeamRuntimeAdapter', () => {
       expect.objectContaining({
         expectedCapabilitySnapshotId: 'cap-1',
         manifestHighWatermark: null,
+        members: [
+          expect.objectContaining({
+            name: 'alice',
+            prompt: expect.stringContaining('agent-teams_member_briefing'),
+          }),
+        ],
       })
     );
+    const launchArg = launchOpenCodeTeam.mock.calls[0]?.[0];
+    expect(launchArg?.members[0]?.prompt).toContain('Do NOT create local team files');
+    expect(launchArg?.members[0]?.prompt).not.toContain('Join team "team-a"');
   });
 
   it('does not mark the lane clean_success when ready bridge data omits an expected member', async () => {
@@ -309,7 +320,9 @@ describe('OpenCodeTeamRuntimeAdapter', () => {
   });
 
   it('sends direct teammate messages through the OpenCode message bridge', async () => {
-    const sendOpenCodeTeamMessage = vi.fn(async () => ({
+    const sendOpenCodeTeamMessage = vi.fn<
+      NonNullable<OpenCodeTeamRuntimeBridgePort['sendOpenCodeTeamMessage']>
+    >(async () => ({
       accepted: true,
       sessionId: 'oc-session-bob',
       memberName: 'bob',
@@ -347,10 +360,13 @@ describe('OpenCodeTeamRuntimeAdapter', () => {
       teamName: 'team-a',
       projectPath: '/repo',
       memberName: 'bob',
-      text: 'hello bob',
+      text: expect.stringContaining('agent-teams_message_send'),
       messageId: 'msg-1',
       agent: 'teammate',
     });
+    const sentText = sendOpenCodeTeamMessage.mock.calls[0]?.[0]?.text ?? '';
+    expect(sentText).toContain('hello bob');
+    expect(sentText).toContain('Do not import, require, create, or run a SendMessage script');
   });
 
   it('keeps missing bridge members pending while reconcile is still launching', async () => {

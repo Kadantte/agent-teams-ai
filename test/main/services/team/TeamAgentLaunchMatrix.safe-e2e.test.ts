@@ -391,6 +391,120 @@ describe('Team agent launch matrix safe e2e', () => {
     });
   });
 
+  it('recovers mixed Gemini failure and split OpenCode lane truth after service restart', async () => {
+    const teamName = 'mixed-persisted-gemini-failure-opencode-split-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, includeGeminiPrimary: true });
+    await writeTeamMeta(teamName, projectPath);
+    await writeMembersMeta(teamName, { includeGeminiPrimary: true });
+    await writeMixedTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          providerId: 'codex',
+          providerBackendId: 'codex-native',
+          model: 'gpt-5.4-mini',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'codex',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        reviewer: mixedMemberState({
+          providerId: 'gemini',
+          model: 'gemini-2.5-flash',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'gemini',
+          launchState: 'failed_to_start',
+          agentToolAccepted: false,
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: 'Gemini pane exited before bootstrap',
+        }),
+        bob: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/minimax-m2.5-free',
+          laneId: 'secondary:opencode:bob',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        tom: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/nemotron-3-super-free',
+          laneId: 'secondary:opencode:tom',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'runtime_pending_permission',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+          pendingPermissionRequestIds: ['perm-tom'],
+        }),
+      },
+    });
+
+    const restartedService = new TeamProvisioningService();
+    const statuses = await restartedService.getMemberSpawnStatuses(teamName);
+
+    expect(statuses.expectedMembers).toEqual(['alice', 'reviewer', 'bob', 'tom']);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      pendingCount: 1,
+      failedCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.reviewer).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'Gemini pane exited before bootstrap',
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_permission',
+      hardFailure: false,
+      pendingPermissionRequestIds: ['perm-tom'],
+    });
+
+    const runtimeSnapshot = await restartedService.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.reviewer).toMatchObject({
+      providerId: 'gemini',
+      laneKind: 'primary',
+      alive: false,
+      runtimeModel: 'gemini-2.5-flash',
+    });
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'opencode',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/minimax-m2.5-free',
+    });
+    expect(runtimeSnapshot.members.tom).toMatchObject({
+      providerId: 'opencode',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/nemotron-3-super-free',
+    });
+  });
+
   it('exposes shared OpenCode side-lane runtime memory in the team runtime snapshot', async () => {
     const teamName = 'mixed-opencode-runtime-memory-safe-e2e';
     const sharedHostPid = 24_242;
@@ -455,6 +569,121 @@ describe('Team agent launch matrix safe e2e', () => {
       rssBytes: 183.9 * 1024 * 1024,
     });
     expect(runtimeSnapshot.members.bob.providerBackendId).toBeUndefined();
+  });
+
+  it('keeps OpenCode side-lane pid and memory visible after mixed failure recovery', async () => {
+    const teamName = 'mixed-gemini-failure-opencode-memory-safe-e2e';
+    const sharedHostPid = 31_313;
+    const sharedRssBytes = 211.4 * 1024 * 1024;
+    await writeMixedTeamConfig({ teamName, projectPath, includeGeminiPrimary: true });
+    await writeTeamMeta(teamName, projectPath);
+    await writeMembersMeta(teamName, { includeGeminiPrimary: true });
+    await writeMixedTeamLaunchState({
+      teamName,
+      members: {
+        alice: mixedMemberState({
+          providerId: 'codex',
+          providerBackendId: 'codex-native',
+          model: 'gpt-5.4-mini',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'codex',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        reviewer: mixedMemberState({
+          providerId: 'gemini',
+          model: 'gemini-2.5-flash',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'gemini',
+          launchState: 'failed_to_start',
+          agentToolAccepted: false,
+          runtimeAlive: false,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: 'Gemini pane exited before bootstrap',
+        }),
+        bob: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/minimax-m2.5-free',
+          laneId: 'secondary:opencode:bob',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        }),
+        tom: mixedMemberState({
+          providerId: 'opencode',
+          model: 'opencode/nemotron-3-super-free',
+          laneId: 'secondary:opencode:tom',
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+          launchState: 'runtime_pending_permission',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          bootstrapConfirmed: false,
+          hardFailure: false,
+          pendingPermissionRequestIds: ['perm-tom'],
+        }),
+      },
+    });
+    const svc = new TeamProvisioningService();
+    (svc as any).getLiveTeamAgentRuntimeMetadata = async () =>
+      new Map([
+        [
+          'bob',
+          {
+            alive: true,
+            metricsPid: sharedHostPid,
+            model: 'opencode/minimax-m2.5-free',
+          },
+        ],
+        [
+          'tom',
+          {
+            alive: true,
+            metricsPid: sharedHostPid,
+            model: 'opencode/nemotron-3-super-free',
+          },
+        ],
+      ]);
+    (svc as any).readProcessRssBytesByPid = async () => new Map([[sharedHostPid, sharedRssBytes]]);
+
+    const runtimeSnapshot = await svc.getTeamAgentRuntimeSnapshot(teamName);
+
+    expect(runtimeSnapshot.members.reviewer).toMatchObject({
+      providerId: 'gemini',
+      laneKind: 'primary',
+      alive: false,
+      runtimeModel: 'gemini-2.5-flash',
+    });
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:bob',
+      laneKind: 'secondary',
+      alive: true,
+      restartable: false,
+      pid: sharedHostPid,
+      runtimeModel: 'opencode/minimax-m2.5-free',
+      rssBytes: sharedRssBytes,
+    });
+    expect(runtimeSnapshot.members.tom).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:tom',
+      laneKind: 'secondary',
+      alive: true,
+      restartable: false,
+      pid: sharedHostPid,
+      runtimeModel: 'opencode/nemotron-3-super-free',
+      rssBytes: sharedRssBytes,
+    });
   });
 
   it('infers OpenCode runtime provider from model after restart when provider metadata is missing', async () => {
@@ -803,6 +1032,138 @@ describe('Team agent launch matrix safe e2e', () => {
     });
   });
 
+  it('keeps mixed launch pending while Codex primary is still joining and OpenCode lanes are ready', async () => {
+    const teamName = 'mixed-codex-starting-opencode-ready-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath });
+    trackLiveRun(svc, run);
+    run.memberSpawnStatuses.set('alice', {
+      status: 'starting',
+      launchState: 'starting',
+      agentToolAccepted: true,
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+      lastEvaluatedAt: '2026-04-23T10:00:00.000Z',
+      updatedAt: '2026-04-23T10:00:00.000Z',
+    });
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+    await waitForCondition(() => run.memberSpawnStatuses.get('bob')?.launchState === 'confirmed_alive');
+    await waitForCondition(() => run.memberSpawnStatuses.get('tom')?.launchState === 'confirmed_alive');
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_pending');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      pendingCount: 1,
+      failedCount: 0,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'waiting',
+      launchState: 'runtime_pending_bootstrap',
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      bootstrapConfirmed: true,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      runtimeAlive: true,
+      bootstrapConfirmed: true,
+    });
+  });
+
+  it('keeps mixed launch partial when Gemini primary fails and OpenCode lanes split ready and pending', async () => {
+    const teamName = 'mixed-gemini-failed-opencode-split-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath, includeGeminiPrimary: true });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'permission',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath });
+    const reviewer = {
+      name: 'reviewer',
+      role: 'Reviewer',
+      providerId: 'gemini',
+      model: 'gemini-2.5-flash',
+    };
+    run.expectedMembers = ['alice', 'reviewer'];
+    run.effectiveMembers = [...run.effectiveMembers, reviewer];
+    run.allEffectiveMembers = [
+      ...run.effectiveMembers,
+      ...run.allEffectiveMembers.filter((member: { providerId?: string }) => member.providerId === 'opencode'),
+    ];
+    run.memberSpawnStatuses.set('reviewer', {
+      status: 'error',
+      launchState: 'failed_to_start',
+      agentToolAccepted: false,
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: true,
+      hardFailureReason: 'Gemini pane exited before bootstrap',
+      lastEvaluatedAt: '2026-04-23T10:00:00.000Z',
+      updatedAt: '2026-04-23T10:00:00.000Z',
+    });
+    trackLiveRun(svc, run);
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+    await waitForCondition(() => run.memberSpawnStatuses.get('bob')?.launchState === 'confirmed_alive');
+    await waitForCondition(() => run.memberSpawnStatuses.get('tom')?.launchState === 'runtime_pending_permission');
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      pendingCount: 1,
+      failedCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.reviewer).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'Gemini pane exited before bootstrap',
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_permission',
+      hardFailure: false,
+      pendingPermissionRequestIds: ['perm-tom'],
+    });
+  });
+
   it('keeps Codex primary online when a mixed OpenCode secondary lane fails', async () => {
     const teamName = 'mixed-live-secondary-failure-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath });
@@ -844,6 +1205,113 @@ describe('Team agent launch matrix safe e2e', () => {
       launchState: 'failed_to_start',
       hardFailure: true,
       hardFailureReason: 'fake_open_code_launch_failure',
+    });
+  });
+
+  it('keeps OpenCode secondary lanes online when the primary Codex member failed to spawn', async () => {
+    const teamName = 'mixed-primary-failure-opencode-ready-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', {
+      bob: 'confirmed',
+      tom: 'confirmed',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const run = createMixedLiveRun({ teamName, projectPath });
+    trackLiveRun(svc, run);
+    run.memberSpawnStatuses.set('alice', {
+      status: 'error',
+      launchState: 'failed_to_start',
+      agentToolAccepted: false,
+      runtimeAlive: false,
+      bootstrapConfirmed: false,
+      hardFailure: true,
+      hardFailureReason: 'Codex native runtime unavailable',
+      lastEvaluatedAt: '2026-04-23T10:00:00.000Z',
+      updatedAt: '2026-04-23T10:00:00.000Z',
+    });
+
+    await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+    await waitForCondition(() => adapter.launchInputs.length === 2);
+    await waitForCondition(() =>
+      run.mixedSecondaryLanes.every((lane: { state: string }) => lane.state === 'finished')
+    );
+    await waitForCondition(() => run.memberSpawnStatuses.get('bob')?.launchState === 'confirmed_alive');
+    await waitForCondition(() => run.memberSpawnStatuses.get('tom')?.launchState === 'confirmed_alive');
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.summary).toMatchObject({
+      confirmedCount: 2,
+      failedCount: 1,
+    });
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'Codex native runtime unavailable',
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+
+    const runtimeSnapshot = await svc.getTeamAgentRuntimeSnapshot(teamName);
+    expect(runtimeSnapshot.members.bob).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:bob',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/minimax-m2.5-free',
+    });
+    expect(runtimeSnapshot.members.tom).toMatchObject({
+      providerId: 'opencode',
+      laneId: 'secondary:opencode:tom',
+      laneKind: 'secondary',
+      runtimeModel: 'opencode/nemotron-3-super-free',
+    });
+  });
+
+  it('fails mixed OpenCode secondary lanes clearly when the runtime adapter is not registered', async () => {
+    const teamName = 'mixed-missing-opencode-adapter-safe-e2e';
+    await writeMixedTeamConfig({ teamName, projectPath });
+    const svc = new TeamProvisioningService();
+    const run = createMixedLiveRun({ teamName, projectPath });
+    trackLiveRun(svc, run);
+
+    const snapshot = await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+
+    expect(snapshot).toMatchObject({
+      teamName,
+      teamLaunchState: 'partial_failure',
+    });
+    expect(run.mixedSecondaryLanes.map((lane: { state: string }) => lane.state)).toEqual([
+      'finished',
+      'finished',
+    ]);
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.teamLaunchState).toBe('partial_failure');
+    expect(statuses.statuses.alice).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      hardFailure: false,
+    });
+    expect(statuses.statuses.bob).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'opencode_runtime_adapter_missing',
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      hardFailure: true,
+      hardFailureReason: 'opencode_runtime_adapter_missing',
     });
   });
 
@@ -1921,6 +2389,7 @@ async function writeOpenCodeTeamConfig(input: {
 async function writeMixedTeamConfig(input: {
   teamName: string;
   projectPath: string;
+  includeGeminiPrimary?: boolean;
 }): Promise<void> {
   const teamDir = path.join(getTeamsBasePath(), input.teamName);
   await fs.mkdir(teamDir, { recursive: true });
@@ -1948,6 +2417,16 @@ async function writeMixedTeamConfig(input: {
             providerBackendId: 'codex-native',
             model: 'gpt-5.4-mini',
           },
+          ...(input.includeGeminiPrimary
+            ? [
+                {
+                  name: 'reviewer',
+                  role: 'Reviewer',
+                  providerId: 'gemini',
+                  model: 'gemini-2.5-flash',
+                },
+              ]
+            : []),
           {
             name: 'bob',
             role: 'Developer',
@@ -2069,7 +2548,10 @@ async function writeTeamMeta(teamName: string, projectPath: string): Promise<voi
   );
 }
 
-async function writeMembersMeta(teamName: string): Promise<void> {
+async function writeMembersMeta(
+  teamName: string,
+  options: { includeGeminiPrimary?: boolean } = {}
+): Promise<void> {
   const teamDir = path.join(getTeamsBasePath(), teamName);
   await fs.mkdir(teamDir, { recursive: true });
   await fs.writeFile(
@@ -2085,6 +2567,15 @@ async function writeMembersMeta(teamName: string): Promise<void> {
             providerBackendId: 'codex-native',
             model: 'gpt-5.4-mini',
           },
+          ...(options.includeGeminiPrimary
+            ? [
+                {
+                  name: 'reviewer',
+                  providerId: 'gemini',
+                  model: 'gemini-2.5-flash',
+                },
+              ]
+            : []),
           {
             name: 'bob',
             providerId: 'opencode',
