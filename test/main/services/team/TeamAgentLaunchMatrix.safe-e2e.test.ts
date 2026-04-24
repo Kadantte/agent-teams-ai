@@ -11962,8 +11962,8 @@ describe('Team agent launch matrix safe e2e', () => {
     svc.stopTeam(teamName);
 
     await waitForCondition(() => adapter.stopInputs.length === 2);
-    expect(staleKillCount).toBe(0);
-    expect(currentKillCount).toBe(1);
+    expectDirectChildKillCount(staleKillCount, 0);
+    expectDirectChildKillCount(currentKillCount, 1);
     expect(staleRun.cancelRequested).toBe(false);
     expect(currentRun.cancelRequested).toBe(true);
     expect(adapter.stopInputs.map((input) => input.laneId).sort()).toEqual([
@@ -12019,8 +12019,8 @@ describe('Team agent launch matrix safe e2e', () => {
 
     await svc.cancelProvisioning(staleRun.runId);
 
-    expect(staleKillCount).toBe(1);
-    expect(currentKillCount).toBe(0);
+    expectDirectChildKillCount(staleKillCount, 1);
+    expectDirectChildKillCount(currentKillCount, 0);
     expect(staleRun.cancelRequested).toBe(true);
     expect(currentRun.cancelRequested).toBe(false);
     expect(adapter.stopInputs).toEqual([]);
@@ -12085,8 +12085,8 @@ describe('Team agent launch matrix safe e2e', () => {
 
     svc.stopTeam(teamName);
 
-    expect(staleKillCount).toBe(0);
-    expect(currentKillCount).toBe(1);
+    expectDirectChildKillCount(staleKillCount, 0);
+    expectDirectChildKillCount(currentKillCount, 1);
     expect(staleRun.cancelRequested).toBe(false);
     expect(currentRun.cancelRequested).toBe(true);
     expect(await svc.getRuntimeState(teamName)).toMatchObject({
@@ -12120,8 +12120,8 @@ describe('Team agent launch matrix safe e2e', () => {
 
     await svc.cancelProvisioning(staleRun.runId);
 
-    expect(staleKillCount).toBe(1);
-    expect(currentKillCount).toBe(0);
+    expectDirectChildKillCount(staleKillCount, 1);
+    expectDirectChildKillCount(currentKillCount, 0);
     expect(staleRun.cancelRequested).toBe(true);
     expect(currentRun.cancelRequested).toBe(false);
     expect(svc.isTeamAlive(teamName)).toBe(true);
@@ -12157,8 +12157,8 @@ describe('Team agent launch matrix safe e2e', () => {
 
     await svc.cancelProvisioning(currentRun.runId);
 
-    expect(staleKillCount).toBe(0);
-    expect(currentKillCount).toBe(1);
+    expectDirectChildKillCount(staleKillCount, 0);
+    expectDirectChildKillCount(currentKillCount, 1);
     expect(staleRun.cancelRequested).toBe(false);
     expect(currentRun.cancelRequested).toBe(true);
     expect(svc.isTeamAlive(teamName)).toBe(false);
@@ -16463,6 +16463,11 @@ function trackLiveRun(svc: TeamProvisioningService, run: any): void {
   (svc as any).runs.set(run.runId, run);
   (svc as any).provisioningRunByTeam.set(run.teamName, run.runId);
   (svc as any).aliveRunByTeam.set(run.teamName, run.runId);
+}
+
+function expectDirectChildKillCount(actual: number, expected: number): void {
+  // Windows uses taskkill.exe for process-tree termination, so fake child.kill is not called.
+  expect(actual).toBe(process.platform === 'win32' ? 0 : expected);
 }
 
 function injectStaleTerminalProvisioningRun(

@@ -69,13 +69,14 @@ describe('electron userData migration', () => {
   }
 
   it('derives legacy candidates beside the current Electron userData directory', () => {
-    expect(
-      getLegacyElectronUserDataCandidates('/Users/me/Library/Application Support/Agent Teams UI')
-    ).toEqual([
-      '/Users/me/Library/Application Support/Claude Agent Teams UI',
-      '/Users/me/Library/Application Support/claude-agent-teams-ui',
-      '/Users/me/Library/Application Support/claude-devtools',
-      '/Users/me/Library/Application Support/claude-code-context',
+    const currentPath = path.join('/Users/me/Library/Application Support', 'Agent Teams UI');
+    const parentPath = path.dirname(currentPath);
+
+    expect(getLegacyElectronUserDataCandidates(currentPath)).toEqual([
+      path.join(parentPath, 'Claude Agent Teams UI'),
+      path.join(parentPath, 'claude-agent-teams-ui'),
+      path.join(parentPath, 'claude-devtools'),
+      path.join(parentPath, 'claude-code-context'),
     ]);
   });
 
