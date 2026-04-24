@@ -256,6 +256,66 @@ describe('runProviderPrepareDiagnostics', () => {
     );
   });
 
+  it('shows missing OpenCode project evidence as a provider note instead of model failures', async () => {
+    const projectEvidenceNote =
+      'OpenCode has not been verified on this project yet. This does not mean the selected models are broken.';
+    const prepareProvisioning = vi
+      .fn<
+        (
+          cwd?: string,
+          providerId?: TeamProviderId,
+          providerIds?: TeamProviderId[],
+          selectedModels?: string[],
+          limitContext?: boolean,
+          modelVerificationMode?: 'compatibility' | 'deep'
+        ) => Promise<TeamProvisioningPrepareResult>
+      >()
+      .mockResolvedValue({
+        ready: true,
+        message: 'CLI is ready to launch (see notes)',
+        details: [
+          'Selected model opencode/minimax-m2.5-free verified for launch.',
+          'Selected model opencode/ling-2.6-flash-free verified for launch.',
+        ],
+        warnings: [projectEvidenceNote],
+      });
+
+    const result = await runProviderPrepareDiagnostics({
+      cwd: '/tmp/project',
+      providerId: 'opencode',
+      selectedModelIds: ['opencode/minimax-m2.5-free', 'opencode/ling-2.6-flash-free'],
+      prepareProvisioning,
+    });
+
+    expect(result.status).toBe('notes');
+    expect(result.details).toEqual([
+      'minimax-m2.5-free - verified',
+      'ling-2.6-flash-free - verified',
+    ]);
+    expect(result.warnings).toEqual([projectEvidenceNote]);
+    expect(result.modelResultsById).toEqual({
+      'opencode/minimax-m2.5-free': {
+        status: 'ready',
+        line: 'minimax-m2.5-free - verified',
+        warningLine: null,
+      },
+      'opencode/ling-2.6-flash-free': {
+        status: 'ready',
+        line: 'ling-2.6-flash-free - verified',
+        warningLine: null,
+      },
+    });
+    expect(prepareProvisioning).toHaveBeenCalledTimes(1);
+    expect(prepareProvisioning).toHaveBeenCalledWith(
+      '/tmp/project',
+      'opencode',
+      ['opencode'],
+      ['opencode/minimax-m2.5-free', 'opencode/ling-2.6-flash-free'],
+      undefined,
+      'compatibility'
+    );
+  });
+
   it('normalizes raw Codex API error envelopes into a clean model reason', async () => {
     const prepareProvisioning = vi.fn<
       (
