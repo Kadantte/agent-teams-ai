@@ -85,6 +85,58 @@ describe('OpenCodeReadinessBridge', () => {
     expect(bridge.getLastOpenCodeRuntimeSnapshot('/repo')).toBeNull();
   });
 
+  it('executes host cleanup through the direct bridge command', async () => {
+    const executor = fakeExecutor(
+      bridgeCommandSuccess({
+        command: 'opencode.cleanupHosts',
+        requestId: 'cleanup-req-1',
+        data: {
+          cleaned: 1,
+          remaining: 0,
+          hosts: [
+            {
+              hostKey: 'host-key',
+              projectPath: '/repo',
+              pid: 123,
+              port: 43116,
+              action: 'disposed',
+              reason: 'stale host has no active leases during startup',
+              leaseCount: 0,
+            },
+          ],
+          diagnostics: [],
+        },
+      })
+    );
+    const bridge = new OpenCodeReadinessBridge(executor, { cleanupTimeoutMs: 5_000 });
+
+    await expect(
+      bridge.cleanupOpenCodeHosts({
+        reason: 'startup',
+        mode: 'stale',
+        projectPath: '/repo',
+        staleAgeMs: 1_000,
+      })
+    ).resolves.toMatchObject({
+      cleaned: 1,
+      remaining: 0,
+    });
+
+    expect(executor.execute).toHaveBeenCalledWith(
+      'opencode.cleanupHosts',
+      {
+        reason: 'startup',
+        mode: 'stale',
+        projectPath: '/repo',
+        staleAgeMs: 1_000,
+      },
+      {
+        cwd: '/repo',
+        timeoutMs: 5_000,
+      }
+    );
+  });
+
   it('routes state-changing launch commands through the guarded command service when configured', async () => {
     const executor = fakeExecutor(
       bridgeFailure('internal_error', 'direct bridge must not run', [])

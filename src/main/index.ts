@@ -184,6 +184,7 @@ import type { FileChangeEvent } from '@main/types';
 import type { TeamChangeEvent } from '@shared/types';
 
 const logger = createLogger('App');
+let openCodeLifecycleBridge: OpenCodeReadinessBridge | null = null;
 if (
   earlyElectronUserDataMigrationResult.migrated &&
   earlyElectronUserDataMigrationResult.legacyPath &&
@@ -224,6 +225,7 @@ async function createOpenCodeRuntimeAdapterRegistry(): Promise<TeamRuntimeAdapte
   const binaryPath = await ClaudeBinaryResolver.resolve();
   if (!binaryPath) {
     logger.warn('[OpenCode] Runtime adapter bridge disabled: orchestrator CLI binary not resolved');
+    openCodeLifecycleBridge = null;
     return new TeamRuntimeAdapterRegistry();
   }
 
@@ -272,13 +274,30 @@ async function createOpenCodeRuntimeAdapterRegistry(): Promise<TeamRuntimeAdapte
       teamsBasePath: getTeamsBasePath(),
     }),
   });
-  return new TeamRuntimeAdapterRegistry([
-    new OpenCodeTeamRuntimeAdapter(
-      new OpenCodeReadinessBridge(bridgeClient, {
-        stateChangingCommands,
-      })
-    ),
-  ]);
+  const readinessBridge = new OpenCodeReadinessBridge(bridgeClient, {
+    stateChangingCommands,
+  });
+  openCodeLifecycleBridge = readinessBridge;
+  return new TeamRuntimeAdapterRegistry([new OpenCodeTeamRuntimeAdapter(readinessBridge)]);
+}
+
+async function cleanupOpenCodeHostsForLifecycle(reason: 'startup' | 'shutdown'): Promise<void> {
+  if (!openCodeLifecycleBridge) {
+    return;
+  }
+  const result = await openCodeLifecycleBridge.cleanupOpenCodeHosts({
+    reason,
+    mode: reason === 'shutdown' ? 'force' : 'stale',
+    staleAgeMs: reason === 'startup' ? 5 * 60_000 : null,
+  });
+  if (result.cleaned > 0) {
+    logger.info(
+      `[OpenCode] ${reason} host cleanup removed ${result.cleaned} registry host(s), ${result.remaining} remaining`
+    );
+  }
+  for (const diagnostic of result.diagnostics) {
+    logger.warn(`[OpenCode] ${reason} host cleanup: ${diagnostic}`);
+  }
 }
 
 // --- Team display name cache (avoid listTeams() on every notification) ---
@@ -1013,6 +1032,9 @@ async function initializeServices(): Promise<void> {
   teamDataService.setMemberRuntimeAdvisoryService(teamMemberRuntimeAdvisoryService);
   teamProvisioningService = new TeamProvisioningService();
   teamProvisioningService.setRuntimeAdapterRegistry(await createOpenCodeRuntimeAdapterRegistry());
+  await cleanupOpenCodeHostsForLifecycle('startup').catch((error: unknown) =>
+    logger.warn(`[OpenCode] Startup host cleanup failed: ${String(error)}`)
+  );
   // Startup GC: remove stale MCP config files from previous sessions (best-effort)
   void new TeamMcpConfigBuilder().gcStaleConfigs();
   void teamDataService
@@ -1328,6 +1350,11 @@ async function shutdownServices(): Promise<void> {
     if (teamProvisioningService) {
       await runShutdownStep('stop all teams', () => teamProvisioningService.stopAllTeams(), 10_000);
     }
+    await runShutdownStep(
+      'OpenCode host registry cleanup',
+      () => cleanupOpenCodeHostsForLifecycle('shutdown'),
+      10_000
+    );
     await runShutdownStep('tracked CLI subprocess cleanup', () =>
       killTrackedCliProcesses('SIGKILL')
     );

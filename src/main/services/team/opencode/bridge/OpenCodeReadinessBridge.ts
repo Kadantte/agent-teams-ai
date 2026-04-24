@@ -9,6 +9,8 @@ import type {
   OpenCodeBridgeFailureKind,
   OpenCodeBridgeResult,
   OpenCodeBridgeRuntimeSnapshot,
+  OpenCodeCleanupHostsCommandBody,
+  OpenCodeCleanupHostsCommandData,
   OpenCodeLaunchTeamCommandBody,
   OpenCodeLaunchTeamCommandData,
   OpenCodeReconcileTeamCommandBody,
@@ -39,6 +41,7 @@ export interface OpenCodeReadinessBridgeOptions {
   reconcileTimeoutMs?: number;
   sendTimeoutMs?: number;
   stopTimeoutMs?: number;
+  cleanupTimeoutMs?: number;
   stateChangingCommands?: Pick<OpenCodeStateChangingBridgeCommandService, 'execute'>;
 }
 
@@ -53,6 +56,7 @@ const DEFAULT_LAUNCH_TIMEOUT_MS = 120_000;
 const DEFAULT_RECONCILE_TIMEOUT_MS = 30_000;
 const DEFAULT_SEND_TIMEOUT_MS = 30_000;
 const DEFAULT_STOP_TIMEOUT_MS = 30_000;
+const DEFAULT_CLEANUP_TIMEOUT_MS = 10_000;
 
 export class OpenCodeReadinessBridge implements OpenCodeTeamRuntimeBridgePort {
   private readonly lastRuntimeSnapshotsByProjectPath = new Map<
@@ -164,6 +168,31 @@ export class OpenCodeReadinessBridge implements OpenCodeTeamRuntimeBridgePort {
           severity: event.severity,
           message: event.message,
         })),
+      ],
+    };
+  }
+
+  async cleanupOpenCodeHosts(
+    input: OpenCodeCleanupHostsCommandBody
+  ): Promise<OpenCodeCleanupHostsCommandData> {
+    const cwd = input.projectPath ?? process.cwd();
+    const result = await this.bridge.execute<
+      OpenCodeCleanupHostsCommandBody,
+      OpenCodeCleanupHostsCommandData
+    >('opencode.cleanupHosts', input, {
+      cwd,
+      timeoutMs: this.options.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS,
+    });
+    if (result.ok) {
+      return result.data;
+    }
+    return {
+      cleaned: 0,
+      remaining: 0,
+      hosts: [],
+      diagnostics: [
+        `OpenCode host cleanup bridge failed: ${result.error.kind}: ${result.error.message}`,
+        ...result.diagnostics.map(formatDiagnosticEvent),
       ],
     };
   }
