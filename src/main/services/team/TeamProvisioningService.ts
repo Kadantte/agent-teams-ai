@@ -8267,6 +8267,12 @@ export class TeamProvisioningService {
 
       const primaryReason =
         prepare.diagnostics.find((entry) => entry.trim().length > 0) ?? prepare.reason;
+      if (isOpenCodeProjectEvidenceMissingPrepareFailure(prepare)) {
+        details.push(`Selected model ${modelId} verified for launch.`);
+        pushUniqueProvisioningWarning(warnings, OPENCODE_PROJECT_EVIDENCE_NOTE);
+        continue;
+      }
+
       const unavailableLine = `Selected model ${modelId} is unavailable. ${primaryReason}`;
       const verificationWarningLine = `Selected model ${modelId} could not be verified. ${primaryReason}`;
       if (prepare.retryable) {
@@ -8356,6 +8362,14 @@ export class TeamProvisioningService {
     if (!sharedPrepare.ok) {
       const primaryReason =
         sharedPrepare.diagnostics.find((entry) => entry.trim().length > 0) ?? sharedPrepare.reason;
+      if (isOpenCodeProjectEvidenceMissingPrepareFailure(sharedPrepare)) {
+        pushUniqueProvisioningWarning(warnings, OPENCODE_PROJECT_EVIDENCE_NOTE);
+        for (const modelId of modelIds) {
+          details.push(`Selected model ${modelId} verified for launch.`);
+        }
+        return { details, warnings, blockingMessages };
+      }
+
       for (const modelId of modelIds) {
         const unavailableLine = `Selected model ${modelId} is unavailable. ${primaryReason}`;
         const verificationWarningLine = `Selected model ${modelId} could not be verified. ${primaryReason}`;
