@@ -1,4 +1,4 @@
-import { getDerivedReviewState } from '@shared/utils/taskHistory';
+import { getDerivedReviewStateFromHistory } from '@shared/utils/taskHistory';
 
 import type { TaskHistoryEvent, TeamReviewState } from '@shared/types';
 
@@ -16,7 +16,12 @@ export function normalizeReviewState(value: unknown): TeamReviewState {
 export function getReviewStateFromTask(task: ReviewStateLike): TeamReviewState {
   // Prefer derivation from historyEvents when available
   if (Array.isArray(task.historyEvents) && task.historyEvents.length > 0) {
-    return getDerivedReviewState({ historyEvents: task.historyEvents as TaskHistoryEvent[] });
+    const derived = getDerivedReviewStateFromHistory({
+      historyEvents: task.historyEvents as TaskHistoryEvent[],
+    });
+    if (derived) {
+      return derived;
+    }
   }
 
   const explicit = normalizeReviewState(task.reviewState);

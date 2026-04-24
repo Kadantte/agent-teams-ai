@@ -2,7 +2,7 @@
  * NotificationManager service - Manages native notifications and notification history.
  *
  * Responsibilities:
- * - Store notification history at ~/.claude/claude-devtools-notifications.json (max 100 entries)
+ * - Store notification history at ~/.claude/agent-teams-notifications.json (max 100 entries)
  * - Show native notifications using Electron's Notification API (cross-platform)
  * - Two adapters: addError() for error notifications, addTeamNotification() for team events
  * - Shared internal pipeline: storeNotification() for unconditional storage + IPC emission
@@ -93,7 +93,19 @@ const MAX_NOTIFICATIONS = 100;
 const THROTTLE_MS = 5000;
 
 /** Path to notifications storage file */
-const NOTIFICATIONS_PATH = path.join(getHomeDir(), '.claude', 'claude-devtools-notifications.json');
+const NOTIFICATIONS_PATH = path.join(getHomeDir(), '.claude', 'agent-teams-notifications.json');
+const LEGACY_NOTIFICATION_FILENAMES = [
+  'claude-devtools-notifications.json',
+  'claude-code-context-notifications.json',
+] as const;
+const LEGACY_NOTIFICATION_PATHS = LEGACY_NOTIFICATION_FILENAMES.map((filename) =>
+  path.join(getHomeDir(), '.claude', filename)
+);
+
+interface LegacyNotificationData {
+  path: string;
+  data: string;
+}
 
 type NotificationEventName = 'click' | 'close' | 'show' | 'failed';
 
@@ -109,6 +121,64 @@ interface NotificationClass {
 
 function getNotificationClass(): NotificationClass | null {
   return (ElectronNotification as NotificationClass | undefined) ?? null;
+}
+
+async function migrateLegacyNotificationPath(): Promise<string> {
+  try {
+    await fsp.readFile(NOTIFICATIONS_PATH, 'utf8');
+    return NOTIFICATIONS_PATH;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      return NOTIFICATIONS_PATH;
+    }
+  }
+
+  const legacyNotificationData = await selectLegacyNotificationData();
+  if (!legacyNotificationData) {
+    return NOTIFICATIONS_PATH;
+  }
+
+  try {
+    await fsp.mkdir(path.dirname(NOTIFICATIONS_PATH), { recursive: true });
+    await fsp.writeFile(NOTIFICATIONS_PATH, legacyNotificationData.data, {
+      encoding: 'utf8',
+      flag: 'wx',
+    });
+    return NOTIFICATIONS_PATH;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return NOTIFICATIONS_PATH;
+    }
+
+    return legacyNotificationData.path;
+  }
+}
+
+async function selectLegacyNotificationData(): Promise<LegacyNotificationData | null> {
+  const readableData: LegacyNotificationData[] = [];
+
+  for (const legacyPath of LEGACY_NOTIFICATION_PATHS) {
+    try {
+      const legacyData = await fsp.readFile(legacyPath, 'utf8');
+      const candidate = { path: legacyPath, data: legacyData };
+      if (isNotificationHistoryJson(legacyData)) {
+        return candidate;
+      }
+      readableData.push(candidate);
+    } catch {
+      // Continue to older legacy filenames.
+    }
+  }
+
+  return readableData[0] ?? null;
+}
+
+function isNotificationHistoryJson(data: string): boolean {
+  try {
+    return Array.isArray(JSON.parse(data));
+  } catch {
+    return false;
+  }
 }
 
 // =============================================================================
@@ -133,6 +203,7 @@ export class NotificationManager extends EventEmitter {
    *  Used by addError() to wait for notifications to be loaded from disk
    *  before writing, preventing a race where save overwrites unloaded data. */
   private initPromise: Promise<void> | null = null;
+  private notificationsPath = NOTIFICATIONS_PATH;
 
   constructor(configManager?: ConfigManager) {
     super();
@@ -183,6 +254,7 @@ export class NotificationManager extends EventEmitter {
       return;
     }
 
+    this.notificationsPath = await migrateLegacyNotificationPath();
     await this.loadNotifications();
     this.pruneNotifications();
     this.isInitialized = true;
@@ -208,7 +280,7 @@ export class NotificationManager extends EventEmitter {
    */
   private async loadNotifications(): Promise<void> {
     try {
-      const data = await fsp.readFile(NOTIFICATIONS_PATH, 'utf8');
+      const data = await fsp.readFile(this.notificationsPath, 'utf8');
       const parsed = JSON.parse(data) as unknown;
 
       if (Array.isArray(parsed)) {
@@ -233,11 +305,11 @@ export class NotificationManager extends EventEmitter {
    */
   private saveNotifications(): void {
     const data = JSON.stringify(this.notifications, null, 2);
-    const dir = path.dirname(NOTIFICATIONS_PATH);
+    const dir = path.dirname(this.notificationsPath);
 
     fsp
       .mkdir(dir, { recursive: true })
-      .then(() => fsp.writeFile(NOTIFICATIONS_PATH, data, 'utf8'))
+      .then(() => fsp.writeFile(this.notificationsPath, data, 'utf8'))
       .catch((error) => {
         logger.error('Error saving notifications:', error);
       });

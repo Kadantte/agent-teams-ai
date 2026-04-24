@@ -68,7 +68,7 @@ export interface OpenCodeTeamMemberLaunchCommandData {
   diagnostics?: string[];
   model: string;
   runtimePid?: number;
-  evidence: Array<{ kind: string; observedAt: string }>;
+  evidence: { kind: string; observedAt: string }[];
 }
 
 export interface OpenCodeLaunchTeamCommandData {
@@ -80,7 +80,7 @@ export interface OpenCodeLaunchTeamCommandData {
   idempotencyKey?: string;
   manifestHighWatermark?: number | null;
   runtimeStoreManifestHighWatermark?: number | null;
-  durableCheckpoints?: Array<{ name: string; memberName?: string | null; observedAt: string }>;
+  durableCheckpoints?: { name: string; memberName?: string | null; observedAt: string }[];
 }
 
 export interface OpenCodeReconcileTeamCommandBody {
@@ -92,7 +92,7 @@ export interface OpenCodeReconcileTeamCommandBody {
   expectedCapabilitySnapshotId?: string | null;
   manifestHighWatermark?: number | null;
   reconcileAttemptId?: string;
-  expectedMembers: Array<{ name: string; model: string | null }>;
+  expectedMembers: { name: string; model: string | null }[];
   reason: string;
 }
 

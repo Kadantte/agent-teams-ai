@@ -1,10 +1,9 @@
 import { randomUUID } from 'crypto';
 
-import type { OpenCodeTeamLaunchReadiness } from '../opencode/readiness/OpenCodeTeamLaunchReadiness';
 import type {
+  OpenCodeBridgeRuntimeSnapshot,
   OpenCodeLaunchTeamCommandBody,
   OpenCodeLaunchTeamCommandData,
-  OpenCodeBridgeRuntimeSnapshot,
   OpenCodeReconcileTeamCommandBody,
   OpenCodeSendMessageCommandBody,
   OpenCodeSendMessageCommandData,
@@ -13,6 +12,7 @@ import type {
   OpenCodeTeamLaunchMode,
   OpenCodeTeamMemberLaunchBridgeState,
 } from '../opencode/bridge/OpenCodeBridgeCommandContract';
+import type { OpenCodeTeamLaunchReadiness } from '../opencode/readiness/OpenCodeTeamLaunchReadiness';
 import type {
   TeamLaunchRuntimeAdapter,
   TeamRuntimeLaunchInput,

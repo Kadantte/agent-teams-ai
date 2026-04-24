@@ -22,7 +22,8 @@ export function registerKanbanTools(server: Pick<FastMCP, 'addTool'>) {
 
   server.addTool({
     name: 'kanban_set_column',
-    description: 'Move task to review or approved column',
+    description:
+      'Repair the kanban overlay for a task that is already in review or approved. Use review_request/review_approve for lifecycle transitions.',
     parameters: z.object({
       ...toolContextSchema,
       taskId: z.string().min(1),
@@ -36,7 +37,8 @@ export function registerKanbanTools(server: Pick<FastMCP, 'addTool'>) {
 
   server.addTool({
     name: 'kanban_clear',
-    description: 'Remove task from kanban board',
+    description:
+      'Repair-clear a stale non-review kanban overlay. Use review_request_changes, review_approve, task_start, or task_set_status for lifecycle transitions.',
     parameters: z.object({
       ...toolContextSchema,
       taskId: z.string().min(1),

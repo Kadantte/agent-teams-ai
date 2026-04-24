@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 
+import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import { AnthropicFastModeSelector } from '@renderer/components/team/dialogs/AnthropicFastModeSelector';
 import { CodexFastModeSelector } from '@renderer/components/team/dialogs/CodexFastModeSelector';
-import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import { EffortLevelSelector } from '@renderer/components/team/dialogs/EffortLevelSelector';
 import { LimitContextCheckbox } from '@renderer/components/team/dialogs/LimitContextCheckbox';
 import {

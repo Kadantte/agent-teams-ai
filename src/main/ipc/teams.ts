@@ -90,19 +90,19 @@ import {
   extractUserFlags,
   PROTECTED_CLI_FLAGS,
 } from '@shared/utils/cliArgsParser';
-import { createLogger } from '@shared/utils/logger';
 import {
   formatEffortLevelListForProvider,
   isTeamEffortLevelForProvider,
 } from '@shared/utils/effortLevels';
 import { isLeadMember } from '@shared/utils/leadDetection';
+import { createLogger } from '@shared/utils/logger';
 import { isTeamProviderBackendId, migrateProviderBackendId } from '@shared/utils/providerBackend';
 import { isRateLimitMessage } from '@shared/utils/rateLimitDetector';
-import { isTeamProviderId, normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 import {
   buildStandaloneSlashCommandMeta,
   parseStandaloneSlashCommand,
 } from '@shared/utils/slashCommands';
+import { isTeamProviderId, normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 import crypto from 'crypto';
 import { app, BrowserWindow, type IpcMain, type IpcMainInvokeEvent, Notification } from 'electron';
 import * as fs from 'fs';
@@ -153,6 +153,7 @@ import type {
   TeamProvisioningService,
 } from '../services';
 import type { TeamBackupService } from '../services/team/TeamBackupService';
+import type { TeamMembersMetaFile } from '../services/team/TeamMembersMetaStore';
 import type {
   AddTaskCommentRequest,
   AgentActionMode,
@@ -189,11 +190,11 @@ import type {
   TeamCreateConfigRequest,
   TeamCreateRequest,
   TeamCreateResponse,
+  TeamFastMode,
   TeamLaunchRequest,
   TeamLaunchResponse,
   TeamMemberActivityMeta,
   TeamMessageNotificationData,
-  TeamFastMode,
   TeamProviderBackendId,
   TeamProviderId,
   TeamProvisioningModelVerificationMode,
@@ -209,7 +210,6 @@ import type {
   UpdateKanbanPatch,
 } from '@shared/types';
 import type { CliArgsValidationResult } from '@shared/utils/cliArgsParser';
-import type { TeamMembersMetaFile } from '../services/team/TeamMembersMetaStore';
 
 const logger = createLogger('IPC:teams');
 
@@ -1018,7 +1018,7 @@ async function handleDeleteTeam(
   }
   return wrapTeamHandler('deleteTeam', async () => {
     getAutoResumeService().cancelPendingAutoResume(validated.value!);
-    getTeamProvisioningService().stopTeam(validated.value!);
+    await getTeamProvisioningService().stopTeam(validated.value!);
     await getTeamDataService().deleteTeam(validated.value!);
   });
 }
@@ -1217,7 +1217,7 @@ function parseOptionalTeamFastMode(
   };
 }
 
-type RuntimeRosterMutationMember = {
+interface RuntimeRosterMutationMember {
   name: string;
   role?: string;
   workflow?: string;
@@ -1228,7 +1228,7 @@ type RuntimeRosterMutationMember = {
   effort?: EffortLevel;
   fastMode?: TeamFastMode;
   removedAt?: number | string | null;
-};
+}
 
 const OPENCODE_LEAD_LIVE_ROSTER_MUTATION_BLOCK_MESSAGE =
   'Live roster mutation for a running OpenCode-led team is not supported in this phase. Stop the team, edit the roster, then relaunch.';
@@ -3402,7 +3402,7 @@ async function handleStopTeam(
   return wrapTeamHandler('stop', async () => {
     addMainBreadcrumb('team', 'stop', { teamName: validated.value! });
     getAutoResumeService().cancelPendingAutoResume(validated.value!);
-    getTeamProvisioningService().stopTeam(validated.value!);
+    await getTeamProvisioningService().stopTeam(validated.value!);
   });
 }
 
@@ -3706,7 +3706,7 @@ async function handleReplaceMembers(
     const previousByName = new Map(
       previousMembers
         .filter((member) => !member.removedAt)
-        .map((member) => [member.name.trim().toLowerCase(), member as RuntimeRosterMutationMember])
+        .map((member) => [member.name.trim().toLowerCase(), member])
     );
     const nextByName = new Map(
       members.map((member) => [
@@ -4556,7 +4556,7 @@ async function handleGetSavedRequest(
       ),
       model: meta.model,
       effort: meta.effort as TeamCreateRequest['effort'],
-      fastMode: meta.fastMode as TeamCreateRequest['fastMode'],
+      fastMode: meta.fastMode,
       skipPermissions: meta.skipPermissions,
       worktree: meta.worktree,
       extraCliArgs: meta.extraCliArgs,

@@ -44,9 +44,9 @@ import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import { formatBytes } from '@renderer/utils/formatters';
 import { filterMainScreenCliProviders } from '@renderer/utils/geminiUiFreeze';
+import { isMultimodelRuntimeStatus } from '@renderer/utils/multimodelProviderVisibility';
 import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
 import { getRuntimeDisplayName as getHumanRuntimeDisplayName } from '@renderer/utils/runtimeDisplayName';
-import { isMultimodelRuntimeStatus } from '@renderer/utils/multimodelProviderVisibility';
 import {
   AlertTriangle,
   CheckCircle,
@@ -370,6 +370,21 @@ const ProviderDetailSkeleton = (): React.JSX.Element => {
         ))}
       </div>
     </div>
+  );
+};
+
+const OpenCodeBetaBadge = (): React.JSX.Element => {
+  return (
+    <span
+      className="inline-flex h-4 shrink-0 items-center rounded border px-1.5 text-[9px] font-semibold uppercase leading-none"
+      style={{
+        borderColor: 'rgba(251, 191, 36, 0.32)',
+        backgroundColor: 'rgba(251, 191, 36, 0.12)',
+        color: '#fbbf24',
+      }}
+    >
+      beta
+    </span>
   );
 };
 
@@ -769,6 +784,7 @@ const InstalledBanner = ({
                         >
                           {provider.displayName}
                         </span>
+                        {provider.providerId === 'opencode' ? <OpenCodeBetaBadge /> : null}
                       </span>
                       <span
                         className="text-xs"

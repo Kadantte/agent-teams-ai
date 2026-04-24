@@ -47,7 +47,7 @@ const DEFAULT_APP_PRODUCTION_E2E_EVIDENCE_PATH = path.join(
   os.userInfo().homedir,
   'Library',
   'Application Support',
-  'claude-agent-teams-ui',
+  'Agent Teams UI',
   'opencode-bridge',
   'production-e2e-evidence.json'
 );

@@ -249,5 +249,5 @@ function pickNewestEvidence(
       return entry;
     }
     return latest;
-  }, entries[0]!);
+  }, entries[0]);
 }

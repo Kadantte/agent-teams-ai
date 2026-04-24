@@ -1,15 +1,16 @@
 import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 
+import {
+  assertOpenCodeProductionE2EEvidenceBasics,
+  type OpenCodeProductionE2EEvidence,
+} from '../e2e/OpenCodeProductionE2EEvidence';
+
 import type {
   OpenCodeApiCapabilities,
   OpenCodeApiEndpointKey,
   OpenCodeEndpointEvidence,
 } from '../capabilities/OpenCodeApiCapabilities';
-import {
-  assertOpenCodeProductionE2EEvidenceBasics,
-  type OpenCodeProductionE2EEvidence,
-} from '../e2e/OpenCodeProductionE2EEvidence';
 
 export interface OpenCodeSupportedVersionPolicy {
   minimumVersion: string;
@@ -111,8 +112,7 @@ export function shouldReuseCompatibilitySnapshot(input: {
   version: string;
 }): boolean {
   return Boolean(
-    input.cached &&
-    input.cached.binaryPath === input.binaryPath &&
+    input.cached?.binaryPath === input.binaryPath &&
     input.cached.binaryFingerprint === input.binaryFingerprint &&
     input.cached.version === input.version
   );
@@ -213,7 +213,7 @@ export function selectPermissionReplyRouteFromCache(
 }
 
 export function parseOpenCodeSemver(version: string): OpenCodeSemver | null {
-  const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/);
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/.exec(version.trim());
   if (!match) {
     return null;
   }

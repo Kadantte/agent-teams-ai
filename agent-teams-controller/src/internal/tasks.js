@@ -11,6 +11,22 @@ function normalizeActorName(value) {
     return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
 
+function isClearOwnerValue(value) {
+    return value == null || value === 'clear' || value === 'none';
+}
+
+function assertKnownTaskActor(context, value, label) {
+    return runtimeHelpers.assertExplicitTeamMemberName(context.paths, value, label, {
+        allowLeadAliases: true,
+    });
+}
+
+function assertTaskNotDeleted(task, action) {
+    if (task && task.status === 'deleted') {
+        throw new Error(`Task #${task.displayId || task.id} is deleted; use task_restore before ${action}`);
+    }
+}
+
 function isSameMember(left, right) {
     return normalizeActorName(left).toLowerCase() === normalizeActorName(right).toLowerCase();
 }
@@ -171,6 +187,9 @@ function maybeNotifyTaskOwnerOnComment(context, task, comment, options = {}) {
 }
 
 function createTask(context, input) {
+    if (input && typeof input.owner === 'string' && input.owner.trim()) {
+        assertKnownTaskActor(context, input.owner, 'task owner');
+    }
     const task = withTeamBoardLock(context.paths, () => taskStore.createTask(context.paths, input));
     if (input && input.notifyOwner !== false) {
         maybeNotifyAssignedOwner(context, task, {
@@ -233,18 +252,46 @@ function resolveTaskId(context, taskRef) {
 }
 
 function setTaskStatus(context, taskId, status, actor) {
-    return withTeamBoardLock(context.paths, () =>
-        taskStore.setTaskStatus(context.paths, taskId, status, actor)
+    return withTeamBoardLock(context.paths, () => {
+        const before = taskStore.readTask(context.paths, taskId, { includeDeleted: true });
+        const normalizedStatus = String(status || '').trim();
+        if (before.status === 'deleted' && normalizedStatus !== 'deleted') {
+            throw new Error(`Task #${before.displayId || before.id} is deleted; use task_restore before changing status`);
+        }
+        let task = taskStore.setTaskStatus(context.paths, taskId, status, actor);
+        if (normalizedStatus === 'deleted' || normalizedStatus === 'in_progress' || normalizedStatus === 'pending') {
+            const state = kanbanStore.readKanbanState(context.paths, context.teamName);
+            if (hasKanbanReference(state, task.id)) {
+                kanbanStore.clearKanban(context.paths, context.teamName, task.id, { nextReviewState: 'none' });
+                task = taskStore.readTask(context.paths, task.id, { includeDeleted: true });
+            }
+        }
+        return task;
+    });
+}
+
+function hasKanbanReference(state, taskId) {
+    if (state.tasks && state.tasks[taskId]) {
+        return true;
+    }
+    if (!state.columnOrder || typeof state.columnOrder !== 'object') {
+        return false;
+    }
+    return Object.values(state.columnOrder).some(
+        (orderedTaskIds) =>
+            Array.isArray(orderedTaskIds) && orderedTaskIds.some((entry) => String(entry) === String(taskId))
     );
 }
 
 function startTask(context, taskId, actor) {
     return withTeamBoardLock(context.paths, () => {
-        const task = taskStore.setTaskStatus(context.paths, taskId, 'in_progress', actor);
+        const before = taskStore.readTask(context.paths, taskId, { includeDeleted: true });
+        assertTaskNotDeleted(before, 'starting work');
+        let task = taskStore.setTaskStatus(context.paths, taskId, 'in_progress', actor);
         const state = kanbanStore.readKanbanState(context.paths, context.teamName);
-        if (state.tasks[task.id]) {
-            delete state.tasks[task.id];
-            kanbanStore.writeKanbanState(context.paths, context.teamName, state);
+        if (hasKanbanReference(state, task.id)) {
+            kanbanStore.clearKanban(context.paths, context.teamName, task.id, { nextReviewState: 'none' });
+            task = taskStore.readTask(context.paths, task.id, { includeDeleted: true });
         }
         return task;
     });
@@ -322,17 +369,42 @@ function completeTask(context, taskId, actor) {
 }
 
 function softDeleteTask(context, taskId, actor) {
-    return setTaskStatus(context, taskId, 'deleted', actor);
+    return withTeamBoardLock(context.paths, () => {
+        let task = taskStore.setTaskStatus(context.paths, taskId, 'deleted', actor);
+        const state = kanbanStore.readKanbanState(context.paths, context.teamName);
+        if (hasKanbanReference(state, task.id)) {
+            kanbanStore.clearKanban(context.paths, context.teamName, task.id, { nextReviewState: 'none' });
+            task = taskStore.readTask(context.paths, task.id, { includeDeleted: true });
+        }
+        return task;
+    });
 }
 
 function restoreTask(context, taskId, actor) {
-    return setTaskStatus(context, taskId, 'pending', actor || 'user');
+    return withTeamBoardLock(context.paths, () => {
+        let task = taskStore.setTaskStatus(context.paths, taskId, 'pending', actor || 'user');
+        const state = kanbanStore.readKanbanState(context.paths, context.teamName);
+        if (hasKanbanReference(state, task.id)) {
+            kanbanStore.clearKanban(context.paths, context.teamName, task.id, { nextReviewState: 'none' });
+            task = taskStore.readTask(context.paths, task.id, { includeDeleted: true });
+        }
+        if (task.reviewState !== 'none') {
+            task = taskStore.updateTask(context.paths, task.id, (current) => {
+                current.reviewState = 'none';
+                return current;
+            });
+        }
+        return task;
+    });
 }
 
 function setTaskOwner(context, taskId, owner) {
     const { previousTask, updatedTask } = withTeamBoardLock(context.paths, () => {
         const before = taskStore.readTask(context.paths, taskId, { includeDeleted: true });
-        const after = taskStore.setTaskOwner(context.paths, taskId, owner);
+        const nextOwner = isClearOwnerValue(owner)
+            ? owner
+            : (assertKnownTaskActor(context, owner, 'task owner'), owner);
+        const after = taskStore.setTaskOwner(context.paths, taskId, nextOwner);
         return {
             previousTask: before,
             updatedTask: after,
@@ -553,10 +625,10 @@ function buildMemberTaskProtocol(teamName) {
    { teamName: "${teamName}", taskId: "<taskId>", from: "<your-name>" }
    This is MANDATORY before review_approve or review_request_changes. Without this step, the kanban board may not show the task in REVIEW during your review.
 4. If you are asked to review and the task is accepted, move it to APPROVED (not DONE) with MCP tool review_approve:
-   { teamName: "${teamName}", taskId: "<taskId>", note?: "<optional note>", notifyOwner: true }
+   { teamName: "${teamName}", taskId: "<taskId>", from: "<your-name>", note?: "<optional note>", notifyOwner: true }
    CRITICAL: Text comments like "approved" or "LGTM" do NOT change the kanban board. You MUST call review_approve to move a task from REVIEW to APPROVED. Without the tool call the task stays stuck in the REVIEW column.
 5. If review fails and changes are needed, use MCP tool review_request_changes:
-   { teamName: "${teamName}", taskId: "<taskId>", comment: "<what to fix>" }
+   { teamName: "${teamName}", taskId: "<taskId>", from: "<your-name>", comment: "<what to fix>" }
 6. NEVER skip status updates. A task is NOT done until completed status is written.
    - Never "bulk-complete" a batch of tasks at the end. Update status incrementally as you work.
 7. To reply to a comment on a task, use MCP tool task_add_comment:

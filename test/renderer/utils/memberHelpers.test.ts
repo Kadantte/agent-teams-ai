@@ -363,6 +363,23 @@ describe('memberHelpers spawn-aware presence', () => {
     ).toContain('Anthropic authentication error');
   });
 
+  it('renders Codex native timeout separately from network errors', () => {
+    const advisory = {
+      kind: 'api_error' as const,
+      observedAt: '2026-04-07T09:00:00.000Z',
+      reasonCode: 'codex_native_timeout' as const,
+      message: 'Codex native exec timed out after 120000ms.',
+    };
+
+    expect(getMemberRuntimeAdvisoryLabel(advisory, 'codex')).toBe('Codex native timeout');
+    expect(getMemberRuntimeAdvisoryTitle(advisory, 'codex')).toContain(
+      'Codex native mailbox turn timed out'
+    );
+    expect(getMemberRuntimeAdvisoryTitle(advisory, 'codex')).toContain(
+      'Codex native exec timed out after 120000ms.'
+    );
+  });
+
   it('marks launch presentation as an error when the runtime has a terminal API error', () => {
     const presentation = buildMemberLaunchPresentation({
       member: { ...member, providerId: 'anthropic' },

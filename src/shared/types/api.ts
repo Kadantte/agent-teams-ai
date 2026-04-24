@@ -93,6 +93,7 @@ import type {
 import type { TerminalAPI } from './terminal';
 import type { TmuxAPI } from './tmux';
 import type { WaterfallData } from './visualization';
+import type { CodexAccountElectronApi } from '@features/codex-account/contracts';
 import type { RecentProjectsElectronApi } from '@features/recent-projects/contracts';
 import type {
   ConversationGroup,
@@ -108,7 +109,6 @@ import type {
   SessionsPaginationOptions,
   SubagentDetail,
 } from '@main/types';
-import type { CodexAccountElectronApi } from '@features/codex-account/contracts';
 
 // =============================================================================
 // Cost Calculation Types

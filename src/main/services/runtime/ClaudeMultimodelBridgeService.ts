@@ -1,11 +1,11 @@
 import { execCli } from '@main/utils/childProcess';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 import { createLogger } from '@shared/utils/logger';
-import { filterVisibleProviderRuntimeModels } from '@shared/utils/providerModelVisibility';
 import {
   createDefaultCliExtensionCapabilities,
   createLegacyRuntimeFallbackCliExtensionCapabilities,
 } from '@shared/utils/providerExtensionCapabilities';
+import { filterVisibleProviderRuntimeModels } from '@shared/utils/providerModelVisibility';
 
 import { resolveGeminiRuntimeAuth } from './geminiRuntimeAuth';
 import { buildProviderAwareCliEnv } from './providerAwareCliEnv';

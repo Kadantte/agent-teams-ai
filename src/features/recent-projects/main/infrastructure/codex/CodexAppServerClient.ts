@@ -201,7 +201,7 @@ export class CodexAppServerClient {
           'initialize',
           {
             clientInfo: {
-              name: 'claude-agent-teams-ui',
+              name: 'agent-teams-ai',
               title: 'Agent Teams UI',
               version: '0.1.0',
             },

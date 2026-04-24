@@ -45,7 +45,6 @@ import {
   MEMBER_SPAWN_STATUS_REFRESH_MS,
 } from '@renderer/utils/memberSpawnStatusPolling';
 import { formatProjectPath } from '@renderer/utils/pathDisplay';
-import { buildPendingRuntimeSummaryCopy } from '@renderer/utils/teamLaunchSummaryCopy';
 import { buildTaskCountsByOwner, normalizePath } from '@renderer/utils/pathNormalize';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { resolveProjectIdByPath } from '@renderer/utils/projectLookup';
@@ -53,6 +52,7 @@ import {
   buildTaskChangeRequestOptions,
   type TaskChangeRequestOptions,
 } from '@renderer/utils/taskChangeRequest';
+import { buildPendingRuntimeSummaryCopy } from '@renderer/utils/teamLaunchSummaryCopy';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
 import { deriveContextMetrics } from '@shared/utils/contextMetrics';
 import { isLeadAgentType, isLeadMember } from '@shared/utils/leadDetection';

@@ -2574,6 +2574,7 @@ describe('TeamProvisioningService', () => {
       svc.setRuntimeAdapterRegistry(registry);
 
       (svc as any).getTrackedRunId = vi.fn(() => 'run-1');
+      (svc as any).provisioningRunByTeam.set('team-a', 'run-1');
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
           projectPath: '/repo',

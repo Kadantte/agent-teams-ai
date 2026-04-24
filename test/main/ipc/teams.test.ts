@@ -234,7 +234,7 @@ describe('ipc teams handlers', () => {
     getCurrentLeadSessionId: vi.fn(() => null as string | null),
     getAliveTeams: vi.fn(() => ['my-team']),
     getLeadActivityState: vi.fn(() => 'idle'),
-    stopTeam: vi.fn(() => undefined),
+    stopTeam: vi.fn(() => Promise.resolve()),
     reattachOpenCodeOwnedMemberLane: vi.fn(async () => undefined),
     detachOpenCodeOwnedMemberLane: vi.fn(async () => undefined),
   };

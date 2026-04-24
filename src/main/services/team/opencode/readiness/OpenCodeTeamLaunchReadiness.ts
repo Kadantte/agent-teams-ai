@@ -1,14 +1,15 @@
-import type { OpenCodeApiCapabilities } from '../capabilities/OpenCodeApiCapabilities';
-import type { OpenCodeTeamLaunchMode } from '../bridge/OpenCodeBridgeCommandContract';
-import type { OpenCodeMcpToolProof } from '../mcp/OpenCodeMcpToolAvailability';
 import {
   evaluateOpenCodeSupport,
   OPENCODE_TEAM_LAUNCH_VERSION_POLICY,
   type OpenCodeInstallMethod,
   type OpenCodeProductionE2EEvidence,
-  type OpenCodeSupportLevel,
   type OpenCodeSupportedVersionPolicy,
+  type OpenCodeSupportLevel,
 } from '../version/OpenCodeVersionPolicy';
+
+import type { OpenCodeTeamLaunchMode } from '../bridge/OpenCodeBridgeCommandContract';
+import type { OpenCodeApiCapabilities } from '../capabilities/OpenCodeApiCapabilities';
+import type { OpenCodeMcpToolProof } from '../mcp/OpenCodeMcpToolAvailability';
 import type { RuntimeStoreReadinessCheck } from '../store/RuntimeStoreManifest';
 
 export type OpenCodeTeamLaunchReadinessState =

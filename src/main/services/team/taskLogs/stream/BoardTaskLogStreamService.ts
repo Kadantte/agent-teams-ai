@@ -3,7 +3,6 @@ import { isLeadMember as isLeadMemberCheck } from '@shared/utils/leadDetection';
 import { getTaskDisplayId } from '@shared/utils/taskIdentity';
 
 import { TeamTaskReader } from '../../TeamTaskReader';
-import type { BoardTaskActivityRecord } from '../activity/BoardTaskActivityRecord';
 import { BoardTaskActivityRecordSource } from '../activity/BoardTaskActivityRecordSource';
 import { TeamTranscriptSourceLocator } from '../discovery/TeamTranscriptSourceLocator';
 import { BoardTaskExactLogChunkBuilder } from '../exact/BoardTaskExactLogChunkBuilder';
@@ -12,8 +11,10 @@ import { BoardTaskExactLogStrictParser } from '../exact/BoardTaskExactLogStrictP
 import { BoardTaskExactLogSummarySelector } from '../exact/BoardTaskExactLogSummarySelector';
 import { isBoardTaskExactLogsReadEnabled } from '../exact/featureGates';
 import { getBoardTaskExactLogFileVersions } from '../exact/fileVersions';
+
 import { OpenCodeTaskLogStreamSource } from './OpenCodeTaskLogStreamSource';
 
+import type { BoardTaskActivityRecord } from '../activity/BoardTaskActivityRecord';
 import type { BoardTaskExactLogDetailCandidate } from '../exact/BoardTaskExactLogTypes';
 import type { ContentBlock, ParsedMessage, ToolUseResultData } from '@main/types';
 import type {
@@ -175,7 +176,12 @@ function valueReferencesTask(value: unknown, taskRefs: Set<string>, depth = 0): 
 function normalizeStatusDetail(
   value: unknown
 ): 'pending' | 'in_progress' | 'completed' | 'deleted' | undefined {
-  if (value !== 'pending' && value !== 'in_progress' && value !== 'completed' && value !== 'deleted') {
+  if (
+    value !== 'pending' &&
+    value !== 'in_progress' &&
+    value !== 'completed' &&
+    value !== 'deleted'
+  ) {
     return undefined;
   }
   return value;
@@ -215,9 +221,7 @@ function normalizeRelationshipDetail(
   return value;
 }
 
-function inferHistoricalLinkKind(
-  canonicalToolName: string
-): 'lifecycle' | 'board_action' | null {
+function inferHistoricalLinkKind(canonicalToolName: string): 'lifecycle' | 'board_action' | null {
   if (HISTORICAL_BOARD_LIFECYCLE_TOOL_NAMES.has(canonicalToolName)) {
     return 'lifecycle';
   }
@@ -227,9 +231,7 @@ function inferHistoricalLinkKind(
   return null;
 }
 
-function inferHistoricalActionCategory(
-  canonicalToolName: string
-): BoardTaskActivityCategory {
+function inferHistoricalActionCategory(canonicalToolName: string): BoardTaskActivityCategory {
   switch (canonicalToolName) {
     case 'task_start':
     case 'task_complete':
@@ -324,7 +326,10 @@ function buildHistoricalActionDetails(args: {
     }
   }
 
-  if (canonicalToolName === 'task_set_owner' && Object.prototype.hasOwnProperty.call(input, 'owner')) {
+  if (
+    canonicalToolName === 'task_set_owner' &&
+    Object.prototype.hasOwnProperty.call(input, 'owner')
+  ) {
     const owner = normalizeOwnerDetail(input.owner);
     if (owner !== undefined) {
       details.owner = owner;
@@ -368,7 +373,10 @@ function buildHistoricalActionDetails(args: {
     }
   }
 
-  if (canonicalToolName === 'task_attach_file' || canonicalToolName === 'task_attach_comment_file') {
+  if (
+    canonicalToolName === 'task_attach_file' ||
+    canonicalToolName === 'task_attach_comment_file'
+  ) {
     const attachmentId =
       typeof resultRecord?.id === 'string' && resultRecord.id.trim().length > 0
         ? resultRecord.id.trim()
@@ -1480,7 +1488,7 @@ export class BoardTaskLogStreamService {
         }
 
         const actor = buildInferredActor(message, leadName);
-        if (!actor || !actor.memberName) {
+        if (!actor?.memberName) {
           continue;
         }
 
@@ -1537,7 +1545,8 @@ export class BoardTaskLogStreamService {
       this.transcriptSourceLocator.getContext(teamName),
     ]);
 
-    const task = [...activeTasks, ...deletedTasks].find((candidate) => candidate.id === taskId) ?? null;
+    const task =
+      [...activeTasks, ...deletedTasks].find((candidate) => candidate.id === taskId) ?? null;
     const transcriptFiles = transcriptContext?.transcriptFiles ?? [];
     if (!task || transcriptFiles.length === 0) {
       return {
@@ -1623,8 +1632,9 @@ export class BoardTaskLogStreamService {
             continue;
           }
 
-          const overriddenActorName =
-            !baseActor.memberName ? readHistoricalActorName(toolCall.input) : undefined;
+          const overriddenActorName = !baseActor.memberName
+            ? readHistoricalActorName(toolCall.input)
+            : undefined;
           const actor: BoardTaskLogActor = overriddenActorName
             ? {
                 ...baseActor,

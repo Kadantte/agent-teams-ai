@@ -746,6 +746,12 @@ describe('TeamProvisioningService prompt content (solo mode discipline)', () => 
       'Browse/search compact inventory rows only: task_list'
     );
     expect(prompt).toContain(
+      `Browse/search compact inventory rows only: task_list { teamName: "${teamName}", owner?: "<member>", status?: "pending|in_progress|completed"`
+    );
+    expect(prompt).not.toContain(
+      `Browse/search compact inventory rows only: task_list { teamName: "${teamName}", owner?: "<member>", status?: "pending|in_progress|completed|deleted"`
+    );
+    expect(prompt).toContain(
       'task_list is inventory/search/drill-down only. Do NOT treat task_list as the lead\'s working queue.'
     );
     expect(prompt).toContain(

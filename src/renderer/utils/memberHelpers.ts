@@ -1,5 +1,5 @@
-import { buildTeamMemberColorMap } from '@shared/utils/teamMemberColors';
 import { isLeadMember } from '@shared/utils/leadDetection';
+import { buildTeamMemberColorMap } from '@shared/utils/teamMemberColors';
 
 import {
   getParticipantAvatarUrlByIndex,
@@ -320,6 +320,8 @@ function formatRuntimeAdvisoryBaseLabel(
         return providerLabel ? `${providerLabel} rate limit` : 'Rate limit';
       case 'auth_error':
         return providerLabel ? `${providerLabel} auth error` : 'Auth error';
+      case 'codex_native_timeout':
+        return 'Codex native timeout';
       case 'network_error':
         return 'Network error';
       case 'provider_overloaded':
@@ -339,6 +341,8 @@ function formatRuntimeAdvisoryBaseLabel(
       return providerLabel ? `${providerLabel} rate limit` : 'Rate limit retry';
     case 'auth_error':
       return providerLabel ? `${providerLabel} auth retry` : 'Auth retry';
+    case 'codex_native_timeout':
+      return 'Codex native retry';
     case 'network_error':
       return 'Network retry';
     case 'provider_overloaded':
@@ -373,6 +377,11 @@ function formatRuntimeAdvisoryTitle(
           `${providerLabel ?? 'Provider'} authentication error.`,
           advisory.message
         );
+      case 'codex_native_timeout':
+        return appendRuntimeAdvisoryRawMessage(
+          'Codex native mailbox turn timed out. The runtime stopped this turn after its watchdog limit; it was not an automatic SDK retry.',
+          advisory.message
+        );
       case 'network_error':
         return appendRuntimeAdvisoryRawMessage('Network or connectivity error.', advisory.message);
       case 'provider_overloaded':
@@ -405,6 +414,11 @@ function formatRuntimeAdvisoryTitle(
     case 'auth_error':
       return appendRuntimeAdvisoryRawMessage(
         `${providerLabel ?? 'Provider'} authentication issue. SDK is retrying automatically.`,
+        advisory.message
+      );
+    case 'codex_native_timeout':
+      return appendRuntimeAdvisoryRawMessage(
+        'Codex native mailbox turn timed out. A retry window was reported by the runtime.',
         advisory.message
       );
     case 'network_error':

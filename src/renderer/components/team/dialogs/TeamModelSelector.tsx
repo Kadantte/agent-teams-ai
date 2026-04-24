@@ -19,8 +19,8 @@ import {
 } from '@renderer/utils/geminiUiFreeze';
 import {
   getAvailableTeamProviderModelOptions,
-  isTeamProviderModelVerificationPending,
   getTeamModelUiDisabledReason,
+  isTeamProviderModelVerificationPending,
   normalizeTeamModelForUi,
   TEAM_MODEL_UI_DISABLED_BADGE_LABEL,
 } from '@renderer/utils/teamModelAvailability';

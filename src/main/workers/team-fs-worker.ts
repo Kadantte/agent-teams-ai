@@ -544,11 +544,11 @@ async function listTeams(
     const removedKeys = new Set<string>();
     const expectedTeammateNames = new Set<string>();
     const confirmedArtifactNames = new Set<string>();
-    const metaRuntimeMembers: Array<{
+    const metaRuntimeMembers: {
       name: string;
       providerId?: 'anthropic' | 'codex' | 'gemini' | 'opencode';
       removedAt?: unknown;
-    }> = [];
+    }[] = [];
     let leadProviderId: 'anthropic' | 'codex' | 'gemini' | 'opencode' | undefined;
 
     try {

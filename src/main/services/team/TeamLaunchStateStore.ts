@@ -25,7 +25,8 @@ export function getTeamLaunchSummaryPath(teamName: string): string {
 }
 
 async function isMissingTeamDirectoryWriteRace(teamName: string, error: unknown): Promise<boolean> {
-  if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code !== 'ENOENT' && code !== 'EINVAL') {
     return false;
   }
   try {

@@ -1,10 +1,9 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { resolveTeamLeadColorName } from '@shared/utils/teamMemberColors';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@renderer/components/common/ProviderBrandLogo', () => ({
   ProviderBrandLogo: () => React.createElement('span', { 'data-testid': 'provider-logo' }),

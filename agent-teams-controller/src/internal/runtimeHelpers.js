@@ -124,15 +124,70 @@ function getPaths(flags, teamName) {
   return { claudeDir, teamDir, tasksDir, kanbanPath, processesPath };
 }
 
+function isCanonicalLeadMember(member) {
+  if (!member || typeof member !== 'object') return false;
+  const agentType = typeof member.agentType === 'string' ? member.agentType.trim().toLowerCase() : '';
+  const role = typeof member.role === 'string' ? member.role.trim().toLowerCase() : '';
+  const name = typeof member.name === 'string' ? member.name.trim().toLowerCase() : '';
+  return (
+    agentType === 'team-lead' ||
+    name === 'team-lead' ||
+    role === 'team-lead' ||
+    role === 'team lead' ||
+    role === 'lead'
+  );
+}
+
+function normalizeMemberKey(value) {
+  return typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : '';
+}
+
+function collectExplicitTeamMembers(paths) {
+  const config = readTeamConfig(paths) || {};
+  const configMembers = Array.isArray(config.members) ? config.members : [];
+  const metaMembers = readMembersMeta(paths);
+  const membersByKey = new Map();
+  const removedNames = new Set();
+
+  for (const rawMember of configMembers) {
+    const normalized = normalizeMemberRecord(rawMember);
+    if (!normalized) continue;
+    membersByKey.set(normalizeMemberKey(normalized.name), normalized);
+  }
+
+  for (const rawMember of metaMembers) {
+    const normalized = normalizeMemberRecord(rawMember);
+    if (!normalized) continue;
+    const key = normalizeMemberKey(normalized.name);
+    if (normalized.removedAt != null) {
+      membersByKey.delete(key);
+      removedNames.add(key);
+      continue;
+    }
+    removedNames.delete(key);
+    membersByKey.set(key, mergeResolvedMember(membersByKey.get(key) || { name: normalized.name }, normalized));
+  }
+
+  return { membersByKey, removedNames };
+}
+
 function inferLeadName(paths) {
   const resolved = resolveTeamMembers(paths);
-  const lead = resolved.members.find(
-    (member) =>
-      member &&
-      ((typeof member.agentType === 'string' && member.agentType === 'team-lead') ||
-        (typeof member.role === 'string' && member.role.toLowerCase().includes('lead')) ||
-        member.name === 'team-lead')
-  );
+  const members = resolved.members || [];
+  const lead =
+    members.find(
+      (member) =>
+        member &&
+        typeof member.agentType === 'string' &&
+        member.agentType.trim().toLowerCase() === 'team-lead'
+    ) ||
+    members.find((member) => String((member && member.name) || '').trim().toLowerCase() === 'team-lead') ||
+    members.find(
+      (member) => {
+        const role = typeof member.role === 'string' ? member.role.trim().toLowerCase() : '';
+        return role === 'team-lead' || role === 'team lead' || role === 'lead';
+      }
+    );
   if (lead) {
     return String(lead.name);
   }
@@ -141,6 +196,39 @@ function inferLeadName(paths) {
     return String(config.members[0].name);
   }
   return 'team-lead';
+}
+
+function resolveExplicitTeamMemberName(paths, candidate, options = {}) {
+  const normalized = typeof candidate === 'string' && candidate.trim() ? candidate.trim() : '';
+  const key = normalizeMemberKey(normalized);
+  if (!key) return null;
+
+  const explicit = collectExplicitTeamMembers(paths);
+  if (explicit.removedNames.has(key)) return null;
+  const directMember = explicit.membersByKey.get(key);
+  if (directMember) {
+    return directMember.name;
+  }
+
+  if (options.allowLeadAliases !== false) {
+    const leadName = inferLeadName(paths);
+    const leadKey = normalizeMemberKey(leadName);
+    if (key === 'lead' || key === 'team-lead' || (leadKey && key === leadKey)) {
+      const leadMember = leadKey ? explicit.membersByKey.get(leadKey) : null;
+      return leadMember ? leadMember.name : null;
+    }
+  }
+
+  return null;
+}
+
+function assertExplicitTeamMemberName(paths, candidate, label = 'member', options = {}) {
+  const resolved = resolveExplicitTeamMemberName(paths, candidate, options);
+  if (!resolved) {
+    const value = typeof candidate === 'string' && candidate.trim() ? candidate.trim() : String(candidate || '');
+    throw new Error(`Unknown ${label}: ${value}. Use a configured team member name.`);
+  }
+  return resolved;
 }
 
 function readTeamConfig(paths) {
@@ -507,12 +595,16 @@ function saveTaskAttachmentFile(paths, taskId, flags) {
 }
 
 module.exports = {
+  assertExplicitTeamMemberName,
+  collectExplicitTeamMembers,
   getPaths,
   inferLeadName,
+  isCanonicalLeadMember,
   isProcessAlive,
   listInboxMemberNames,
   readMembersMeta,
   readTeamConfig,
+  resolveExplicitTeamMemberName,
   resolveTeamMembers,
   getCurrentRuntimeMemberIdentity,
   resolveCanonicalLeadSessionId,

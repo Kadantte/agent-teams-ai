@@ -742,6 +742,7 @@ export interface MemberRuntimeAdvisory {
     | 'quota_exhausted'
     | 'rate_limited'
     | 'auth_error'
+    | 'codex_native_timeout'
     | 'network_error'
     | 'provider_overloaded'
     | 'backend_error'

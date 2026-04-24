@@ -1,10 +1,11 @@
 import { createLogger } from '@shared/utils/logger';
 
 import { ClaudeMultimodelBridgeService } from '../../../runtime/ClaudeMultimodelBridgeService';
+import { canonicalizeAgentTeamsToolName } from '../../agentTeamsToolNames';
 import { ClaudeBinaryResolver } from '../../ClaudeBinaryResolver';
 import { TeamTaskReader } from '../../TeamTaskReader';
-import { canonicalizeAgentTeamsToolName } from '../../agentTeamsToolNames';
 import { BoardTaskExactLogChunkBuilder } from '../exact/BoardTaskExactLogChunkBuilder';
+
 import { OpenCodeTaskLogAttributionStore } from './OpenCodeTaskLogAttributionStore';
 
 import type {
@@ -15,6 +16,7 @@ import type {
   OpenCodeTaskLogAttributionReader,
   OpenCodeTaskLogAttributionRecord,
 } from './OpenCodeTaskLogAttributionStore';
+import type { ContentBlock, ParsedMessage, ToolUseResultData } from '@main/types';
 import type {
   BoardTaskLogActor,
   BoardTaskLogParticipant,
@@ -22,7 +24,6 @@ import type {
   BoardTaskLogStreamResponse,
   TeamTask,
 } from '@shared/types';
-import type { ContentBlock, ParsedMessage, ToolUseResultData } from '@main/types';
 
 const logger = createLogger('OpenCodeTaskLogStreamSource');
 

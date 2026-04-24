@@ -910,7 +910,7 @@ describe('agent-teams-mcp tools', () => {
     );
     expect(kanbanCleared.tasks[createdTask.id]).toBeUndefined();
 
-    // review_start: moves task to review without requiring completed status
+    // review_start: cannot move pending/non-review work into review by itself
     const pendingTask = parseJsonToolResult(
       await getTool('task_create').execute({
         claudeDir,
@@ -919,17 +919,14 @@ describe('agent-teams-mcp tools', () => {
         owner: 'bob',
       })
     );
-    const reviewStarted = parseJsonToolResult(
-      await getTool('review_start').execute({
+    await expect(
+      getTool('review_start').execute({
         claudeDir,
         teamName,
         taskId: pendingTask.id,
         from: 'alice',
       })
-    );
-    expect(reviewStarted.ok).toBe(true);
-    expect(reviewStarted.column).toBe('review');
-    expect(reviewStarted.taskId).toBe(pendingTask.id);
+    ).rejects.toThrow('must be completed before starting review');
 
     const pid = process.pid;
 
@@ -977,6 +974,159 @@ describe('agent-teams-mcp tools', () => {
       })
     );
     expect(unregistered).toEqual([]);
+  });
+
+  it('rejects public lifecycle bypasses through kanban_set_column and task_set_status', async () => {
+    const claudeDir = makeClaudeDir();
+    const teamName = 'public-bypass-guards';
+    writeTeamConfig(claudeDir, teamName, {
+      members: [
+        { name: 'lead', role: 'team-lead' },
+        { name: 'alice', role: 'reviewer' },
+        { name: 'bob', role: 'developer' },
+      ],
+    });
+
+    const pendingTask = parseJsonToolResult(
+      await getTool('task_create').execute({
+        claudeDir,
+        teamName,
+        subject: 'Cannot approve directly',
+        owner: 'bob',
+      })
+    );
+    await expect(
+      getTool('kanban_set_column').execute({
+        claudeDir,
+        teamName,
+        taskId: pendingTask.id,
+        column: 'approved',
+      })
+    ).rejects.toThrow('must be completed before moving to APPROVED column');
+
+    const reviewTask = parseJsonToolResult(
+      await getTool('task_create').execute({
+        claudeDir,
+        teamName,
+        subject: 'Delete cleanup through generic status',
+        owner: 'bob',
+      })
+    );
+    await getTool('task_complete').execute({
+      claudeDir,
+      teamName,
+      taskId: reviewTask.id,
+      actor: 'bob',
+    });
+    await getTool('review_request').execute({
+      claudeDir,
+      teamName,
+      taskId: reviewTask.id,
+      from: 'lead',
+      reviewer: 'alice',
+    });
+    const deleted = parseJsonToolResult(
+      await getTool('task_set_status').execute({
+        claudeDir,
+        teamName,
+        taskId: reviewTask.id,
+        status: 'deleted',
+        actor: 'lead',
+      })
+    );
+    expect(deleted.status).toBe('deleted');
+    expect(deleted.reviewState).toBe('none');
+    const kanbanState = parseJsonToolResult(
+      await getTool('kanban_get').execute({
+        claudeDir,
+        teamName,
+      })
+    );
+    expect(kanbanState.tasks[reviewTask.id]).toBeUndefined();
+    expect(JSON.stringify(kanbanState.columnOrder ?? {})).not.toContain(reviewTask.id);
+  });
+
+  it('only notifies the owner on review_approve when notifyOwner is explicit', async () => {
+    const claudeDir = makeClaudeDir();
+    const teamName = 'review-approval-notify';
+    writeTeamConfig(claudeDir, teamName, {
+      members: [
+        { name: 'lead', role: 'team-lead' },
+        { name: 'alice', role: 'reviewer' },
+        { name: 'bob', role: 'developer' },
+      ],
+    });
+
+    const ownerInboxPath = path.join(claudeDir, 'teams', teamName, 'inboxes', 'bob.json');
+    const readOwnerInbox = () =>
+      fs.existsSync(ownerInboxPath) ? JSON.parse(fs.readFileSync(ownerInboxPath, 'utf8')) : [];
+
+    const quietTask = parseJsonToolResult(
+      await getTool('task_create').execute({
+        claudeDir,
+        teamName,
+        subject: 'Quiet approval',
+        owner: 'bob',
+      })
+    );
+    await getTool('task_complete').execute({
+      claudeDir,
+      teamName,
+      taskId: quietTask.id,
+      actor: 'bob',
+    });
+    await getTool('review_request').execute({
+      claudeDir,
+      teamName,
+      taskId: quietTask.id,
+      from: 'lead',
+      reviewer: 'alice',
+    });
+    const beforeQuietApprove = readOwnerInbox().length;
+    parseJsonToolResult(
+      await getTool('review_approve').execute({
+        claudeDir,
+        teamName,
+        taskId: quietTask.id,
+        from: 'alice',
+      })
+    );
+    expect(readOwnerInbox()).toHaveLength(beforeQuietApprove);
+
+    const notifyingTask = parseJsonToolResult(
+      await getTool('task_create').execute({
+        claudeDir,
+        teamName,
+        subject: 'Notifying approval',
+        owner: 'bob',
+      })
+    );
+    await getTool('task_complete').execute({
+      claudeDir,
+      teamName,
+      taskId: notifyingTask.id,
+      actor: 'bob',
+    });
+    await getTool('review_request').execute({
+      claudeDir,
+      teamName,
+      taskId: notifyingTask.id,
+      from: 'lead',
+      reviewer: 'alice',
+    });
+    const beforeNotifyingApprove = readOwnerInbox().length;
+    parseJsonToolResult(
+      await getTool('review_approve').execute({
+        claudeDir,
+        teamName,
+        taskId: notifyingTask.id,
+        from: 'alice',
+        notifyOwner: true,
+      })
+    );
+    const afterNotifyingApprove = readOwnerInbox();
+    expect(afterNotifyingApprove).toHaveLength(beforeNotifyingApprove + 1);
+    expect(afterNotifyingApprove.at(-1).text).toContain('approved');
   });
 
   it('persists full message metadata through message_send', async () => {

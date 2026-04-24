@@ -98,6 +98,7 @@ vi.mock('@main/utils/childProcess', () => ({
 import { TeamProvisioningService } from '@main/services/team/TeamProvisioningService';
 import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
 import { TeamRuntimeAdapterRegistry } from '@main/services/team/runtime';
+import { ProviderConnectionService } from '@main/services/runtime/ProviderConnectionService';
 import { spawnCli } from '@main/utils/childProcess';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 
@@ -1425,6 +1426,106 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
       })
     );
     expect(spawnProbe).not.toHaveBeenCalled();
+  });
+
+  it('augments dynamic Codex compatibility checks with the app-server catalog', async () => {
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'buildProvisioningEnv').mockResolvedValue({
+      env: {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      authSource: 'codex_runtime',
+      geminiRuntimeAuth: null,
+      providerArgs: ['--settings', '{"codex":{"forced_login_method":"chatgpt"}}'],
+    });
+    const getCodexModelCatalog = vi
+      .spyOn(ProviderConnectionService.getInstance(), 'getCodexModelCatalog')
+      .mockResolvedValue({
+        schemaVersion: 1,
+        providerId: 'codex',
+        source: 'app-server',
+        status: 'ready',
+        fetchedAt: '2026-04-24T00:00:00.000Z',
+        staleAt: '2026-04-24T00:10:00.000Z',
+        defaultModelId: 'gpt-5.5',
+        defaultLaunchModel: 'gpt-5.5',
+        models: [
+          {
+            id: 'gpt-5.5',
+            launchModel: 'gpt-5.5',
+            displayName: 'GPT-5.5',
+            hidden: false,
+            supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+            defaultReasoningEffort: 'high',
+            inputModalities: ['text', 'image'],
+            supportsPersonality: false,
+            isDefault: true,
+            upgrade: false,
+            source: 'app-server',
+            badgeLabel: '5.5',
+          },
+        ],
+        diagnostics: {
+          configReadState: 'ready',
+          appServerState: 'healthy',
+          message: null,
+          code: null,
+        },
+      });
+
+    execCliMock.mockImplementation(async (_binaryPath: string | null, args: string[]) => {
+      if (args.includes('model') && args.includes('list')) {
+        return {
+          stdout: JSON.stringify({
+            schemaVersion: 1,
+            providers: {
+              codex: {
+                defaultModel: 'gpt-5.4-mini',
+                models: [
+                  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+                  { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
+                ],
+              },
+            },
+          }),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      if (args.includes('runtime') && args.includes('status')) {
+        return {
+          stdout: JSON.stringify({
+            providers: {
+              codex: {
+                runtimeCapabilities: {
+                  modelCatalog: { dynamic: true, source: 'runtime' },
+                },
+              },
+            },
+          }),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+
+    const result = await (svc as any).verifySelectedProviderModels({
+      claudePath: '/fake/claude',
+      cwd: tempRoot,
+      providerId: 'codex',
+      modelIds: ['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex'],
+      limitContext: false,
+    });
+
+    expect(result.details).toEqual([
+      'Selected model gpt-5.5 is available for launch.',
+      'Selected model gpt-5.4-mini is available for launch.',
+      'Selected model gpt-5.3-codex is available for launch.',
+    ]);
+    expect(result.blockingMessages).toEqual([]);
+    expect(getCodexModelCatalog).toHaveBeenCalledWith({ cwd: tempRoot });
   });
 
   it('passes provider launch args before model-list catalog subcommands', async () => {

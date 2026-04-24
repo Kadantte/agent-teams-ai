@@ -190,7 +190,7 @@ export const MemberCard = ({
         <div className="flex items-center gap-2.5">
           <div className="relative shrink-0">
             <div
-              className="rounded-full border-2 p-[1px]"
+              className="rounded-full border-2 p-px"
               style={{
                 borderColor: colors.border,
                 boxShadow: isLight ? 'none' : `0 0 0 1px ${colors.badge}`,

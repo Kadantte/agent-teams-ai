@@ -70,7 +70,7 @@ export function registerReviewTools(server: Pick<FastMCP, 'addTool'>) {
             getController(teamName, claudeDir).review.approveReview(taskId, {
               ...(from ? { from } : {}),
               ...(note ? { note } : {}),
-              ...(notifyOwner !== false ? { 'notify-owner': true } : {}),
+              ...(notifyOwner === true ? { 'notify-owner': true } : {}),
               ...(leadSessionId ? { leadSessionId } : {}),
             }) as Record<string, unknown>
           )

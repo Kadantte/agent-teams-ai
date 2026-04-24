@@ -10,7 +10,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
 const defaultEvidencePath = path.join(
   resolveAppDataDir(),
-  'claude-agent-teams-ui',
+  'Agent Teams UI',
   'opencode-bridge',
   'production-e2e-evidence.json'
 );
