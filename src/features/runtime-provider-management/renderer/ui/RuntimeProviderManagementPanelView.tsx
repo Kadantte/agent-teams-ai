@@ -113,6 +113,23 @@ function getDirectoryModelsLabel(provider: RuntimeProviderDirectoryEntryDto): st
   return `${provider.modelCount} model${provider.modelCount === 1 ? '' : 's'}`;
 }
 
+function directoryEntryToProviderConnection(
+  provider: RuntimeProviderDirectoryEntryDto
+): RuntimeProviderConnectionDto {
+  return {
+    providerId: provider.providerId,
+    displayName: provider.displayName,
+    state: provider.state,
+    ownership: provider.ownership,
+    recommended: provider.recommended,
+    modelCount: provider.modelCount ?? 1,
+    defaultModelId: provider.defaultModelId,
+    authMethods: provider.authMethods,
+    actions: provider.actions,
+    detail: provider.detail,
+  };
+}
+
 function stateClassName(provider: RuntimeProviderConnectionDto): string {
   switch (provider.state) {
     case 'connected':
@@ -727,10 +744,26 @@ function ProviderDirectoryPanel({
           <ArrowLeft className="mr-1 size-3.5" />
           Providers
         </Button>
-        <div className="text-xs text-[var(--color-text-muted)]">
-          {state.directoryTotalCount === null
-            ? 'All OpenCode providers'
-            : `${state.directoryTotalCount} OpenCode providers`}
+        <div className="flex items-center gap-2">
+          <div className="text-xs text-[var(--color-text-muted)]">
+            {state.directoryTotalCount === null
+              ? 'All OpenCode providers'
+              : `${state.directoryTotalCount} OpenCode providers`}
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={disabled || state.directoryLoading || state.directoryRefreshing}
+            onClick={() => void actions.refreshDirectory()}
+          >
+            {state.directoryRefreshing ? (
+              <Loader2 className="mr-1 size-3.5 animate-spin" />
+            ) : (
+              <RefreshCcw className="mr-1 size-3.5" />
+            )}
+            Refresh
+          </Button>
         </div>
       </div>
 
@@ -774,16 +807,30 @@ function ProviderDirectoryPanel({
         {state.directoryLoading && state.directoryEntries.length === 0 ? (
           <RuntimeProviderLoadingPlaceholder />
         ) : null}
-        {state.directoryEntries.map((provider) => (
-          <DirectoryProviderRow
-            key={provider.providerId}
-            provider={provider}
-            active={state.directorySelectedProviderId === provider.providerId}
-            disabled={disabled || state.directoryLoading}
-            busy={state.savingProviderId === provider.providerId}
-            actions={actions}
-          />
-        ))}
+        {state.directoryEntries.map((provider) => {
+          const active = state.directorySelectedProviderId === provider.providerId;
+          return (
+            <div key={provider.providerId}>
+              <DirectoryProviderRow
+                provider={provider}
+                active={active}
+                disabled={disabled || state.directoryLoading}
+                busy={state.savingProviderId === provider.providerId}
+                actions={actions}
+              />
+              {active && provider.state === 'connected' && provider.modelCount !== 0 ? (
+                <div className="ml-3 border-l border-sky-300/25 pl-3">
+                  <ProviderModelList
+                    state={state}
+                    actions={actions}
+                    provider={directoryEntryToProviderConnection(provider)}
+                    disabled={disabled || state.directoryLoading}
+                  />
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
 
       {!state.directoryLoading && state.directoryEntries.length === 0 && !state.directoryError ? (

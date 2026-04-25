@@ -505,6 +505,11 @@ export function useRuntimeProviderManagement(
     setDirectoryNextCursor(null);
   }, []);
 
+  const updateDirectoryQuery = useCallback((value: string): void => {
+    setDirectoryQuery(value);
+    setDirectoryNextCursor(null);
+  }, []);
+
   const loadMoreDirectory = useCallback(async (): Promise<void> => {
     if (!directoryNextCursor || directoryLoading || directoryRefreshing) {
       return;
@@ -882,7 +887,7 @@ export function useRuntimeProviderManagement(
       setProviderQuery,
       openDirectory,
       closeDirectory,
-      setDirectoryQuery,
+      setDirectoryQuery: updateDirectoryQuery,
       setDirectoryFilter,
       loadMoreDirectory,
       refreshDirectory,
@@ -919,6 +924,7 @@ export function useRuntimeProviderManagement(
       startConnect,
       submitConnect,
       testModel,
+      updateDirectoryQuery,
       useModelForNewTeams,
     ]
   );
