@@ -47,7 +47,6 @@ import {
   extractBaseDir,
   extractProjectName,
   extractSessionId,
-  getProjectDirNameCandidates,
   getProjectsBasePath,
   getTodosBasePath,
   isValidEncodedPath,
@@ -59,6 +58,7 @@ import { configManager } from '../infrastructure/ConfigManager';
 import { LocalFileSystemProvider } from '../infrastructure/LocalFileSystemProvider';
 
 import { ProjectPathResolver } from './ProjectPathResolver';
+import { resolveProjectStorageDir as resolveProjectStorageDirFromCandidates } from './projectStorageDir';
 import { SessionContentFilter } from './SessionContentFilter';
 import { SessionSearcher } from './SessionSearcher';
 import { SubagentLocator } from './SubagentLocator';
@@ -633,13 +633,12 @@ export class ProjectScanner {
    */
   async listSessions(projectId: string): Promise<Session[]> {
     try {
-      const baseDir = extractBaseDir(projectId);
-      const projectPath = path.join(this.projectsDir, baseDir);
+      const projectPath = await this.resolveProjectStorageDir(projectId);
       const sessionFilter = await this.getSessionFilterForProject(projectId);
       const shouldFilterNoise = this.fsProvider.type !== 'ssh';
       const metadataLevel: SessionMetadataLevel = this.fsProvider.type === 'ssh' ? 'light' : 'deep';
 
-      if (!(await this.fsProvider.exists(projectPath))) {
+      if (!projectPath) {
         return [];
       }
 
@@ -722,14 +721,13 @@ export class ProjectScanner {
     try {
       const includeTotalCount = options?.includeTotalCount ?? false;
       const prefilterAll = options?.prefilterAll ?? false;
-      const baseDir = extractBaseDir(projectId);
-      const projectPath = path.join(this.projectsDir, baseDir);
+      const projectPath = await this.resolveProjectStorageDir(projectId);
       const sessionFilter = await this.getSessionFilterForProject(projectId);
       const shouldFilterNoise = this.fsProvider.type !== 'ssh';
       const metadataLevel: SessionMetadataLevel =
         options?.metadataLevel ?? (this.fsProvider.type === 'ssh' ? 'light' : 'deep');
 
-      if (!(await this.fsProvider.exists(projectPath))) {
+      if (!projectPath) {
         return { sessions: [], nextCursor: null, hasMore: false, totalCount: 0 };
       }
 
@@ -1140,9 +1138,9 @@ export class ProjectScanner {
    * Gets a single session's metadata.
    */
   async getSession(projectId: string, sessionId: string): Promise<Session | null> {
-    const filePath = this.getSessionPath(projectId, sessionId);
+    const filePath = await this.resolveSessionPath(projectId, sessionId);
 
-    if (!(await this.fsProvider.exists(filePath))) {
+    if (!filePath || !(await this.fsProvider.exists(filePath))) {
       return null;
     }
 
@@ -1159,9 +1157,9 @@ export class ProjectScanner {
     sessionId: string,
     options?: SessionsByIdsOptions
   ): Promise<Session | null> {
-    const filePath = this.getSessionPath(projectId, sessionId);
+    const filePath = await this.resolveSessionPath(projectId, sessionId);
 
-    if (!(await this.fsProvider.exists(filePath))) {
+    if (!filePath || !(await this.fsProvider.exists(filePath))) {
       return null;
     }
 
@@ -1208,6 +1206,14 @@ export class ProjectScanner {
   }
 
   /**
+   * Resolves a session path using all known project storage directory codecs.
+   */
+  async resolveSessionPath(projectId: string, sessionId: string): Promise<string | null> {
+    const projectPath = await this.resolveProjectStorageDir(projectId);
+    return projectPath ? path.join(projectPath, `${sessionId}.jsonl`) : null;
+  }
+
+  /**
    * Gets the path to the subagents directory.
    */
   getSubagentsPath(projectId: string, sessionId: string): string {
@@ -1242,13 +1248,7 @@ export class ProjectScanner {
   }
 
   private async resolveProjectStorageDir(projectId: string): Promise<string | null> {
-    for (const dirName of getProjectDirNameCandidates(projectId)) {
-      const projectPath = path.join(this.projectsDir, dirName);
-      if (await this.fsProvider.exists(projectPath)) {
-        return projectPath;
-      }
-    }
-    return null;
+    return resolveProjectStorageDirFromCandidates(this.projectsDir, projectId, this.fsProvider);
   }
 
   /**

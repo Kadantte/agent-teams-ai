@@ -149,6 +149,22 @@ describe('TmuxWslService', () => {
     expect(preferenceStore.getPreferredDistroSync()).toBeNull();
   });
 
+  it('ignores Docker internal WSL distros when choosing a teammate runtime distro', async () => {
+    const service = new TmuxWslService(
+      createExecFileMock({
+        '--status': { stdout: 'Default Distribution: docker-desktop\nDefault Version: 2\n' },
+        '--list --quiet': { stdout: 'docker-desktop\ndocker-desktop-data\n' },
+      }),
+      createPreferenceStore() as never
+    );
+
+    const result = await service.probe();
+
+    expect(result.status.wslInstalled).toBe(true);
+    expect(result.status.distroName).toBeNull();
+    expect(result.status.statusDetail).toContain('no Linux distribution');
+  });
+
   it('switches preference source away from persisted after clearing a stale distro', async () => {
     const preferenceStore = createPreferenceStore('Ubuntu');
     const service = new TmuxWslService(

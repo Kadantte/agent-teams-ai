@@ -420,7 +420,13 @@ export class TmuxWslService {
       .split(/\r?\n/)
       .map((line) => line.replace(/\0/g, '').trim())
       .map((line) => line.replace(/^\*\s*/, '').trim())
+      .filter((line) => !this.#isInternalWslDistro(line))
       .filter(Boolean);
+  }
+
+  #isInternalWslDistro(name: string): boolean {
+    const normalized = name.trim().toLowerCase();
+    return normalized === 'docker-desktop' || normalized === 'docker-desktop-data';
   }
 
   #parseVerboseDistroEntries(stdout: string, distros: string[]): WslVerboseDistroEntry[] {

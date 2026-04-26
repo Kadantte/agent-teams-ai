@@ -4,7 +4,9 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { ProjectScanner } from '../../../../src/main/services/discovery/ProjectScanner';
+import { SessionSearcher } from '../../../../src/main/services/discovery/SessionSearcher';
 import { subprojectRegistry } from '../../../../src/main/services/discovery/SubprojectRegistry';
+import { SessionParser } from '../../../../src/main/services/parsing/SessionParser';
 import { encodePathPortable } from '../../../../src/main/utils/pathDecoder';
 
 function createSessionLine(opts: { cwd?: string; type?: string }): string {
@@ -51,10 +53,7 @@ describe('ProjectScanner cwd split logic', () => {
     // Session WITHOUT cwd (older format)
     fs.writeFileSync(
       path.join(projectDir, 'session-no-cwd.jsonl'),
-      createSessionLine({ type: 'system' }) +
-        '\n' +
-        createSessionLine({ type: 'user' }) +
-        '\n'
+      createSessionLine({ type: 'system' }) + '\n' + createSessionLine({ type: 'user' }) + '\n'
     );
 
     const scanner = new ProjectScanner(projectsDir);
@@ -119,6 +118,19 @@ describe('ProjectScanner cwd split logic', () => {
 
     const scanner = new ProjectScanner(projectsDir);
     await expect(scanner.listSessionFiles(uiEncodedName)).resolves.toEqual([sessionPath]);
+    await expect(scanner.listSessions(uiEncodedName)).resolves.toHaveLength(1);
+    await expect(scanner.getSession(uiEncodedName, 'session-orchestrator')).resolves.toMatchObject({
+      id: 'session-orchestrator',
+      projectId: uiEncodedName,
+    });
+
+    const parser = new SessionParser(scanner);
+    const parsed = await parser.parseSession(uiEncodedName, 'session-orchestrator');
+    expect(parsed.messages).toHaveLength(1);
+
+    const searcher = new SessionSearcher(projectsDir);
+    const searchResult = await searcher.searchSessions(uiEncodedName, 'hello', 10);
+    expect(searchResult.totalMatches).toBe(1);
   });
 
   it('detects Windows forward-slash worktree paths', async () => {
