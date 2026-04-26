@@ -124,6 +124,7 @@ export interface OpenCodeCleanupHostsCommandBody {
   projectPath?: string;
   staleAgeMs?: number | null;
   leaseStaleAgeMs?: number | null;
+  preflightLeaseStaleAgeMs?: number | null;
 }
 
 export interface OpenCodeCleanupHostsCommandData {

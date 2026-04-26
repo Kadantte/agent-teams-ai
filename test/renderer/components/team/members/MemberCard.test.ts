@@ -495,6 +495,98 @@ describe('MemberCard starting-state visuals', () => {
     });
   });
 
+  it('shows a worktree badge only for teammates configured with worktree isolation', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberCard, {
+          member: {
+            ...member,
+            providerId: 'opencode',
+            isolation: 'worktree',
+            cwd: '/tmp/project-alice-worktree',
+          },
+          memberColor: 'blue',
+          runtimeSummary: 'kimi · via OpenCode',
+          isTeamAlive: true,
+          isTeamProvisioning: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('worktree');
+    expect(
+      host.querySelector(
+        '[title="Worktree isolation configured. Worktree path: /tmp/project-alice-worktree"]'
+      )
+    ).not.toBeNull();
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberCard, {
+          member: {
+            ...member,
+            providerId: 'opencode',
+            isolation: 'worktree',
+          },
+          memberColor: 'blue',
+          runtimeEntry: {
+            memberName: 'alice',
+            alive: true,
+            restartable: true,
+            providerId: 'opencode',
+            cwd: '/tmp/project',
+            updatedAt: '2026-04-24T12:00:00.000Z',
+          },
+          runtimeSummary: 'kimi · via OpenCode',
+          isTeamAlive: true,
+          isTeamProvisioning: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('worktree');
+    expect(
+      host.querySelector(
+        '[title="Worktree isolation is configured, but the runtime path is not available yet"]'
+      )
+    ).not.toBeNull();
+    expect(host.querySelector('[title="Worktree isolation configured. Runtime cwd: /tmp/project"]'))
+      .toBeNull();
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberCard, {
+          member: {
+            ...member,
+            providerId: 'opencode',
+            cwd: '/tmp/project',
+          },
+          memberColor: 'blue',
+          runtimeSummary: 'kimi · via OpenCode',
+          isTeamAlive: true,
+          isTeamProvisioning: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).not.toContain('worktree');
+    expect(host.textContent).not.toContain('shared');
+    expect(host.querySelector('[title^="Shared workspace"]')).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('copies bounded launch diagnostics only for launch errors', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const writeText = vi.fn().mockResolvedValue(undefined);

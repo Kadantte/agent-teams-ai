@@ -120,7 +120,10 @@ export class OpenCodeTeamRuntimeAdapter implements TeamLaunchRuntimeAdapter {
   }
 
   async launch(input: TeamRuntimeLaunchInput): Promise<TeamRuntimeLaunchResult> {
-    const memberValidationDiagnostics = validateOpenCodeRuntimeMembers(input.expectedMembers);
+    const memberValidationDiagnostics = validateOpenCodeRuntimeMembers(
+      input.expectedMembers,
+      input.cwd
+    );
     if (memberValidationDiagnostics.length > 0) {
       return blockedLaunchResult(
         input,
@@ -663,13 +666,14 @@ function buildOpenCodeRuntimeMessageText(input: OpenCodeTeamRuntimeMessageInput)
 }
 
 function validateOpenCodeRuntimeMembers(
-  members: TeamRuntimeLaunchInput['expectedMembers']
+  members: TeamRuntimeLaunchInput['expectedMembers'],
+  launchCwd?: string
 ): string[] {
   if (members.length === 0) {
     return ['OpenCode runtime adapter requires at least one expected OpenCode member.'];
   }
 
-  return members.flatMap((member, index) => {
+  const diagnostics = members.flatMap((member, index) => {
     const name = member.name.trim() || `<index ${index}>`;
     if (member.providerId === 'opencode') {
       return [];
@@ -678,6 +682,21 @@ function validateOpenCodeRuntimeMembers(
       `OpenCode runtime adapter received non-OpenCode member "${name}" with provider "${member.providerId}".`,
     ];
   });
+  const memberCwds = [
+    ...new Set(members.map((member) => member.cwd.trim()).filter((cwd) => cwd.length > 0)),
+  ];
+  if (memberCwds.length > 1) {
+    diagnostics.push(
+      'OpenCode runtime adapter currently supports one project path per lane. Launch isolated OpenCode teammates as separate side lanes.'
+    );
+  }
+  const onlyMemberCwd = memberCwds.length === 1 ? memberCwds[0] : null;
+  if (launchCwd?.trim() && onlyMemberCwd && onlyMemberCwd !== launchCwd.trim()) {
+    diagnostics.push(
+      `OpenCode runtime lane cwd mismatch: launch cwd "${launchCwd.trim()}" differs from member cwd "${onlyMemberCwd}".`
+    );
+  }
+  return diagnostics;
 }
 
 function formatOpenCodeBridgeDiagnostic(diagnostic: {

@@ -200,6 +200,7 @@ import {
 import { TeamLaunchStateStore } from './TeamLaunchStateStore';
 import { TeamMcpConfigBuilder } from './TeamMcpConfigBuilder';
 import { TeamMemberLogsFinder } from './TeamMemberLogsFinder';
+import { TeamMemberWorktreeManager } from './TeamMemberWorktreeManager';
 import { TeamMembersMetaStore } from './TeamMembersMetaStore';
 import { TeamMetaStore } from './TeamMetaStore';
 import {
@@ -254,6 +255,7 @@ interface PersistedRuntimeMemberLike {
   tmuxPaneId?: string;
   backendType?: string;
   providerId?: string;
+  cwd?: string;
   runtimePid?: number;
   runtimeSessionId?: string;
 }
@@ -1515,6 +1517,7 @@ interface LiveTeamAgentRuntimeMetadata {
   backendType?: TeamAgentRuntimeBackendType;
   providerId?: TeamProviderId;
   agentId?: string;
+  cwd?: string;
   pid?: number;
   metricsPid?: number;
   model?: string;
@@ -4000,7 +4003,8 @@ export class TeamProvisioningService {
     private readonly mcpConfigBuilder: TeamMcpConfigBuilder = new TeamMcpConfigBuilder(),
     private readonly teamMetaStore: TeamMetaStore = new TeamMetaStore(),
     private readonly inboxWriter: TeamInboxWriter = new TeamInboxWriter(),
-    private readonly openCodeTaskLogAttributionStore: OpenCodeTaskLogAttributionStore = new OpenCodeTaskLogAttributionStore()
+    private readonly openCodeTaskLogAttributionStore: OpenCodeTaskLogAttributionStore = new OpenCodeTaskLogAttributionStore(),
+    private readonly memberWorktreeManager: TeamMemberWorktreeManager = new TeamMemberWorktreeManager()
   ) {
     this.memberLogsFinder = new TeamMemberLogsFinder(
       this.configReader,
@@ -5251,11 +5255,15 @@ export class TeamProvisioningService {
     ) {
       return { delivered: false, reason: 'opencode_runtime_not_active' };
     }
+    const memberRuntimeCwd = metaMember?.cwd?.trim() || configMember?.cwd?.trim();
     const cwd =
-      config?.projectPath?.trim() ||
-      metaMember?.cwd?.trim() ||
-      configMember?.cwd?.trim() ||
-      this.readPersistedTeamProjectPath(teamName);
+      laneIdentity.laneKind === 'secondary' && laneIdentity.laneOwnerProviderId === 'opencode'
+        ? memberRuntimeCwd ||
+          config?.projectPath?.trim() ||
+          this.readPersistedTeamProjectPath(teamName)
+        : config?.projectPath?.trim() ||
+          memberRuntimeCwd ||
+          this.readPersistedTeamProjectPath(teamName);
     if (!cwd) {
       return { delivered: false, reason: 'opencode_project_path_unavailable' };
     }
@@ -5419,23 +5427,6 @@ export class TeamProvisioningService {
     }
 
     if (ledgerRecord && ledger && messageId) {
-      if (ledgerRecord.status === 'failed_terminal') {
-        this.logOpenCodePromptDeliveryEvent(
-          'opencode_prompt_delivery_terminal_failure',
-          ledgerRecord
-        );
-        return {
-          delivered: false,
-          accepted: false,
-          responsePending: false,
-          responseState: ledgerRecord.responseState,
-          ledgerStatus: ledgerRecord.status,
-          ledgerRecordId: ledgerRecord.id,
-          laneId: laneIdentity.laneId,
-          reason: ledgerRecord.lastReason ?? 'opencode_prompt_delivery_failed_terminal',
-          diagnostics: ledgerRecord.diagnostics,
-        };
-      }
       let proof = await this.applyOpenCodeVisibleDestinationProof({
         ledger,
         ledgerRecord,
@@ -5467,6 +5458,24 @@ export class TeamProvisioningService {
           laneId: laneIdentity.laneId,
           visibleReplyMessageId: ledgerRecord.visibleReplyMessageId ?? undefined,
           visibleReplyCorrelation: ledgerRecord.visibleReplyCorrelation ?? undefined,
+          diagnostics: ledgerRecord.diagnostics,
+        };
+      }
+
+      if (ledgerRecord.status === 'failed_terminal') {
+        this.logOpenCodePromptDeliveryEvent(
+          'opencode_prompt_delivery_terminal_failure',
+          ledgerRecord
+        );
+        return {
+          delivered: false,
+          accepted: false,
+          responsePending: false,
+          responseState: ledgerRecord.responseState,
+          ledgerStatus: ledgerRecord.status,
+          ledgerRecordId: ledgerRecord.id,
+          laneId: laneIdentity.laneId,
+          reason: ledgerRecord.lastReason ?? 'opencode_prompt_delivery_failed_terminal',
           diagnostics: ledgerRecord.diagnostics,
         };
       }
@@ -6191,6 +6200,7 @@ export class TeamProvisioningService {
       ...(configuredMember.role ? { role: configuredMember.role } : {}),
       ...(configuredMember.workflow ? { workflow: configuredMember.workflow } : {}),
       ...(configuredMember.isolation === 'worktree' ? { isolation: 'worktree' as const } : {}),
+      ...(configuredMember.cwd ? { cwd: configuredMember.cwd } : {}),
       ...(configuredMember.providerId ? { providerId: configuredMember.providerId } : {}),
       ...(configuredMember.providerBackendId
         ? { providerBackendId: configuredMember.providerBackendId }
@@ -6208,6 +6218,7 @@ export class TeamProvisioningService {
         role: member.role?.trim() || undefined,
         workflow: member.workflow?.trim() || undefined,
         isolation: member.isolation === 'worktree' ? ('worktree' as const) : undefined,
+        cwd: member.cwd?.trim() || undefined,
         providerId: normalizeOptionalTeamProviderId(member.providerId),
         providerBackendId: migrateProviderBackendId(member.providerId, member.providerBackendId),
         model: member.model?.trim() || undefined,
@@ -8591,6 +8602,7 @@ export class TeamProvisioningService {
 
     const updatedAt = nowIso();
     const run = runId ? (this.runs.get(runId) ?? null) : null;
+    const currentRuntimeAdapterRun = this.runtimeAdapterRunByTeam.get(teamName);
     const persistedTeamMeta = await this.teamMetaStore.getMeta(teamName).catch(() => null);
 
     let configuredMembers: TeamConfig['members'] = [];
@@ -8718,6 +8730,10 @@ export class TeamProvisioningService {
         inferTeamProviderIdFromModel(launchMember?.model) ??
         inferTeamProviderIdFromModel(member.model);
       const isOpenCodeMember = memberProviderId === 'opencode';
+      const configuredCwd = typeof member.cwd === 'string' ? member.cwd.trim() : '';
+      const runtimeCwd =
+        liveRuntimeMember?.cwd ??
+        (configuredCwd || (isOpenCodeMember ? currentRuntimeAdapterRun?.cwd : undefined));
       const metricsPid = liveRuntimeMember?.metricsPid;
       const isSharedOpenCodeHost =
         isOpenCodeMember &&
@@ -8760,6 +8776,7 @@ export class TeamProvisioningService {
         ...(launchMember?.laneKind ? { laneKind: launchMember.laneKind } : {}),
         ...(displayPid ? { pid: displayPid } : {}),
         ...(runtimeModel ? { runtimeModel } : {}),
+        ...(runtimeCwd ? { cwd: runtimeCwd } : {}),
         ...(typeof rssBytes === 'number' && rssBytes >= 0 ? { rssBytes } : {}),
         ...(liveRuntimeMember?.livenessKind
           ? { livenessKind: liveRuntimeMember.livenessKind }
@@ -9267,7 +9284,15 @@ export class TeamProvisioningService {
       );
     }
 
-    const memberSpec = this.buildConfiguredProvisioningMember(configuredMember);
+    const [memberSpec] = await this.resolveOpenCodeMemberWorkspacesForRuntime({
+      teamName,
+      baseCwd: run.request.cwd,
+      leadProviderId,
+      members: [this.buildConfiguredProvisioningMember(configuredMember)],
+    });
+    if (!memberSpec) {
+      throw new Error(`Member "${memberName}" could not be resolved for OpenCode lane reattach.`);
+    }
     const nextLane = this.createMixedSecondaryLaneStateForMember(run, memberSpec);
     const existingLaneIndex = run.mixedSecondaryLanes.findIndex(
       (lane) => lane.laneId === nextLane.laneId || lane.member.name.trim() === memberName
@@ -10537,6 +10562,95 @@ export class TeamProvisioningService {
     return effectiveMembers;
   }
 
+  private getOpenCodeRuntimeLaunchCwd(
+    fallbackCwd: string,
+    members: TeamCreateRequest['members']
+  ): string {
+    if (members.length > 1 && members.some((member) => member.isolation === 'worktree')) {
+      throw new Error(
+        'OpenCode worktree isolation currently supports one isolated OpenCode member per runtime lane.'
+      );
+    }
+    const memberCwds = [
+      ...new Set(
+        members.map((member) => member.cwd?.trim()).filter((cwd): cwd is string => Boolean(cwd))
+      ),
+    ];
+    if (memberCwds.length === 0) {
+      return fallbackCwd;
+    }
+    if (memberCwds.length === 1) {
+      return memberCwds[0];
+    }
+    throw new Error(
+      'OpenCode runtime lanes support exactly one project path in this release. Use mixed-team OpenCode side lanes for per-teammate worktree isolation.'
+    );
+  }
+
+  private async resolveOpenCodeMemberWorkspacesForRuntime(params: {
+    teamName: string;
+    baseCwd: string;
+    leadProviderId?: TeamProviderId;
+    members: TeamCreateRequest['members'];
+  }): Promise<TeamCreateRequest['members']> {
+    const isolatedOpenCodeMembers = params.members.filter((member) => {
+      const providerId = normalizeTeamMemberProviderId(member.providerId);
+      return providerId === 'opencode' && member.isolation === 'worktree';
+    });
+    if (isolatedOpenCodeMembers.length === 0) {
+      return params.members;
+    }
+
+    if (
+      isPureOpenCodeProvisioningRequest({
+        providerId: params.leadProviderId,
+        members: params.members,
+      }) &&
+      params.members.length > 1
+    ) {
+      throw new Error(
+        'OpenCode worktree isolation currently supports mixed-team OpenCode side lanes or one-member OpenCode runtime lanes. Multiple OpenCode members in one lane cannot use separate worktrees yet.'
+      );
+    }
+
+    const nextMembers: TeamCreateRequest['members'] = [];
+    for (const member of params.members) {
+      const providerId = normalizeTeamMemberProviderId(member.providerId);
+      if (providerId !== 'opencode' || member.isolation !== 'worktree') {
+        nextMembers.push(member);
+        continue;
+      }
+
+      const existingCwd = member.cwd?.trim();
+      if (existingCwd) {
+        if (!path.isAbsolute(existingCwd)) {
+          throw new Error(
+            `OpenCode worktree path for "${member.name}" must be absolute: ${existingCwd}`
+          );
+        }
+        const existingCwdStat = await fs.promises.stat(existingCwd).catch(() => null);
+        if (existingCwdStat) {
+          if (!existingCwdStat.isDirectory()) {
+            throw new Error(
+              `OpenCode worktree path for "${member.name}" is not a directory: ${existingCwd}`
+            );
+          }
+          nextMembers.push({ ...member, cwd: existingCwd });
+          continue;
+        }
+      }
+
+      const resolution = await this.memberWorktreeManager.ensureMemberWorktree({
+        teamName: params.teamName,
+        memberName: member.name,
+        baseCwd: params.baseCwd,
+      });
+      nextMembers.push({ ...member, cwd: resolution.worktreePath });
+    }
+
+    return nextMembers;
+  }
+
   private getFreshCachedProbeResult(
     cwd: string,
     providerId: TeamProviderId | undefined
@@ -11432,7 +11546,7 @@ export class TeamProvisioningService {
       if (envWarning) {
         throw new Error(envWarning);
       }
-      const allEffectiveMemberSpecs = await this.materializeEffectiveTeamMemberSpecs({
+      const materializedMemberSpecs = await this.materializeEffectiveTeamMemberSpecs({
         claudePath,
         cwd: request.cwd,
         members: request.members,
@@ -11444,6 +11558,12 @@ export class TeamProvisioningService {
         primaryProviderId: request.providerId,
         primaryEnv: provisioningEnv,
         limitContext: request.limitContext,
+      });
+      const allEffectiveMemberSpecs = await this.resolveOpenCodeMemberWorkspacesForRuntime({
+        teamName: request.teamName,
+        baseCwd: request.cwd,
+        leadProviderId: request.providerId,
+        members: materializedMemberSpecs,
       });
       const lanePlan = this.planRuntimeLanesOrThrow(request.providerId, allEffectiveMemberSpecs);
       const primaryMemberNames = new Set(lanePlan.primaryMembers.map((member) => member.name));
@@ -11805,10 +11925,15 @@ export class TeamProvisioningService {
     }
 
     await ensureCwdExists(request.cwd);
-    const effectiveMembers = buildEffectiveTeamMemberSpecs(request.members, {
-      providerId: request.providerId,
-      model: request.model,
-      effort: request.effort,
+    const effectiveMembers = await this.resolveOpenCodeMemberWorkspacesForRuntime({
+      teamName: request.teamName,
+      baseCwd: request.cwd,
+      leadProviderId: request.providerId,
+      members: buildEffectiveTeamMemberSpecs(request.members, {
+        providerId: request.providerId,
+        model: request.model,
+        effort: request.effort,
+      }),
     });
     const teamDir = path.join(getTeamsBasePath(), request.teamName);
     const tasksDir = path.join(getTasksBasePath(), request.teamName);
@@ -11863,10 +11988,15 @@ export class TeamProvisioningService {
       configRaw,
       request.providerId
     );
-    const effectiveMembers = buildEffectiveTeamMemberSpecs(members, {
-      providerId: request.providerId,
-      model: request.model,
-      effort: request.effort,
+    const effectiveMembers = await this.resolveOpenCodeMemberWorkspacesForRuntime({
+      teamName: request.teamName,
+      baseCwd: request.cwd,
+      leadProviderId: request.providerId,
+      members: buildEffectiveTeamMemberSpecs(members, {
+        providerId: request.providerId,
+        model: request.model,
+        effort: request.effort,
+      }),
     });
     await this.updateConfigProjectPath(request.teamName, request.cwd);
 
@@ -11957,11 +12087,12 @@ export class TeamProvisioningService {
       laneId: 'primary',
       state: 'active',
     });
+    const launchCwd = this.getOpenCodeRuntimeLaunchCwd(input.request.cwd, input.members);
     const launchInput: TeamRuntimeLaunchInput = {
       runId,
       laneId: 'primary',
       teamName: input.request.teamName,
-      cwd: input.request.cwd,
+      cwd: launchCwd,
       prompt: input.prompt,
       providerId: 'opencode',
       model: input.request.model,
@@ -11975,7 +12106,7 @@ export class TeamProvisioningService {
         providerId: 'opencode',
         model: member.model ?? input.request.model,
         effort: member.effort ?? input.request.effort,
-        cwd: input.request.cwd,
+        cwd: member.cwd?.trim() || launchCwd,
       })),
       previousLaunchState,
     };
@@ -12040,7 +12171,7 @@ export class TeamProvisioningService {
         this.runtimeAdapterRunByTeam.set(input.request.teamName, {
           runId,
           providerId: 'opencode',
-          cwd: input.request.cwd,
+          cwd: launchCwd,
           members: result.members,
         });
         this.aliveRunByTeam.set(input.request.teamName, runId);
@@ -12116,6 +12247,7 @@ export class TeamProvisioningService {
           providerId: normalizeOptionalTeamProviderId(member.providerId),
           model: member.model,
           effort: member.effort,
+          cwd: member.cwd?.trim() || undefined,
         })),
       ],
     };
@@ -12155,6 +12287,7 @@ export class TeamProvisioningService {
       providerBackendId: undefined,
       model: member.model?.trim() || undefined,
       effort: member.effort,
+      cwd: member.cwd?.trim() || undefined,
       laneId: 'primary',
       laneKind: 'primary',
       laneOwnerProviderId: 'opencode',
@@ -12435,7 +12568,7 @@ export class TeamProvisioningService {
         throw new Error(envWarning);
       }
 
-      const allEffectiveMemberSpecs = await this.materializeEffectiveTeamMemberSpecs({
+      const materializedMemberSpecs = await this.materializeEffectiveTeamMemberSpecs({
         claudePath,
         cwd: request.cwd,
         members: expectedMemberSpecs,
@@ -12447,6 +12580,12 @@ export class TeamProvisioningService {
         primaryProviderId: request.providerId,
         primaryEnv: provisioningEnv,
         limitContext: request.limitContext,
+      });
+      const allEffectiveMemberSpecs = await this.resolveOpenCodeMemberWorkspacesForRuntime({
+        teamName: request.teamName,
+        baseCwd: request.cwd,
+        leadProviderId: request.providerId,
+        members: materializedMemberSpecs,
       });
       const lanePlan = this.planRuntimeLanesOrThrow(request.providerId, allEffectiveMemberSpecs);
       const primaryMemberNames = new Set(lanePlan.primaryMembers.map((member) => member.name));
@@ -13527,6 +13666,74 @@ export class TeamProvisioningService {
           })
           .catch(() => null);
         if (existingRecord?.status === 'failed_terminal') {
+          let recoveredRecord: OpenCodePromptDeliveryLedgerRecord | null = null;
+          let recoveredVisibleReply: OpenCodeVisibleReplyProof | null = null;
+          if (typeof promptLedger.applyDestinationProof === 'function') {
+            try {
+              const proof = await this.applyOpenCodeVisibleDestinationProof({
+                ledger: promptLedger,
+                ledgerRecord: existingRecord,
+                teamName,
+                replyRecipient: existingRecord.replyRecipient,
+                memberName: memberIdentity.canonicalMemberName,
+              });
+              recoveredRecord = proof.ledgerRecord;
+              recoveredVisibleReply = proof.visibleReply;
+            } catch {
+              recoveredRecord = null;
+              recoveredVisibleReply = null;
+            }
+          }
+          const recoveredReadAllowed =
+            recoveredRecord &&
+            this.isOpenCodeDeliveryResponseReadCommitAllowed({
+              responseState: recoveredRecord.responseState,
+              actionMode: recoveredRecord.actionMode ?? undefined,
+              taskRefs: recoveredRecord.taskRefs,
+              visibleReply: recoveredVisibleReply,
+              ledgerRecord: recoveredRecord,
+            });
+          if (recoveredRecord && recoveredReadAllowed) {
+            try {
+              await this.markInboxMessagesRead(teamName, memberName, [message]);
+              const committed = await promptLedger.markInboxReadCommitted({
+                id: recoveredRecord.id,
+                committedAt: nowIso(),
+              });
+              this.logOpenCodePromptDeliveryEvent(
+                'opencode_prompt_delivery_inbox_committed_read',
+                committed,
+                { recoveredTerminal: true }
+              );
+              result.delivered += 1;
+              result.relayed += 1;
+              result.lastDelivery = {
+                delivered: true,
+                accepted: true,
+                responsePending: false,
+                responseState: committed.responseState,
+                ledgerStatus: committed.status,
+                ledgerRecordId: committed.id,
+                laneId: memberIdentity.laneId,
+                visibleReplyMessageId: committed.visibleReplyMessageId ?? undefined,
+                visibleReplyCorrelation: committed.visibleReplyCorrelation ?? undefined,
+                diagnostics: committed.diagnostics,
+              };
+              break;
+            } catch (error) {
+              const diagnostic = `opencode_inbox_mark_read_failed_after_terminal_recovery: ${getErrorMessage(
+                error
+              )}`;
+              result.failed += 1;
+              result.lastDelivery = {
+                delivered: false,
+                reason: 'opencode_inbox_mark_read_failed_after_terminal_recovery',
+                diagnostics: [diagnostic],
+              };
+              result.diagnostics = [...(result.diagnostics ?? []), diagnostic];
+              break;
+            }
+          }
           const diagnostic =
             existingRecord.lastReason ??
             `opencode_prompt_delivery_failed_terminal: ${message.messageId}`;
@@ -13547,7 +13754,6 @@ export class TeamProvisioningService {
           }
           continue;
         }
-
         const fallbackReplyRecipient =
           typeof message.from === 'string' &&
           message.from.trim() &&
@@ -14770,6 +14976,7 @@ export class TeamProvisioningService {
     model?: string;
     effort?: EffortLevel;
     fastMode?: TeamFastMode;
+    cwd?: string;
     agentType?: string;
     removedAt?: number | string;
   } | null {
@@ -14819,6 +15026,7 @@ export class TeamProvisioningService {
           : undefined;
     const agentType =
       metaMember?.agentType?.trim() || configuredMember?.agentType?.trim() || undefined;
+    const cwd = metaMember?.cwd?.trim() || configuredMember?.cwd?.trim() || undefined;
     const removedAt = metaMember?.removedAt ?? configuredMember?.removedAt;
 
     return {
@@ -14831,6 +15039,7 @@ export class TeamProvisioningService {
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       ...(fastMode ? { fastMode } : {}),
+      ...(cwd ? { cwd } : {}),
       ...(agentType ? { agentType } : {}),
       ...(removedAt != null ? { removedAt } : {}),
     };
@@ -15023,6 +15232,7 @@ export class TeamProvisioningService {
         ...(typeof member.runtimeSessionId === 'string' && member.runtimeSessionId.trim()
           ? { runtimeSessionId: member.runtimeSessionId.trim() }
           : {}),
+        ...(typeof member.cwd === 'string' && member.cwd.trim() ? { cwd: member.cwd.trim() } : {}),
         ...(runtimeModel ? { model: runtimeModel } : {}),
       });
     }
@@ -15060,6 +15270,7 @@ export class TeamProvisioningService {
         ...(normalizeOptionalTeamProviderId(member.providerId)
           ? { providerId: normalizeOptionalTeamProviderId(member.providerId) }
           : {}),
+        ...(typeof member.cwd === 'string' && member.cwd.trim() ? { cwd: member.cwd.trim() } : {}),
         ...(normalizeTeamAgentRuntimeBackendType(configuredBackendType, false)
           ? {
               backendType: normalizeTeamAgentRuntimeBackendType(configuredBackendType, false),
@@ -15089,6 +15300,7 @@ export class TeamProvisioningService {
         ...(typeof member.agentId === 'string' && member.agentId.trim()
           ? { agentId: member.agentId.trim() }
           : {}),
+        ...(typeof member.cwd === 'string' && member.cwd.trim() ? { cwd: member.cwd.trim() } : {}),
       });
     }
 
@@ -15109,6 +15321,11 @@ export class TeamProvisioningService {
       }
       const evidence = lane.result?.members[memberName];
       const runtimeModel = lane.member.model?.trim() || undefined;
+      const laneMemberCwd =
+        typeof (lane.member as { cwd?: unknown }).cwd === 'string'
+          ? (lane.member as { cwd?: string }).cwd?.trim()
+          : '';
+      const laneCwd = laneMemberCwd || run?.request.cwd;
       upsertMetadata(memberName, {
         backendType: 'process',
         providerId: 'opencode',
@@ -15116,6 +15333,7 @@ export class TeamProvisioningService {
         livenessKind: evidence?.livenessKind,
         pidSource: evidence?.pidSource,
         runtimeDiagnostic: evidence?.runtimeDiagnostic,
+        ...(laneCwd ? { cwd: laneCwd } : {}),
         ...(runtimeModel ? { model: runtimeModel } : {}),
         ...(typeof evidence?.runtimePid === 'number' && evidence.runtimePid > 0
           ? { metricsPid: evidence.runtimePid }
@@ -15962,13 +16180,14 @@ export class TeamProvisioningService {
     lane.runId = lane.runId ?? randomUUID();
     lane.warnings = [];
     lane.diagnostics = [...migration.diagnostics];
+    const laneCwd = lane.member.cwd?.trim() || run.request.cwd;
     this.setSecondaryRuntimeRun({
       teamName: run.teamName,
       runId: lane.runId,
       providerId: 'opencode',
       laneId: lane.laneId,
       memberName: lane.member.name,
-      cwd: run.request.cwd,
+      cwd: laneCwd,
     });
     await this.publishMixedSecondaryLaneStatusChange(run, lane);
     const previousLaunchState = await this.launchStateStore.read(run.teamName);
@@ -15978,7 +16197,7 @@ export class TeamProvisioningService {
         runId: lane.runId,
         laneId: lane.laneId,
         teamName: run.teamName,
-        cwd: run.request.cwd,
+        cwd: laneCwd,
         prompt: run.request.prompt?.trim() ?? undefined,
         providerId: 'opencode',
         model: lane.member.model,
@@ -15993,7 +16212,7 @@ export class TeamProvisioningService {
             providerId: 'opencode',
             model: lane.member.model,
             effort: lane.member.effort,
-            cwd: run.request.cwd,
+            cwd: laneCwd,
           },
         ],
         previousLaunchState,
@@ -16079,7 +16298,7 @@ export class TeamProvisioningService {
           runId: lane.runId,
           laneId: lane.laneId,
           teamName: run.teamName,
-          cwd: run.request.cwd,
+          cwd: lane.member.cwd?.trim() || run.request.cwd,
           providerId: 'opencode',
           reason,
           previousLaunchState,
@@ -16408,7 +16627,8 @@ export class TeamProvisioningService {
     previousLaunchState: PersistedTeamLaunchSnapshot | null;
   }): Promise<TeamRuntimeMemberLaunchEvidence | null> {
     const adapter = this.getOpenCodeRuntimeAdapter();
-    if (!adapter || !params.projectPath) {
+    const runtimeProjectPath = params.member.cwd?.trim() || params.projectPath;
+    if (!adapter || !runtimeProjectPath) {
       return null;
     }
 
@@ -16427,7 +16647,7 @@ export class TeamProvisioningService {
             providerId: 'opencode',
             model: params.member.model,
             effort: params.member.effort,
-            cwd: params.projectPath,
+            cwd: runtimeProjectPath,
           },
         ],
         previousLaunchState: params.previousLaunchState,
@@ -21800,15 +22020,17 @@ export class TeamProvisioningService {
         const model =
           typeof member.model === 'string' ? member.model.trim() || undefined : undefined;
         const effort = isTeamEffortLevel(member.effort) ? member.effort : undefined;
+        const cwd = typeof member.cwd === 'string' ? member.cwd.trim() || undefined : undefined;
         const prev = byName.get(name);
         if (!prev) {
-          byName.set(name, { name, role, workflow, isolation, providerId, model, effort });
+          byName.set(name, { name, role, workflow, isolation, cwd, providerId, model, effort });
         } else {
           byName.set(name, {
             ...prev,
             role: prev.role || role,
             workflow: prev.workflow || workflow,
             isolation: prev.isolation || isolation,
+            cwd: prev.cwd || cwd,
             providerId: prev.providerId || providerId,
             model: prev.model || model,
             effort: prev.effort || effort,
@@ -21870,6 +22092,7 @@ export class TeamProvisioningService {
             role: configMember?.role,
             workflow: configMember?.workflow,
             isolation: configMember?.isolation,
+            cwd: configMember?.cwd,
             providerId: configMember?.providerId,
             model: configMember?.model,
             effort: configMember?.effort,
@@ -21978,6 +22201,7 @@ export class TeamProvisioningService {
           provider?: string;
           model?: string;
           effort?: string;
+          cwd?: string;
         }[];
       };
       if (!Array.isArray(parsed.members)) {
@@ -21996,6 +22220,7 @@ export class TeamProvisioningService {
           workflow:
             typeof member.workflow === 'string' ? member.workflow.trim() || undefined : undefined,
           isolation: member.isolation === 'worktree' ? ('worktree' as const) : undefined,
+          cwd: typeof member.cwd === 'string' ? member.cwd.trim() || undefined : undefined,
           providerId: normalizeTeamMemberProviderId(member.providerId ?? member.provider),
           model: typeof member.model === 'string' ? member.model.trim() || undefined : undefined,
           effort: isTeamEffortLevel(member.effort) ? member.effort : undefined,

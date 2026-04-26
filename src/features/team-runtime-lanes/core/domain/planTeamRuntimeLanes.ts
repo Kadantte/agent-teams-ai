@@ -10,6 +10,10 @@ import type {
 
 export interface RuntimeLanePlannerMemberInput {
   name: string;
+  role?: string;
+  workflow?: string;
+  isolation?: 'worktree';
+  cwd?: string;
   providerId?: TeamProviderId;
   providerBackendId?: TeamProviderBackendId;
   model?: string;
@@ -185,6 +189,10 @@ export function fromProvisioningMembers(
     leadProviderId,
     members: members.map((member) => ({
       name: member.name,
+      role: member.role,
+      workflow: member.workflow,
+      isolation: member.isolation,
+      cwd: member.cwd,
       providerId: normalizeOptionalTeamProviderId(member.providerId),
       providerBackendId: member.providerBackendId,
       model: member.model,

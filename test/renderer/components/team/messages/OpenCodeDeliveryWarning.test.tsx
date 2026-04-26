@@ -28,7 +28,12 @@ function renderWarning(props: Partial<React.ComponentProps<typeof OpenCodeDelive
 
   act(() => {
     root.render(
-      <OpenCodeDeliveryWarning warning={warning} debugDetails={debugDetails} {...props} />
+      <OpenCodeDeliveryWarning
+        warning={warning}
+        debugDetails={debugDetails}
+        pendingDelayMs={0}
+        {...props}
+      />
     );
   });
 
@@ -47,6 +52,7 @@ function findButton(host: HTMLElement, text: string): HTMLButtonElement {
 
 afterEach(() => {
   document.body.innerHTML = '';
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -115,6 +121,58 @@ describe('OpenCodeDeliveryWarning', () => {
     });
   });
 
+  it('delays pending runtime delivery warnings by default', async () => {
+    vi.useFakeTimers();
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    act(() => {
+      root.render(<OpenCodeDeliveryWarning warning={warning} debugDetails={debugDetails} />);
+    });
+
+    expect(host.textContent).not.toContain(warning);
+
+    act(() => {
+      vi.advanceTimersByTime(9_999);
+    });
+
+    expect(host.textContent).not.toContain(warning);
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(host.textContent).toContain(warning);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('shows failed runtime delivery warnings immediately', async () => {
+    const failedWarning =
+      'OpenCode runtime delivery failed. Message was saved to inbox, but live delivery did not complete.';
+    const { host, root } = renderWarning({
+      warning: failedWarning,
+      debugDetails: {
+        ...debugDetails,
+        delivered: false,
+        responsePending: false,
+        responseState: 'failed',
+        ledgerStatus: 'failed_terminal',
+        reason: 'tool_error',
+        diagnostics: ['tool_error'],
+      },
+    });
+
+    expect(host.textContent).toContain(failedWarning);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it('hides details again when a different runtime delivery payload arrives', async () => {
     const { host, root } = renderWarning();
 
@@ -127,6 +185,7 @@ describe('OpenCodeDeliveryWarning', () => {
       root.render(
         <OpenCodeDeliveryWarning
           warning={warning}
+          pendingDelayMs={0}
           debugDetails={{
             ...debugDetails,
             messageId: 'm-opencode-2',

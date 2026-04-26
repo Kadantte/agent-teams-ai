@@ -11,17 +11,25 @@ import type { JSX } from 'react';
 interface OpenCodeDeliveryWarningProps {
   warning: string | null;
   debugDetails?: OpenCodeRuntimeDeliveryDebugDetails | null;
+  pendingDelayMs?: number;
 }
 
 export function OpenCodeDeliveryWarning({
   warning,
   debugDetails,
+  pendingDelayMs = 10_000,
 }: OpenCodeDeliveryWarningProps): JSX.Element | null {
   const detailsKey = `${warning ?? ''}:${debugDetails?.messageId ?? ''}`;
+  const delayPendingWarning =
+    debugDetails?.responsePending === true && debugDetails.delivered !== false;
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [pendingVisibleKey, setPendingVisibleKey] = useState<string | null>(() =>
+    delayPendingWarning ? null : detailsKey
+  );
   const mountedRef = useRef(true);
   const copiedResetTimerRef = useRef<number | null>(null);
+  const pendingTimerRef = useRef<number | null>(null);
   const expanded = expandedKey === detailsKey;
   const copied = copiedKey === detailsKey;
   const copyText = useMemo(
@@ -36,10 +44,36 @@ export function OpenCodeDeliveryWarning({
       if (copiedResetTimerRef.current !== null) {
         window.clearTimeout(copiedResetTimerRef.current);
       }
+      if (pendingTimerRef.current !== null) {
+        window.clearTimeout(pendingTimerRef.current);
+      }
     };
   }, []);
 
+  useEffect(() => {
+    if (pendingTimerRef.current !== null) {
+      window.clearTimeout(pendingTimerRef.current);
+      pendingTimerRef.current = null;
+    }
+    if (!warning) {
+      setPendingVisibleKey(null);
+      return;
+    }
+    if (!delayPendingWarning || pendingDelayMs <= 0) {
+      setPendingVisibleKey(detailsKey);
+      return;
+    }
+    setPendingVisibleKey(null);
+    pendingTimerRef.current = window.setTimeout(() => {
+      pendingTimerRef.current = null;
+      if (mountedRef.current) {
+        setPendingVisibleKey(detailsKey);
+      }
+    }, pendingDelayMs);
+  }, [delayPendingWarning, detailsKey, pendingDelayMs, warning]);
+
   if (!warning) return null;
+  if (delayPendingWarning && pendingVisibleKey !== detailsKey) return null;
 
   const handleCopy = async (): Promise<void> => {
     if (!copyText || !navigator.clipboard?.writeText) return;

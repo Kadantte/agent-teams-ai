@@ -180,6 +180,12 @@ export const MemberCard = ({
   const { summary: runtimeSummaryText, memory: memoryLabel } =
     splitRuntimeSummaryMemory(runtimeSummary);
   const memorySourceLabel = getRuntimeMemorySourceLabel(runtimeEntry);
+  const isLead = isLeadMember(member);
+  const workspacePath = member.cwd?.trim();
+  const showWorkspaceBadge = !isLead && !isRemoved && member.isolation === 'worktree';
+  const workspaceBadgeTitle = workspacePath
+    ? `Worktree isolation configured. Worktree path: ${workspacePath}`
+    : 'Worktree isolation is configured, but the runtime path is not available yet';
   const activityTask = currentTask ?? reviewTask ?? null;
   const activityTitle = currentTask
     ? `Current task: #${deriveTaskDisplayId(currentTask.id)}`
@@ -343,6 +349,14 @@ export const MemberCard = ({
                 <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-[var(--color-text-muted)]">
                   <GitBranch size={10} />
                   {member.gitBranch}
+                </span>
+              ) : null}
+              {showWorkspaceBadge ? (
+                <span
+                  className="shrink-0 rounded border border-emerald-400/35 bg-emerald-400/10 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-emerald-300"
+                  title={workspaceBadgeTitle}
+                >
+                  worktree
                 </span>
               ) : null}
               {currentTask ? (

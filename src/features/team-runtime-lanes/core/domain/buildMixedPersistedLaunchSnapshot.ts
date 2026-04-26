@@ -156,6 +156,7 @@ function createPrimaryLaneMemberState(params: {
         : undefined),
     model: params.member.model?.trim() || undefined,
     effort: params.member.effort,
+    cwd: params.member.cwd?.trim() || undefined,
     selectedFastMode:
       normalizeFastMode(params.member.fastMode) ??
       (providerId === params.leadDefaults.providerId
@@ -231,6 +232,7 @@ function createSecondaryLaneMemberState(
         : undefined),
     model: params.member.model?.trim() || undefined,
     effort: params.member.effort,
+    cwd: params.member.cwd?.trim() || undefined,
     selectedFastMode:
       normalizeFastMode(params.member.fastMode) ??
       (providerId === params.leadDefaults.providerId

@@ -3071,6 +3071,76 @@ describe('TeamProvisioningService', () => {
       });
     });
 
+    it('delivers OpenCode secondary-lane messages to the member worktree cwd after restart', async () => {
+      const svc = new TeamProvisioningService();
+      const sendMessageToMember = vi.fn(async (input: Record<string, unknown>) => ({
+        ok: true,
+        providerId: 'opencode',
+        memberName: String(input.memberName),
+        sessionId: 'oc-session-bob',
+        diagnostics: [],
+      }));
+      svc.setRuntimeAdapterRegistry(
+        new TeamRuntimeAdapterRegistry([
+          {
+            providerId: 'opencode',
+            prepare: vi.fn(),
+            launch: vi.fn(),
+            reconcile: vi.fn(),
+            stop: vi.fn(),
+            sendMessageToMember,
+          } as any,
+        ])
+      );
+
+      (svc as any).getTrackedRunId = vi.fn(() => null);
+      (svc as any).resolveCurrentOpenCodeRuntimeRunId = vi.fn(async () => 'opencode-run-bob');
+      (svc as any).isOpenCodeRuntimeLaneIndexActive = vi.fn(async () => true);
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          projectPath: '/repo',
+          members: [
+            { name: 'team-lead', providerId: 'codex', model: 'gpt-5.4' },
+            { name: 'bob', providerId: 'opencode', model: 'minimax-m2.5-free' },
+          ],
+        })),
+      };
+      (svc as any).teamMetaStore = {
+        getMeta: vi.fn(async () => ({
+          launchIdentity: { providerId: 'codex' },
+          providerId: 'codex',
+        })),
+      };
+      (svc as any).membersMetaStore = {
+        getMembers: vi.fn(async () => [
+          {
+            name: 'bob',
+            providerId: 'opencode',
+            model: 'opencode/minimax-m2.5-free',
+            isolation: 'worktree',
+            cwd: '/repo/.agent-team-worktrees/bob',
+          },
+        ]),
+      };
+
+      await expect(
+        svc.deliverOpenCodeMemberMessage('team-a', {
+          memberName: 'bob',
+          text: 'hello bob',
+          messageId: 'msg-1',
+        })
+      ).resolves.toMatchObject({ delivered: true });
+
+      expect(sendMessageToMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runId: 'opencode-run-bob',
+          laneId: 'secondary:opencode:bob',
+          memberName: 'bob',
+          cwd: '/repo/.agent-team-worktrees/bob',
+        })
+      );
+    });
+
     it('observes accepted OpenCode prompt delivery before sending the same inbox row again', async () => {
       const svc = new TeamProvisioningService();
       const sendMessageToMember = vi.fn(async (input: Record<string, unknown>) => ({
@@ -3959,6 +4029,37 @@ describe('TeamProvisioningService', () => {
         responseState: 'empty_assistant_turn',
         ledgerStatus: 'failed_terminal',
         reason: 'empty_assistant_turn',
+      });
+      const inboxDir = path.join(tempTeamsBase, 'team-a', 'inboxes');
+      await fsPromises.mkdir(inboxDir, { recursive: true });
+      await fsPromises.writeFile(
+        path.join(inboxDir, 'user.json'),
+        `${JSON.stringify(
+          [
+            {
+              from: 'bob',
+              to: 'user',
+              text: 'Late but valid answer.',
+              timestamp: '2026-04-25T10:00:04.000Z',
+              read: false,
+              messageId: 'reply-after-terminal',
+              relayOfMessageId: 'msg-max-attempts',
+              source: 'runtime_delivery',
+            },
+          ],
+          null,
+          2
+        )}\n`,
+        'utf8'
+      );
+      await expect(deliver()).resolves.toMatchObject({
+        delivered: true,
+        accepted: true,
+        responsePending: false,
+        responseState: 'responded_visible_message',
+        ledgerStatus: 'responded',
+        visibleReplyMessageId: 'reply-after-terminal',
+        visibleReplyCorrelation: 'relayOfMessageId',
       });
       expect(sendMessageToMember).toHaveBeenCalledTimes(3);
       expect(observeMessageDelivery).toHaveBeenCalledTimes(2);
@@ -6485,7 +6586,9 @@ describe('TeamProvisioningService', () => {
   });
 
   describe('safe app launch matrix', () => {
-    function createSafeLaunchService() {
+    function createSafeLaunchService(options?: {
+      memberWorktreeManager?: { ensureMemberWorktree: ReturnType<typeof vi.fn> };
+    }) {
       const mcpConfigBuilder = {
         writeConfigFile: vi.fn(async () => path.join(tempClaudeRoot, 'mcp-config.json')),
         removeConfigFile: vi.fn(async () => {}),
@@ -6506,7 +6609,10 @@ describe('TeamProvisioningService', () => {
         membersMetaStore as any,
         undefined,
         mcpConfigBuilder as any,
-        teamMetaStore as any
+        teamMetaStore as any,
+        undefined,
+        undefined,
+        options?.memberWorktreeManager as any
       );
 
       (svc as any).buildProvisioningEnv = vi.fn(async () => ({
@@ -6973,6 +7079,167 @@ describe('TeamProvisioningService', () => {
       );
 
       await svc.cancelProvisioning(runId);
+    });
+
+    it('launches isolated OpenCode side lanes from the resolved member worktree cwd', async () => {
+      allowConsoleLogs();
+      vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+      vi.mocked(spawnCli).mockReturnValue(createRunningChild() as any);
+
+      const bobWorktree = path.join(tempClaudeRoot, 'worktrees', 'bob');
+      const worktreeManager = {
+        ensureMemberWorktree: vi.fn(async () => ({
+          baseRepoPath: tempClaudeRoot,
+          worktreePath: bobWorktree,
+          branchName: 'agent-teams/test/bob',
+        })),
+      };
+      const adapterLaunch = vi.fn(async (input: Record<string, unknown>) => {
+        const expectedMembers = input.expectedMembers as Array<{ name: string }>;
+        const memberName = expectedMembers[0]?.name ?? 'unknown';
+        return {
+          runId: String(input.runId),
+          teamName: String(input.teamName),
+          launchPhase: 'finished',
+          teamLaunchState: 'clean_success',
+          members: {
+            [memberName]: {
+              memberName,
+              providerId: 'opencode',
+              launchState: 'confirmed_alive',
+              agentToolAccepted: true,
+              runtimeAlive: true,
+              bootstrapConfirmed: true,
+              hardFailure: false,
+              diagnostics: [],
+            },
+          },
+          warnings: [],
+          diagnostics: [],
+        };
+      });
+
+      const { svc, membersMetaStore } = createSafeLaunchService({ memberWorktreeManager: worktreeManager });
+      svc.setRuntimeAdapterRegistry(
+        new TeamRuntimeAdapterRegistry([
+          {
+            providerId: 'opencode',
+            prepare: vi.fn(),
+            launch: adapterLaunch,
+            reconcile: vi.fn(),
+            stop: vi.fn(),
+          } as any,
+        ])
+      );
+
+      const { runId } = await svc.createTeam(
+        {
+          teamName: 'safe-mixed-opencode-worktree-launch',
+          cwd: tempClaudeRoot,
+          providerId: 'codex',
+          providerBackendId: 'codex-native',
+          model: 'gpt-5.4',
+          effort: 'medium',
+          members: [
+            {
+              name: 'alice',
+              role: 'Reviewer',
+              providerId: 'codex',
+              model: 'gpt-5.4-mini',
+            },
+            {
+              name: 'bob',
+              role: 'Developer',
+              providerId: 'opencode',
+              model: 'minimax-m2.5-free',
+              isolation: 'worktree',
+            },
+          ],
+        },
+        () => {}
+      );
+
+      expect(worktreeManager.ensureMemberWorktree).toHaveBeenCalledWith({
+        teamName: 'safe-mixed-opencode-worktree-launch',
+        memberName: 'bob',
+        baseCwd: tempClaudeRoot,
+      });
+      expect(membersMetaStore.writeMembers).toHaveBeenCalledWith(
+        'safe-mixed-opencode-worktree-launch',
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'bob',
+            providerId: 'opencode',
+            isolation: 'worktree',
+            cwd: bobWorktree,
+          }),
+        ]),
+        expect.objectContaining({ providerBackendId: 'codex-native' })
+      );
+
+      const run = (svc as any).runs.get(runId);
+      await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
+      await vi.waitFor(() => expect(adapterLaunch).toHaveBeenCalledTimes(1));
+      expect(adapterLaunch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          laneId: 'secondary:opencode:bob',
+          cwd: bobWorktree,
+          expectedMembers: [
+            expect.objectContaining({
+              name: 'bob',
+              providerId: 'opencode',
+              isolation: 'worktree',
+              cwd: bobWorktree,
+            }),
+          ],
+        })
+      );
+
+      await svc.cancelProvisioning(runId);
+    });
+
+    it('rejects multi-member pure OpenCode worktree isolation instead of sharing one projectPath', async () => {
+      allowConsoleLogs();
+      const adapterLaunch = vi.fn();
+      const { svc } = createSafeLaunchService();
+      svc.setRuntimeAdapterRegistry(
+        new TeamRuntimeAdapterRegistry([
+          {
+            providerId: 'opencode',
+            prepare: vi.fn(),
+            launch: adapterLaunch,
+            reconcile: vi.fn(),
+            stop: vi.fn(),
+          } as any,
+        ])
+      );
+
+      await expect(
+        svc.createTeam(
+          {
+            teamName: 'blocked-opencode-multi-worktree',
+            cwd: tempClaudeRoot,
+            providerId: 'opencode',
+            providerBackendId: 'adapter',
+            model: 'big-pickle',
+            members: [
+              {
+                name: 'bob',
+                providerId: 'opencode',
+                model: 'minimax-m2.5-free',
+                isolation: 'worktree',
+              },
+              {
+                name: 'tom',
+                providerId: 'opencode',
+                model: 'nemotron-3-super-free',
+              },
+            ],
+          },
+          () => {}
+        )
+      ).rejects.toThrow('Multiple OpenCode members in one lane cannot use separate worktrees yet');
+      expect(adapterLaunch).not.toHaveBeenCalled();
     });
   });
 

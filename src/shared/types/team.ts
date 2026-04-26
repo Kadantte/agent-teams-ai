@@ -981,6 +981,7 @@ export interface PersistedTeamLaunchMemberState {
   providerBackendId?: TeamProviderBackendId;
   model?: string;
   effort?: EffortLevel;
+  cwd?: string;
   selectedFastMode?: TeamFastMode;
   resolvedFastMode?: boolean;
   laneId?: string;
@@ -1085,6 +1086,8 @@ export interface TeamAgentRuntimeEntry {
   laneKind?: 'primary' | 'secondary';
   pid?: number;
   runtimeModel?: string;
+  /** Runtime working directory, when known. */
+  cwd?: string;
   rssBytes?: number;
   livenessKind?: TeamAgentRuntimeLivenessKind;
   pidSource?: TeamAgentRuntimePidSource;
@@ -1221,6 +1224,8 @@ export interface TeamProvisioningMemberInput {
   workflow?: string;
   /** Opt-in: run this teammate in its own git worktree. */
   isolation?: 'worktree';
+  /** Resolved runtime working directory. Usually app-managed for isolated teammates. */
+  cwd?: string;
   providerId?: TeamProviderId;
   providerBackendId?: TeamProviderBackendId;
   model?: string;
