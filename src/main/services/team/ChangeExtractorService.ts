@@ -1,4 +1,5 @@
 import { getTasksBasePath, getTeamsBasePath } from '@main/utils/pathDecoder';
+import { appendOpenCodeTaskChangeDiag } from '@main/utils/openCodeTaskChangeDiagLog';
 import { createLogger } from '@shared/utils/logger';
 import { resolveTaskChangePresenceFromResult } from '@shared/utils/taskChangePresence';
 import {
@@ -444,7 +445,8 @@ export class ChangeExtractorService {
       projectDir,
       workspaceRoot,
       cacheKey,
-      deliveryContextRecords
+      deliveryContextRecords,
+      sourceGeneration
     ).finally(() => {
       this.openCodeBackfillInFlight.delete(cacheKey);
     });
@@ -467,7 +469,8 @@ export class ChangeExtractorService {
     cacheKey: string,
     deliveryContextRecords: Awaited<
       ReturnType<ChangeExtractorService['readOpenCodeDeliveryContextRecords']>
-    >
+    >,
+    sourceGeneration: string | null
   ): Promise<boolean> {
     const deliveryContext = await this.createOpenCodeDeliveryContextTempFile(
       input.teamName,
@@ -486,6 +489,31 @@ export class ChangeExtractorService {
         attributionMode: OPEN_CODE_AUTO_BACKFILL_ATTRIBUTION_MODE,
         ...(deliveryContext.filePath ? { deliveryContextPath: deliveryContext.filePath } : {}),
       });
+      void appendOpenCodeTaskChangeDiag({
+        event: 'backfill_result',
+        reason: this.classifyOpenCodeBackfillResult(result),
+        teamName: input.teamName,
+        taskId: input.taskId,
+        displayId: input.taskMeta?.displayId ?? null,
+        memberName: input.effectiveOptions.owner ?? null,
+        projectDir,
+        workspaceRoot,
+        sourceGeneration,
+        deliveryRecordCount: deliveryContextRecords.length,
+        deliveryContextFingerprint: this.hashOpenCodeDeliveryContextRecords(deliveryContextRecords),
+        result: {
+          attributionMode: result.attributionMode ?? OPEN_CODE_AUTO_BACKFILL_ATTRIBUTION_MODE,
+          outcome: result.outcome,
+          dryRun: result.dryRun,
+          scannedSessions: result.scannedSessions,
+          scannedToolparts: result.scannedToolparts,
+          candidateEvents: result.candidateEvents,
+          importedEvents: result.importedEvents,
+          skippedEvents: result.skippedEvents,
+        },
+        diagnostics: (result.diagnostics ?? []).slice(0, 25),
+        notices: (result.notices ?? []).slice(0, 25),
+      }).catch(() => undefined);
       const backfilled =
         result.importedEvents > 0 ||
         result.outcome === 'imported' ||
@@ -516,6 +544,19 @@ export class ChangeExtractorService {
       logger.warn(
         `OpenCode ledger backfill failed for ${input.teamName}/${input.taskId}: ${error instanceof Error ? error.message : String(error)}`
       );
+      void appendOpenCodeTaskChangeDiag({
+        event: 'backfill_exception',
+        reason: 'exception',
+        teamName: input.teamName,
+        taskId: input.taskId,
+        displayId: input.taskMeta?.displayId ?? null,
+        memberName: input.effectiveOptions.owner ?? null,
+        projectDir,
+        workspaceRoot,
+        deliveryRecordCount: deliveryContextRecords.length,
+        deliveryContextFingerprint: this.hashOpenCodeDeliveryContextRecords(deliveryContextRecords),
+        error: error instanceof Error ? error.message : String(error),
+      }).catch(() => undefined);
       if (deliveryContextRecords.length === 0) {
         this.openCodeBackfillCache.set(cacheKey, {
           backfilledAt: 0,
@@ -528,6 +569,27 @@ export class ChangeExtractorService {
     } finally {
       await deliveryContext.cleanup();
     }
+  }
+
+  private classifyOpenCodeBackfillResult(
+    result: Awaited<ReturnType<OpenCodeLedgerBackfillPort['backfillOpenCodeTaskLedger']>>
+  ): string {
+    if (result.importedEvents > 0) {
+      return 'imported';
+    }
+    if (result.candidateEvents > 0 && result.outcome === 'duplicates-only') {
+      return 'duplicates-only';
+    }
+    if (result.scannedSessions > 0 && result.scannedToolparts > 0 && result.candidateEvents === 0) {
+      return 'no-write-edit-candidates';
+    }
+    if (result.outcome === 'no-attribution') {
+      return 'no-attribution';
+    }
+    if (result.outcome === 'no-history') {
+      return 'no-history';
+    }
+    return result.outcome;
   }
 
   private async isOpenCodeTeamCandidate(teamName: string): Promise<boolean> {

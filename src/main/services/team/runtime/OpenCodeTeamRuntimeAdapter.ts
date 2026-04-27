@@ -636,9 +636,24 @@ function buildMemberBootstrapPrompt(
 function buildOpenCodeRuntimeMessageText(input: OpenCodeTeamRuntimeMessageInput): string {
   const replyRecipient = input.replyRecipient?.trim() || 'user';
   const taskRefs = input.taskRefs?.length ? JSON.stringify(input.taskRefs) : null;
+  const deliveryContext =
+    input.messageId && input.taskRefs?.length
+      ? JSON.stringify({
+          schemaVersion: 1,
+          kind: 'opencode-delivery-context',
+          teamName: input.teamName,
+          laneId: input.laneId,
+          memberName: input.memberName,
+          inboundMessageId: input.messageId,
+          taskRefs: input.taskRefs,
+        })
+      : null;
 
   return [
     '<opencode_app_message_delivery>',
+    deliveryContext
+      ? `<opencode_delivery_context>${deliveryContext}</opencode_delivery_context>`
+      : null,
     'You are running in OpenCode, not Claude Code or Codex native.',
     'To make your reply visible in the app Messages UI, call MCP tool agent-teams_message_send (or mcp__agent-teams__message_send if that is the exposed name).',
     `Use teamName="${input.teamName}", to="${replyRecipient}", from="${input.memberName}", text, and summary.`,

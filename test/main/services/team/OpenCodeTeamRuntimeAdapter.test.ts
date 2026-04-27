@@ -361,6 +361,9 @@ describe('OpenCodeTeamRuntimeAdapter', () => {
     expect(sentText).toContain('Include source="runtime_delivery"');
     expect(sentText).toContain('Include relayOfMessageId="msg-1"');
     expect(sentText).toContain('Action mode for this message: delegate.');
+    expect(sentText).toContain('<opencode_delivery_context>');
+    expect(sentText).toContain('"kind":"opencode-delivery-context"');
+    expect(sentText).toContain('"inboundMessageId":"msg-1"');
     expect(sentText).toContain(
       'If your reply is about these tasks, include taskRefs exactly: [{"taskId":"task-1","displayId":"abcd1234","teamName":"team-a"}]'
     );
