@@ -349,6 +349,221 @@ describe('GraphMemberLogPreviewHud', () => {
     });
   });
 
+  it('does not highlight existing rows when logs are toggled off and on', async () => {
+    const node: GraphNode = {
+      id: 'member:alpha-team:alice',
+      kind: 'member',
+      label: 'alice',
+      state: 'active',
+      domainRef: { kind: 'member', teamName: 'alpha-team', memberName: 'alice' },
+    };
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const renderHud = (enabled: boolean): void => {
+      root.render(
+        <GraphMemberLogPreviewHud
+          teamName="alpha-team"
+          nodes={[node]}
+          getLogWorldRect={() => ({
+            left: 40,
+            top: 80,
+            right: 300,
+            bottom: 372,
+            width: 260,
+            height: 292,
+          })}
+          getCameraZoom={() => 1}
+          worldToScreen={(x, y) => ({ x, y })}
+          getViewportSize={() => ({ width: 1200, height: 800 })}
+          focusNodeIds={null}
+          enabled={enabled}
+        />
+      );
+    };
+
+    await act(async () => {
+      renderHud(true);
+      await Promise.resolve();
+    });
+
+    const initialRow = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('pnpm test')
+    );
+    expect(initialRow?.className).not.toContain('border-sky-300/70');
+
+    await act(async () => {
+      renderHud(false);
+      await Promise.resolve();
+    });
+    expect(host.querySelectorAll('button')).toHaveLength(0);
+
+    await act(async () => {
+      renderHud(true);
+      await Promise.resolve();
+    });
+
+    const restoredRow = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('pnpm test')
+    );
+    expect(restoredRow?.className).not.toContain('border-sky-300/70');
+
+    const alicePreview = basePreviewsByMember.get('alice')!;
+    mockedPreviewsByMember = new Map(basePreviewsByMember);
+    mockedPreviewsByMember.set('alice', {
+      ...alicePreview,
+      items: [
+        {
+          id: 'preview-after-toggle',
+          kind: 'text' as const,
+          provider: 'claude_transcript' as const,
+          timestamp: '2026-04-03T00:01:00.000Z',
+          title: 'Assistant',
+          preview: 'new log after toggle',
+          tone: 'neutral' as const,
+        },
+        ...alicePreview.items,
+      ],
+    });
+
+    await act(async () => {
+      renderHud(true);
+      await Promise.resolve();
+    });
+
+    const newRow = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('new log after toggle')
+    );
+    expect(newRow?.className).toContain('border-sky-300/70');
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it('scopes new-row highlights by member when preview ids collide', async () => {
+    const aliceNode: GraphNode = {
+      id: 'member:alpha-team:alice',
+      kind: 'member',
+      label: 'alice',
+      state: 'active',
+      domainRef: { kind: 'member', teamName: 'alpha-team', memberName: 'alice' },
+    };
+    const bobNode: GraphNode = {
+      id: 'member:alpha-team:bob',
+      kind: 'member',
+      label: 'bob',
+      state: 'active',
+      domainRef: { kind: 'member', teamName: 'alpha-team', memberName: 'bob' },
+    };
+    const sharedId = 'preview-shared-id';
+    mockedPreviewsByMember = new Map<string, MemberLogPreviewMember>([
+      [
+        'alice',
+        {
+          memberName: 'alice',
+          items: [
+            {
+              id: sharedId,
+              kind: 'text',
+              provider: 'claude_transcript',
+              timestamp: '2026-04-03T00:00:00.000Z',
+              title: 'Assistant',
+              preview: 'alice already known',
+              tone: 'neutral',
+            },
+          ],
+          coverage: [{ provider: 'claude_transcript', status: 'included' }],
+          warnings: [],
+          truncated: false,
+          overflowCount: 0,
+          generatedAt: '2026-04-03T00:00:00.000Z',
+        },
+      ],
+      [
+        'bob',
+        {
+          memberName: 'bob',
+          items: [],
+          coverage: [{ provider: 'claude_transcript', status: 'included' }],
+          warnings: [],
+          truncated: false,
+          overflowCount: 0,
+          generatedAt: '2026-04-03T00:00:00.000Z',
+        },
+      ],
+    ]);
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const renderHud = (): void => {
+      root.render(
+        <GraphMemberLogPreviewHud
+          teamName="alpha-team"
+          nodes={[aliceNode, bobNode]}
+          getLogWorldRect={(ownerNodeId) => ({
+            left: ownerNodeId.includes('bob') ? 360 : 40,
+            top: 80,
+            right: ownerNodeId.includes('bob') ? 620 : 300,
+            bottom: 372,
+            width: 260,
+            height: 292,
+          })}
+          getCameraZoom={() => 1}
+          worldToScreen={(x, y) => ({ x, y })}
+          getViewportSize={() => ({ width: 1200, height: 800 })}
+          focusNodeIds={null}
+        />
+      );
+    };
+
+    await act(async () => {
+      renderHud();
+      await Promise.resolve();
+    });
+
+    mockedPreviewsByMember = new Map(mockedPreviewsByMember);
+    mockedPreviewsByMember.set('bob', {
+      memberName: 'bob',
+      items: [
+        {
+          id: sharedId,
+          kind: 'text',
+          provider: 'claude_transcript',
+          timestamp: '2026-04-03T00:01:00.000Z',
+          title: 'Assistant',
+          preview: 'bob new shared id',
+          tone: 'neutral',
+        },
+      ],
+      coverage: [{ provider: 'claude_transcript', status: 'included' }],
+      warnings: [],
+      truncated: false,
+      overflowCount: 0,
+      generatedAt: '2026-04-03T00:01:00.000Z',
+    });
+
+    await act(async () => {
+      renderHud();
+      await Promise.resolve();
+    });
+
+    const aliceRow = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('alice already known')
+    );
+    const bobRow = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('bob new shared id')
+    );
+
+    expect(aliceRow?.className).not.toContain('border-sky-300/70');
+    expect(bobRow?.className).toContain('border-sky-300/70');
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it('renders lead log previews and opens the lead profile logs tab', async () => {
     const leadNode: GraphNode = {
       id: 'lead:alpha-team',
@@ -427,6 +642,15 @@ describe('GraphMemberLogPreviewHud', () => {
               preview: 'stored',
               tone: 'success',
             },
+            {
+              id: 'bash-result-preview',
+              kind: 'tool_result',
+              provider: 'claude_transcript',
+              timestamp: '2026-04-03T00:00:40.000Z',
+              title: 'Bash result',
+              preview: 'Bash result app/components/Calculator.tsx app/components/Display.tsx',
+              tone: 'success',
+            },
           ],
           coverage: [{ provider: 'claude_transcript', status: 'included' }],
           warnings: [],
@@ -481,6 +705,13 @@ describe('GraphMemberLogPreviewHud', () => {
       button.textContent?.includes('stored')
     );
     expect(genericResultRow?.textContent).toContain('Tool result');
+
+    const bashResultRow = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('app/components/Calculator.tsx')
+    );
+    expect(bashResultRow?.textContent).toContain('Bash');
+    expect(bashResultRow?.textContent).not.toContain('Bash result');
+    expect(bashResultRow?.textContent).not.toContain('result app/components');
 
     act(() => {
       root.unmount();

@@ -276,6 +276,19 @@ pnpm dev
 
 The app auto-discovers Claude Code projects from `~/.claude/`.
 
+### Debug teammate runtimes
+
+Development launches use the app-managed process backend for teammates by default. To inspect
+teammates in `tmux` panes while debugging, start the desktop app with:
+
+```bash
+CLAUDE_TEAM_TEAMMATE_MODE=tmux pnpm dev
+```
+
+The same override is available per launch from custom CLI args with
+`--teammate-mode tmux`. Use this as an operator/debug mode; the default process backend provides
+stronger app-owned lifecycle, diagnostics, and cleanup for normal team launches.
+
 ### Build for distribution
 
 ```bash

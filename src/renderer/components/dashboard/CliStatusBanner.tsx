@@ -19,7 +19,10 @@ import {
 import { api, isElectronMode } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
-import { CodexLoginLinkCopyButton } from '@renderer/components/runtime/CodexLoginLinkCopyButton';
+import {
+  CodexLoginLinkCopyButton,
+  CodexLoginUserCodeBadge,
+} from '@renderer/components/runtime/CodexLoginLinkCopyButton';
 import {
   formatProviderStatusText,
   getProviderConnectionModeSummary,
@@ -103,7 +106,9 @@ function getCodexDashboardHint(provider: CliProviderStatus): string | null {
   }
 
   if (codex.login.status === 'starting' || codex.login.status === 'pending') {
-    return codex.login.authUrl ? 'Finish ChatGPT login in the browser.' : null;
+    return codex.login.authUrl
+      ? 'Finish ChatGPT login in the browser. Enter the shown code if prompted.'
+      : null;
   }
 
   const usageHint = codex.localActiveChatgptAccountPresent
@@ -718,6 +723,7 @@ const InstalledBanner = ({
               provider.connection?.codex?.login.status !== 'starting' &&
               provider.connection?.codex?.login.status !== 'pending';
             const codexLoginAuthUrl = provider.connection?.codex?.login.authUrl ?? null;
+            const codexLoginUserCode = provider.connection?.codex?.login.userCode ?? null;
             const showCodexLoginActions = codexNeedsReconnect || Boolean(codexLoginAuthUrl);
             const disconnectAction = getProviderDisconnectAction(provider);
             const providerLoading = cliProviderStatusLoading[provider.providerId] === true;
@@ -888,9 +894,11 @@ const InstalledBanner = ({
                             <>
                               <CodexLoginLinkCopyButton
                                 authUrl={codexLoginAuthUrl}
+                                userCode={codexLoginUserCode}
                                 disabled={codexReconnectBusy || actionDisabled}
                                 size="xs"
                               />
+                              <CodexLoginUserCodeBadge userCode={codexLoginUserCode} />
                               <button
                                 type="button"
                                 onClick={() => {

@@ -16496,54 +16496,10 @@ export class TeamProvisioningService {
       stdoutLineBuf += text;
       const lines = stdoutLineBuf.split('\n');
       stdoutLineBuf = lines.pop() ?? '';
-      run.stdoutParserCarry = stdoutLineBuf;
-      const trimmedCarry = stdoutLineBuf.trim();
-      if (!trimmedCarry) {
-        run.stdoutParserCarryIsCompleteJson = false;
-        run.stdoutParserCarryLooksLikeClaudeJson = false;
-      } else {
-        try {
-          JSON.parse(trimmedCarry);
-          run.stdoutParserCarryIsCompleteJson = true;
-        } catch {
-          run.stdoutParserCarryIsCompleteJson = false;
-        }
-        run.stdoutParserCarryLooksLikeClaudeJson = looksLikeClaudeStdoutJsonFragment(trimmedCarry);
-      }
+      this.updateStdoutParserCarry(run, stdoutLineBuf);
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const msg = JSON.parse(trimmed) as Record<string, unknown>;
-          // Only reset stall timer on messages that represent actual API progress
-          // (assistant response or result). System messages like retry attempts
-          // (type=system, subtype=attempt) are informational — the CLI is still
-          // waiting for the API and the user should see the stall warning.
-          const msgType = msg.type;
-          if (msgType === 'assistant' || msgType === 'result') {
-            run.lastStdoutReceivedAt = Date.now();
-            if (run.stallWarningIndex != null) {
-              const removedIndex = run.stallWarningIndex;
-              run.provisioningOutputParts.splice(removedIndex, 1);
-              this.shiftProvisioningOutputIndexesAfterRemoval(run, removedIndex);
-              run.stallWarningIndex = null;
-              if (run.preStallMessage != null) {
-                run.progress.message = run.preStallMessage;
-                run.preStallMessage = null;
-                delete run.progress.messageSeverity;
-              }
-            }
-          }
-          this.handleStreamJsonMessage(run, msg);
-        } catch {
-          // Not valid JSON — check for auth failure in raw text output
-          this.handleAuthFailureInOutput(run, trimmed, 'stdout');
-          if (this.hasApiError(trimmed) && !this.isAuthFailureWarning(trimmed, 'stdout')) {
-            // Show warning but do NOT kill — the SDK may be retrying internally (e.g. 429 model_cooldown).
-            // If all retries fail, result.subtype="error" will catch it and kill then.
-            this.emitApiErrorWarning(run, trimmed);
-          }
-        }
+        this.handleStdoutParserLine(run, trimmed);
       }
 
       const currentTs = Date.now();
@@ -16552,6 +16508,76 @@ export class TeamProvisioningService {
         emitLogsProgress(run);
       }
     });
+  }
+
+  private updateStdoutParserCarry(run: ProvisioningRun, carry: string): void {
+    run.stdoutParserCarry = carry;
+    const trimmedCarry = carry.trim();
+    if (!trimmedCarry) {
+      run.stdoutParserCarryIsCompleteJson = false;
+      run.stdoutParserCarryLooksLikeClaudeJson = false;
+      return;
+    }
+
+    try {
+      JSON.parse(trimmedCarry);
+      run.stdoutParserCarryIsCompleteJson = true;
+    } catch {
+      run.stdoutParserCarryIsCompleteJson = false;
+    }
+    run.stdoutParserCarryLooksLikeClaudeJson = looksLikeClaudeStdoutJsonFragment(trimmedCarry);
+  }
+
+  private flushStdoutParserCarry(run: ProvisioningRun): void {
+    const trimmed = run.stdoutParserCarry.trim();
+    if (!trimmed || !run.stdoutParserCarryIsCompleteJson) {
+      return;
+    }
+
+    this.handleStdoutParserLine(run, trimmed);
+    this.updateStdoutParserCarry(run, '');
+  }
+
+  private handleStdoutParserLine(run: ProvisioningRun, trimmed: string): void {
+    if (!trimmed) {
+      return;
+    }
+
+    try {
+      const msg = JSON.parse(trimmed) as Record<string, unknown>;
+      this.handleParsedStdoutJsonMessage(run, msg);
+    } catch {
+      // Not valid JSON - check for auth failure in raw text output.
+      this.handleAuthFailureInOutput(run, trimmed, 'stdout');
+      if (this.hasApiError(trimmed) && !this.isAuthFailureWarning(trimmed, 'stdout')) {
+        // Show warning but do not kill - the SDK may be retrying internally (e.g. 429 model_cooldown).
+        // If all retries fail, result.subtype="error" will catch it and kill then.
+        this.emitApiErrorWarning(run, trimmed);
+      }
+    }
+  }
+
+  private handleParsedStdoutJsonMessage(run: ProvisioningRun, msg: Record<string, unknown>): void {
+    // Only reset stall timer on messages that represent actual API progress
+    // (assistant response or result). System messages like retry attempts
+    // (type=system, subtype=attempt) are informational - the CLI is still
+    // waiting for the API and the user should see the stall warning.
+    const msgType = msg.type;
+    if (msgType === 'assistant' || msgType === 'result') {
+      run.lastStdoutReceivedAt = Date.now();
+      if (run.stallWarningIndex != null) {
+        const removedIndex = run.stallWarningIndex;
+        run.provisioningOutputParts.splice(removedIndex, 1);
+        this.shiftProvisioningOutputIndexesAfterRemoval(run, removedIndex);
+        run.stallWarningIndex = null;
+        if (run.preStallMessage != null) {
+          run.progress.message = run.preStallMessage;
+          run.preStallMessage = null;
+          delete run.progress.messageSeverity;
+        }
+      }
+    }
+    this.handleStreamJsonMessage(run, msg);
   }
 
   /** Attaches the stderr handler with auth failure detection. */
@@ -20364,13 +20390,22 @@ export class TeamProvisioningService {
   private markUnconfirmedBootstrapMembersFailed(
     run: ProvisioningRun,
     reason: string,
-    options?: { cleanupRequested?: boolean }
+    options?: { cleanupRequested?: boolean; preserveExistingFailure?: boolean }
   ): void {
     const failedAt = nowIso();
     const baseReason = reason.trim() || 'Deterministic bootstrap failed before teammate check-in.';
     for (const expected of run.expectedMembers) {
       const prev = run.memberSpawnStatuses.get(expected) ?? createInitialMemberSpawnStatusEntry();
       if (prev.bootstrapConfirmed || prev.skippedForLaunch) {
+        continue;
+      }
+      const hasExistingFailure =
+        prev.status === 'error' ||
+        prev.launchState === 'failed_to_start' ||
+        prev.hardFailure === true ||
+        Boolean(prev.error) ||
+        Boolean(prev.hardFailureReason);
+      if (options?.preserveExistingFailure && hasExistingFailure) {
         continue;
       }
 
@@ -28315,11 +28350,16 @@ export class TeamProvisioningService {
     }
 
     if (!hasNewerTrackedRun && run.isLaunch && !run.provisioningComplete && !run.cancelRequested) {
-      this.markUnconfirmedBootstrapMembersFailed(
-        run,
-        'Launch ended before teammate bootstrap completed.',
-        { cleanupRequested: true }
-      );
+      const cleanupReason =
+        typeof run.progress.error === 'string' && run.progress.error.trim()
+          ? run.progress.error.trim()
+          : run.progress.state === 'failed' && run.progress.message.trim()
+            ? run.progress.message.trim()
+            : 'Launch ended before teammate bootstrap completed.';
+      this.markUnconfirmedBootstrapMembersFailed(run, cleanupReason, {
+        cleanupRequested: true,
+        preserveExistingFailure: true,
+      });
       void this.persistLaunchStateSnapshot(run, 'finished');
     }
     this.resetRuntimeToolActivity(run);
@@ -28614,6 +28654,8 @@ export class TeamProvisioningService {
       );
       return;
     }
+
+    this.flushStdoutParserCarry(run);
 
     // IMPORTANT: stopStallWatchdog MUST be AFTER authRetryInProgress guard above!
     // During respawn, the old process exit fires but run.stallCheckHandle already

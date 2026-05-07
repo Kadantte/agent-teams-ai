@@ -1,6 +1,9 @@
 import React from 'react';
 
-import { CodexLoginLinkCopyButton } from '@renderer/components/runtime/CodexLoginLinkCopyButton';
+import {
+  CodexLoginLinkCopyButton,
+  CodexLoginUserCodeBadge,
+} from '@renderer/components/runtime/CodexLoginLinkCopyButton';
 import { api } from '@renderer/api';
 import { LogIn } from 'lucide-react';
 
@@ -62,10 +65,12 @@ export function shouldShowCodexReconnectPrompt({
 
 export const CodexReconnectPrompt = ({
   authUrl,
+  userCode,
   reconnectBusy,
   onReconnect,
 }: {
   authUrl: string | null;
+  userCode: string | null;
   reconnectBusy: boolean;
   onReconnect: () => void;
 }): React.JSX.Element => {
@@ -80,9 +85,15 @@ export const CodexReconnectPrompt = ({
       <div className="flex flex-wrap items-center gap-2">
         <p className="min-w-0 flex-1 text-[11px] text-amber-100/90">
           Codex found the local ChatGPT account, but this session is stale. Sign in with ChatGPT,
-          then finish login in the browser and retry this dialog.
+          enter the code if shown, then retry this dialog.
         </p>
-        <CodexLoginLinkCopyButton authUrl={authUrl} disabled={reconnectBusy} size="xs" />
+        <CodexLoginUserCodeBadge userCode={userCode} />
+        <CodexLoginLinkCopyButton
+          authUrl={authUrl}
+          userCode={userCode}
+          disabled={reconnectBusy}
+          size="xs"
+        />
         <button
           type="button"
           onClick={() => {

@@ -693,6 +693,7 @@ class CodexAccountFeatureFacadeImpl implements CodexAccountFeatureFacade {
       error: loginState.status === 'failed' ? loginState.error : null,
       startedAt: null,
       authUrl: null,
+      userCode: null,
     };
   }
 

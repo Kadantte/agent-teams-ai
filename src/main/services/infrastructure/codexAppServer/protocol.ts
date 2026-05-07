@@ -44,6 +44,9 @@ export type CodexAppServerLoginAccountParams =
       type: 'chatgpt';
     }
   | {
+      type: 'chatgptDeviceCode';
+    }
+  | {
       type: 'chatgptAuthTokens';
       accessToken: string;
       chatgptAccountId: string;
@@ -56,6 +59,12 @@ export type CodexAppServerLoginAccountResponse =
       type: 'chatgpt';
       loginId: string;
       authUrl: string;
+    }
+  | {
+      type: 'chatgptDeviceCode';
+      loginId: string;
+      verificationUrl: string;
+      userCode: string;
     }
   | { type: 'chatgptAuthTokens' };
 

@@ -6,11 +6,13 @@ interface DesktopTeammateModeDecision {
   forceProcessTeammates: boolean;
 }
 
+type DesktopTeammateMode = 'auto' | 'tmux' | 'in-process';
+
+const DESKTOP_TEAMMATE_MODE_ENV = 'CLAUDE_TEAM_TEAMMATE_MODE';
+
 let tmuxAvailablePromise: Promise<boolean> | null = null;
 
-function getExplicitTeammateMode(
-  rawExtraCliArgs: string | undefined
-): 'auto' | 'tmux' | 'in-process' | null {
+function getExplicitTeammateMode(rawExtraCliArgs: string | undefined): DesktopTeammateMode | null {
   const tokens = parseCliArgs(rawExtraCliArgs);
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
@@ -34,6 +36,17 @@ function getExplicitTeammateMode(
   return null;
 }
 
+function normalizeDesktopTeammateMode(value: string | undefined): DesktopTeammateMode | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === 'auto' || normalized === 'tmux' || normalized === 'in-process'
+    ? normalized
+    : null;
+}
+
+function getEnvTeammateMode(env: NodeJS.ProcessEnv): DesktopTeammateMode | null {
+  return normalizeDesktopTeammateMode(env[DESKTOP_TEAMMATE_MODE_ENV]);
+}
+
 async function isTmuxAvailable(): Promise<boolean> {
   if (!tmuxAvailablePromise) {
     tmuxAvailablePromise = isTmuxRuntimeReadyForCurrentPlatform()
@@ -48,24 +61,25 @@ async function isTmuxAvailable(): Promise<boolean> {
 }
 
 export async function resolveDesktopTeammateModeDecision(
-  rawExtraCliArgs: string | undefined
+  rawExtraCliArgs: string | undefined,
+  env: NodeJS.ProcessEnv = process.env
 ): Promise<DesktopTeammateModeDecision> {
-  const explicitMode = getExplicitTeammateMode(rawExtraCliArgs);
-  if (explicitMode === 'tmux') {
+  const requestedMode = getExplicitTeammateMode(rawExtraCliArgs) ?? getEnvTeammateMode(env);
+  if (requestedMode === 'tmux') {
+    return {
+      injectedTeammateMode: 'tmux',
+      forceProcessTeammates: false,
+    };
+  }
+
+  if (requestedMode === 'auto') {
     return {
       injectedTeammateMode: null,
       forceProcessTeammates: true,
     };
   }
 
-  if (explicitMode === 'auto') {
-    return {
-      injectedTeammateMode: null,
-      forceProcessTeammates: true,
-    };
-  }
-
-  if (explicitMode === 'in-process') {
+  if (requestedMode === 'in-process') {
     return {
       injectedTeammateMode: null,
       forceProcessTeammates: false,

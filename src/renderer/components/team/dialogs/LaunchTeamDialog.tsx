@@ -2910,6 +2910,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                     <div className="pl-6">
                       <CodexReconnectPrompt
                         authUrl={codexAccount.snapshot?.login.authUrl ?? null}
+                        userCode={codexAccount.snapshot?.login.userCode ?? null}
                         reconnectBusy={codexAccount.loading}
                         onReconnect={handleCodexReconnect}
                       />

@@ -31,9 +31,10 @@ function createSession(overrides?: {
   const request =
     overrides?.request ??
     vi.fn().mockResolvedValue({
-      type: 'chatgpt',
+      type: 'chatgptDeviceCode',
       loginId: 'login-1',
-      authUrl: 'https://chatgpt.com/auth',
+      verificationUrl: 'https://chatgpt.com/auth',
+      userCode: 'ABCD-EFGH',
     });
   const close = overrides?.close ?? vi.fn().mockResolvedValue(undefined);
 
@@ -101,9 +102,10 @@ describe('CodexLoginSessionManager', () => {
     await Promise.all([firstStart, secondStart]);
 
     expect(fakeSession.request).toHaveBeenCalledTimes(1);
-    expect(openExternalMock).toHaveBeenCalledTimes(1);
+    expect(openExternalMock).not.toHaveBeenCalled();
     expect(manager.getState().status).toBe('pending');
     expect(manager.getState().authUrl).toBe('https://chatgpt.com/auth');
+    expect(manager.getState().userCode).toBe('ABCD-EFGH');
   });
 
   it('cancels a login cleanly while the app-server session is still starting', async () => {
@@ -137,6 +139,7 @@ describe('CodexLoginSessionManager', () => {
       error: null,
       startedAt: null,
       authUrl: null,
+      userCode: null,
     });
   });
 
@@ -173,6 +176,7 @@ describe('CodexLoginSessionManager', () => {
       error: null,
       startedAt: null,
       authUrl: null,
+      userCode: null,
     });
   });
 

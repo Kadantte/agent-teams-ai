@@ -1779,7 +1779,7 @@ describe('CLI status visibility during completed install state', () => {
       'Usage limits appear only after Codex refreshes the currently selected ChatGPT session. Right now the local session needs reconnect. API key fallback is available if you switch auth mode.'
     );
     const reconnectButton = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Reconnect ChatGPT'
+      (button) => button.textContent?.trim() === 'Generate link'
     );
     expect(reconnectButton).toBeTruthy();
 

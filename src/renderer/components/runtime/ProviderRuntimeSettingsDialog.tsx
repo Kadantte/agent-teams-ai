@@ -22,7 +22,10 @@ import {
 import { RuntimeProviderManagementPanel } from '@features/runtime-provider-management/renderer';
 import { api } from '@renderer/api';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
-import { CodexLoginLinkCopyButton } from '@renderer/components/runtime/CodexLoginLinkCopyButton';
+import {
+  CodexLoginLinkCopyButton,
+  CodexLoginUserCodeBadge,
+} from '@renderer/components/runtime/CodexLoginLinkCopyButton';
 import { Button } from '@renderer/components/ui/button';
 import {
   Dialog,
@@ -718,6 +721,7 @@ export const ProviderRuntimeSettingsDialog = ({
   const codexLoginPending =
     codexConnection?.login.status === 'starting' || codexConnection?.login.status === 'pending';
   const codexLoginAuthUrl = codexConnection?.login.authUrl ?? null;
+  const codexLoginUserCode = codexConnection?.login.userCode ?? null;
   const configurableAuthModes = selectedProvider?.connection?.configurableAuthModes ?? [];
   const configuredAuthMode: CliProviderAuthMode | undefined =
     selectedProvider?.connection?.configuredAuthMode ?? configurableAuthModes[0] ?? undefined;
@@ -1395,8 +1399,10 @@ export const ProviderRuntimeSettingsDialog = ({
                           <>
                             <CodexLoginLinkCopyButton
                               authUrl={codexLoginAuthUrl}
+                              userCode={codexLoginUserCode}
                               disabled={codexActionBusy}
                             />
+                            <CodexLoginUserCodeBadge userCode={codexLoginUserCode} />
                             {codexLoginAuthUrl ? (
                               <Button
                                 size="sm"
@@ -1430,8 +1436,10 @@ export const ProviderRuntimeSettingsDialog = ({
                           <>
                             <CodexLoginLinkCopyButton
                               authUrl={codexLoginAuthUrl}
+                              userCode={codexLoginUserCode}
                               disabled={codexActionBusy}
                             />
+                            <CodexLoginUserCodeBadge userCode={codexLoginUserCode} />
                             <Button
                               size="sm"
                               variant="outline"

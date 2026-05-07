@@ -62,6 +62,10 @@ function normalizeMemberName(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function buildRenderedItemKey(memberName: string, itemId: string): string {
+  return `${normalizeMemberName(memberName)}:${itemId}`;
+}
+
 function formatRelativeTime(timestamp: string): string {
   const parsed = Date.parse(timestamp);
   if (!Number.isFinite(parsed)) return '';
@@ -145,7 +149,11 @@ function trimRepeatedTitlePrefix(preview: string, title: string): string {
 function compactPreviewText(item: MemberLogPreviewItem, displayTitle: string): string {
   const preview = item.preview?.trim();
   if (preview) {
-    const compact = trimRepeatedTitlePrefix(preview, displayTitle);
+    const rawTitle = item.title.trim();
+    const compact = trimRepeatedTitlePrefix(
+      trimRepeatedTitlePrefix(preview, rawTitle),
+      displayTitle
+    );
     return compact || preview;
   }
   if (item.kind === 'tool_result') {
@@ -244,45 +252,45 @@ export const GraphMemberLogPreviewHud = ({
   useEffect(() => {
     if (!enabled) return;
 
-    const newItemIds: string[] = [];
+    const newItemKeys: string[] = [];
     for (const [memberKey, preview] of previewsByMember) {
       const currentIds = new Set(preview.items.map((item) => item.id));
       const knownIds = knownItemIdsByMemberRef.current.get(memberKey);
       if (knownIds) {
         for (const itemId of currentIds) {
           if (!knownIds.has(itemId)) {
-            newItemIds.push(itemId);
+            newItemKeys.push(buildRenderedItemKey(memberKey, itemId));
           }
         }
       }
       knownItemIdsByMemberRef.current.set(memberKey, currentIds);
     }
 
-    if (newItemIds.length === 0) return;
+    if (newItemKeys.length === 0) return;
 
     setHighlightedItemIds((current) => {
       const next = new Set(current);
-      for (const itemId of newItemIds) {
-        next.add(itemId);
+      for (const itemKey of newItemKeys) {
+        next.add(itemKey);
       }
       return next;
     });
 
-    for (const itemId of newItemIds) {
-      const existingTimer = highlightTimersRef.current.get(itemId);
+    for (const itemKey of newItemKeys) {
+      const existingTimer = highlightTimersRef.current.get(itemKey);
       if (existingTimer) {
         clearTimeout(existingTimer);
       }
       const timer = setTimeout(() => {
-        highlightTimersRef.current.delete(itemId);
+        highlightTimersRef.current.delete(itemKey);
         setHighlightedItemIds((current) => {
-          if (!current.has(itemId)) return current;
+          if (!current.has(itemKey)) return current;
           const next = new Set(current);
-          next.delete(itemId);
+          next.delete(itemKey);
           return next;
         });
       }, NEW_LOG_HIGHLIGHT_MS);
-      highlightTimersRef.current.set(itemId, timer);
+      highlightTimersRef.current.set(itemKey, timer);
     }
   }, [enabled, previewsByMember]);
 
@@ -424,7 +432,7 @@ export const GraphMemberLogPreviewHud = ({
       const titleText = relativeTime
         ? `${displayTitle} ${relativeTime} ${fullPreviewText}`
         : `${displayTitle} ${fullPreviewText}`;
-      const isHighlighted = highlightedItemIds.has(item.id);
+      const isHighlighted = highlightedItemIds.has(buildRenderedItemKey(memberName, item.id));
       const isError = item.tone === 'error';
       const rowStateClassName = isHighlighted
         ? isError

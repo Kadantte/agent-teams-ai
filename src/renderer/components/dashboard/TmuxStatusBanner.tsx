@@ -1,7 +1,7 @@
-import { TmuxInstallerBannerView } from '@features/tmux-installer/renderer';
-
 import type { JSX } from 'react';
 
-export const TmuxStatusBanner = (): JSX.Element => {
-  return <TmuxInstallerBannerView />;
+export const TmuxStatusBanner = (): JSX.Element | null => {
+  // tmux is now a debug/operator runtime mode, not a default production requirement.
+  // return <TmuxInstallerBannerView />;
+  return null;
 };

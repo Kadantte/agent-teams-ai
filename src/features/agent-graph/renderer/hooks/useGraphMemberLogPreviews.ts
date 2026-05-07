@@ -382,7 +382,7 @@ export function useGraphMemberLogPreviews(input: {
         return;
       }
       if (event.type === 'task-log-change') {
-        scheduleReload(false);
+        scheduleReload(true);
       }
     });
 

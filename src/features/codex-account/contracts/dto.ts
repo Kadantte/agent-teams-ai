@@ -63,6 +63,7 @@ export interface CodexLoginStateDto {
   error: string | null;
   startedAt: string | null;
   authUrl?: string | null;
+  userCode?: string | null;
 }
 
 export interface CodexRuntimeContextDto {

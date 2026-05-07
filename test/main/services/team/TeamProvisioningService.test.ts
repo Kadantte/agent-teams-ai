@@ -1294,6 +1294,70 @@ describe('TeamProvisioningService', () => {
       });
       expect(persist).toHaveBeenCalledWith(run, 'finished');
     });
+
+    it('preserves specific member launch failures when cleanup applies its fallback reason', () => {
+      const svc = new TeamProvisioningService();
+      const timeoutReason = 'Teammate was registered but did not bootstrap-confirm before timeout.';
+      const specificReason = 'OpenCode bridge reported member launch failure';
+      const run = createClaudeLogsRun({
+        runId: 'run-cleanup-preserves-specific-launch-failure',
+        teamName: 'cleanup-preserves-specific-launch-failure-team',
+        isLaunch: true,
+        provisioningComplete: false,
+        cancelRequested: false,
+        expectedMembers: ['bob', 'carol'],
+        provisioningOutputParts: [],
+        progress: {
+          runId: 'run-cleanup-preserves-specific-launch-failure',
+          teamName: 'cleanup-preserves-specific-launch-failure-team',
+          state: 'failed',
+          message: 'Deterministic bootstrap failed',
+          startedAt: '2026-04-19T10:00:00.000Z',
+          updatedAt: '2026-04-19T10:00:01.000Z',
+          error: timeoutReason,
+        },
+        memberSpawnStatuses: new Map([
+          [
+            'bob',
+            createMemberSpawnStatusEntry({
+              status: 'error',
+              launchState: 'failed_to_start',
+              error: specificReason,
+              hardFailure: true,
+              hardFailureReason: specificReason,
+              bootstrapConfirmed: false,
+            }),
+          ],
+          [
+            'carol',
+            createMemberSpawnStatusEntry({
+              status: 'waiting',
+              launchState: 'runtime_pending_bootstrap',
+              agentToolAccepted: true,
+              runtimeAlive: false,
+              bootstrapConfirmed: false,
+            }),
+          ],
+        ]),
+      });
+      vi.spyOn(svc as any, 'persistLaunchStateSnapshot').mockResolvedValue(null);
+
+      (svc as any).runs.set(run.runId, run);
+      (svc as any).provisioningRunByTeam.set(run.teamName, run.runId);
+
+      (svc as any).cleanupRun(run);
+
+      expect(run.memberSpawnStatuses.get('bob')).toMatchObject({
+        status: 'error',
+        launchState: 'failed_to_start',
+        hardFailureReason: specificReason,
+      });
+      expect(run.memberSpawnStatuses.get('carol')).toMatchObject({
+        status: 'error',
+        launchState: 'failed_to_start',
+        hardFailureReason: timeoutReason,
+      });
+    });
   });
 
   describe('member spawn status launch reads', () => {
@@ -12404,6 +12468,70 @@ describe('TeamProvisioningService', () => {
     expect(handleProcessExit.mock.calls[0]?.[1]).toBe(0);
 
     await svc.cancelProvisioning(runId);
+  });
+
+  it('flushes a final newline-less bootstrap completion event before handling launch close', async () => {
+    allowConsoleLogs();
+    const teamName = 'launch-close-flushes-final-json-team';
+    const leadSessionId = 'lead-session-final-json-flush';
+    writeLaunchConfig(teamName, tempClaudeRoot, leadSessionId, ['alice']);
+
+    vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+    const child = createRunningChild();
+    vi.mocked(spawnCli).mockReturnValue(child as any);
+
+    const svc = new TeamProvisioningService(undefined, undefined, undefined, undefined, {
+      writeConfigFile: vi.fn(async () => '/mock/mcp-config-launch.json'),
+      removeConfigFile: vi.fn(async () => {}),
+    } as any);
+    (svc as any).buildProvisioningEnv = vi.fn(async () => ({
+      env: { ANTHROPIC_API_KEY: 'test' },
+      authSource: 'anthropic_api_key',
+    }));
+    (svc as any).resolveLaunchExpectedMembers = vi.fn(async () => ({
+      members: [{ name: 'alice' }],
+      source: 'members-meta',
+      warning: undefined,
+    }));
+    (svc as any).normalizeTeamConfigForLaunch = vi.fn(async () => {});
+    (svc as any).assertConfigLeadOnlyForLaunch = vi.fn(async () => {});
+    (svc as any).updateConfigProjectPath = vi.fn(async () => {});
+    (svc as any).restorePrelaunchConfig = vi.fn(async () => {});
+    (svc as any).validateAgentTeamsMcpRuntime = vi.fn(async () => {});
+    (svc as any).persistLaunchStateSnapshot = vi.fn(async () => {});
+    (svc as any).startFilesystemMonitor = vi.fn();
+    (svc as any).pathExists = vi.fn(async (targetPath: string) =>
+      targetPath.endsWith(`${leadSessionId}.jsonl`)
+    );
+    const complete = vi
+      .spyOn(svc as any, 'handleProvisioningTurnComplete')
+      .mockImplementation(async (run: any) => {
+        run.provisioningComplete = true;
+      });
+
+    const { runId } = await svc.launchTeam({ teamName, cwd: tempClaudeRoot }, () => {});
+
+    child.stdout.emit(
+      'data',
+      Buffer.from(
+        JSON.stringify({
+          type: 'system',
+          subtype: 'team_bootstrap',
+          event: 'completed',
+          run_id: runId,
+          team_name: teamName,
+          seq: 1,
+          failed_members: [],
+        }),
+        'utf8'
+      )
+    );
+    await Promise.resolve();
+    expect(complete).not.toHaveBeenCalled();
+
+    child.emit('close', 0);
+
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
   });
 
   it('clears stale team-scoped transient state before starting a new launch run', async () => {

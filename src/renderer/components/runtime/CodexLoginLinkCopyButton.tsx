@@ -4,12 +4,14 @@ import { Check, Copy } from 'lucide-react';
 
 interface CodexLoginLinkCopyButtonProps {
   authUrl?: string | null;
+  userCode?: string | null;
   disabled?: boolean;
   size?: 'xs' | 'sm';
 }
 
 export const CodexLoginLinkCopyButton = ({
   authUrl,
+  userCode,
   disabled = false,
   size = 'sm',
 }: CodexLoginLinkCopyButtonProps): React.JSX.Element | null => {
@@ -17,7 +19,7 @@ export const CodexLoginLinkCopyButton = ({
 
   useEffect(() => {
     setCopyState('idle');
-  }, [authUrl]);
+  }, [authUrl, userCode]);
 
   if (!authUrl) {
     return null;
@@ -29,7 +31,8 @@ export const CodexLoginLinkCopyButton = ({
       return;
     }
 
-    void navigator.clipboard.writeText(authUrl).then(
+    const text = userCode ? `${authUrl}\nCode: ${userCode}` : authUrl;
+    void navigator.clipboard.writeText(text).then(
       () => setCopyState('copied'),
       () => setCopyState('failed')
     );
@@ -47,10 +50,40 @@ export const CodexLoginLinkCopyButton = ({
         borderColor: 'rgba(245, 158, 11, 0.28)',
         backgroundColor: 'rgba(245, 158, 11, 0.08)',
       }}
-      title="Copy ChatGPT login link"
+      title={userCode ? 'Copy ChatGPT login link and code' : 'Copy ChatGPT login link'}
     >
       {copyState === 'copied' ? <Check className="size-3" /> : <Copy className="size-3" />}
-      {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy link'}
+      {copyState === 'copied'
+        ? 'Copied'
+        : copyState === 'failed'
+          ? 'Copy failed'
+          : userCode
+            ? 'Copy link + code'
+            : 'Copy link'}
     </button>
+  );
+};
+
+export const CodexLoginUserCodeBadge = ({
+  userCode,
+}: {
+  userCode?: string | null;
+}): React.JSX.Element | null => {
+  if (!userCode) {
+    return null;
+  }
+
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium"
+      style={{
+        borderColor: 'rgba(245, 158, 11, 0.22)',
+        backgroundColor: 'rgba(245, 158, 11, 0.06)',
+        color: '#fbbf24',
+      }}
+      title="Enter this code on the ChatGPT login page"
+    >
+      Code <span className="font-mono tracking-wide text-amber-100">{userCode}</span>
+    </span>
   );
 };

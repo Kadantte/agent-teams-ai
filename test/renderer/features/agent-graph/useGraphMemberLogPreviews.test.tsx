@@ -409,7 +409,7 @@ describe('useGraphMemberLogPreviews', () => {
     });
   });
 
-  it('reloads visible members on log-source events with force refresh', async () => {
+  it('reloads visible members on log change events with force refresh', async () => {
     let teamChangeListener:
       | ((event: unknown, data: { teamName: string; type: string }) => void)
       | null = null;
@@ -443,6 +443,19 @@ describe('useGraphMemberLogPreviews', () => {
     });
 
     expect(apiMock.memberLogStream.getMemberLogPreviews).toHaveBeenCalledTimes(2);
+    expect(apiMock.memberLogStream.getMemberLogPreviews).toHaveBeenLastCalledWith(
+      'alpha-team',
+      ['alice'],
+      expect.objectContaining({ forceRefresh: true })
+    );
+
+    await act(async () => {
+      teamChangeListener?.(null, { teamName: 'alpha-team', type: 'task-log-change' });
+      vi.advanceTimersByTime(700);
+      await Promise.resolve();
+    });
+
+    expect(apiMock.memberLogStream.getMemberLogPreviews).toHaveBeenCalledTimes(3);
     expect(apiMock.memberLogStream.getMemberLogPreviews).toHaveBeenLastCalledWith(
       'alpha-team',
       ['alice'],
