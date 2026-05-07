@@ -6,7 +6,10 @@
  * to run in a regular browser connected to an HTTP server.
  */
 
+import { createEmptyMemberLogStreamResponse } from '@features/member-log-stream/contracts';
+
 import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts';
+import type { MemberLogStreamApi } from '@features/member-log-stream/contracts';
 import type { DashboardRecentProjectsPayload } from '@features/recent-projects/contracts';
 import type { RuntimeProviderManagementApi } from '@features/runtime-provider-management/contracts';
 import type {
@@ -250,6 +253,16 @@ export class HttpAPIClient implements ElectronAPI {
 
   getDashboardRecentProjects = (): Promise<DashboardRecentProjectsPayload> =>
     this.get<DashboardRecentProjectsPayload>('/api/dashboard/recent-projects');
+
+  memberLogStream: MemberLogStreamApi = {
+    getMemberLogStream: async () => {
+      console.warn('[HttpAPIClient] getMemberLogStream is not available in browser mode');
+      return createEmptyMemberLogStreamResponse();
+    },
+    setMemberLogStreamTracking: async () => {
+      // Not available in browser mode - no-op.
+    },
+  };
 
   getProjects = (): Promise<Project[]> => this.get<Project[]>('/api/projects');
 

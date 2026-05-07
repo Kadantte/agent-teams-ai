@@ -111,7 +111,18 @@ export interface MemberLogFileRef {
   sessionId: string;
   filePath: string;
   mtimeMs: number;
+  sizeBytes?: number;
+  messageCount?: number;
+  kind?: 'lead_session' | 'member_session' | 'subagent';
 }
+
+type FindRecentMemberLogFileRefsOptions =
+  | number
+  | null
+  | {
+      mtimeSinceMs?: number | null;
+      forceRefresh?: boolean;
+    };
 
 export interface TeamLogSourceLiveContext {
   projectDir: string;
@@ -935,8 +946,15 @@ export class TeamMemberLogsFinder {
   async findRecentMemberLogFileRefsByMember(
     teamName: string,
     memberNames: readonly string[],
-    mtimeSinceMs?: number | null
+    options?: FindRecentMemberLogFileRefsOptions
   ): Promise<MemberLogFileRef[]> {
+    const parsedOptions =
+      typeof options === 'number' || options === null
+        ? { mtimeSinceMs: options ?? null, forceRefresh: false }
+        : {
+            mtimeSinceMs: options?.mtimeSinceMs ?? null,
+            forceRefresh: options?.forceRefresh === true,
+          };
     const requestedMembersByKey = new Map<string, string>();
     for (const memberName of memberNames) {
       const trimmed = memberName.trim();
@@ -952,12 +970,18 @@ export class TeamMemberLogsFinder {
       return [];
     }
 
-    const discovery = await this.discoverProjectSessions(teamName);
+    const discovery = await this.discoverProjectSessions(teamName, {
+      forceRefresh: parsedOptions.forceRefresh,
+    });
     if (!discovery) {
       return [];
     }
 
     const { projectDir, sessionIds, knownMembers, config } = discovery;
+    const scopedKnownMembers = new Set(knownMembers);
+    for (const memberKey of requestedMembersByKey.keys()) {
+      scopedKnownMembers.add(memberKey);
+    }
     const refs: MemberLogFileRef[] = [];
     const seenFilePaths = new Set<string>();
     const pushRef = (ref: MemberLogFileRef): void => {
@@ -975,12 +999,17 @@ export class TeamMemberLogsFinder {
       const leadJsonl = path.join(projectDir, `${config.leadSessionId}.jsonl`);
       try {
         const stat = await fs.stat(leadJsonl);
-        if (stat.isFile()) {
+        if (
+          stat.isFile() &&
+          (parsedOptions.mtimeSinceMs == null || stat.mtimeMs >= parsedOptions.mtimeSinceMs)
+        ) {
           pushRef({
             memberName: requestedMembersByKey.get(leadKey) ?? leadMemberName,
             sessionId: config.leadSessionId,
             filePath: leadJsonl,
             mtimeMs: stat.mtimeMs,
+            sizeBytes: stat.size,
+            kind: 'lead_session',
           });
         }
       } catch {
@@ -995,20 +1024,20 @@ export class TeamMemberLogsFinder {
         if (!stat.isFile()) {
           return null;
         }
-        if (mtimeSinceMs != null && stat.mtimeMs < mtimeSinceMs) {
+        if (parsedOptions.mtimeSinceMs != null && stat.mtimeMs < parsedOptions.mtimeSinceMs) {
           return null;
         }
         const attribution =
           candidate.kind === 'subagent'
             ? await this.getCachedSubagentAttribution(
                 candidate.filePath,
-                knownMembers,
+                scopedKnownMembers,
                 stat.mtimeMs
               )
             : await this.getCachedMemberSessionAttribution(
                 candidate.filePath,
                 teamName,
-                knownMembers,
+                scopedKnownMembers,
                 stat.mtimeMs
               );
         if (!attribution) {
@@ -1024,6 +1053,8 @@ export class TeamMemberLogsFinder {
           sessionId: candidate.sessionId,
           filePath: candidate.filePath,
           mtimeMs: stat.mtimeMs,
+          sizeBytes: stat.size,
+          kind: candidate.kind,
         } satisfies MemberLogFileRef;
       } catch {
         return null;
