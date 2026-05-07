@@ -136,20 +136,24 @@ function timestampIso(value: Date | string): string {
 function stripAngleTags(value: string): string {
   let result = '';
   let insideTag = false;
-  for (const char of value) {
-    if (char === '<') {
-      insideTag = true;
-      result += ' ';
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (!insideTag && char === '<') {
+      const next = value[index + 1] ?? '';
+      if (/[A-Za-z/!]/.test(next)) {
+        insideTag = true;
+        result += ' ';
+        continue;
+      }
+    }
+    if (insideTag) {
+      if (char === '>') {
+        insideTag = false;
+        result += ' ';
+      }
       continue;
     }
-    if (char === '>') {
-      insideTag = false;
-      result += ' ';
-      continue;
-    }
-    if (!insideTag) {
-      result += char;
-    }
+    result += char;
   }
   return result;
 }
@@ -468,6 +472,8 @@ function formatToolTitle(toolName: string): string {
   const canonical = canonicalToolName(toolName);
   if (canonical === 'sendmessage' || canonical === 'message_send') return 'Send message';
   if (canonical === 'cross_team_send') return 'Cross-team message';
+  if (canonical === 'cross_team_list_targets') return 'List teams';
+  if (canonical === 'cross_team_get_outbox') return 'Cross-team outbox';
   if (canonical === 'runtime_deliver_message') return 'Runtime delivery';
   if (canonical === 'runtime_task_event') return 'Runtime task event';
   if (canonical === 'runtime_heartbeat') return 'Runtime heartbeat';
@@ -492,6 +498,7 @@ function formatToolTitle(toolName: string): string {
   if (canonical === 'review_approve') return 'Approve review';
   if (canonical === 'review_request_changes') return 'Request changes';
   if (canonical === 'runtime_bootstrap_checkin') return 'Runtime check-in';
+  if (canonical === 'lead_briefing') return 'Lead briefing';
   if (canonical === 'member_briefing') return 'Member briefing';
   if (canonical === 'member_work_sync_status') return 'Work sync status';
   if (canonical === 'member_work_sync_report') return 'Work sync report';
@@ -499,6 +506,9 @@ function formatToolTitle(toolName: string): string {
   if (canonical === 'task_update') return 'Update task';
   if (canonical === 'task_delete') return 'Delete task';
   if (canonical === 'process_list') return 'List processes';
+  if (canonical === 'process_register') return 'Register process';
+  if (canonical === 'process_stop') return 'Stop process';
+  if (canonical === 'process_unregister') return 'Unregister process';
   return humanizeFallbackToolName(toolName);
 }
 
@@ -525,14 +535,16 @@ function isToolUseSupersededBySuccessResult(toolName: string): boolean {
   return (
     canonical === 'sendmessage' ||
     canonical === 'message_send' ||
-    canonical === 'cross_team_send' ||
+    canonical.startsWith('cross_team_') ||
     canonical === 'runtime_deliver_message' ||
     canonical === 'runtime_bootstrap_checkin' ||
     canonical === 'runtime_heartbeat' ||
     canonical === 'runtime_task_event' ||
+    canonical === 'lead_briefing' ||
     canonical === 'member_briefing' ||
     canonical === 'member_work_sync_status' ||
     canonical === 'member_work_sync_report' ||
+    canonical.startsWith('process_') ||
     canonical.startsWith('task_') ||
     canonical.startsWith('review_')
   );
@@ -765,6 +777,172 @@ function formatProcessCollectionArrayPayload(items: readonly unknown[]): KnownPa
   };
 }
 
+function processLabelFromPayload(
+  payload: Record<string, unknown>,
+  fallbackInput?: Record<string, unknown> | null
+): string | null {
+  const process = asRecord(payload.process) ?? asRecord(fallbackInput?.process) ?? undefined;
+  return (
+    [
+      stringField(payload, 'label'),
+      stringField(payload, 'name'),
+      stringField(payload, 'command'),
+      stringField(payload, 'processId'),
+      stringField(payload, 'id'),
+      stringifyPrimitive(payload.pid),
+      stringField(process, 'label'),
+      stringField(process, 'name'),
+      stringField(process, 'command'),
+      stringField(process, 'processId'),
+      stringField(process, 'id'),
+      stringifyPrimitive(process?.pid),
+      stringField(fallbackInput ?? undefined, 'label'),
+      stringField(fallbackInput ?? undefined, 'name'),
+      stringField(fallbackInput ?? undefined, 'command'),
+      stringField(fallbackInput ?? undefined, 'processId'),
+      stringField(fallbackInput ?? undefined, 'id'),
+      stringifyPrimitive(fallbackInput?.pid),
+    ].find((value) => typeof value === 'string' && value.trim().length > 0) ?? null
+  );
+}
+
+function formatProcessLifecyclePayload(
+  payload: Record<string, unknown>,
+  canonicalToolNameValue: string | null,
+  fallbackInput?: Record<string, unknown> | null
+): KnownPayloadPreview | null {
+  const canonical = canonicalToolNameValue ?? '';
+  if (
+    canonical !== 'process_register' &&
+    canonical !== 'process_stop' &&
+    canonical !== 'process_unregister'
+  ) {
+    return null;
+  }
+
+  const label = processLabelFromPayload(payload, fallbackInput);
+  const status =
+    stringField(payload, 'status') ??
+    stringField(asRecord(payload.process), 'status') ??
+    stringField(fallbackInput ?? undefined, 'status');
+
+  if (canonical === 'process_register') {
+    const suffix = status && label ? ` ${status}` : '';
+    return {
+      title: 'Process registered',
+      text: label ? `Registered ${label}${suffix}` : 'Registered process',
+    };
+  }
+  if (canonical === 'process_stop') {
+    return {
+      title: 'Process stopped',
+      text: label ? `Stopped ${label}` : 'Stopped process',
+    };
+  }
+  return {
+    title: 'Process unregistered',
+    text: label ? `Unregistered ${label}` : 'Unregistered process',
+  };
+}
+
+function formatCrossTeamTargetItem(item: Record<string, unknown>): string | null {
+  return (
+    stringField(item, 'teamName') ??
+    stringField(item, 'name') ??
+    stringField(item, 'id') ??
+    stringField(item, 'slug')
+  );
+}
+
+function formatCrossTeamOutboxItem(item: Record<string, unknown>): string | null {
+  const target =
+    stringField(item, 'toTeam') ??
+    stringField(item, 'targetTeam') ??
+    stringField(item, 'teamName') ??
+    stringField(item, 'target');
+  const summary =
+    stringField(item, 'summary') ??
+    stringField(item, 'text') ??
+    stringField(item, 'message') ??
+    stringField(item, 'content');
+  if (target && summary) return `to ${target}: ${summary}`;
+  return target ?? summary;
+}
+
+function formatCrossTeamCollectionArrayPayload(
+  items: readonly unknown[],
+  canonicalToolNameValue: string | null
+): KnownPayloadPreview | null {
+  const canonical = canonicalToolNameValue ?? '';
+  const title =
+    canonical === 'cross_team_list_targets'
+      ? 'Cross-team targets'
+      : canonical === 'cross_team_get_outbox'
+        ? 'Cross-team outbox'
+        : null;
+  if (!title) return null;
+
+  const records = items
+    .map((item) => asRecord(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item));
+  const summaries = records
+    .slice(0, 3)
+    .map((item) =>
+      canonical === 'cross_team_list_targets'
+        ? formatCrossTeamTargetItem(item)
+        : formatCrossTeamOutboxItem(item)
+    )
+    .filter(Boolean);
+  const remainingCount = Math.max(0, records.length - summaries.length);
+  const moreText = remainingCount > 0 ? `; +${remainingCount} more` : '';
+
+  if (canonical === 'cross_team_list_targets') {
+    const countText = `${records.length} ${records.length === 1 ? 'team' : 'teams'}`;
+    return {
+      title,
+      text: summaries.length > 0 ? `${countText} - ${summaries.join('; ')}${moreText}` : countText,
+    };
+  }
+
+  const countText = `${records.length} ${records.length === 1 ? 'message' : 'messages'}`;
+  return {
+    title,
+    text: summaries.length > 0 ? `${countText} - ${summaries.join('; ')}${moreText}` : countText,
+  };
+}
+
+function formatCrossTeamCollectionPayload(
+  payload: Record<string, unknown>,
+  canonicalToolNameValue: string | null
+): KnownPayloadPreview | null {
+  const canonical = canonicalToolNameValue ?? '';
+  if (canonical !== 'cross_team_list_targets' && canonical !== 'cross_team_get_outbox') {
+    return null;
+  }
+
+  const rawItems =
+    (Array.isArray(payload.targets) ? payload.targets : null) ??
+    (Array.isArray(payload.teams) ? payload.teams : null) ??
+    (Array.isArray(payload.messages) ? payload.messages : null) ??
+    (Array.isArray(payload.outbox) ? payload.outbox : null) ??
+    (Array.isArray(payload.items) ? payload.items : null);
+  if (rawItems) {
+    return formatCrossTeamCollectionArrayPayload(rawItems, canonical);
+  }
+
+  const summary =
+    stringField(payload, 'summary') ??
+    stringField(payload, 'message') ??
+    stringField(payload, 'text');
+  if (summary) {
+    return {
+      title: canonical === 'cross_team_list_targets' ? 'Cross-team targets' : 'Cross-team outbox',
+      text: summary,
+    };
+  }
+  return null;
+}
+
 function formatRelationshipPayload(
   payload: Record<string, unknown>,
   fallbackInput?: Record<string, unknown> | null
@@ -959,6 +1137,26 @@ function formatRuntimePayload(
       text: memberName ? `${memberName} checked in` : 'Runtime checked in',
     };
   }
+  if (canonical === 'runtime_deliver_message') {
+    const target =
+      stringField(payload, 'to') ??
+      stringField(payload, 'target') ??
+      stringField(fallbackInput ?? undefined, 'to') ??
+      stringField(fallbackInput ?? undefined, 'target');
+    const summary =
+      stringField(payload, 'summary') ??
+      stringField(payload, 'message') ??
+      stringField(payload, 'text') ??
+      stringField(fallbackInput ?? undefined, 'summary') ??
+      stringField(fallbackInput ?? undefined, 'message') ??
+      stringField(fallbackInput ?? undefined, 'text');
+    if (target && summary) {
+      return { title: 'Runtime delivery', text: `Delivered to ${target} - ${summary}` };
+    }
+    if (target) return { title: 'Runtime delivery', text: `Delivered to ${target}` };
+    if (summary) return { title: 'Runtime delivery', text: summary };
+    return { title: 'Runtime delivery', text: 'Delivered runtime message' };
+  }
   if (canonical === 'runtime_heartbeat') {
     return {
       title: 'Runtime heartbeat',
@@ -983,6 +1181,14 @@ function formatRuntimePayload(
     return {
       title: 'Member briefing',
       text: memberName ? `Loaded briefing for ${memberName}` : 'Loaded member briefing',
+    };
+  }
+  if (canonical === 'lead_briefing') {
+    const teamName =
+      stringField(payload, 'teamName') ?? stringField(fallbackInput ?? undefined, 'teamName');
+    return {
+      title: 'Lead briefing',
+      text: teamName ? `Loaded lead briefing for ${teamName}` : 'Loaded lead briefing',
     };
   }
   return null;
@@ -1125,14 +1331,25 @@ function formatPlainToolResultStatus(
   if (!toolContext) {
     return null;
   }
-  if (toolContext.canonicalName === 'member_briefing') {
+  if (
+    toolContext.canonicalName === 'member_briefing' ||
+    toolContext.canonicalName === 'lead_briefing'
+  ) {
     const memberMatch = /^member briefing for\s+([^\s]+)\s+on team\b/i.exec(
       compactWhitespace(value)
     );
+    const teamMatch = /^lead briefing for team\s+([^\s.]+)/i.exec(compactWhitespace(value));
     const memberName =
       memberMatch?.[1] ??
       stringField(asRecord(toolContext.input), 'memberName') ??
       stringField(asRecord(toolContext.input), 'member');
+    if (toolContext.canonicalName === 'lead_briefing') {
+      const teamName = teamMatch?.[1] ?? stringField(asRecord(toolContext.input), 'teamName');
+      return {
+        title: 'Lead briefing',
+        text: teamName ? `Loaded lead briefing for ${teamName}` : 'Loaded lead briefing',
+      };
+    }
     return {
       title: 'Member briefing',
       text: memberName ? `Loaded briefing for ${memberName}` : 'Loaded member briefing',
@@ -1151,11 +1368,29 @@ function formatPlainToolResultStatus(
     const text = fallbackInput ? formatCrossTeamPayload(fallbackInput) : null;
     return text ? { title: 'Cross-team message', text } : null;
   }
+  if (toolContext.canonicalName === 'cross_team_list_targets') {
+    const teamName = stringField(fallbackInput ?? undefined, 'teamName');
+    return {
+      title: 'Cross-team targets',
+      text: teamName ? `Listed teams for ${teamName}` : 'Listed cross-team targets',
+    };
+  }
+  if (toolContext.canonicalName === 'cross_team_get_outbox') {
+    const teamName = stringField(fallbackInput ?? undefined, 'teamName');
+    return {
+      title: 'Cross-team outbox',
+      text: teamName ? `Loaded outbox for ${teamName}` : 'Loaded cross-team outbox',
+    };
+  }
   if (
     toolContext.canonicalName === 'member_work_sync_status' ||
     toolContext.canonicalName === 'member_work_sync_report'
   ) {
     return formatWorkSyncPayload({}, toolContext.canonicalName, fallbackInput);
+  }
+  const processText = formatProcessLifecyclePayload({}, toolContext.canonicalName, fallbackInput);
+  if (processText) {
+    return processText;
   }
   return (
     formatTaskToolPayload({}, toolContext.canonicalName, fallbackInput) ??
@@ -1268,6 +1503,14 @@ function formatKnownPayloadPreview(
   if (workSyncText) {
     return workSyncText;
   }
+  const processLifecycleText = formatProcessLifecyclePayload(payload, canonical, fallbackInput);
+  if (processLifecycleText) {
+    return processLifecycleText;
+  }
+  const crossTeamCollectionText = formatCrossTeamCollectionPayload(payload, canonical);
+  if (crossTeamCollectionText) {
+    return crossTeamCollectionText;
+  }
   if (canonical === 'process_list') {
     const processText = formatProcessCollectionPayload(payload);
     if (processText) {
@@ -1340,6 +1583,16 @@ function previewUnknownValue(
     if (knownCollection) {
       return { ...truncatePreview(knownCollection.text, limit), title: knownCollection.title };
     }
+    const crossTeamCollection = formatCrossTeamCollectionArrayPayload(
+      value,
+      toolContext?.canonicalName ?? null
+    );
+    if (crossTeamCollection) {
+      return {
+        ...truncatePreview(crossTeamCollection.text, limit),
+        title: crossTeamCollection.title,
+      };
+    }
     if (toolContext?.canonicalName === 'process_list') {
       const processCollection = formatProcessCollectionArrayPayload(value);
       return { ...truncatePreview(processCollection.text, limit), title: processCollection.title };
@@ -1396,6 +1649,19 @@ function previewToolInputValue(toolName: string, value: unknown, limit: number):
       return truncatePreview(formatted, limit);
     }
   }
+  if (canonical === 'cross_team_list_targets' || canonical === 'cross_team_get_outbox') {
+    const payload = recordFromUnknown(value);
+    const teamName = payload ? stringField(payload, 'teamName') : null;
+    const text =
+      canonical === 'cross_team_list_targets'
+        ? teamName
+          ? `for ${teamName}`
+          : 'List cross-team targets'
+        : teamName
+          ? `for ${teamName}`
+          : 'Read cross-team outbox';
+    return truncatePreview(text, limit);
+  }
   const payload = recordFromUnknown(value);
   if (payload) {
     const runtimeFormatted = formatRuntimePayload(payload, canonical, payload);
@@ -1405,6 +1671,10 @@ function previewToolInputValue(toolName: string, value: unknown, limit: number):
     const workSyncFormatted = formatWorkSyncPayload(payload, canonical, payload);
     if (workSyncFormatted) {
       return truncatePreview(workSyncFormatted.text, limit);
+    }
+    const processFormatted = formatProcessLifecyclePayload(payload, canonical, payload);
+    if (processFormatted) {
+      return truncatePreview(processFormatted.text, limit);
     }
     const taskFormatted = formatTaskToolInputPayload(canonical, payload);
     if (taskFormatted) {

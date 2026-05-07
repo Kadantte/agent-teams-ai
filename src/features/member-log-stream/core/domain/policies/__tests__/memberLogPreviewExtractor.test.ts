@@ -1257,6 +1257,149 @@ Reply to this comment using MCP tool task_add_comment.
       preview: '2 processes - vite dev running; pnpm test exited',
     });
     expect(processResult.items[0]?.preview).not.toContain('[{');
+
+    const taskUpdateResult = extractMemberLogPreviewItems({
+      provider: 'opencode_runtime',
+      maxItems: 3,
+      textLimit: 160,
+      messages: [
+        message({
+          uuid: 'task-update-call',
+          timestamp: '2026-04-01T10:00:00.000Z',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tool-task-update',
+              name: 'agent-teams_task_update',
+              input: {
+                taskId: 'abc12345-0000-0000-0000-000000000000',
+                status: 'in_progress',
+              },
+            },
+          ],
+        }),
+        message({
+          uuid: 'task-update-result',
+          type: 'user',
+          role: 'user',
+          timestamp: '2026-04-01T10:01:00.000Z',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'tool-task-update',
+              content: {
+                taskId: 'abc12345-0000-0000-0000-000000000000',
+                status: 'in_progress',
+              },
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(taskUpdateResult.items[0]).toMatchObject({
+      kind: 'tool_result',
+      title: 'Task updated',
+      preview: '#abc12345 -> in_progress',
+    });
+
+    const remainingOperationalTools = [
+      {
+        toolName: 'agent-teams_lead_briefing',
+        input: { teamName: 'relay-works-10' },
+        result: 'Lead briefing for team relay-works-10. CRITICAL: hidden rules',
+        expectedTitle: 'Lead briefing',
+        expectedPreview: 'Loaded lead briefing for relay-works-10',
+      },
+      {
+        toolName: 'agent-teams_runtime_deliver_message',
+        input: { to: 'bob', text: 'Follow-up ready', runtimeSessionId: 'ses-secret' },
+        result: 'ok',
+        expectedTitle: 'Runtime delivery',
+        expectedPreview: 'Delivered to bob - Follow-up ready',
+      },
+      {
+        toolName: 'agent-teams_cross_team_list_targets',
+        input: { teamName: 'relay-works-10' },
+        result: JSON.stringify([{ teamName: 'qa-team' }, { name: 'design-team' }]),
+        expectedTitle: 'Cross-team targets',
+        expectedPreview: '2 teams - qa-team; design-team',
+      },
+      {
+        toolName: 'agent-teams_cross_team_get_outbox',
+        input: { teamName: 'relay-works-10' },
+        result: {
+          messages: [{ toTeam: 'qa-team', summary: 'Need smoke-test help' }],
+        },
+        expectedTitle: 'Cross-team outbox',
+        expectedPreview: '1 message - to qa-team: Need smoke-test help',
+      },
+      {
+        toolName: 'agent-teams_process_register',
+        input: { label: 'vite dev', command: 'pnpm dev' },
+        result: { process: { label: 'vite dev', status: 'running' } },
+        expectedTitle: 'Process registered',
+        expectedPreview: 'Registered vite dev running',
+      },
+      {
+        toolName: 'agent-teams_process_stop',
+        input: { label: 'vite dev' },
+        result: 'ok',
+        expectedTitle: 'Process stopped',
+        expectedPreview: 'Stopped vite dev',
+      },
+      {
+        toolName: 'agent-teams_process_unregister',
+        input: { pid: 123 },
+        result: 'ok',
+        expectedTitle: 'Process unregistered',
+        expectedPreview: 'Unregistered 123',
+      },
+    ] as const;
+
+    for (const [index, tool] of remainingOperationalTools.entries()) {
+      const result = extractMemberLogPreviewItems({
+        provider: 'opencode_runtime',
+        maxItems: 3,
+        textLimit: 160,
+        messages: [
+          message({
+            uuid: `remaining-tool-call-${index}`,
+            timestamp: '2026-04-01T10:00:00.000Z',
+            content: [
+              {
+                type: 'tool_use',
+                id: `tool-remaining-${index}`,
+                name: tool.toolName,
+                input: tool.input,
+              },
+            ],
+          }),
+          message({
+            uuid: `remaining-tool-result-${index}`,
+            type: 'user',
+            role: 'user',
+            timestamp: '2026-04-01T10:01:00.000Z',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: `tool-remaining-${index}`,
+                content: tool.result,
+              },
+            ],
+          }),
+        ],
+      });
+
+      expect(result.items[0]).toMatchObject({
+        kind: 'tool_result',
+        title: tool.expectedTitle,
+        preview: tool.expectedPreview,
+      });
+      expect(`${result.items[0]?.title ?? ''} ${result.items[0]?.preview ?? ''}`).not.toMatch(
+        /CRITICAL|runtimeSessionId|agent_teams_|process_register|cross_team_/i
+      );
+    }
   });
 
   it('uses concrete names for generic runtime tool results', () => {
