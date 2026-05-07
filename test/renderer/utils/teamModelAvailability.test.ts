@@ -204,6 +204,7 @@ describe('teamModelAvailability', () => {
     expect(getTeamModelSelectionError('codex', 'gpt-5.4', providerStatus)).toBeNull();
     expect(getAvailableTeamProviderModelOptions('codex', providerStatus)).toEqual([
       { value: '', label: 'Default', badgeLabel: 'Default' },
+      { value: 'gpt-5.5', label: '5.5', badgeLabel: '5.5' },
       { value: 'gpt-5.4', label: '5.4', badgeLabel: '5.4' },
       { value: 'gpt-5.4-mini', label: '5.4 Mini', badgeLabel: '5.4-mini' },
       { value: 'gpt-5.3-codex', label: '5.3 Codex', badgeLabel: '5.3-codex' },

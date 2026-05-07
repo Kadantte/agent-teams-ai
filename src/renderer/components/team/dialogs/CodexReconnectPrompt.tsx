@@ -34,9 +34,9 @@ export function shouldShowCodexReconnectPrompt({
     (provider) => provider.providerId === 'codex'
   );
   const codexConnection = codexProvider?.connection?.codex;
-  const loginStatus = codexConnection?.login.status;
+  const loginStatus = codexConnection?.login?.status;
   const loginPending = loginStatus === 'starting' || loginStatus === 'pending';
-  if (loginPending && codexConnection?.login.authUrl) {
+  if (loginPending && codexConnection?.login?.authUrl) {
     return true;
   }
 

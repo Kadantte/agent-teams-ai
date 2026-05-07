@@ -1280,7 +1280,7 @@ describe('team change throttling', () => {
     expect(refreshTeamChangePresenceSpy).toHaveBeenCalledWith('my-team');
   });
 
-  it('polls unknown in-progress tasks in round-robin order without starving later tasks', async () => {
+  it('keeps background polling disabled for unknown in-progress tasks', async () => {
     const invalidateTaskChangePresence = vi.fn();
     const checkTaskHasChanges = vi.fn(async () => undefined);
 
@@ -1321,24 +1321,11 @@ describe('team change throttling', () => {
       checkTaskHasChanges,
     } as never);
 
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(checkTaskHasChanges).toHaveBeenNthCalledWith(
-      1,
-      'my-team',
-      'task-1',
-      expect.objectContaining({ status: 'in_progress', owner: 'alice' })
-    );
-
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(checkTaskHasChanges).toHaveBeenNthCalledWith(
-      2,
-      'my-team',
-      'task-2',
-      expect.objectContaining({ status: 'in_progress', owner: 'alice' })
-    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(checkTaskHasChanges).not.toHaveBeenCalled();
   });
 
-  it('polls visible non-selected graph teams from cached team data', async () => {
+  it('keeps background polling disabled for visible non-selected graph teams', async () => {
     const invalidateTaskChangePresence = vi.fn();
     const checkTaskHasChanges = vi.fn(async () => undefined);
 
@@ -1400,21 +1387,8 @@ describe('team change throttling', () => {
       checkTaskHasChanges,
     } as never);
 
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(checkTaskHasChanges).toHaveBeenNthCalledWith(
-      1,
-      'my-team',
-      'task-1',
-      expect.objectContaining({ status: 'in_progress', owner: 'alice' })
-    );
-
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(checkTaskHasChanges).toHaveBeenNthCalledWith(
-      2,
-      'my-team',
-      'task-2',
-      expect.objectContaining({ status: 'in_progress', owner: 'alice' })
-    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(checkTaskHasChanges).not.toHaveBeenCalled();
   });
 
   it('per-team throttling: busy team does not block another visible team', async () => {

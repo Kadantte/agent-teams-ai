@@ -14,14 +14,19 @@ export interface ProjectPathOptionMeta {
 }
 
 function toProjectOption(project: ProjectPathProject): ComboboxOption {
-  return {
+  const option: ComboboxOption = {
     value: project.path,
     label: project.name,
     description: project.path,
-    meta: {
-      discoverySource: project.discoverySource,
-    } satisfies ProjectPathOptionMeta,
   };
+
+  if (project.discoverySource !== undefined) {
+    option.meta = {
+      discoverySource: project.discoverySource,
+    } satisfies ProjectPathOptionMeta;
+  }
+
+  return option;
 }
 
 /**
