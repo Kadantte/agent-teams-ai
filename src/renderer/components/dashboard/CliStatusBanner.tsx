@@ -19,6 +19,7 @@ import {
 import { api, isElectronMode } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
+import { CodexLoginLinkCopyButton } from '@renderer/components/runtime/CodexLoginLinkCopyButton';
 import {
   formatProviderStatusText,
   getProviderConnectionModeSummary,
@@ -29,7 +30,6 @@ import {
   isConnectionManagedRuntimeProvider,
   shouldShowProviderConnectAction,
 } from '@renderer/components/runtime/providerConnectionUi';
-import { CodexLoginLinkCopyButton } from '@renderer/components/runtime/CodexLoginLinkCopyButton';
 import { ProviderModelBadges } from '@renderer/components/runtime/ProviderModelBadges';
 import { getProviderRuntimeBackendSummary } from '@renderer/components/runtime/ProviderRuntimeBackendSelector';
 import { ProviderRuntimeSettingsDialog } from '@renderer/components/runtime/ProviderRuntimeSettingsDialog';
@@ -370,21 +370,6 @@ const ProviderDetailSkeleton = (): React.JSX.Element => {
         ))}
       </div>
     </div>
-  );
-};
-
-const OpenCodeBetaBadge = (): React.JSX.Element => {
-  return (
-    <span
-      className="inline-flex h-4 shrink-0 items-center rounded border px-1.5 text-[9px] font-semibold uppercase leading-none"
-      style={{
-        borderColor: 'rgba(251, 191, 36, 0.32)',
-        backgroundColor: 'rgba(251, 191, 36, 0.12)',
-        color: '#fbbf24',
-      }}
-    >
-      beta
-    </span>
   );
 };
 
@@ -781,7 +766,6 @@ const InstalledBanner = ({
                             ? getProviderLabel(provider.providerId)
                             : provider.displayName}
                         </span>
-                        {provider.providerId === 'opencode' ? <OpenCodeBetaBadge /> : null}
                       </span>
                       <span
                         className="text-xs"

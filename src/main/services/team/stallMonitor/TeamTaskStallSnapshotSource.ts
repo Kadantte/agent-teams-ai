@@ -9,8 +9,8 @@ import { TeamTranscriptSourceLocator } from '../taskLogs/discovery/TeamTranscrip
 import { isBoardTaskExactLogsReadEnabled } from '../taskLogs/exact/featureGates';
 import { TeamKanbanManager } from '../TeamKanbanManager';
 import { TeamMembersMetaStore } from '../TeamMembersMetaStore';
-import { TeamTaskReader } from '../TeamTaskReader';
 import { getTeamTaskWorkflowColumn, isTeamTaskActivelyWorked } from '../teamTaskActiveState';
+import { TeamTaskReader } from '../TeamTaskReader';
 
 import { BoardTaskActivityBatchIndexer } from './BoardTaskActivityBatchIndexer';
 import { OpenCodeTaskStallEvidenceSource } from './OpenCodeTaskStallEvidenceSource';

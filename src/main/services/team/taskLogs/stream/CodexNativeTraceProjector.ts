@@ -214,7 +214,7 @@ export class CodexNativeTraceProjector {
       >();
       for (const event of run.events) {
         const projection = event.projection;
-        if (!projection || projection.toolSource !== 'native') {
+        if (projection?.toolSource !== 'native') {
           continue;
         }
         if (!projection.itemId) {

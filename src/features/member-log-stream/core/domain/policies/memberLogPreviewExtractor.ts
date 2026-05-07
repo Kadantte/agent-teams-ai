@@ -21,8 +21,10 @@ export interface MemberLogPreviewParsedMessage {
   content: string | MemberLogPreviewContentBlock[];
   isMeta?: boolean;
   toolCalls?: readonly {
-    id: string;
-    name: string;
+    id?: string;
+    name?: string;
+    callId?: string;
+    toolName?: string;
     input?: unknown;
     isTask?: boolean;
   }[];
@@ -104,6 +106,20 @@ interface ToolUseContext {
   id: string;
   name: string;
   canonicalName: string;
+  input?: unknown;
+}
+
+interface ToolCallLike {
+  id?: string;
+  name?: string;
+  callId?: string;
+  toolName?: string;
+  input?: unknown;
+}
+
+interface NormalizedToolCall {
+  id: string;
+  name: string;
   input?: unknown;
 }
 
@@ -207,6 +223,18 @@ function textFromTextContentBlocks(value: unknown): string | null {
   return text.trim().length > 0 ? text : null;
 }
 
+function textFromPreviewContent(content: string | MemberLogPreviewContentBlock[]): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  return content
+    .filter((block): block is Extract<MemberLogPreviewContentBlock, { type: 'text' }> => {
+      return block.type === 'text' && typeof block.text === 'string';
+    })
+    .map((block) => block.text)
+    .join(' ');
+}
+
 function unwrapAgentTeamsResponsePayload(payload: Record<string, unknown>): {
   payload: Record<string, unknown>;
   wrapperKey?: string;
@@ -254,6 +282,127 @@ function recordFromUnknownWithWrapper(
 
 function recordFromUnknown(value: unknown): Record<string, unknown> | null {
   return recordFromUnknownWithWrapper(value)?.payload ?? null;
+}
+
+function unknownPayloadLooksLikeError(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(unknownPayloadLooksLikeError);
+  }
+  const record = asRecord(value);
+  if (!record) {
+    return false;
+  }
+
+  const type = stringField(record, 'type')?.toLowerCase();
+  if (type === 'error' || type?.endsWith('_error')) {
+    return true;
+  }
+  if (record.ok === false || record.success === false) {
+    return true;
+  }
+
+  const error = record.error;
+  if (typeof error === 'string' && error.trim().length > 0) {
+    return true;
+  }
+  if (error === true) {
+    return true;
+  }
+  const errorRecord = asRecord(error);
+  if (
+    errorRecord &&
+    (stringField(errorRecord, 'type') ||
+      stringField(errorRecord, 'message') ||
+      stringField(errorRecord, 'code'))
+  ) {
+    return true;
+  }
+
+  return typeof record.errorMessage === 'string' && record.errorMessage.trim().length > 0;
+}
+
+function payloadErrorMessage(payload: Record<string, unknown>): string | null {
+  const direct =
+    stringField(payload, 'error') ??
+    stringField(payload, 'errorMessage') ??
+    stringField(payload, 'message');
+  if (direct) {
+    return direct;
+  }
+
+  const nestedError = asRecord(payload.error);
+  if (!nestedError) {
+    return null;
+  }
+  const nestedType = stringField(nestedError, 'type')?.replace(/_/g, ' ');
+  const nestedCode = stringField(nestedError, 'code');
+  const nestedMessage = stringField(nestedError, 'message');
+  if (nestedMessage) {
+    return nestedMessage;
+  }
+  if (nestedType && nestedCode) {
+    return `${nestedType} ${nestedCode}`;
+  }
+  return nestedType ?? nestedCode;
+}
+
+function parseJsonObjectFromText(value: string): Record<string, unknown> | null {
+  const parsed = parseJsonLikeString(value);
+  const direct = asRecord(parsed);
+  if (direct) {
+    return direct;
+  }
+
+  const jsonStart = value.indexOf('{');
+  if (jsonStart <= 0) {
+    return null;
+  }
+  return asRecord(parseJsonLikeString(value.slice(jsonStart)));
+}
+
+function runtimeErrorTitle(value: string, payload: Record<string, unknown> | null): string {
+  const labelMatch = /^(api error|runtime error|provider error|tool error)\b/i.exec(value);
+  if (labelMatch?.[1]) {
+    const label = labelMatch[1].toLowerCase();
+    if (label === 'api error') return 'API error';
+    return `${label[0]?.toUpperCase()}${label.slice(1)}`;
+  }
+  const type = stringField(payload, 'type') ?? stringField(asRecord(payload?.error), 'type');
+  if (type?.toLowerCase().includes('api')) {
+    return 'API error';
+  }
+  return 'Runtime error';
+}
+
+function formatRuntimeErrorText(
+  value: string,
+  limit: number
+): (ValuePreview & { title: string }) | null {
+  const compact = compactWhitespace(value);
+  if (!compact) {
+    return null;
+  }
+
+  const payload = parseJsonObjectFromText(compact);
+  const hasErrorSignal =
+    /^(api error|runtime error|provider error|tool error)\b/i.test(compact) ||
+    /\b(api|codex|claude|openai|anthropic)\s+api\s+error\b/i.test(compact) ||
+    /\b(api|codex|claude|openai|anthropic|provider)\s+error\s*:\s*\d{3}\b/i.test(compact) ||
+    unknownPayloadLooksLikeError(payload);
+
+  if (!hasErrorSignal) {
+    return null;
+  }
+
+  const title = runtimeErrorTitle(compact, payload);
+  const jsonStart = compact.indexOf('{');
+  const header = jsonStart > 0 ? compact.slice(0, jsonStart).trim() : '';
+  const payloadMessage = payload ? payloadErrorMessage(payload) : null;
+  const text =
+    payloadMessage && header && !header.toLowerCase().includes(payloadMessage.toLowerCase())
+      ? `${header} - ${payloadMessage}`
+      : (payloadMessage ?? header);
+  return { ...truncatePreview(text || 'Runtime error', limit), title };
 }
 
 function findPriorityValue(
@@ -721,18 +870,8 @@ function formatRuntimePayload(
 }
 
 function formatErrorPayload(payload: Record<string, unknown>): KnownPayloadPreview | null {
-  const error =
-    stringField(payload, 'error') ??
-    stringField(payload, 'errorMessage') ??
-    stringField(payload, 'message');
-  if (
-    error &&
-    (payload.ok === false || payload.success === false || payload.error || payload.errorMessage)
-  ) {
-    return { title: 'Tool error', text: error };
-  }
-  if (payload.ok === false || payload.success === false) {
-    return { title: 'Tool error', text: 'Tool reported failure' };
+  if (unknownPayloadLooksLikeError(payload)) {
+    return { title: 'Tool error', text: payloadErrorMessage(payload) ?? 'Tool reported failure' };
   }
   return null;
 }
@@ -1059,16 +1198,7 @@ function extractTextPreview(
   content: string | MemberLogPreviewContentBlock[],
   textLimit: number
 ): { preview: string; truncated: boolean } | null {
-  if (typeof content === 'string') {
-    const text = truncatePreview(content, textLimit);
-    return text.preview.length > 0 ? text : null;
-  }
-  const text = content
-    .filter((block): block is Extract<MemberLogPreviewContentBlock, { type: 'text' }> => {
-      return block.type === 'text' && typeof block.text === 'string';
-    })
-    .map((block) => block.text)
-    .join(' ');
+  const text = textFromPreviewContent(content);
   const preview = truncatePreview(text, textLimit);
   return preview.preview.length > 0 ? preview : null;
 }
@@ -1204,12 +1334,35 @@ function isToolResultBlock(
   );
 }
 
+function normalizeToolCall(toolCall: ToolCallLike): NormalizedToolCall | null {
+  const id =
+    typeof toolCall.id === 'string'
+      ? toolCall.id.trim()
+      : typeof toolCall.callId === 'string'
+        ? toolCall.callId.trim()
+        : '';
+  const name =
+    typeof toolCall.name === 'string'
+      ? toolCall.name.trim()
+      : typeof toolCall.toolName === 'string'
+        ? toolCall.toolName.trim()
+        : '';
+  if (!id || !name) {
+    return null;
+  }
+  return {
+    id,
+    name,
+    input: toolCall.input,
+  };
+}
+
 function buildToolUseContexts(
   messages: readonly MemberLogPreviewParsedMessage[]
 ): Map<string, ToolUseContext> {
   const contexts = new Map<string, ToolUseContext>();
-  const addContext = (tool: { id: string; name: string; input?: unknown }): void => {
-    const id = tool.id.trim();
+  const addContext = (tool: NormalizedToolCall): void => {
+    const id = tool.id;
     if (!id || contexts.has(id)) return;
     contexts.set(id, {
       id,
@@ -1220,7 +1373,12 @@ function buildToolUseContexts(
   };
 
   for (const message of messages) {
-    message.toolCalls?.forEach((toolCall) => addContext(toolCall));
+    message.toolCalls?.forEach((toolCall) => {
+      const normalized = normalizeToolCall(toolCall);
+      if (normalized) {
+        addContext(normalized);
+      }
+    });
     if (!Array.isArray(message.content)) continue;
     message.content.forEach((block) => {
       if (!isToolUseBlock(block)) return;
@@ -1375,7 +1533,12 @@ function collectToolUseCandidates(input: {
     );
   };
 
-  input.message.toolCalls?.forEach((toolCall, index) => addTool(toolCall, 100 + index));
+  input.message.toolCalls?.forEach((toolCall, index) => {
+    const normalized = normalizeToolCall(toolCall);
+    if (normalized) {
+      addTool(normalized, 100 + index);
+    }
+  });
   if (Array.isArray(input.message.content)) {
     input.message.content.forEach((block, index) => {
       if (!isToolUseBlock(block)) return;
@@ -1527,6 +1690,10 @@ export function extractMemberLogPreviewItems(
     if (role === 'assistant') {
       const textPreview = extractTextPreview(message.content, textLimit);
       if (textPreview) {
+        const runtimeErrorPreview = formatRuntimeErrorText(
+          textFromPreviewContent(message.content),
+          textLimit
+        );
         candidates.push(
           buildCandidate({
             provider: input.provider,
@@ -1535,14 +1702,14 @@ export function extractMemberLogPreviewItems(
             messageIndex,
             blockIndex: 10,
             kind: 'text',
-            title: 'Assistant',
-            preview: textPreview.preview,
-            tone: 'neutral',
+            title: runtimeErrorPreview?.title ?? 'Assistant',
+            preview: runtimeErrorPreview?.preview ?? textPreview.preview,
+            tone: runtimeErrorPreview ? 'error' : 'neutral',
             sourceLabel: input.sourceLabel,
             sessionId: input.sessionId ?? message.sessionId,
             laneId: input.laneId,
             token: 'assistant-text',
-            textTruncated: textPreview.truncated,
+            textTruncated: runtimeErrorPreview?.truncated ?? textPreview.truncated,
           })
         );
       }

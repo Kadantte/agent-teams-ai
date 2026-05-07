@@ -164,14 +164,16 @@ describe('GraphMemberLogPreviewHud', () => {
     expect(row).not.toBeUndefined();
     expect(row?.querySelector('.float-left')).not.toBeNull();
     expect(row?.querySelector('.line-clamp-3')).toBeNull();
-    expect(row?.className).toContain('h-16');
-    expect(row?.querySelector('span.text-slate-200')?.className).toContain('leading-4');
+    expect(row?.className).toContain('h-[68px]');
+    expect(row?.querySelector('span.text-slate-200')?.className).toContain('leading-[18px]');
     expect(row?.textContent).toContain('pnpm test');
 
     const errorRow = Array.from(host.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('OpenCode tool failed')
     );
+    expect(errorRow?.className).toContain('border-rose-400/35');
     expect(errorRow?.querySelector('svg.text-rose-300')).not.toBeNull();
+    expect(errorRow?.querySelector('.text-rose-100')).not.toBeNull();
 
     const resultRow = Array.from(host.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('Tests passed')
@@ -197,6 +199,73 @@ describe('GraphMemberLogPreviewHud', () => {
     });
 
     expect(onOpenMemberProfile).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it('caps long visible rows while preserving the full preview in the title', async () => {
+    const node: GraphNode = {
+      id: 'member:alpha-team:alice',
+      kind: 'member',
+      label: 'alice',
+      state: 'active',
+      domainRef: { kind: 'member', teamName: 'alpha-team', memberName: 'alice' },
+    };
+    const longPreview =
+      'to team-lead inbox - #68a3a8cc blocked by dependencies and needs a follow-up investigation before merge final-token';
+    const alicePreview = basePreviewsByMember.get('alice')!;
+    mockedPreviewsByMember = new Map(basePreviewsByMember);
+    mockedPreviewsByMember.set('alice', {
+      ...alicePreview,
+      items: [
+        {
+          id: 'preview-long',
+          kind: 'tool_use' as const,
+          provider: 'claude_transcript' as const,
+          timestamp: '2026-04-03T00:00:00.000Z',
+          title: 'Send message',
+          preview: longPreview,
+          tone: 'warning' as const,
+        },
+      ],
+      overflowCount: 0,
+    });
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <GraphMemberLogPreviewHud
+          teamName="alpha-team"
+          nodes={[node]}
+          getLogWorldRect={() => ({
+            left: 40,
+            top: 80,
+            right: 300,
+            bottom: 372,
+            width: 260,
+            height: 292,
+          })}
+          getCameraZoom={() => 1}
+          worldToScreen={(x, y) => ({ x, y })}
+          getViewportSize={() => ({ width: 1200, height: 800 })}
+          focusNodeIds={null}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    const row = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Send message')
+    );
+
+    expect(row?.textContent).toContain('...');
+    expect(row?.textContent).not.toContain('final-token');
+    expect(row?.getAttribute('title')).toContain('final-token');
 
     act(() => {
       root.unmount();

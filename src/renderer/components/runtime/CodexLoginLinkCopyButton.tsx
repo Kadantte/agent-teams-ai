@@ -8,11 +8,11 @@ interface CodexLoginLinkCopyButtonProps {
   size?: 'xs' | 'sm';
 }
 
-export function CodexLoginLinkCopyButton({
+export const CodexLoginLinkCopyButton = ({
   authUrl,
   disabled = false,
   size = 'sm',
-}: CodexLoginLinkCopyButtonProps): React.JSX.Element | null {
+}: CodexLoginLinkCopyButtonProps): React.JSX.Element | null => {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   useEffect(() => {
@@ -53,4 +53,4 @@ export function CodexLoginLinkCopyButton({
       {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy link'}
     </button>
   );
-}
+};

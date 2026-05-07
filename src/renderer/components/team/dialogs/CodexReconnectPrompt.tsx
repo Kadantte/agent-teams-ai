@@ -59,7 +59,7 @@ export function shouldShowCodexReconnectPrompt({
   );
 }
 
-export function CodexReconnectPrompt({
+export const CodexReconnectPrompt = ({
   authUrl,
   reconnectBusy,
   onReconnect,
@@ -67,7 +67,7 @@ export function CodexReconnectPrompt({
   authUrl: string | null;
   reconnectBusy: boolean;
   onReconnect: () => void;
-}): React.JSX.Element {
+}): React.JSX.Element => {
   return (
     <div
       className="mt-2 rounded-md border px-2.5 py-2"
@@ -98,4 +98,4 @@ export function CodexReconnectPrompt({
       </div>
     </div>
   );
-}
+};

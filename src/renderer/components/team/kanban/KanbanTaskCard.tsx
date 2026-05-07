@@ -13,11 +13,11 @@ import {
   buildTaskChangeRequestOptions,
   canDisplayTaskChangesForOptions,
 } from '@renderer/utils/taskChangeRequest';
+import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
   isTeamTaskFinishedForDependency,
   isTeamTaskNeedsFixActionable,
 } from '@shared/utils/teamTaskState';
-import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
   ArrowLeftFromLine,
   ArrowRightFromLine,

@@ -95,12 +95,12 @@ export class TeamTranscriptSourceLocator {
 
     const generation = this.getGeneration(teamName);
     const cached = this.contextCache.get(teamName);
-    if (cached && cached.generation === generation && cached.expiresAt > Date.now()) {
+    if (cached?.generation === generation && cached.expiresAt > Date.now()) {
       return cached.value;
     }
 
     const inFlight = this.contextInFlight.get(teamName);
-    if (inFlight && inFlight.generation === generation) {
+    if (inFlight?.generation === generation) {
       return await inFlight.promise;
     }
 

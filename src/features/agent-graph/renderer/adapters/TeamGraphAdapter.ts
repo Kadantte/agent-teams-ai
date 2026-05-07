@@ -25,11 +25,11 @@ import {
 } from '@shared/utils/idleNotificationSemantics';
 import { isInboxNoiseMessage } from '@shared/utils/inboxNoise';
 import { isLeadMember } from '@shared/utils/leadDetection';
+import { buildOrderedVisibleTeamGraphOwnerIds } from '@shared/utils/teamGraphDefaultLayout';
 import {
   isTeamTaskActivelyWorked,
   isTeamTaskNeedsFixActionable,
 } from '@shared/utils/teamTaskState';
-import { buildOrderedVisibleTeamGraphOwnerIds } from '@shared/utils/teamGraphDefaultLayout';
 
 import {
   buildInlineActivityEntries,

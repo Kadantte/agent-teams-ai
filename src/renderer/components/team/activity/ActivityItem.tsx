@@ -63,8 +63,8 @@ import {
   getKnownSlashCommand,
   parseStandaloneSlashCommand,
 } from '@shared/utils/slashCommands';
-import { isTaskStallRemediationMessage } from '@shared/utils/teamAutomationMessages';
 import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
+import { isTaskStallRemediationMessage } from '@shared/utils/teamAutomationMessages';
 import {
   AlertTriangle,
   Check,

@@ -7,11 +7,11 @@ import { useStore } from '@renderer/store';
 import { selectResolvedMembersForTeamName } from '@renderer/store/slices/teamSlice';
 import { buildMemberColorMap, REVIEW_STATE_DISPLAY } from '@renderer/utils/memberHelpers';
 import { linkifyTaskIdsInMarkdown } from '@renderer/utils/taskReferenceUtils';
+import { formatTaskDisplayLabel, taskMatchesRef } from '@shared/utils/taskIdentity';
 import {
   getTeamTaskWorkflowColumn,
   isTeamTaskNeedsFixActionable,
 } from '@shared/utils/teamTaskState';
-import { formatTaskDisplayLabel, taskMatchesRef } from '@shared/utils/taskIdentity';
 import { useShallow } from 'zustand/react/shallow';
 
 import type { TeamTaskWithKanban } from '@shared/types';

@@ -779,7 +779,7 @@ function isQueuedOpenCodeLaunch(
 
   // Only label lanes as queued before runtime evidence appears. Once the
   // backend has any liveness signal, show the exact runtime state instead.
-  return runtimeEntry == null || runtimeEntry.livenessKind == null;
+  return runtimeEntry?.livenessKind == null;
 }
 
 function hasElapsedSinceIso(

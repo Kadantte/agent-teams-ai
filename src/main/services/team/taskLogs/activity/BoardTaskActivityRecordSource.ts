@@ -44,12 +44,12 @@ export class BoardTaskActivityRecordSource {
   private async getTaskActivityIndex(teamName: string): Promise<TaskActivityIndex> {
     const generation = this.getTranscriptDiscoveryGeneration(teamName);
     const cached = this.indexCache.get(teamName);
-    if (cached && cached.generation === generation && cached.expiresAt > Date.now()) {
+    if (cached?.generation === generation && cached.expiresAt > Date.now()) {
       return cached;
     }
 
     const existingInFlight = this.indexInFlight.get(teamName);
-    if (existingInFlight && existingInFlight.generation === generation) {
+    if (existingInFlight?.generation === generation) {
       return await existingInFlight.promise;
     }
 

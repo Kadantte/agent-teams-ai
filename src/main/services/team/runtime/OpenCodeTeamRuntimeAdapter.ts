@@ -596,7 +596,7 @@ function normalizeAppManagedBootstrapCandidate(
     runtimeSessionId?: string;
   }
 ): OpenCodeAppManagedBootstrapCandidate | undefined {
-  if (!value || value.schemaVersion !== 1 || value.source !== 'app_managed_bootstrap') {
+  if (value?.schemaVersion !== 1 || value.source !== 'app_managed_bootstrap') {
     return undefined;
   }
   if (

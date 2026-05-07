@@ -91,8 +91,8 @@ import { CronScheduleInput } from '../schedule/CronScheduleInput';
 
 import { AdvancedCliSection } from './AdvancedCliSection';
 import { AnthropicFastModeSelector } from './AnthropicFastModeSelector';
-import { CodexReconnectPrompt, shouldShowCodexReconnectPrompt } from './CodexReconnectPrompt';
 import { CodexFastModeSelector } from './CodexFastModeSelector';
+import { CodexReconnectPrompt, shouldShowCodexReconnectPrompt } from './CodexReconnectPrompt';
 import { EffortLevelSelector } from './EffortLevelSelector';
 import { resolveLaunchDialogPrefill } from './launchDialogPrefill';
 import {
@@ -100,8 +100,8 @@ import {
   resolveProviderScopedMemberModel,
 } from './memberModelScope';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
-import { ProjectPathSelector } from './ProjectPathSelector';
 import { loadProjectPathProjects, type ProjectPathProject } from './projectPathProjects';
+import { ProjectPathSelector } from './ProjectPathSelector';
 import { buildProviderPrepareModelCacheKey } from './providerPrepareCacheKey';
 import {
   buildReusableProviderPrepareModelResults,

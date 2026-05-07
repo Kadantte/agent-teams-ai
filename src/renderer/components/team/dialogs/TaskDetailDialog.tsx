@@ -55,15 +55,15 @@ import {
 import { linkifyTaskIdsInMarkdown, parseTaskLinkHref } from '@renderer/utils/taskReferenceUtils';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import {
-  getTeamTaskWorkflowColumn,
-  isTeamTaskFinishedForDependency,
-  isTeamTaskNeedsFixActionable,
-} from '@shared/utils/teamTaskState';
-import {
   deriveTaskDisplayId,
   formatTaskDisplayLabel,
   taskMatchesRef,
 } from '@shared/utils/taskIdentity';
+import {
+  getTeamTaskWorkflowColumn,
+  isTeamTaskFinishedForDependency,
+  isTeamTaskNeedsFixActionable,
+} from '@shared/utils/teamTaskState';
 import { format, formatDistanceToNow } from 'date-fns';
 import {
   AlignLeft,

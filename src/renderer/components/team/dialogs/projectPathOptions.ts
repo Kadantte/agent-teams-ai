@@ -1,8 +1,8 @@
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { isEphemeralProjectPath } from '@shared/utils/ephemeralProjectPath';
 
-import type { ComboboxOption } from '@renderer/components/ui/combobox';
 import type { DashboardRecentProjectSource } from '@features/recent-projects/contracts';
+import type { ComboboxOption } from '@renderer/components/ui/combobox';
 import type { Project } from '@shared/types';
 
 export interface ProjectPathProject extends Project {

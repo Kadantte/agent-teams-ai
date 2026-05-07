@@ -1,11 +1,12 @@
+import {
+  OPEN_CODE_APP_MANAGED_BOOTSTRAP_CONTRACT_VERSION,
+  OPEN_CODE_TASK_LEDGER_EVIDENCE_CONTRACT_VERSION,
+} from './OpenCodeBridgeCommandContract';
+
 import type {
   OpenCodeBridgeCommandName,
   OpenCodeBridgeHandshake,
   OpenCodeBridgePeerIdentity,
-} from './OpenCodeBridgeCommandContract';
-import {
-  OPEN_CODE_APP_MANAGED_BOOTSTRAP_CONTRACT_VERSION,
-  OPEN_CODE_TASK_LEDGER_EVIDENCE_CONTRACT_VERSION,
 } from './OpenCodeBridgeCommandContract';
 import type {
   OpenCodeBridgeCommandExecutor,

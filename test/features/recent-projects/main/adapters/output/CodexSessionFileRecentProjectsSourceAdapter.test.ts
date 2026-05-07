@@ -28,6 +28,7 @@ async function writeRollout(
     source?: string;
     timestamp?: string;
     branch?: string;
+    metadataPadding?: string;
   },
   mtime: Date
 ): Promise<void> {
@@ -43,6 +44,9 @@ async function writeRollout(
         cwd: payload.cwd,
         source: payload.source ?? 'cli',
         git: payload.branch ? { branch: payload.branch } : undefined,
+        ...(payload.metadataPadding
+          ? { base_instructions: { text: payload.metadataPadding } }
+          : {}),
       },
     })}\n${'x'.repeat(1024)}`,
     'utf8'
@@ -108,6 +112,40 @@ describe('CodexSessionFileRecentProjectsSourceAdapter', () => {
       degraded: false,
     });
     expect(identityResolver.resolve).toHaveBeenCalledWith('/Users/test/projects/alpha');
+  });
+
+  it('loads Codex projects from large session metadata lines without parsing the full line', async () => {
+    const codexHome = path.join(tempDir, '.codex');
+    const logger = createLogger();
+    const identityResolver = {
+      resolve: vi.fn().mockResolvedValue(null),
+    } as unknown as RecentProjectIdentityResolver;
+    const updatedAt = new Date('2026-04-14T12:00:00.000Z');
+    await writeRollout(
+      path.join(codexHome, 'sessions', '2026', '04', '14', 'rollout-large.jsonl'),
+      {
+        cwd: '/Users/test/projects/large',
+        metadataPadding: 'x'.repeat(160_000),
+      },
+      updatedAt
+    );
+
+    const adapter = new CodexSessionFileRecentProjectsSourceAdapter({
+      getActiveContext: () => ({ type: 'local', id: 'local-1' }) as never,
+      getLocalContext: () => ({ type: 'local', id: 'local-1' }) as never,
+      identityResolver,
+      logger,
+      codexHome,
+    });
+
+    const result = await adapter.list();
+
+    expect(result.candidates).toEqual([
+      expect.objectContaining({
+        primaryPath: '/Users/test/projects/large',
+        sourceKind: 'codex',
+      }),
+    ]);
   });
 
   it('deduplicates sessions by cwd and keeps the newest activity', async () => {

@@ -1,8 +1,6 @@
-import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import readline from 'node:readline';
 
 import { normalizeIdentityPath } from '@features/recent-projects/main/infrastructure/identity/normalizeIdentityPath';
 import { isEphemeralProjectPath } from '@shared/utils/ephemeralProjectPath';
@@ -18,8 +16,9 @@ import type { ServiceContext } from '@main/services';
 
 const CODEX_SESSION_FILE_PARSE_LIMIT = 500;
 const CODEX_PROJECT_CANDIDATE_LIMIT = 40;
-const CODEX_SESSION_FILE_SOURCE_TIMEOUT_MS = 3_500;
+const CODEX_SESSION_FILE_SOURCE_TIMEOUT_MS = 8_000;
 const CODEX_SESSION_FILE_READ_BATCH_SIZE = 24;
+const CODEX_SESSION_METADATA_READ_LIMIT_BYTES = 128 * 1024;
 
 interface CodexSessionFileEntry {
   filePath: string;
@@ -45,6 +44,14 @@ interface CodexSessionProjectSnapshot {
   branchName?: string;
 }
 
+interface CodexSessionMetadata {
+  cwd: string;
+  source: unknown;
+  payloadTimestamp?: unknown;
+  eventTimestamp?: unknown;
+  branchName?: string;
+}
+
 function isInteractiveSource(source: unknown): boolean {
   return source === 'vscode' || source === 'cli';
 }
@@ -66,23 +73,47 @@ function getCodexHome(codexHome?: string): string {
   return codexHome?.trim() || process.env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex');
 }
 
-async function readFirstLine(filePath: string): Promise<string | null> {
-  const stream = createReadStream(filePath, { encoding: 'utf8' });
-  const lines = readline.createInterface({
-    input: stream,
-    crlfDelay: Infinity,
-  });
+function extractJsonStringField(input: string, fieldName: string): string {
+  const pattern = new RegExp(`"${fieldName}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`);
+  const match = pattern.exec(input);
+  if (!match) return '';
 
   try {
-    for await (const line of lines) {
-      return line;
-    }
-    return null;
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return '';
+  }
+}
+
+function parseSessionMetadataPrefix(firstLine: string): CodexSessionMetadata | null {
+  const cwd = extractJsonStringField(firstLine, 'cwd').trim();
+  const source = extractJsonStringField(firstLine, 'source').trim();
+  if (!cwd || !source) return null;
+
+  return {
+    cwd,
+    source,
+    payloadTimestamp: extractJsonStringField(firstLine, 'timestamp'),
+    eventTimestamp: extractJsonStringField(firstLine, 'timestamp'),
+    branchName: extractJsonStringField(firstLine, 'branch').trim() || undefined,
+  };
+}
+
+async function readFirstLine(filePath: string): Promise<string | null> {
+  let handle: fs.FileHandle | null = null;
+  try {
+    handle = await fs.open(filePath, 'r');
+    const buffer = Buffer.allocUnsafe(CODEX_SESSION_METADATA_READ_LIMIT_BYTES);
+    const result = await handle.read(buffer, 0, buffer.length, 0);
+    if (result.bytesRead <= 0) return null;
+
+    const newlineIndex = buffer.subarray(0, result.bytesRead).indexOf(0x0a);
+    const endIndex = newlineIndex >= 0 ? newlineIndex : result.bytesRead;
+    return buffer.toString('utf8', 0, endIndex);
   } catch {
     return null;
   } finally {
-    lines.close();
-    stream.destroy();
+    await handle?.close().catch(() => undefined);
   }
 }
 
@@ -130,28 +161,36 @@ function parseSessionSnapshot(
   firstLine: string,
   mtimeMs: number
 ): CodexSessionProjectSnapshot | null {
-  let event: CodexSessionEvent;
+  let metadata: CodexSessionMetadata | null = null;
   try {
-    event = JSON.parse(firstLine) as CodexSessionEvent;
+    const event = JSON.parse(firstLine) as CodexSessionEvent;
+    metadata = {
+      cwd: typeof event.payload?.cwd === 'string' ? event.payload.cwd.trim() : '',
+      source: event.payload?.source,
+      payloadTimestamp: event.payload?.timestamp,
+      eventTimestamp: event.timestamp,
+      branchName:
+        typeof event.payload?.git?.branch === 'string' ? event.payload.git.branch.trim() : '',
+    };
   } catch {
-    return null;
+    metadata = parseSessionMetadataPrefix(firstLine);
   }
 
-  const cwd = typeof event.payload?.cwd === 'string' ? event.payload.cwd.trim() : '';
-  if (!cwd || !isInteractiveSource(event.payload?.source) || isEphemeralProjectPath(cwd)) {
+  const cwd = metadata?.cwd ?? '';
+  if (!metadata || !cwd || !isInteractiveSource(metadata.source) || isEphemeralProjectPath(cwd)) {
     return null;
   }
 
   const timestamp =
-    mtimeMs || normalizeTimestamp(event.payload?.timestamp) || normalizeTimestamp(event.timestamp);
-  const branchName =
-    typeof event.payload?.git?.branch === 'string' ? event.payload.git.branch.trim() : '';
+    mtimeMs ||
+    normalizeTimestamp(metadata.payloadTimestamp) ||
+    normalizeTimestamp(metadata.eventTimestamp);
 
   return {
     cwd,
-    source: event.payload?.source,
+    source: metadata.source,
     lastActivityAt: timestamp,
-    branchName: branchName || undefined,
+    branchName: metadata.branchName || undefined,
   };
 }
 

@@ -1,7 +1,8 @@
+import { decideMemberWorkSyncStatus } from '../domain';
+
 import { appendMemberWorkSyncAudit, reasonToAuditEvent } from './MemberWorkSyncAudit';
 import { decideMemberWorkSyncNudgeActivation } from './MemberWorkSyncNudgeActivationPolicy';
 import { finalizeMemberWorkSyncAgenda } from './MemberWorkSyncReconciler';
-import { decideMemberWorkSyncStatus } from '../domain';
 
 import type { MemberWorkSyncOutboxItem, MemberWorkSyncStatus } from '../../contracts';
 import type { MemberWorkSyncAuditEventName, MemberWorkSyncUseCaseDeps } from './ports';

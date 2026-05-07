@@ -1133,8 +1133,8 @@ export interface RetryFailedOpenCodeSecondaryLanesResult {
   attempted: string[];
   confirmed: string[];
   pending: string[];
-  failed: Array<{ memberName: string; error: string }>;
-  skipped: Array<{ memberName: string; reason: string }>;
+  failed: { memberName: string; error: string }[];
+  skipped: { memberName: string; reason: string }[];
 }
 
 export type MemberSpawnLivenessSource = 'heartbeat' | 'process';

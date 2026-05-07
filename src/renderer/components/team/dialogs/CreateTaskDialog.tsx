@@ -28,8 +28,8 @@ import {
   extractTaskRefsFromText,
   stripEncodedTaskReferenceMetadata,
 } from '@renderer/utils/taskReferenceUtils';
-import { getTeamTaskWorkflowColumn } from '@shared/utils/teamTaskState';
 import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
+import { getTeamTaskWorkflowColumn } from '@shared/utils/teamTaskState';
 import { AlertTriangle, ChevronDown, ChevronRight, Search } from 'lucide-react';
 
 import type { InlineChip } from '@renderer/types/inlineChip';

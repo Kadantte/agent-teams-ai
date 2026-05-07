@@ -85,12 +85,6 @@ import { migrateProviderBackendId } from '@shared/utils/providerBackend';
 import { isDefaultProviderModelSelection } from '@shared/utils/providerModelSelection';
 import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
-  getTeamTaskWorkflowColumn,
-  isTeamTaskActivelyWorked,
-  isTeamTaskDeleted,
-  isTeamTaskNeedsFixActionable,
-} from '@shared/utils/teamTaskState';
-import {
   isTeamInternalControlMessageText,
   stripExactInternalControlEchoPrefix,
 } from '@shared/utils/teamInternalControlMessages';
@@ -104,6 +98,12 @@ import {
   inferTeamProviderIdFromModel,
   normalizeOptionalTeamProviderId,
 } from '@shared/utils/teamProvider';
+import {
+  getTeamTaskWorkflowColumn,
+  isTeamTaskActivelyWorked,
+  isTeamTaskDeleted,
+  isTeamTaskNeedsFixActionable,
+} from '@shared/utils/teamTaskState';
 import {
   extractToolPreview,
   extractToolResultPreview,
@@ -170,10 +170,6 @@ import {
   type OpenCodePromptDeliveryStatus,
 } from './opencode/delivery/OpenCodePromptDeliveryLedger';
 import {
-  isActionRequiredOpenCodeRuntimeDeliveryReason,
-  selectOpenCodeRuntimeDeliveryReason,
-} from './opencode/delivery/OpenCodeRuntimeDeliveryDiagnostics';
-import {
   decideOpenCodePromptDeliveryRepair,
   type OpenCodePromptDeliveryHardFailureKind,
 } from './opencode/delivery/OpenCodePromptDeliveryRepairPolicy';
@@ -189,6 +185,10 @@ import {
   OPENCODE_PROMPT_WATCHDOG_PER_TEAM_CONCURRENCY,
   type OpenCodeVisibleReplyProof,
 } from './opencode/delivery/OpenCodePromptDeliveryWatchdog';
+import {
+  isActionRequiredOpenCodeRuntimeDeliveryReason,
+  selectOpenCodeRuntimeDeliveryReason,
+} from './opencode/delivery/OpenCodeRuntimeDeliveryDiagnostics';
 import { createRuntimeDeliveryJournalStore } from './opencode/delivery/RuntimeDeliveryJournal';
 import {
   type RuntimeDeliveryDestinationPort,

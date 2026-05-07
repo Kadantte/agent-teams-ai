@@ -7,11 +7,11 @@ import {
   TASK_STATUS_LABELS,
   TASK_STATUS_STYLES,
 } from '@renderer/utils/memberHelpers';
+import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
   getTeamTaskWorkflowColumn,
   isTeamTaskNeedsFixActionable,
 } from '@shared/utils/teamTaskState';
-import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 
 import type { TeamTaskWithKanban } from '@shared/types';
 

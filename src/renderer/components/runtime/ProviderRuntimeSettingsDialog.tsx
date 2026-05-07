@@ -20,8 +20,9 @@ import {
   resolveCodexRuntimeSelection,
 } from '@features/codex-runtime-profile/renderer';
 import { RuntimeProviderManagementPanel } from '@features/runtime-provider-management/renderer';
-import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import { api } from '@renderer/api';
+import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
+import { CodexLoginLinkCopyButton } from '@renderer/components/runtime/CodexLoginLinkCopyButton';
 import { Button } from '@renderer/components/ui/button';
 import {
   Dialog,
@@ -40,7 +41,6 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
-import { CodexLoginLinkCopyButton } from '@renderer/components/runtime/CodexLoginLinkCopyButton';
 import { useStore } from '@renderer/store';
 import { AlertTriangle, Key, Link2, Loader2, Trash2 } from 'lucide-react';
 

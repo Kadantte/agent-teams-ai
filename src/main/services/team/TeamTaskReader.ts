@@ -468,10 +468,7 @@ export class TeamTaskReader {
       return cloned;
     }
 
-    if (
-      TeamTaskReader.allTasksInFlight &&
-      TeamTaskReader.allTasksInFlight.generationAtStart === TeamTaskReader.allTasksGeneration
-    ) {
+    if (TeamTaskReader.allTasksInFlight?.generationAtStart === TeamTaskReader.allTasksGeneration) {
       const waitedAt = Date.now();
       const tasks = await TeamTaskReader.allTasksInFlight.promise;
       const cloned = cloneTasks(tasks);

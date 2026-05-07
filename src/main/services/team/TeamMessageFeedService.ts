@@ -451,7 +451,7 @@ export class TeamMessageFeedService {
 
     const existingRequest = this.inFlightByTeam.get(teamName);
     const generationAtStart = this.getGeneration(teamName);
-    if (existingRequest && existingRequest.generationAtStart === generationAtStart) {
+    if (existingRequest?.generationAtStart === generationAtStart) {
       return existingRequest.promise;
     }
 

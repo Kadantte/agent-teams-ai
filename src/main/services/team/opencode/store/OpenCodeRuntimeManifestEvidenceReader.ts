@@ -15,13 +15,13 @@ import {
   validateRuntimeStoreManifest,
 } from './RuntimeStoreManifest';
 
+import type { RuntimeStoreManifestEvidence } from '../bridge/OpenCodeBridgeCommandContract';
+import type { RuntimeStoreManifestReader } from '../bridge/OpenCodeStateChangingBridgeCommandService';
+import type { RuntimeStoreManifestEntryState } from './RuntimeStoreManifest';
 import type {
   OpenCodeAppManagedBootstrapCandidate,
   OpenCodeBootstrapEvidenceSource,
 } from '@shared/types/team';
-import type { RuntimeStoreManifestEvidence } from '../bridge/OpenCodeBridgeCommandContract';
-import type { RuntimeStoreManifestReader } from '../bridge/OpenCodeStateChangingBridgeCommandService';
-import type { RuntimeStoreManifestEntryState } from './RuntimeStoreManifest';
 
 const logger = createLogger('OpenCodeRuntimeManifestEvidenceReader');
 

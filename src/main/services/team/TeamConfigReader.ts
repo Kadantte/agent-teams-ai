@@ -356,10 +356,7 @@ export class TeamConfigReader {
     }
 
     const existingRequest = TeamConfigReader.listTeamsInFlightByBasePath.get(teamsBasePath);
-    if (
-      existingRequest &&
-      existingRequest.generationAtStart === TeamConfigReader.listTeamsGeneration
-    ) {
+    if (existingRequest?.generationAtStart === TeamConfigReader.listTeamsGeneration) {
       return cloneTeamSummaries(await existingRequest.promise);
     }
 

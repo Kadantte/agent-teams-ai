@@ -88,15 +88,15 @@ import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 
 import { AdvancedCliSection } from './AdvancedCliSection';
 import { AnthropicFastModeSelector } from './AnthropicFastModeSelector';
-import { CodexReconnectPrompt, shouldShowCodexReconnectPrompt } from './CodexReconnectPrompt';
 import { CodexFastModeSelector } from './CodexFastModeSelector';
+import { CodexReconnectPrompt, shouldShowCodexReconnectPrompt } from './CodexReconnectPrompt';
 import {
   clearInheritedMemberModelsUnavailableForProvider,
   resolveProviderScopedMemberModel,
 } from './memberModelScope';
 import { OptionalSettingsSection } from './OptionalSettingsSection';
-import { ProjectPathSelector } from './ProjectPathSelector';
 import { loadProjectPathProjects, type ProjectPathProject } from './projectPathProjects';
+import { ProjectPathSelector } from './ProjectPathSelector';
 import { buildProviderPrepareModelCacheKey } from './providerPrepareCacheKey';
 import {
   buildReusableProviderPrepareModelResults,

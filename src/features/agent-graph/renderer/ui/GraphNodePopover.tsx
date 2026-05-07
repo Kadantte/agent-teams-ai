@@ -13,8 +13,8 @@ import {
   buildMemberAvatarMap,
   buildMemberLaunchPresentation,
 } from '@renderer/utils/memberHelpers';
-import { isDisplayableCurrentTask } from '@renderer/utils/teamTaskDisplayState';
 import { buildTeamProvisioningPresentation } from '@renderer/utils/teamProvisioningPresentation';
+import { isDisplayableCurrentTask } from '@renderer/utils/teamTaskDisplayState';
 import { ExternalLink, Loader2, MessageSquare, Plus, User } from 'lucide-react';
 
 import { isTaskInReviewCycle, resolveTaskReviewer } from '../../core/domain/taskGraphSemantics';

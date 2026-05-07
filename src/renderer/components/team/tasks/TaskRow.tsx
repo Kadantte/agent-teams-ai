@@ -5,11 +5,11 @@ import {
   REVIEW_STATE_DISPLAY,
   TASK_STATUS_LABELS,
 } from '@renderer/utils/memberHelpers';
+import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import {
   getTeamTaskWorkflowColumn,
   isTeamTaskNeedsFixActionable,
 } from '@shared/utils/teamTaskState';
-import { deriveTaskDisplayId, formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 
 import type { TeamTaskWithKanban } from '@shared/types';
 

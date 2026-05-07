@@ -53,6 +53,48 @@ describe('memberLogPreviewExtractor', () => {
     expect(result.items[1]?.preview).toBe('older answer');
   });
 
+  it('marks assistant runtime error text as error tone without flagging normal text', () => {
+    const result = extractMemberLogPreviewItems({
+      provider: 'claude_transcript',
+      maxItems: 3,
+      textLimit: 160,
+      messages: [
+        message({
+          uuid: 'api-error',
+          timestamp: '2026-04-01T10:00:00.000Z',
+          content: [
+            {
+              type: 'text',
+              text: `API Error: 429
+
+{"type":"error","error":{"type":"api_error","message":"Codex API error: 429"}}`,
+            },
+          ],
+        }),
+        message({
+          uuid: 'normal-error-word',
+          timestamp: '2026-04-01T10:01:00.000Z',
+          content: [{ type: 'text', text: 'Reviewed the error handling path and it is covered.' }],
+        }),
+      ],
+    });
+
+    expect(result.items[0]).toMatchObject({
+      kind: 'text',
+      title: 'Assistant',
+      preview: 'Reviewed the error handling path and it is covered.',
+      tone: 'neutral',
+    });
+    expect(result.items[1]).toMatchObject({
+      kind: 'text',
+      title: 'API error',
+      tone: 'error',
+    });
+    expect(result.items[1]?.preview).toContain('API Error: 429');
+    expect(result.items[1]?.preview).toContain('Codex API error: 429');
+    expect(result.items[1]?.preview).not.toContain('{"type"');
+  });
+
   it('extracts readable inbound task and comment messages without agent-only blocks', () => {
     const result = extractMemberLogPreviewItems({
       provider: 'opencode_runtime',
@@ -291,6 +333,96 @@ Reply to this comment using MCP tool task_add_comment.
       title: 'Send message',
       preview: 'to team-lead: #abc done',
     });
+  });
+
+  it('accepts OpenCode canonical callId/toolName tool calls defensively', () => {
+    const result = extractMemberLogPreviewItems({
+      provider: 'opencode_runtime',
+      maxItems: 3,
+      textLimit: 160,
+      messages: [
+        message({
+          uuid: 'canonical-call',
+          timestamp: '2026-04-01T10:00:00.000Z',
+          content: '',
+          toolCalls: [
+            {
+              callId: 'fc-canonical',
+              toolName: 'agent-teams_task_add_comment',
+              input: {
+                taskId: '1dcfefd2-e505-4b1f-af22-0227c0aa551a',
+                text: 'Confirmed',
+              },
+            },
+          ],
+        }),
+        message({
+          uuid: 'canonical-result',
+          type: 'user',
+          role: 'user',
+          timestamp: '2026-04-01T10:01:00.000Z',
+          content: '',
+          toolResults: [
+            {
+              toolUseId: 'fc-canonical',
+              content: JSON.stringify({
+                taskId: '1dcfefd2-e505-4b1f-af22-0227c0aa551a',
+                comment: {
+                  id: 'comment-1',
+                  author: 'jack',
+                  text: 'Confirmed',
+                },
+              }),
+              isError: false,
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      kind: 'tool_result',
+      title: 'Comment added',
+      preview: 'Comment by jack on #1dcfefd2: Confirmed',
+    });
+  });
+
+  it('marks nested structured error tool results without requiring is_error', () => {
+    const result = extractMemberLogPreviewItems({
+      provider: 'claude_transcript',
+      maxItems: 3,
+      textLimit: 160,
+      messages: [
+        message({
+          uuid: 'api-result',
+          type: 'user',
+          role: 'user',
+          timestamp: '2026-04-01T10:01:00.000Z',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'tool-api',
+              content: JSON.stringify({
+                type: 'error',
+                error: {
+                  type: 'api_error',
+                  message: 'Codex API error: 429',
+                },
+              }),
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(result.items[0]).toMatchObject({
+      kind: 'tool_result',
+      title: 'Tool error',
+      preview: 'Codex API error: 429',
+      tone: 'error',
+    });
+    expect(result.items[0]?.preview).not.toContain('{"type"');
   });
 
   it('formats orphan comment result payloads without guessing add vs read semantics', () => {

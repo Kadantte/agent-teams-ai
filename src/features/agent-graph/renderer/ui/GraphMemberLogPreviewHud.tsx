@@ -28,6 +28,8 @@ import type {
 const LOG_PREVIEW_FALLBACK_WIDTH = 260;
 const LOG_PREVIEW_FALLBACK_HEIGHT = 292;
 const NEW_LOG_HIGHLIGHT_MS = 1_000;
+const COMPACT_ROW_TEXT_LIMIT = 118;
+const COMPACT_ROW_MIN_PREVIEW_LIMIT = 48;
 
 interface StableRectLike {
   left: number;
@@ -153,6 +155,18 @@ function compactPreviewText(item: MemberLogPreviewItem, displayTitle: string): s
     return 'No input';
   }
   return item.sourceLabel || 'Log event';
+}
+
+function truncateCompactRowPreview(
+  preview: string,
+  displayTitle: string,
+  relativeTime: string
+): string {
+  const normalized = preview.replace(/\s+/g, ' ').trim();
+  const metaLength = displayTitle.length + relativeTime.length + (relativeTime ? 2 : 1);
+  const previewLimit = Math.max(COMPACT_ROW_MIN_PREVIEW_LIMIT, COMPACT_ROW_TEXT_LIMIT - metaLength);
+  if (normalized.length <= previewLimit) return normalized;
+  return `${normalized.slice(0, Math.max(0, previewLimit - 3)).trimEnd()}...`;
 }
 
 function setShellHidden(shell: HTMLDivElement): void {
@@ -405,42 +419,53 @@ export const GraphMemberLogPreviewHud = ({
     (memberName: string, item: MemberLogPreviewItem) => {
       const relativeTime = formatRelativeTime(item.timestamp);
       const displayTitle = compactDisplayTitle(item);
-      const previewText = compactPreviewText(item, displayTitle);
+      const fullPreviewText = compactPreviewText(item, displayTitle);
+      const previewText = truncateCompactRowPreview(fullPreviewText, displayTitle, relativeTime);
       const titleText = relativeTime
-        ? `${displayTitle} ${relativeTime} ${previewText}`
-        : `${displayTitle} ${previewText}`;
+        ? `${displayTitle} ${relativeTime} ${fullPreviewText}`
+        : `${displayTitle} ${fullPreviewText}`;
       const isHighlighted = highlightedItemIds.has(item.id);
+      const isError = item.tone === 'error';
+      const rowStateClassName = isHighlighted
+        ? isError
+          ? 'border-rose-300/75 bg-rose-950/35 shadow-[0_0_0_1px_rgba(253,164,175,0.30),0_0_18px_rgba(244,63,94,0.22)] hover:border-rose-300/80 hover:bg-rose-950/45'
+          : 'border-sky-300/70 bg-[rgba(14,34,62,0.74)] shadow-[0_0_0_1px_rgba(125,211,252,0.30),0_0_18px_rgba(56,189,248,0.22)] hover:border-sky-300/75 hover:bg-[rgba(14,34,62,0.82)]'
+        : isError
+          ? 'border-rose-400/35 bg-rose-950/20 hover:border-rose-300/50 hover:bg-rose-950/30'
+          : 'border-white/10 bg-[rgba(8,14,28,0.52)] hover:border-white/20 hover:bg-[rgba(12,20,40,0.78)]';
+      const iconClassName = isError
+        ? 'float-left mr-2 inline-flex size-5 shrink-0 items-center justify-center rounded bg-rose-500/10'
+        : 'float-left mr-2 inline-flex size-5 shrink-0 items-center justify-center rounded bg-white/5';
+      const headerClassName = 'inline-flex h-5 items-center align-top';
+      const titleClassName = isError
+        ? 'text-[11px] font-medium leading-[18px] text-rose-100'
+        : 'text-[11px] font-medium leading-[18px] text-slate-200';
+      const timeClassName = isError
+        ? 'ml-1 text-[9px] font-normal leading-[18px] text-rose-300/70'
+        : 'ml-1 text-[9px] font-normal leading-[18px] text-slate-500';
+      const previewClassName = isError
+        ? 'ml-1 break-words align-top text-[10px] leading-[18px] text-rose-100/85'
+        : 'ml-1 break-words align-top text-[10px] leading-[18px] text-slate-300/85';
 
       return (
         <button
           key={item.id}
           type="button"
           className={[
-            'block h-16 min-h-16 w-full min-w-0 overflow-hidden rounded-md border px-2.5 py-1.5 text-left text-slate-400 transition-[border-color,background-color,box-shadow] duration-500 hover:border-white/20 hover:bg-[rgba(12,20,40,0.78)]',
-            isHighlighted
-              ? 'border-sky-300/70 bg-[rgba(14,34,62,0.74)] shadow-[0_0_0_1px_rgba(125,211,252,0.30),0_0_18px_rgba(56,189,248,0.22)]'
-              : 'border-white/10 bg-[rgba(8,14,28,0.52)]',
+            'block h-[68px] min-h-[68px] w-full min-w-0 overflow-hidden rounded-md border px-2.5 py-1.5 text-left text-slate-400 transition-[border-color,background-color,box-shadow] duration-500',
+            rowStateClassName,
           ].join(' ')}
           title={titleText}
           onClick={() => openLogs(memberName)}
         >
-          <span
-            className="float-left mr-2 inline-flex size-5 shrink-0 items-center justify-center rounded bg-white/5 align-top"
-            aria-hidden="true"
-          >
+          <span className={iconClassName} aria-hidden="true">
             {itemIcon(item)}
           </span>
-          <span className="align-top text-[11px] font-medium leading-4 text-slate-200">
-            {displayTitle}
+          <span className={headerClassName}>
+            <span className={titleClassName}>{displayTitle}</span>
+            {relativeTime ? <span className={timeClassName}>{relativeTime}</span> : null}
           </span>
-          {relativeTime ? (
-            <span className="ml-1 align-top text-[9px] font-normal leading-4 text-slate-500">
-              {relativeTime}
-            </span>
-          ) : null}
-          <span className="ml-1 break-words align-top text-[10px] leading-4 text-slate-300/85">
-            {previewText}
-          </span>
+          <span className={previewClassName}>{previewText}</span>
         </button>
       );
     },
@@ -494,7 +519,7 @@ export const GraphMemberLogPreviewHud = ({
                 ) : (
                   <button
                     type="button"
-                    className="flex h-16 min-h-16 items-center rounded-md border border-dashed border-white/10 bg-[rgba(8,14,28,0.28)] px-3 text-left text-[11px] text-slate-400/60"
+                    className="flex h-[68px] min-h-[68px] items-center rounded-md border border-dashed border-white/10 bg-[rgba(8,14,28,0.28)] px-3 text-left text-[11px] text-slate-400/60"
                     onClick={() => openLogs(memberName)}
                   >
                     {resolveEmptyText(preview, loading, error)}

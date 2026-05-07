@@ -66,11 +66,11 @@ function getSourceLabel(source: DashboardRecentProjectSource): string {
   }
 }
 
-function ProjectSourceBadge({
+const ProjectSourceBadge = ({
   source,
 }: {
   source?: DashboardRecentProjectSource;
-}): React.JSX.Element | null {
+}): React.JSX.Element | null => {
   if (!source) {
     return null;
   }
@@ -92,7 +92,7 @@ function ProjectSourceBadge({
       ))}
     </span>
   );
-}
+};
 
 export type CwdMode = 'project' | 'custom';
 
