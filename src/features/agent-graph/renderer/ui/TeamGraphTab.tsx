@@ -224,7 +224,7 @@ export const TeamGraphTab = ({
                   worldToScreen={extraHudProps.worldToScreen}
                   getViewportSize={getViewportSize}
                   focusNodeIds={focusNodeIds}
-                  enabled={isActive && (filters?.showActivity ?? true)}
+                  enabled={isActive && (filters?.showLogs ?? true)}
                   onOpenMemberProfile={dispatchOpenProfile}
                 />
               </>

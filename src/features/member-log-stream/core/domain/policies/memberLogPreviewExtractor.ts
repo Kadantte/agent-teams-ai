@@ -240,8 +240,10 @@ function recordFromUnknownWithWrapper(
     return null;
   }
 
-  if (typeof record.content === 'string') {
-    const nested = recordFromUnknownWithWrapper(record.content);
+  const nestedContent =
+    typeof record.content === 'string' ? record.content : textFromTextContentBlocks(record.content);
+  if (nestedContent) {
+    const nested = recordFromUnknownWithWrapper(nestedContent);
     if (nested) {
       return nested;
     }
@@ -984,7 +986,10 @@ function previewUnknownValue(
     if (textBlocks) {
       return previewUnknownValue(textBlocks, limit, priorityKeys, toolContext);
     }
-    const knownCollection = formatTaskCollectionArrayPayload(value, toolContext?.canonicalName);
+    const knownCollection = formatTaskCollectionArrayPayload(
+      value,
+      toolContext?.canonicalName ?? null
+    );
     if (knownCollection) {
       return { ...truncatePreview(knownCollection.text, limit), title: knownCollection.title };
     }
@@ -999,6 +1004,13 @@ function previewUnknownValue(
     const known = formatKnownPayloadPreview(record, toolContext);
     if (known) {
       return { ...truncatePreview(known.text, limit), title: known.title };
+    }
+    for (const key of ['content', 'message', 'result'] as const) {
+      if (!(key in record)) continue;
+      const nested = previewUnknownValue(record[key], limit, priorityKeys, toolContext);
+      if (nested.preview.trim().length > 0) {
+        return nested;
+      }
     }
     const priority = findPriorityValue(record, priorityKeys);
     if (priority) {

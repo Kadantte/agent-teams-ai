@@ -124,6 +124,7 @@ export function GraphView({
   const [interactionLocked, setInteractionLocked] = useState(false);
   const [filters, setFilters] = useState<GraphFilterState>({
     showActivity: config?.showActivity ?? true,
+    showLogs: config?.showLogs ?? config?.showActivity ?? true,
     showTasks: config?.showTasks ?? true,
     showProcesses: config?.showProcesses ?? true,
     showEdges: true,
@@ -138,10 +139,10 @@ export function GraphView({
         ? {
             ...data.layout,
             showActivity: filters.showActivity,
-            showLogs: filters.showActivity,
+            showLogs: filters.showLogs,
           }
         : data.layout,
-    [data.layout, filters.showActivity]
+    [data.layout, filters.showActivity, filters.showLogs]
   );
 
   // Ref mirror of selectedNodeId — read by RAF loop to avoid recreating animate on selection change

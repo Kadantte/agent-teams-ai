@@ -164,6 +164,8 @@ describe('GraphMemberLogPreviewHud', () => {
     expect(row).not.toBeUndefined();
     expect(row?.querySelector('.float-left')).not.toBeNull();
     expect(row?.querySelector('.line-clamp-3')).toBeNull();
+    expect(row?.className).toContain('h-16');
+    expect(row?.querySelector('span.text-slate-200')?.className).toContain('leading-4');
     expect(row?.textContent).toContain('pnpm test');
 
     const errorRow = Array.from(host.querySelectorAll('button')).find((button) =>

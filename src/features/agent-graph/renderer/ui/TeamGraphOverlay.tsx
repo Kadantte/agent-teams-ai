@@ -203,7 +203,7 @@ export const TeamGraphOverlay = ({
                 worldToScreen={extraHudProps.worldToScreen}
                 getViewportSize={getViewportSize}
                 focusNodeIds={focusNodeIds}
-                enabled={filters?.showActivity ?? true}
+                enabled={filters?.showLogs ?? true}
                 onOpenMemberProfile={onOpenMemberProfile}
               />
             </>

@@ -513,7 +513,7 @@ describe('GraphView pan interactions', () => {
     expect(onOwnerSlotDrop).not.toHaveBeenCalled();
   });
 
-  it('passes activity filter state to renderHud and updates it through graph controls', async () => {
+  it('passes activity and log filter state to renderHud and updates it through graph controls', async () => {
     const renderHud = vi.fn(() => null);
 
     await act(async () => {
@@ -539,6 +539,7 @@ describe('GraphView pan interactions', () => {
       expect.objectContaining({
         filters: expect.objectContaining({
           showActivity: false,
+          showLogs: false,
         }),
       })
     );
@@ -546,6 +547,7 @@ describe('GraphView pan interactions', () => {
     const controlsProps = hoisted.graphControlsProps as {
       filters: {
         showActivity: boolean;
+        showLogs: boolean;
         showTasks: boolean;
         showProcesses: boolean;
         showEdges: boolean;
@@ -553,6 +555,7 @@ describe('GraphView pan interactions', () => {
       };
       onFiltersChange: (filters: {
         showActivity: boolean;
+        showLogs: boolean;
         showTasks: boolean;
         showProcesses: boolean;
         showEdges: boolean;
@@ -573,6 +576,25 @@ describe('GraphView pan interactions', () => {
       expect.objectContaining({
         filters: expect.objectContaining({
           showActivity: true,
+          showLogs: false,
+        }),
+      })
+    );
+
+    await act(async () => {
+      controlsProps?.onFiltersChange({
+        ...controlsProps!.filters,
+        showActivity: true,
+        showLogs: true,
+      });
+      await Promise.resolve();
+    });
+
+    expect(renderHud).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        filters: expect.objectContaining({
+          showActivity: true,
+          showLogs: true,
         }),
       })
     );

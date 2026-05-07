@@ -9,6 +9,7 @@ import {
   Activity,
   Columns3,
   Expand,
+  FileText,
   Settings2,
   Eye,
   EyeOff,
@@ -29,6 +30,7 @@ import type { GraphLayoutMode } from '../ports/types';
 
 export interface GraphFilterState {
   showActivity: boolean;
+  showLogs: boolean;
   showTasks: boolean;
   showProcesses: boolean;
   showEdges: boolean;
@@ -267,6 +269,13 @@ export function GraphControls({
                   onClick={() => toggle('showActivity')}
                   icon={<Activity size={13} />}
                   label="Activity"
+                  block
+                />
+                <ToolbarToggle
+                  active={filters.showLogs}
+                  onClick={() => toggle('showLogs')}
+                  icon={<FileText size={13} />}
+                  label="Logs"
                   block
                 />
                 <ToolbarToggle

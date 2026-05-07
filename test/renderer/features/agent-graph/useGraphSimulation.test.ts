@@ -408,6 +408,49 @@ describe('stable slot layout planner', () => {
     expect(frame?.kanbanBandRect.left).toBe(frame?.boardBandRect.left);
   });
 
+  it('keeps the reserved log column when logs are shown and activity is hidden', () => {
+    const teamName = 'team-logs-without-activity-slot';
+    const lead = createLead(teamName);
+    const alice = createMember(teamName, 'agent-alice', 'alice');
+    const layout: GraphLayoutPort = {
+      version: 'stable-slots-v1',
+      showActivity: false,
+      showLogs: true,
+      ownerOrder: [alice.id],
+      slotAssignments: {
+        [alice.id]: { ringIndex: 0, sectorIndex: 1 },
+      },
+    };
+
+    const [footprint] = computeOwnerFootprints([lead, alice], layout);
+    const snapshot = buildStableSlotLayoutSnapshot({
+      teamName,
+      nodes: [lead, alice],
+      layout,
+    });
+    const frame = snapshot?.memberSlotFrames[0];
+
+    expect(footprint).toBeDefined();
+    expect(footprint?.activityColumnWidth).toBe(0);
+    expect(footprint?.activityColumnHeight).toBe(0);
+    expect(footprint?.logColumnWidth).toBe(260);
+    expect(footprint?.logColumnHeight).toBe(
+      ACTIVITY_LANE.headerHeight +
+        ACTIVITY_LANE.maxVisibleItems * ACTIVITY_LANE.rowHeight +
+        ACTIVITY_LANE.overflowHeight
+    );
+    expect(snapshot).not.toBeNull();
+    expect(validateStableSlotLayout(snapshot!)).toEqual({ valid: true });
+    expect(frame?.activityColumnRect.width).toBe(0);
+    expect(frame?.activityColumnRect.height).toBe(0);
+    expect(frame?.logColumnRect.width).toBe(260);
+    expect(frame?.logColumnRect.height).toBe(
+      ACTIVITY_LANE.headerHeight +
+        ACTIVITY_LANE.maxVisibleItems * ACTIVITY_LANE.rowHeight +
+        ACTIVITY_LANE.overflowHeight
+    );
+  });
+
   it('keeps diagonal ring-zero sectors closer than the legacy coarse central box radius', () => {
     const teamName = 'team-directional-radius';
     const lead = createLead(teamName);

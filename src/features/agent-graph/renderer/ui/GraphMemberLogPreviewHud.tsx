@@ -416,7 +416,7 @@ export const GraphMemberLogPreviewHud = ({
           key={item.id}
           type="button"
           className={[
-            'block h-14 min-h-14 w-full min-w-0 overflow-hidden rounded-md border px-2.5 py-1.5 text-left text-slate-400 transition-[border-color,background-color,box-shadow] duration-500 hover:border-white/20 hover:bg-[rgba(12,20,40,0.78)]',
+            'block h-16 min-h-16 w-full min-w-0 overflow-hidden rounded-md border px-2.5 py-1.5 text-left text-slate-400 transition-[border-color,background-color,box-shadow] duration-500 hover:border-white/20 hover:bg-[rgba(12,20,40,0.78)]',
             isHighlighted
               ? 'border-sky-300/70 bg-[rgba(14,34,62,0.74)] shadow-[0_0_0_1px_rgba(125,211,252,0.30),0_0_18px_rgba(56,189,248,0.22)]'
               : 'border-white/10 bg-[rgba(8,14,28,0.52)]',
@@ -430,15 +430,15 @@ export const GraphMemberLogPreviewHud = ({
           >
             {itemIcon(item)}
           </span>
-          <span className="align-top text-[11px] font-medium leading-5 text-slate-200">
+          <span className="align-top text-[11px] font-medium leading-4 text-slate-200">
             {displayTitle}
           </span>
           {relativeTime ? (
-            <span className="ml-1 align-top text-[9px] font-normal leading-5 text-slate-500">
+            <span className="ml-1 align-top text-[9px] font-normal leading-4 text-slate-500">
               {relativeTime}
             </span>
           ) : null}
-          <span className="ml-1 break-words align-top text-[10px] leading-5 text-slate-300/85">
+          <span className="ml-1 break-words align-top text-[10px] leading-4 text-slate-300/85">
             {previewText}
           </span>
         </button>
@@ -494,7 +494,7 @@ export const GraphMemberLogPreviewHud = ({
                 ) : (
                   <button
                     type="button"
-                    className="flex h-14 min-h-14 items-center rounded-md border border-dashed border-white/10 bg-[rgba(8,14,28,0.28)] px-3 text-left text-[11px] text-slate-400/60"
+                    className="flex h-16 min-h-16 items-center rounded-md border border-dashed border-white/10 bg-[rgba(8,14,28,0.28)] px-3 text-left text-[11px] text-slate-400/60"
                     onClick={() => openLogs(memberName)}
                   >
                     {resolveEmptyText(preview, loading, error)}

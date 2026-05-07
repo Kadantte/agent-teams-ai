@@ -33,6 +33,7 @@ export interface GraphConfigPort {
 
   // ─── Filters (show/hide node kinds) ────────────────────────────────────
   showActivity?: boolean;
+  showLogs?: boolean;
   showTasks?: boolean;
   showProcesses?: boolean;
   showCompletedTasks?: boolean;

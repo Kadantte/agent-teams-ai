@@ -37,6 +37,7 @@ describe('GraphControls', () => {
         React.createElement(GraphControls, {
           filters: {
             showActivity: true,
+            showLogs: true,
             showTasks: true,
             showProcesses: true,
             showEdges: true,
@@ -90,6 +91,7 @@ describe('GraphControls', () => {
         React.createElement(GraphControls, {
           filters: {
             showActivity: true,
+            showLogs: true,
             showTasks: true,
             showProcesses: true,
             showEdges: true,
@@ -126,6 +128,7 @@ describe('GraphControls', () => {
         React.createElement(GraphControls, {
           filters: {
             showActivity: true,
+            showLogs: true,
             showTasks: true,
             showProcesses: true,
             showEdges: true,
@@ -161,6 +164,67 @@ describe('GraphControls', () => {
 
     expect(onFiltersChange).toHaveBeenCalledWith({
       showActivity: false,
+      showLogs: true,
+      showTasks: true,
+      showProcesses: true,
+      showEdges: true,
+      paused: false,
+    });
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('toggles log preview visibility from graph settings independently of activity', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const onFiltersChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        React.createElement(GraphControls, {
+          filters: {
+            showActivity: true,
+            showLogs: true,
+            showTasks: true,
+            showProcesses: true,
+            showEdges: true,
+            paused: false,
+          },
+          onFiltersChange,
+          onZoomIn: vi.fn(),
+          onZoomOut: vi.fn(),
+          onZoomToFit: vi.fn(),
+          teamName: 'demo-team',
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const settingsButton = host.querySelector('button[aria-label="Graph settings"]');
+    expect(settingsButton).not.toBeNull();
+
+    await act(async () => {
+      settingsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const logsButton = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Logs')
+    );
+    expect(logsButton).not.toBeUndefined();
+
+    await act(async () => {
+      logsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(onFiltersChange).toHaveBeenCalledWith({
+      showActivity: true,
+      showLogs: false,
       showTasks: true,
       showProcesses: true,
       showEdges: true,
@@ -184,6 +248,7 @@ describe('GraphControls', () => {
         React.createElement(GraphControls, {
           filters: {
             showActivity: true,
+            showLogs: true,
             showTasks: true,
             showProcesses: true,
             showEdges: true,

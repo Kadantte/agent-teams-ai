@@ -645,6 +645,62 @@ Reply to this comment using MCP tool task_add_comment.
     expect(result.items[0]?.preview).not.toContain('[{');
   });
 
+  it('formats sourceToolUseID result wrappers with text-block content arrays', () => {
+    const result = extractMemberLogPreviewItems({
+      provider: 'claude_transcript',
+      maxItems: 3,
+      textLimit: 220,
+      messages: [
+        message({
+          uuid: 'list-call',
+          timestamp: '2026-04-01T10:00:00.000Z',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tool-list',
+              name: 'mcp__agent-teams__task_list',
+              input: { teamName: 'demo' },
+            },
+          ],
+        }),
+        message({
+          uuid: 'source-result',
+          type: 'user',
+          role: 'user',
+          timestamp: '2026-04-01T10:01:00.000Z',
+          content: '',
+          sourceToolUseID: 'tool-list',
+          toolUseResult: {
+            toolUseId: 'tool-list',
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify([
+                  {
+                    id: '4499fbe5-1fee-42a5-8584-851fbfc4adcd',
+                    displayId: '4499fbe5',
+                    subject: 'Fix contact form route',
+                    status: 'todo',
+                    owner: 'bob',
+                  },
+                ]),
+              },
+            ],
+            isError: false,
+          },
+        }),
+      ],
+    });
+
+    expect(result.items[0]).toMatchObject({
+      kind: 'tool_result',
+      title: 'Task list',
+      preview: '1 task - #4499fbe5: Fix contact form route, status todo, owner bob',
+    });
+    expect(result.items[0]?.preview).not.toContain('toolUseId');
+    expect(result.items[0]?.preview).not.toContain('content');
+  });
+
   it('formats common board and cross-team tool previews compactly', () => {
     const result = extractMemberLogPreviewItems({
       provider: 'opencode_runtime',
