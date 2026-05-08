@@ -66,19 +66,36 @@ function normalizeActorKey(value) {
   return typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : '';
 }
 
+function closeTimestampForInterval(interval, timestamp) {
+  const startedAtMs = Date.parse(interval.startedAt);
+  const timestampMs = Date.parse(timestamp);
+  if (Number.isFinite(startedAtMs) && Number.isFinite(timestampMs) && timestampMs < startedAtMs) {
+    return interval.startedAt;
+  }
+  return timestamp;
+}
+
 function openReviewInterval(task, reviewer, timestamp = new Date().toISOString()) {
   const reviewerName = typeof reviewer === 'string' && reviewer.trim() ? reviewer.trim() : '';
   if (!reviewerName) return false;
   const reviewerKey = normalizeActorKey(reviewerName);
   const intervals = Array.isArray(task.reviewIntervals) ? [...task.reviewIntervals] : [];
-  const hasOpenForReviewer = intervals.some(
-    (interval) => !interval.completedAt && normalizeActorKey(interval.reviewer) === reviewerKey
-  );
+  let changed = false;
+  let hasOpenForReviewer = false;
+  const nextIntervals = intervals.map((interval) => {
+    if (interval.completedAt) return interval;
+    if (normalizeActorKey(interval.reviewer) === reviewerKey) {
+      hasOpenForReviewer = true;
+      return interval;
+    }
+    changed = true;
+    return { ...interval, completedAt: closeTimestampForInterval(interval, timestamp) };
+  });
   if (hasOpenForReviewer) {
-    task.reviewIntervals = intervals;
-    return false;
+    task.reviewIntervals = nextIntervals;
+    return changed;
   }
-  task.reviewIntervals = [...intervals, { reviewer: reviewerName, startedAt: timestamp }];
+  task.reviewIntervals = [...nextIntervals, { reviewer: reviewerName, startedAt: timestamp }];
   return true;
 }
 
@@ -88,7 +105,7 @@ function closeReviewIntervals(task, timestamp = new Date().toISOString()) {
   task.reviewIntervals = task.reviewIntervals.map((interval) => {
     if (interval.completedAt) return interval;
     changed = true;
-    return { ...interval, completedAt: timestamp };
+    return { ...interval, completedAt: closeTimestampForInterval(interval, timestamp) };
   });
   return changed;
 }
@@ -315,7 +332,7 @@ function startReview(context, taskId, flags = {}) {
         });
       } else {
         tasks.updateTask(context, task.id, (t) => {
-          openReviewInterval(t, existingActor);
+          openReviewInterval(t, existingActor, latestReviewEvent.timestamp);
           return t;
         });
       }

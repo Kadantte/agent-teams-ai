@@ -1,7 +1,9 @@
-import { getTasksBasePath } from '@main/utils/pathDecoder';
+import { getTasksBasePath, getTeamsBasePath } from '@main/utils/pathDecoder';
+import { createLogger } from '@shared/utils/logger';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { withFileLockSync } from './fileLock';
 import { TeamTaskReader } from './TeamTaskReader';
 
 import type {
@@ -20,6 +22,7 @@ type MutableTeamTask = TeamTask & {
 };
 
 const CRASH_REPAIR_GRACE_MS = 5_000;
+const logger = createLogger('Service:TeamTaskActivityIntervalService');
 
 function normalizeMemberName(value: string | null | undefined): string {
   return typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : '';
@@ -143,6 +146,23 @@ export class TeamTaskActivityIntervalService {
     teamName: string,
     mutate: (task: MutableTeamTask) => boolean
   ): ActivityIntervalResult {
+    const lockScope = path.join(getTeamsBasePath(), teamName, 'board-state');
+    try {
+      return withFileLockSync(lockScope, () => this.mutateTeamTasksUnlocked(teamName, mutate));
+    } catch (error) {
+      logger.warn(
+        `[${teamName}] Failed to update task activity intervals: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return { changedTasks: 0 };
+    }
+  }
+
+  private mutateTeamTasksUnlocked(
+    teamName: string,
+    mutate: (task: MutableTeamTask) => boolean
+  ): ActivityIntervalResult {
     const tasksDir = path.join(getTasksBasePath(), teamName);
     let entries: string[];
     try {
@@ -216,6 +236,7 @@ export class TeamTaskActivityIntervalService {
 
       const activeReviewer = getActiveReviewActor(task);
       if (
+        task.status === 'completed' &&
         activeReviewer &&
         normalizeMemberName(activeReviewer) === memberKey &&
         !hasOpenReviewInterval(task, activeReviewer)
