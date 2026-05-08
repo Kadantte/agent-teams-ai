@@ -1374,7 +1374,7 @@ export const TaskDetailDialog = ({
                 headerExtra={
                   showTaskImplementationDuration ? (
                     <span
-                      className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--color-text-muted)]"
+                      className="inline-flex items-center gap-1 rounded-md bg-[var(--color-bg-secondary)] px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--color-text-muted)]"
                       title="Implementation time from persisted work intervals"
                     >
                       <Clock size={10} />
@@ -1384,7 +1384,12 @@ export const TaskDetailDialog = ({
                 }
                 defaultOpen={false}
               >
-                <WorkflowTimeline events={currentTask.historyEvents} memberColorMap={colorMap} />
+                <WorkflowTimeline
+                  events={currentTask.historyEvents}
+                  memberColorMap={colorMap}
+                  implementationDurationTask={currentTask}
+                  nowMs={taskDurationNowMs}
+                />
               </CollapsibleTeamSection>
             ) : null}
 

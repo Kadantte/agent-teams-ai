@@ -30796,6 +30796,8 @@ export class TeamProvisioningService {
       );
     }
 
+    const configMembers = this.extractTeammateSpecsFromConfig(teamName, configRaw);
+
     try {
       const allInboxNames = Array.from(
         new Set(
@@ -30820,7 +30822,14 @@ export class TeamProvisioningService {
           return !inboxNameSetLower.has(match[1].toLowerCase());
         });
       if (inboxNames.length > 0) {
-        const configMembers = this.extractTeammateSpecsFromConfig(teamName, configRaw);
+        const configHasOpenCodeMember = configMembers.some((member) => {
+          const providerId = normalizeOptionalTeamProviderId(member.providerId);
+          const model = typeof member.model === 'string' ? member.model.trim() : '';
+          return providerId === 'opencode' || inferTeamProviderIdFromModel(model) === 'opencode';
+        });
+        if (configHasOpenCodeMember) {
+          return this.buildConfigLaunchCompatibilityReport(teamName, configMembers, leadProviderId);
+        }
         const configMembersByName = new Map(
           configMembers.map((member) => [member.name.toLowerCase(), member] as const)
         );
@@ -30878,54 +30887,8 @@ export class TeamProvisioningService {
       );
     }
 
-    const configMembers = this.extractTeammateSpecsFromConfig(teamName, configRaw);
     if (configMembers.length > 0) {
-      if (this.hasIncompleteOpenCodeLaunchCompatibilityMember(configMembers)) {
-        return {
-          level: 'unsafe',
-          rosterSource: 'config',
-          members: [],
-          warnings: [],
-          blockers: [
-            `[${teamName}] ${getMixedLaunchFallbackRecoveryError()} Fallback source: config.`,
-          ],
-        };
-      }
-      const lanePlan = this.runtimeLaneCoordinator.planProvisioningMembers({
-        leadProviderId,
-        members: configMembers,
-        hasOpenCodeRuntimeAdapter: true,
-      });
-      if (this.runtimeLaneCoordinator.isMixedSideLanePlan(lanePlan)) {
-        const sideLanesHaveExplicitProviderModels = lanePlan.sideLanes.every(
-          (lane) =>
-            normalizeOptionalTeamProviderId(lane.member.providerId) === 'opencode' &&
-            typeof lane.member.model === 'string' &&
-            lane.member.model.trim().length > 0
-        );
-        if (!sideLanesHaveExplicitProviderModels) {
-          return {
-            level: 'unsafe',
-            rosterSource: 'config',
-            members: [],
-            warnings: [],
-            blockers: [
-              `[${teamName}] ${getMixedLaunchFallbackRecoveryError()} Fallback source: config.`,
-            ],
-          };
-        }
-      }
-      return {
-        level: 'repairable',
-        rosterSource: 'config',
-        members: configMembers,
-        warnings: [
-          'members.meta.json and inboxes are empty; launch fell back to config.json members. ' +
-            'Run a fresh team bootstrap to persist stable member metadata.',
-        ],
-        blockers: [],
-        repairAction: 'materialize-members-meta',
-      };
+      return this.buildConfigLaunchCompatibilityReport(teamName, configMembers, leadProviderId);
     }
 
     let configParseFailed = false;
@@ -30946,6 +30909,59 @@ export class TeamProvisioningService {
           ]
         : [],
       blockers: [],
+    };
+  }
+
+  private buildConfigLaunchCompatibilityReport(
+    teamName: string,
+    configMembers: TeamCreateRequest['members'],
+    leadProviderId?: TeamProviderId
+  ): TeamLaunchCompatibilityReport {
+    if (this.hasIncompleteOpenCodeLaunchCompatibilityMember(configMembers)) {
+      return {
+        level: 'unsafe',
+        rosterSource: 'config',
+        members: [],
+        warnings: [],
+        blockers: [
+          `[${teamName}] ${getMixedLaunchFallbackRecoveryError()} Fallback source: config.`,
+        ],
+      };
+    }
+    const lanePlan = this.runtimeLaneCoordinator.planProvisioningMembers({
+      leadProviderId,
+      members: configMembers,
+      hasOpenCodeRuntimeAdapter: true,
+    });
+    if (this.runtimeLaneCoordinator.isMixedSideLanePlan(lanePlan)) {
+      const sideLanesHaveExplicitProviderModels = lanePlan.sideLanes.every(
+        (lane) =>
+          normalizeOptionalTeamProviderId(lane.member.providerId) === 'opencode' &&
+          typeof lane.member.model === 'string' &&
+          lane.member.model.trim().length > 0
+      );
+      if (!sideLanesHaveExplicitProviderModels) {
+        return {
+          level: 'unsafe',
+          rosterSource: 'config',
+          members: [],
+          warnings: [],
+          blockers: [
+            `[${teamName}] ${getMixedLaunchFallbackRecoveryError()} Fallback source: config.`,
+          ],
+        };
+      }
+    }
+    return {
+      level: 'repairable',
+      rosterSource: 'config',
+      members: configMembers,
+      warnings: [
+        'members.meta.json and inboxes are empty; launch fell back to config.json members. ' +
+          'Run a fresh team bootstrap to persist stable member metadata.',
+      ],
+      blockers: [],
+      repairAction: 'materialize-members-meta',
     };
   }
 

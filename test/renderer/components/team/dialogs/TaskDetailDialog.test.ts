@@ -80,7 +80,9 @@ vi.mock('@renderer/components/team/CollapsibleTeamSection', () => ({
           ? React.createElement('span', { 'data-testid': `section-extra-${title}` }, headerExtra)
           : null
       ),
-      title === 'Changes' && open ? React.createElement('div', null, children) : null
+      (title === 'Changes' || title === 'Workflow History') && open
+        ? React.createElement('div', null, children)
+        : null
     );
   },
 }));
@@ -561,7 +563,7 @@ describe('TaskDetailDialog changes summary loading', () => {
     });
   });
 
-  it('shows total implementation time in the workflow history header', async () => {
+  it('shows total and per-transition implementation time in workflow history', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-20T10:07:30.000Z'));
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -578,9 +580,33 @@ describe('TaskDetailDialog changes summary loading', () => {
       historyEvents: [
         {
           id: 'event-created',
-          timestamp: '2026-04-20T10:00:00.000Z',
+          timestamp: '2026-04-20T09:59:00.000Z',
           type: 'task_created',
-          status: 'in_progress',
+          status: 'pending',
+          actor: 'lead',
+        },
+        {
+          id: 'event-started',
+          timestamp: '2026-04-20T10:00:00.000Z',
+          type: 'status_changed',
+          from: 'pending',
+          to: 'in_progress',
+          actor: 'lead',
+        },
+        {
+          id: 'event-completed',
+          timestamp: '2026-04-20T10:02:31.000Z',
+          type: 'status_changed',
+          from: 'in_progress',
+          to: 'completed',
+          actor: 'alice',
+        },
+        {
+          id: 'event-restarted',
+          timestamp: '2026-04-20T10:05:00.000Z',
+          type: 'status_changed',
+          from: 'completed',
+          to: 'in_progress',
           actor: 'lead',
         },
       ],
@@ -606,6 +632,21 @@ describe('TaskDetailDialog changes summary loading', () => {
 
     expect(host.textContent).toContain('Workflow History');
     expect(host.textContent).toContain('Work time 5m 00s');
+
+    const workflowButton = [...host.querySelectorAll('button')].find(
+      (button) => button.textContent?.startsWith('Workflow History') === true
+    );
+    if (!workflowButton) {
+      throw new Error('Workflow History section button not found');
+    }
+
+    await act(async () => {
+      workflowButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('2m 30s');
+    expect(host.textContent).toContain('running 2m 30s');
 
     await act(async () => {
       root.unmount();

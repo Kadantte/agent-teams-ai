@@ -153,7 +153,7 @@ describe('TeamProvisioningService (launch roster discovery)', () => {
     ]);
   });
 
-  it('rejects inbox fallback when it would reconstruct a mixed OpenCode side lane without members.meta truth', async () => {
+  it('rejects inbox fallback when OpenCode metadata is incomplete without members.meta truth', async () => {
     const svc = new TeamProvisioningService(
       {} as never,
       { listInboxNames: vi.fn(async () => ['tom']) } as never,
@@ -163,7 +163,7 @@ describe('TeamProvisioningService (launch roster discovery)', () => {
 
     const configRaw = JSON.stringify({
       name: 't',
-      members: [{ name: 'tom', role: 'developer', provider: 'opencode', model: 'minimax-m2.5-free' }],
+      members: [{ name: 'tom', role: 'developer', provider: 'opencode' }],
     });
 
     await expect(
@@ -193,6 +193,27 @@ describe('TeamProvisioningService (launch roster discovery)', () => {
     expect(report.members).toMatchObject([
       { name: 'tom', role: 'developer', providerId: 'opencode', model: 'minimax-m2.5-free' },
     ]);
+  });
+
+  it('prefers complete mixed OpenCode config over inbox names when members.meta is missing', async () => {
+    const svc = new TeamProvisioningService(
+      {} as never,
+      { listInboxNames: vi.fn(async () => ['tom']) } as never,
+      { getMembers: vi.fn(async () => []) } as never,
+      {} as never
+    );
+
+    const configRaw = JSON.stringify({
+      name: 't',
+      members: [{ name: 'tom', role: 'developer', provider: 'opencode', model: 'minimax-m2.5-free' }],
+    });
+
+    const report = await (svc as unknown as any).probeLaunchCompatibility('t', configRaw, 'codex');
+    expect(report).toMatchObject({
+      level: 'repairable',
+      rosterSource: 'config',
+      repairAction: 'materialize-members-meta',
+    });
   });
 
   it('rejects mixed OpenCode config fallback when the side lane is missing an explicit model', async () => {

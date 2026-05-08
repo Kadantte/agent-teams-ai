@@ -6,17 +6,38 @@ import {
   TASK_STATUS_LABELS,
   TASK_STATUS_STYLES,
 } from '@renderer/utils/memberHelpers';
+import {
+  calculateTaskImplementationEventDuration,
+  formatTaskImplementationDuration,
+} from '@shared/utils/taskWorkDuration';
 import { ArrowRight, Eye, MessageSquareX, Plus, ShieldCheck, UserRound } from 'lucide-react';
 
-import type { TaskHistoryEvent, TeamReviewState, TeamTaskStatus } from '@shared/types';
+import type {
+  TaskHistoryEvent,
+  TaskWorkInterval,
+  TeamReviewState,
+  TeamTaskStatus,
+} from '@shared/types';
 
 interface WorkflowTimelineProps {
   events: TaskHistoryEvent[];
   /** Map of member name → color name for colored badges. */
   memberColorMap?: Map<string, string>;
+  implementationDurationTask?: {
+    status?: string | null;
+    workIntervals?: TaskWorkInterval[] | null;
+  } | null;
+  nowMs?: number;
 }
 
-export const WorkflowTimeline = ({ events, memberColorMap }: WorkflowTimelineProps) => {
+export const WorkflowTimeline = ({
+  events,
+  memberColorMap,
+  implementationDurationTask,
+  nowMs,
+}: WorkflowTimelineProps): React.JSX.Element => {
+  const implementationNowMs = nowMs ?? 0;
+
   if (events.length === 0) {
     return (
       <div className="px-3 py-2 text-xs text-[var(--color-text-muted)]">
@@ -30,6 +51,13 @@ export const WorkflowTimeline = ({ events, memberColorMap }: WorkflowTimelinePro
       {events.map((event, idx) => {
         const isLast = idx === events.length - 1;
         const time = formatTime(event.timestamp);
+        const implementationDuration = implementationDurationTask
+          ? calculateTaskImplementationEventDuration(
+              implementationDurationTask,
+              event,
+              implementationNowMs
+            )
+          : null;
 
         return (
           <div key={event.id} className="flex">
@@ -47,6 +75,19 @@ export const WorkflowTimeline = ({ events, memberColorMap }: WorkflowTimelinePro
                     {time}
                   </span>
                   <EventContent event={event} memberColorMap={memberColorMap} />
+                  {implementationDuration ? (
+                    <span
+                      className="shrink-0 rounded bg-[var(--color-bg-secondary)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]"
+                      title={
+                        implementationDuration.running
+                          ? 'Current implementation interval'
+                          : 'Implementation interval ended at this transition'
+                      }
+                    >
+                      {implementationDuration.running ? 'running ' : ''}
+                      {formatTaskImplementationDuration(implementationDuration.elapsedMs)}
+                    </span>
+                  ) : null}
                   {shouldShowTrailingActor(event) && event.actor ? (
                     <span className="ml-auto shrink-0">
                       <MemberBadge
@@ -78,7 +119,7 @@ const EventContent = ({
 }: {
   event: TaskHistoryEvent;
   memberColorMap?: Map<string, string>;
-}) => {
+}): React.JSX.Element => {
   switch (event.type) {
     case 'task_created':
       return (
@@ -196,7 +237,7 @@ const EventContent = ({
   }
 };
 
-const StatusBadge = ({ status }: { status: TeamTaskStatus }) => {
+const StatusBadge = ({ status }: { status: TeamTaskStatus }): React.JSX.Element => {
   const style = TASK_STATUS_STYLES[status] ?? TASK_STATUS_STYLES.pending;
   const label = TASK_STATUS_LABELS[status] ?? status;
   return (
@@ -208,7 +249,7 @@ const StatusBadge = ({ status }: { status: TeamTaskStatus }) => {
   );
 };
 
-const ReviewStateBadge = ({ state }: { state: TeamReviewState }) => {
+const ReviewStateBadge = ({ state }: { state: TeamReviewState }): React.JSX.Element | null => {
   if (state === 'none') return null;
   const display = REVIEW_STATE_DISPLAY[state];
   if (!display) return null;

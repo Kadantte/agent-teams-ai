@@ -3,6 +3,15 @@ interface TaskWorkDurationIntervalLike {
   completedAt?: string | null;
 }
 
+interface TaskWorkDurationEventLike {
+  id?: string | null;
+  type?: string | null;
+  timestamp?: string | null;
+  status?: string | null;
+  from?: string | null;
+  to?: string | null;
+}
+
 export interface TaskWorkDurationLike<
   TInterval extends TaskWorkDurationIntervalLike = TaskWorkDurationIntervalLike,
 > {
@@ -16,10 +25,21 @@ export interface TaskImplementationDuration {
   countedIntervalCount: number;
 }
 
+export interface TaskImplementationEventDuration {
+  elapsedMs: number;
+  running: boolean;
+}
+
+const TIMELINE_EVENT_MATCH_TOLERANCE_MS = 5_000;
+
 function parseIsoMs(value: string | null | undefined): number {
   if (!value) return 0;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isNearTime(leftMs: number, rightMs: number): boolean {
+  return Math.abs(leftMs - rightMs) <= TIMELINE_EVENT_MATCH_TOLERANCE_MS;
 }
 
 export function calculateTaskImplementationDuration<TInterval extends TaskWorkDurationIntervalLike>(
@@ -67,6 +87,55 @@ export function calculateTaskImplementationDuration<TInterval extends TaskWorkDu
 
   const elapsedMs = merged.reduce((sum, window) => sum + (window.endMs - window.startMs), 0);
   return { elapsedMs, hasRunningInterval, countedIntervalCount: windows.length };
+}
+
+export function calculateTaskImplementationEventDuration<
+  TInterval extends TaskWorkDurationIntervalLike,
+>(
+  task: TaskWorkDurationLike<TInterval> | null | undefined,
+  event: TaskWorkDurationEventLike,
+  nowMs = Date.now()
+): TaskImplementationEventDuration | null {
+  if (!task || !Array.isArray(task.workIntervals)) return null;
+
+  const eventMs = parseIsoMs(event.timestamp);
+  if (eventMs <= 0) return null;
+
+  if (
+    event.type === 'status_changed' &&
+    event.from === 'in_progress' &&
+    event.to !== 'in_progress'
+  ) {
+    let closest: { elapsedMs: number; distanceMs: number } | null = null;
+
+    for (const interval of task.workIntervals) {
+      const startMs = parseIsoMs(interval?.startedAt);
+      const endMs = parseIsoMs(interval?.completedAt);
+      if (startMs <= 0 || endMs <= startMs || !isNearTime(endMs, eventMs)) continue;
+
+      const distanceMs = Math.abs(endMs - eventMs);
+      if (!closest || distanceMs < closest.distanceMs) {
+        closest = { elapsedMs: endMs - startMs, distanceMs };
+      }
+    }
+
+    return closest ? { elapsedMs: closest.elapsedMs, running: false } : null;
+  }
+
+  const startsInProgress =
+    (event.type === 'task_created' && event.status === 'in_progress') ||
+    (event.type === 'status_changed' && event.to === 'in_progress');
+
+  if (!startsInProgress || task.status !== 'in_progress') return null;
+
+  for (const interval of task.workIntervals) {
+    const startMs = parseIsoMs(interval?.startedAt);
+    if (startMs > 0 && !interval?.completedAt && nowMs > startMs && isNearTime(startMs, eventMs)) {
+      return { elapsedMs: nowMs - startMs, running: true };
+    }
+  }
+
+  return null;
 }
 
 export function shouldShowTaskImplementationDuration(
