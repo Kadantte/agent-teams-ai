@@ -2763,11 +2763,26 @@ async function handleSendMessage(
         : leadName !== null && memberName === leadName;
     const actionMode = payload.actionMode;
 
-    // Attachments only supported for live lead (stdin content blocks)
-    if (validatedAttachments?.length && (!isLeadRecipient || !isAlive)) {
-      throw new Error(
-        'Attachments are only supported when sending to the team lead while the team is online'
-      );
+    const recipientProviderId = !isLeadRecipient
+      ? await provisioning.resolveRuntimeRecipientProviderId(tn, memberName)
+      : undefined;
+    const isOpenCodeRecipient = recipientProviderId === 'opencode';
+
+    // Attachments are routed through explicit provider transports only.
+    // Native Claude/Codex teammates still read inbox files directly, so storing
+    // attachment metadata there would look successful while silently dropping
+    // the image at runtime. Keep those paths fail-closed until they have a
+    // real runtime attachment transport.
+    if (validatedAttachments?.length) {
+      const supportedLiveLead = isLeadRecipient && isAlive;
+      const supportedLiveOpenCodeRecipient = !isLeadRecipient && isOpenCodeRecipient && isAlive;
+      if (!supportedLiveLead && !supportedLiveOpenCodeRecipient) {
+        throw new Error(
+          isOpenCodeRecipient
+            ? 'Attachments for OpenCode teammates require the team to be online'
+            : 'Attachments are supported for the online team lead and online OpenCode teammates only'
+        );
+      }
     }
 
     // Smart routing: lead + alive → stdin direct, else → inbox
@@ -2897,24 +2912,22 @@ async function handleSendMessage(
       }
     }
 
-    // Inbox path: offline lead or regular members (no attachment support)
+    // Inbox path: offline lead or regular members.
     const baseText = payload.text!.trim();
     const replyRecipient =
       typeof payload.from === 'string' && payload.from.trim().length > 0
         ? payload.from.trim()
         : 'user';
     const storedFrom = replyRecipient.toLowerCase() === 'user' ? 'user' : replyRecipient;
-    const recipientProviderId = !isLeadRecipient
-      ? await provisioning.resolveRuntimeRecipientProviderId(tn, memberName)
-      : undefined;
-    const isOpenCodeRecipient = recipientProviderId === 'opencode';
     const directReplyProtocol = resolveVisibleDirectReplyProtocol({
       isLeadRecipient,
       replyRecipient,
       ...(recipientProviderId ? { providerId: recipientProviderId } : {}),
     });
     const inboxMessageId =
-      directReplyProtocol === 'agent_teams_message_send' ? crypto.randomUUID() : undefined;
+      directReplyProtocol === 'agent_teams_message_send' || validatedAttachments?.length
+        ? crypto.randomUUID()
+        : undefined;
     const memberDeliveryText = buildMessageDeliveryText(baseText, {
       actionMode,
       isLeadRecipient,
@@ -2925,6 +2938,14 @@ async function handleSendMessage(
       ...(inboxMessageId ? { messageId: inboxMessageId } : {}),
     });
     const inboxText = isOpenCodeRecipient ? baseText : memberDeliveryText;
+    if (validatedAttachments?.length && inboxMessageId) {
+      try {
+        await attachmentStore.saveAttachments(tn, inboxMessageId, validatedAttachments);
+      } catch (error) {
+        throw new Error(`Failed to save message attachments: ${getErrorMessage(error)}`);
+      }
+    }
+
     const result = await getTeamDataService().sendMessage(tn, {
       member: memberName,
       text: inboxText,
@@ -2934,6 +2955,7 @@ async function handleSendMessage(
       source: 'user_sent',
       taskRefs: validatedTaskRefs.value,
       ...(inboxMessageId ? { messageId: inboxMessageId } : {}),
+      ...(validatedAttachments?.length ? { attachments: validatedAttachments } : {}),
     });
 
     // Teammate inbox relay DISABLED (2026-03-23).
