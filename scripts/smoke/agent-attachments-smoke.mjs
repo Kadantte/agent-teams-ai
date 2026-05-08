@@ -285,6 +285,7 @@ function redactSmokeText(value) {
   let redacted = value
     .replace(/(data:image\/[a-z0-9.+-]+;base64,)[a-z0-9+/=]+/gi, '$1[redacted]')
     .replace(/("[Dd]ata"\s*:\s*")[a-z0-9+/=]{80,}(")/g, '$1[redacted]$2')
+    .replace(/("[Ss]ignature"\s*:\s*")[^"]{80,}(")/g, '$1[redacted]$2')
     .replace(/(Authorization\s*[:=]\s*Bearer\s+)[^\s"']+/gi, '$1[redacted]')
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{20,}/g, '$1[redacted]')
     .replace(/\b(sk-(?:ant|or|proj|live|test|codex|openai)[A-Za-z0-9._~+/=-]{12,})\b/g, '[redacted api key]');
