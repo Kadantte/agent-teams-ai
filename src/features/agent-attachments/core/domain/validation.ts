@@ -26,6 +26,12 @@ export function isProviderImageMimeType(mimeType: string): mimeType is ProviderI
   return PROVIDER_IMAGE_MIME_TYPES.has(mimeType as ProviderImageMimeType);
 }
 
+function isProviderFileMimeType(mimeType: string, supported: readonly string[]): boolean {
+  return supported.some((candidate) =>
+    candidate.endsWith('/*') ? mimeType.startsWith(candidate.slice(0, -1)) : candidate === mimeType
+  );
+}
+
 export function classifyAttachmentMime(mimeType: string): AgentAttachmentKind {
   if (isAgentImageMimeType(mimeType)) return 'image';
   if (mimeType === 'application/pdf' || mimeType === 'text/plain' || mimeType.startsWith('text/')) {
@@ -85,6 +91,42 @@ export function validateAttachmentForCapability(input: {
   const warnings = [...attachment.warnings];
 
   if (attachment.kind !== 'image') {
+    if (attachment.kind !== 'file') {
+      return {
+        ok: false,
+        code: 'attachment_type_unsupported',
+        message: 'This attachment type is not supported by the selected provider.',
+        warnings,
+      };
+    }
+
+    if (!capability.supportsFiles) {
+      return {
+        ok: false,
+        code: 'attachment_type_unsupported',
+        message: capability.filesDisplayText,
+        warnings,
+      };
+    }
+
+    if (!isProviderFileMimeType(attachment.mimeType, capability.supportedFileMimeTypes)) {
+      return {
+        ok: false,
+        code: 'attachment_type_unsupported',
+        message: 'This file type is not supported by the selected provider.',
+        warnings,
+      };
+    }
+
+    if (attachment.sizeBytes > capability.maxBytesPerFile) {
+      return {
+        ok: false,
+        code: 'attachment_too_large',
+        message: 'File is too large for the selected provider path.',
+        warnings,
+      };
+    }
+
     return { ok: true, warnings };
   }
 

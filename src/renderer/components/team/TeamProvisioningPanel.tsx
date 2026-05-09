@@ -45,8 +45,13 @@ export const TeamProvisioningPanel = memo(function TeamProvisioningPanel({
   className,
   defaultLogsOpen,
 }: TeamProvisioningPanelProps): React.JSX.Element | null {
-  const { presentation, cancelProvisioning, retryFailedOpenCodeSecondaryLanes, runInstanceKey } =
-    useTeamProvisioningPresentation(teamName);
+  const {
+    presentation,
+    cancelProvisioning,
+    retryFailedOpenCodeSecondaryLanes,
+    memberDiagnostics,
+    runInstanceKey,
+  } = useTeamProvisioningPresentation(teamName);
   const [dismissed, setDismissed] = useState(false);
   const [retryingOpenCode, setRetryingOpenCode] = useState(false);
   const [openCodeRetryMessage, setOpenCodeRetryMessage] = useState<string | null>(null);
@@ -134,6 +139,7 @@ export const TeamProvisioningPanel = memo(function TeamProvisioningPanel({
       cliLogsTail={presentation.progress.cliLogsTail}
       assistantOutput={presentation.progress.assistantOutput}
       launchDiagnostics={presentation.progress.launchDiagnostics}
+      memberDiagnostics={memberDiagnostics}
       defaultLiveOutputOpen={presentation.defaultLiveOutputOpen}
       defaultLogsOpen={defaultLogsOpen}
       onCancel={

@@ -4,6 +4,7 @@ export type AgentAttachmentKind = 'image' | 'file' | 'unsupported';
 
 export type AgentImageMimeType = 'image/png' | 'image/jpeg' | 'image/webp';
 export type ProviderImageMimeType = 'image/png' | 'image/jpeg';
+export type ProviderFileMimeType = 'application/pdf' | 'text/*';
 
 export type AttachmentDeliveryFailureCode =
   | 'attachment_too_large'
@@ -96,9 +97,13 @@ export interface AgentAttachmentCapabilityTarget {
 
 export interface AgentAttachmentCapability {
   supportsImages: boolean;
+  supportsFiles: boolean;
   supportedImageMimeTypes: ProviderImageMimeType[];
+  supportedFileMimeTypes: ProviderFileMimeType[];
   maxImages: number;
+  maxFiles: number;
   maxBytesPerImage: number;
+  maxBytesPerFile: number;
   maxBytesTotal: number;
   reason:
     | 'known_provider_support'
@@ -107,6 +112,7 @@ export interface AgentAttachmentCapability {
     | 'unknown_model'
     | 'unsupported_provider';
   displayText: string;
+  filesDisplayText: string;
 }
 
 export type AttachmentValidationResult =

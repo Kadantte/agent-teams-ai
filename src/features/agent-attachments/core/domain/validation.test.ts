@@ -70,4 +70,69 @@ describe('agent attachment validation', () => {
       warnings: [],
     });
   });
+
+  it('allows Claude text file delivery through document blocks', () => {
+    const capability = resolveAgentAttachmentCapability({
+      providerId: 'anthropic',
+      model: 'claude-haiku-4-5',
+    });
+    const result = validateAttachmentForCapability({
+      attachment: fakeImageAttachment({
+        id: 'att_text',
+        originalName: 'notes.md',
+        mimeType: 'text/markdown',
+        sizeBytes: 128,
+        kind: 'file',
+      }),
+      capability,
+    });
+
+    expect(result).toEqual({ ok: true, warnings: [] });
+  });
+
+  it('blocks non-image files for Codex native delivery', () => {
+    const capability = resolveAgentAttachmentCapability({
+      providerId: 'codex',
+      model: 'gpt-5.4-mini',
+    });
+    const result = validateAttachmentForCapability({
+      attachment: fakeImageAttachment({
+        id: 'att_pdf',
+        originalName: 'spec.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 1024,
+        kind: 'file',
+      }),
+      capability,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('attachment_type_unsupported');
+      expect(result.message).toContain('image attachments only');
+    }
+  });
+
+  it('blocks non-image files for OpenCode even when the model supports images', () => {
+    const capability = resolveAgentAttachmentCapability({
+      providerId: 'opencode',
+      model: 'openrouter/moonshotai/kimi-k2.6',
+    });
+    const result = validateAttachmentForCapability({
+      attachment: fakeImageAttachment({
+        id: 'att_text',
+        originalName: 'trace.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 1024,
+        kind: 'file',
+      }),
+      capability,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('attachment_type_unsupported');
+      expect(result.message).toContain('image attachments only');
+    }
+  });
 });

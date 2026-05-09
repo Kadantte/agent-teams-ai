@@ -52,7 +52,7 @@ export function buildClaudeAttachmentDeliveryParts(input: {
       continue;
     }
 
-    if (attachment.mimeType === 'text/plain') {
+    if (attachment.mimeType === 'text/plain' || attachment.mimeType.startsWith('text/')) {
       const decoded = decodeBase64Text(attachment.data);
       contentBlocks.push(
         decoded.ok
@@ -94,7 +94,7 @@ export function buildClaudeAttachmentDeliveryParts(input: {
 
     throw new AgentAttachmentError(
       'attachment_type_unsupported',
-      `Claude image MIME unsupported: ${attachment.mimeType}`,
+      `Claude attachment MIME unsupported: ${attachment.mimeType}`,
       { attachmentId: attachment.id, retryable: false }
     );
   }

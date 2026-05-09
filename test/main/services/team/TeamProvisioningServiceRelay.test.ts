@@ -2249,7 +2249,7 @@ Messages:
     expect(rows.map((row: { read?: boolean }) => row.read)).toEqual([false, true]);
   });
 
-  it('fails OpenCode secondary rows with missing attachment payloads without text-only delivery', async () => {
+  it('fails OpenCode secondary rows with missing attachment payloads terminally without text-only delivery', async () => {
     const service = new TeamProvisioningService();
     const teamName = 'my-team';
     hoisted.files.set(

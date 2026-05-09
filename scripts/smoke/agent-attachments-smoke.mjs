@@ -6,6 +6,8 @@ import path from 'node:path';
 import { deflateSync } from 'node:zlib';
 
 const PROMPT = 'Look at the attached image. Reply with exactly one word: red, green, or blue.';
+const MULTI_IMAGE_PROMPT =
+  'Look at every attached image. Each image has a dominant background color. Reply with exactly one word: red, green, or blue. Use red if the dominant background color is red in all images.';
 const TIMEOUT_MS = 90_000;
 
 const CASES = [
@@ -13,7 +15,7 @@ const CASES = [
     id: 'claude-subscription-streaming',
     runtime: 'claude',
     model: process.env.CLAUDE_ATTACHMENTS_SMOKE_CLAUDE_MODEL || 'claude-haiku-4-5',
-    command: async (imagePath, cwd, testCase) => ({
+    command: async (imagePath, cwd, testCase, imagePaths) => ({
       bin: 'claude',
       args: [
         '-p',
@@ -27,7 +29,32 @@ const CASES = [
         testCase.model,
       ],
       cwd,
-      stdin: await buildClaudeStreamJsonPrompt(imagePath),
+      stdin: await buildClaudeStreamJsonPrompt(imagePaths, PROMPT),
+    }),
+    expected: /red/i,
+  },
+  {
+    id: 'claude-subscription-streaming-multi-image',
+    runtime: 'claude',
+    model: process.env.CLAUDE_ATTACHMENTS_SMOKE_CLAUDE_MODEL || 'claude-haiku-4-5',
+    imageCount: 3,
+    imageWidth: 1600,
+    imageHeight: 1100,
+    command: async (imagePath, cwd, testCase, imagePaths) => ({
+      bin: 'claude',
+      args: [
+        '-p',
+        '--input-format',
+        'stream-json',
+        '--output-format',
+        'stream-json',
+        '--verbose',
+        '--no-session-persistence',
+        '--model',
+        testCase.model,
+      ],
+      cwd,
+      stdin: await buildClaudeStreamJsonPrompt(imagePaths, MULTI_IMAGE_PROMPT),
     }),
     expected: /red/i,
   },
@@ -54,6 +81,30 @@ const CASES = [
     expected: /red/i,
   },
   {
+    id: 'codex-native-gpt-5-4-mini-multi-image',
+    runtime: 'codex',
+    model: 'gpt-5.4-mini',
+    imageCount: 3,
+    imageWidth: 1600,
+    imageHeight: 1100,
+    command: (imagePath, cwd, testCase, imagePaths) => ({
+      bin: 'codex',
+      args: [
+        'exec',
+        '--json',
+        '--skip-git-repo-check',
+        '-C',
+        cwd,
+        '--model',
+        'gpt-5.4-mini',
+        ...imagePaths.flatMap((candidate) => ['--image', candidate]),
+        '-',
+      ],
+      stdin: MULTI_IMAGE_PROMPT,
+    }),
+    expected: /red/i,
+  },
+  {
     id: 'opencode-openai-gpt-5-4-mini',
     runtime: 'opencode',
     model: 'openai/gpt-5.4-mini',
@@ -71,6 +122,31 @@ const CASES = [
         PROMPT,
         '-f',
         imagePath,
+      ],
+    }),
+    expected: /red/i,
+  },
+  {
+    id: 'opencode-openrouter-kimi-k2-6-multi-image',
+    runtime: 'opencode',
+    model: 'openrouter/moonshotai/kimi-k2.6',
+    envRequired: ['OPENROUTER_API_KEY'],
+    imageCount: 3,
+    imageWidth: 1600,
+    imageHeight: 1100,
+    command: (imagePath, cwd, testCase, imagePaths) => ({
+      bin: 'opencode',
+      args: [
+        'run',
+        '--pure',
+        '--format',
+        'json',
+        '--dir',
+        cwd,
+        '--model',
+        'openrouter/moonshotai/kimi-k2.6',
+        MULTI_IMAGE_PROMPT,
+        ...imagePaths.flatMap((candidate) => ['-f', candidate]),
       ],
     }),
     expected: /red/i,
@@ -196,24 +272,28 @@ function createRedCardPng(width = 320, height = 240) {
   ]);
 }
 
-async function buildClaudeStreamJsonPrompt(imagePath) {
-  const data = await readFile(imagePath, 'base64');
+async function buildClaudeStreamJsonPrompt(imagePaths, prompt) {
+  const imageBlocks = [];
+  for (const imagePath of imagePaths) {
+    const data = await readFile(imagePath, 'base64');
+    imageBlocks.push({
+      type: 'image',
+      source: {
+        // Claude stream-json expects image bytes inside a structured image block.
+        // Do not replace this with base64-in-text fallback because that tests a different path.
+        type: 'base64',
+        media_type: 'image/png',
+        data,
+      },
+    });
+  }
   return `${JSON.stringify({
     type: 'user',
     message: {
       role: 'user',
       content: [
-        { type: 'text', text: PROMPT },
-        {
-          type: 'image',
-          source: {
-            // Claude stream-json expects image bytes inside a structured image block.
-            // Do not replace this with base64-in-text fallback because that tests a different path.
-            type: 'base64',
-            media_type: 'image/png',
-            data,
-          },
-        },
+        { type: 'text', text: prompt },
+        ...imageBlocks,
       ],
     },
   })}\n`;
@@ -286,6 +366,7 @@ function redactSmokeText(value) {
     .replace(/(data:image\/[a-z0-9.+-]+;base64,)[a-z0-9+/=]+/gi, '$1[redacted]')
     .replace(/("[Dd]ata"\s*:\s*")[a-z0-9+/=]{80,}(")/g, '$1[redacted]$2')
     .replace(/("[Ss]ignature"\s*:\s*")[^"]{80,}(")/g, '$1[redacted]$2')
+    .replace(/\b[A-Za-z0-9+/]{400,}={0,2}\b/g, '[redacted long encoded payload]')
     .replace(/(Authorization\s*[:=]\s*Bearer\s+)[^\s"']+/gi, '$1[redacted]')
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{20,}/g, '$1[redacted]')
     .replace(/\b(sk-(?:ant|or|proj|live|test|codex|openai)[A-Za-z0-9._~+/=-]{12,})\b/g, '[redacted api key]');
@@ -299,6 +380,46 @@ function redactSmokeText(value) {
   }
 
   return redacted;
+}
+
+function extractAssistantTextFromJsonLine(line) {
+  let parsed;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  if (typeof parsed.result === 'string') {
+    return parsed.result;
+  }
+  if (parsed.type === 'item.completed' && typeof parsed.item?.text === 'string') {
+    return parsed.item.text;
+  }
+  if (parsed.type === 'text' && typeof parsed.part?.text === 'string') {
+    return parsed.part.text;
+  }
+  const content = parsed.message?.content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (part?.type === 'text' && typeof part.text === 'string' ? part.text : ''))
+      .join('\n')
+      .trim();
+  }
+  return null;
+}
+
+function extractAssistantText(output) {
+  const texts = [];
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{')) continue;
+    const text = extractAssistantTextFromJsonLine(trimmed);
+    if (text?.trim()) {
+      texts.push(text.trim());
+    }
+  }
+  return texts.join('\n').trim();
 }
 
 async function main() {
@@ -319,10 +440,9 @@ async function main() {
 
   const cwd = await mkdtemp(path.join(tmpdir(), 'agent-attachments-smoke-'));
   await mkdir(cwd, { recursive: true });
-  const imagePath = path.join(cwd, 'red-card.png');
-  await writeFile(imagePath, createRedCardPng());
 
   const results = [];
+  const imagePathsByCase = {};
   for (const testCase of selected) {
     const missingEnv = (testCase.envRequired ?? []).filter((name) => !process.env[name]);
     if (missingEnv.length) {
@@ -336,12 +456,18 @@ async function main() {
       continue;
     }
 
-    const command = await testCase.command(imagePath, cwd, testCase);
+    const imagePaths = await prepareSmokeImages(cwd, testCase);
+    imagePathsByCase[testCase.id] = imagePaths;
+    const command = await testCase.command(imagePaths[0], cwd, testCase, imagePaths);
     const result = await runCommand(command);
     const output = `${result.stdout}\n${result.stderr}`;
-    const matched = testCase.expected ? testCase.expected.test(output) : false;
+    const assistantText = extractAssistantText(output);
+    const textForMatch = assistantText || output;
+    const matched = testCase.expected ? testCase.expected.test(textForMatch) : false;
     const unsupportedMatched = testCase.expectedUnsupported
-      ? /cannot|unable|unsupported|text-only|vision|image/i.test(output)
+      ? /cannot|unable|unsupported|text-only|vision|image|не могу|не поддерживает|изображен/i.test(
+          textForMatch
+        )
       : false;
     results.push({
       id: testCase.id,
@@ -353,12 +479,14 @@ async function main() {
           : 'failed',
       exitCode: result.exitCode,
       timedOut: result.timedOut,
+      assistantText: redactSmokeText(assistantText.slice(-1000)),
       stdoutTail: redactSmokeText(result.stdout.slice(-4000)),
       stderrTail: redactSmokeText(result.stderr.slice(-4000)),
     });
   }
 
-  const report = { imagePath, results };
+  const firstImagePath = Object.values(imagePathsByCase)[0]?.[0] ?? null;
+  const report = { imagePath: firstImagePath, imagePathsByCase, results };
   if (args.jsonPath) {
     await writeFile(path.resolve(args.jsonPath), `${JSON.stringify(report, null, 2)}\n`);
   }
@@ -366,6 +494,19 @@ async function main() {
   if (results.some((result) => result.status === 'failed')) {
     process.exitCode = 1;
   }
+}
+
+async function prepareSmokeImages(cwd, testCase) {
+  const imageCount = testCase.imageCount ?? 1;
+  const width = testCase.imageWidth ?? 320;
+  const height = testCase.imageHeight ?? 240;
+  const paths = [];
+  for (let index = 0; index < imageCount; index += 1) {
+    const imagePath = path.join(cwd, `red-card-${testCase.id}-${index + 1}.png`);
+    await writeFile(imagePath, createRedCardPng(width, height));
+    paths.push(imagePath);
+  }
+  return paths;
 }
 
 main().catch((error) => {

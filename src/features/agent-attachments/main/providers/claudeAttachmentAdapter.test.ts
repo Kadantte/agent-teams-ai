@@ -57,13 +57,41 @@ describe('Claude attachment adapter', () => {
     });
   });
 
+  it('serializes text subtypes as text document blocks', () => {
+    const result = buildClaudeAttachmentDeliveryParts({
+      text: 'Read this',
+      attachments: [
+        attachment({
+          filename: 'notes.md',
+          mimeType: 'text/markdown',
+          data: Buffer.from('# hello', 'utf8').toString('base64'),
+        }),
+      ],
+    });
+
+    expect(result.blocks[1]).toEqual({
+      type: 'document',
+      source: { type: 'text', media_type: 'text/plain', data: '# hello' },
+      title: 'notes.md',
+    });
+  });
+
+  it('rejects unsupported non-image files before provider send', () => {
+    expect(() =>
+      buildClaudeAttachmentDeliveryParts({
+        text: 'read sheet',
+        attachments: [attachment({ filename: 'sheet.xlsx', mimeType: 'application/vnd.ms-excel' })],
+      })
+    ).toThrow(/Claude attachment MIME unsupported/);
+  });
+
   it('rejects unsupported image mime types before provider send', () => {
     expect(() =>
       buildClaudeAttachmentDeliveryParts({
         text: 'see gif',
         attachments: [attachment({ mimeType: 'image/gif' })],
       })
-    ).toThrow(/Claude image MIME unsupported/);
+    ).toThrow(/Claude attachment MIME unsupported/);
   });
 
   it('redacts image and document bytes in diagnostics', () => {

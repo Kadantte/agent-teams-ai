@@ -2,16 +2,34 @@ import type { AgentAttachmentCapability, AgentAttachmentCapabilityTarget } from 
 
 const DEFAULT_IMAGE_BYTES_PER_PROVIDER = 4 * 1024 * 1024;
 const DEFAULT_IMAGE_BYTES_TOTAL = 8 * 1024 * 1024;
+const DEFAULT_FILE_BYTES_PER_PROVIDER = 4 * 1024 * 1024;
 
-function supported(displayText: string): AgentAttachmentCapability {
+function supportedImagesOnly(displayText: string): AgentAttachmentCapability {
   return {
     supportsImages: true,
+    supportsFiles: false,
     supportedImageMimeTypes: ['image/png', 'image/jpeg'],
+    supportedFileMimeTypes: [],
     maxImages: 5,
+    maxFiles: 0,
     maxBytesPerImage: DEFAULT_IMAGE_BYTES_PER_PROVIDER,
+    maxBytesPerFile: 0,
     maxBytesTotal: DEFAULT_IMAGE_BYTES_TOTAL,
     reason: 'known_provider_support',
     displayText,
+    filesDisplayText:
+      'This provider path currently supports image attachments only. Non-image files are blocked before provider delivery.',
+  };
+}
+
+function supportedClaude(displayText: string): AgentAttachmentCapability {
+  return {
+    ...supportedImagesOnly(displayText),
+    supportsFiles: true,
+    supportedFileMimeTypes: ['application/pdf', 'text/*'],
+    maxFiles: 5,
+    maxBytesPerFile: DEFAULT_FILE_BYTES_PER_PROVIDER,
+    filesDisplayText: 'Claude can receive text files and PDFs through structured document blocks.',
   };
 }
 
@@ -21,12 +39,18 @@ function unsupported(
 ): AgentAttachmentCapability {
   return {
     supportsImages: false,
+    supportsFiles: false,
     supportedImageMimeTypes: [],
+    supportedFileMimeTypes: [],
     maxImages: 0,
+    maxFiles: 0,
     maxBytesPerImage: 0,
+    maxBytesPerFile: 0,
     maxBytesTotal: 0,
     reason,
     displayText,
+    filesDisplayText:
+      'Selected provider does not support non-image file attachments through this delivery path.',
   };
 }
 
@@ -49,24 +73,28 @@ export function resolveAgentAttachmentCapability(
   const providerId = target.providerId.trim().toLowerCase();
 
   if (providerId === 'anthropic') {
-    return supported('Claude can receive image attachments through structured image blocks.');
+    return supportedClaude('Claude can receive image attachments through structured image blocks.');
   }
 
   if (providerId === 'codex') {
-    return supported('Codex can receive image attachments through the native image channel.');
+    return supportedImagesOnly(
+      'Codex can receive image attachments through the native image channel.'
+    );
   }
 
   if (providerId === 'opencode') {
     const { model } = canonicalizeOpenCodeModel(target);
     if (model === 'gpt-5.4-mini') {
       return {
-        ...supported('OpenCode model openai/gpt-5.4-mini is verified for image attachments.'),
+        ...supportedImagesOnly(
+          'OpenCode model openai/gpt-5.4-mini is verified for image attachments.'
+        ),
         reason: 'known_vision_model',
       };
     }
     if (model === 'moonshotai/kimi-k2.6' || model === 'z-ai/glm-4.5v') {
       return {
-        ...supported(`OpenCode model ${model} is verified for image attachments.`),
+        ...supportedImagesOnly(`OpenCode model ${model} is verified for image attachments.`),
         reason: 'known_vision_model',
       };
     }
