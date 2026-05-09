@@ -229,6 +229,8 @@ describe('MemberWorkSyncTaskImpactResolver', () => {
             id: 'evt-self-review',
             type: 'review_requested',
             timestamp: '2026-05-06T19:00:00.000Z',
+            from: 'none',
+            to: 'review',
             reviewer: 'alice',
           },
         ],

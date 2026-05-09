@@ -1271,7 +1271,7 @@ export const TaskDetailDialog = ({
                             className="group flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-surface-raised)]"
                           >
                             <FileIcon
-                              fileName={file.relativePath.split('/').pop() ?? file.relativePath}
+                              fileName={file.relativePath.split(/[\\/]/).pop() ?? file.relativePath}
                               className="size-3.5"
                             />
                             {onViewChanges ? (
