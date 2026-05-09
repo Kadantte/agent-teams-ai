@@ -289,6 +289,7 @@ import {
   snapshotFromRuntimeMemberStatuses,
   snapshotToMemberSpawnStatuses,
 } from './TeamLaunchStateEvaluator';
+import { writeTeamLaunchFailureArtifactPack } from './TeamLaunchFailureArtifactPack';
 import { TeamLaunchStateStore } from './TeamLaunchStateStore';
 import { TeamMcpConfigBuilder } from './TeamMcpConfigBuilder';
 import { TeamMemberLogsFinder } from './TeamMemberLogsFinder';
@@ -407,6 +408,11 @@ type BootstrapTranscriptSuccessSource = 'member_briefing' | 'assistant_text';
 const BOOTSTRAP_RUNTIME_PROOF_TAIL_BYTES = 256 * 1024;
 const BOOTSTRAP_RUNTIME_EVENT_MAX_LINES = 256;
 const BOOTSTRAP_RUNTIME_EVENT_MAX_LINE_BYTES = 16 * 1024;
+const TEAMMATE_RUNTIME_ENV = 'CLAUDE_CODE_TEAMMATE_RUNTIME';
+const TEAMMATE_RUNTIME_EVENTS_ENV = 'CLAUDE_CODE_TEAMMATE_RUNTIME_EVENTS_PATH';
+const TEAMMATE_BOOTSTRAP_PROOF_TOKEN_ENV = 'CLAUDE_CODE_BOOTSTRAP_PROOF_TOKEN';
+const NATIVE_APP_MANAGED_BOOTSTRAP_CONTEXT_ENV =
+  'CLAUDE_CODE_NATIVE_APP_MANAGED_BOOTSTRAP_CONTEXT_PATH';
 
 function getTeamRuntimeEventsDir(teamName: string): string {
   return path.join(getTeamsBasePath(), teamName, 'runtime');
@@ -5519,6 +5525,7 @@ export class TeamProvisioningService {
   >();
   private readonly memberSpawnStatusesCacheGenerationByTeam = new Map<string, number>();
   private readonly launchStateStore = new TeamLaunchStateStore();
+  private readonly launchFailureArtifactPackRunIds = new Set<string>();
   private readonly launchStateStoreQueue = new Map<string, Promise<unknown>>();
   private readonly launchStateWrittenRunIdByTeam = new Map<string, string>();
   private readonly failedOpenCodeSecondaryRetryInFlightByTeam = new Map<
@@ -5622,6 +5629,56 @@ export class TeamProvisioningService {
       this.launchStateStore.read(teamName).catch(() => null),
     ]);
     return choosePreferredLaunchSnapshot(bootstrapSnapshot, launchSnapshot);
+  }
+
+  private writeLaunchFailureArtifactPackBestEffort(
+    run: ProvisioningRun,
+    options: {
+      reason: string;
+      launchSnapshot?: PersistedTeamLaunchSnapshot | null;
+    }
+  ): void {
+    const key = `${run.teamName}:${run.runId}`;
+    if (this.launchFailureArtifactPackRunIds.has(key)) return;
+    this.launchFailureArtifactPackRunIds.add(key);
+
+    const memberSpawnStatuses = Object.fromEntries(run.memberSpawnStatuses.entries());
+    const request = run.request as Partial<TeamCreateRequest> | undefined;
+    void writeTeamLaunchFailureArtifactPack({
+      teamName: run.teamName,
+      runId: run.runId,
+      reason: options.reason,
+      startedAt: run.startedAt,
+      cwd: request?.cwd ?? '',
+      pid: run.child?.pid ?? run.progress.pid ?? null,
+      providerId: request?.providerId,
+      providerBackendId: request?.providerBackendId,
+      model: request?.model,
+      expectedMembers: run.expectedMembers,
+      effectiveMembers: run.allEffectiveMembers,
+      progress: run.progress,
+      launchSnapshot: options.launchSnapshot ?? null,
+      launchDiagnostics: run.progress.launchDiagnostics ?? buildLaunchDiagnosticsFromRun(run),
+      memberSpawnStatuses,
+      cliLogs: extractCliLogsFromRun(run),
+      progressTraceLines: run.provisioningTraceLines,
+      runtimeAdapterTraceLines: this.runtimeAdapterTraceLinesByRunId.get(run.runId),
+      flags: {
+        isLaunch: run.isLaunch,
+        provisioningComplete: run.provisioningComplete,
+        deterministicBootstrap: run.deterministicBootstrap,
+        processKilled: run.processKilled,
+        finalizingByTimeout: run.finalizingByTimeout,
+        cancelRequested: run.cancelRequested,
+      },
+    }).catch((error: unknown) => {
+      this.launchFailureArtifactPackRunIds.delete(key);
+      logger.warn(
+        `[${run.teamName}] Failed to write launch failure artifact pack: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    });
   }
 
   async repairStaleTaskActivityIntervalsBeforeSnapshot(teamName: string): Promise<void> {
@@ -13787,6 +13844,13 @@ export class TeamProvisioningService {
     providerId: TeamProviderId;
     joinedAt: number;
     bootstrapExpectedAfter: string;
+    backendType?: 'tmux' | 'process';
+    runtimePid?: number;
+    bootstrapRuntimeEventsPath?: string;
+    bootstrapProofToken?: string;
+    bootstrapRunId?: string;
+    bootstrapContextHash?: string;
+    bootstrapBriefingHash?: string;
   }): Promise<void> {
     const configPath = path.join(getTeamsBasePath(), input.teamName, 'config.json');
     const raw = await tryReadRegularFileUtf8(configPath, {
@@ -13822,10 +13886,25 @@ export class TeamProvisioningService {
       color: input.color,
       joinedAt: input.joinedAt,
       bootstrapExpectedAfter: input.bootstrapExpectedAfter,
+      ...(input.bootstrapProofToken ? { bootstrapProofToken: input.bootstrapProofToken } : {}),
+      ...(input.bootstrapRunId ? { bootstrapRunId: input.bootstrapRunId } : {}),
+      ...(input.bootstrapRuntimeEventsPath
+        ? { bootstrapRuntimeEventsPath: input.bootstrapRuntimeEventsPath }
+        : {}),
+      ...(input.bootstrapContextHash
+        ? {
+            bootstrapProofMode: 'native_app_managed_context',
+            bootstrapContextHash: input.bootstrapContextHash,
+          }
+        : {}),
+      ...(input.bootstrapBriefingHash
+        ? { bootstrapBriefingHash: input.bootstrapBriefingHash }
+        : {}),
       tmuxPaneId: input.paneId,
+      ...(typeof input.runtimePid === 'number' ? { runtimePid: input.runtimePid } : {}),
       cwd: input.cwd,
       subscriptions: Array.isArray(existing.subscriptions) ? existing.subscriptions : [],
-      backendType: 'tmux',
+      backendType: input.backendType ?? 'tmux',
     };
 
     if (existingIndex >= 0) {
@@ -14045,6 +14124,378 @@ export class TeamProvisioningService {
       `restart command delivered to tmux pane ${input.paneId}`
     );
     this.setMemberSpawnStatus(input.run, input.memberName, 'waiting');
+  }
+
+  private async launchDirectProcessMemberRestart(input: {
+    run: ProvisioningRun;
+    teamName: string;
+    displayName: string;
+    leadName: string;
+    memberName: string;
+    config: TeamConfig;
+    configuredMember: NonNullable<
+      ReturnType<TeamProvisioningService['resolveEffectiveConfiguredMember']>
+    >;
+    persistedRuntimeMembers: readonly PersistedRuntimeMemberLike[];
+  }): Promise<void> {
+    const providerId = resolveTeamProviderId(input.configuredMember.providerId);
+    const claudePath = input.run.spawnContext?.claudePath ?? (await ClaudeBinaryResolver.resolve());
+    if (!claudePath) {
+      throw new Error('Claude CLI not found; install it or provide a valid path');
+    }
+
+    const cwd = this.resolveDirectRestartRuntimeCwd({
+      configuredMember: input.configuredMember,
+      persistedRuntimeMembers: input.persistedRuntimeMembers,
+      config: input.config,
+      run: input.run,
+    });
+    await ensureCwdExists(cwd);
+
+    const provisioningEnv = await this.buildProvisioningEnv(
+      providerId,
+      input.configuredMember.providerBackendId,
+      {
+        teamRuntimeAuth: {
+          teamName: input.teamName,
+          authMaterialId: `${input.run.runId}-process-restart-${input.configuredMember.name}-${randomUUID()}`,
+          allowAnthropicApiKeyHelper: true,
+        },
+      }
+    );
+    if (provisioningEnv.warning) {
+      throw new Error(provisioningEnv.warning);
+    }
+
+    const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(cwd);
+    const agentId = `${input.configuredMember.name}@${input.teamName}`;
+    const color =
+      input.config.members
+        ?.find((member) => matchesExactTeamMemberName(member.name, input.memberName))
+        ?.color?.trim() || getMemberColorByName(input.configuredMember.name);
+    const parentSessionId =
+      input.run.detectedSessionId?.trim() || input.config.leadSessionId?.trim() || input.run.runId;
+    const memberSpec: TeamCreateRequest['members'][number] = {
+      name: input.configuredMember.name,
+      ...(input.configuredMember.role ? { role: input.configuredMember.role } : {}),
+      ...(input.configuredMember.workflow ? { workflow: input.configuredMember.workflow } : {}),
+      ...(input.configuredMember.providerId
+        ? { providerId: input.configuredMember.providerId }
+        : {}),
+      ...(input.configuredMember.providerBackendId
+        ? { providerBackendId: input.configuredMember.providerBackendId }
+        : {}),
+      ...(input.configuredMember.model ? { model: input.configuredMember.model } : {}),
+      ...(input.configuredMember.effort ? { effort: input.configuredMember.effort } : {}),
+      ...(input.configuredMember.agentType ? { agentType: input.configuredMember.agentType } : {}),
+      ...(input.configuredMember.isolation === 'worktree'
+        ? { isolation: 'worktree' as const }
+        : {}),
+      ...(input.configuredMember.cwd ? { cwd: input.configuredMember.cwd } : {}),
+    };
+    const prompt = buildMemberSpawnPrompt(
+      memberSpec,
+      input.displayName,
+      input.teamName,
+      input.leadName,
+      {
+        restart: true,
+      }
+    );
+    const bootstrapExpectedAfter = nowIso();
+    const bootstrapProofToken = randomUUID();
+    const runtimePaths = this.getDirectProcessRestartRuntimePaths(
+      input.teamName,
+      input.configuredMember.name
+    );
+    await fs.promises.mkdir(runtimePaths.dir, { recursive: true });
+    await fs.promises.writeFile(runtimePaths.eventsPath, '', { encoding: 'utf8', mode: 0o600 });
+
+    const nativeBootstrapSpec =
+      (
+        await buildNativeAppManagedBootstrapSpecs({
+          teamName: input.teamName,
+          cwd,
+          members: [memberSpec],
+        })
+      ).get(input.configuredMember.name) ?? null;
+    const nativeBootstrapEnv = await this.materializeDirectProcessNativeBootstrapContext({
+      teamName: input.teamName,
+      memberName: input.configuredMember.name,
+      agentId,
+      providerId,
+      runId: input.run.runId,
+      bootstrapProofToken,
+      spec: nativeBootstrapSpec,
+    });
+
+    const runtimeArgsPlan = await this.buildTeamRuntimeLaunchArgsPlan({
+      teamName: input.teamName,
+      providerId,
+      launchIdentity: null,
+      envResolution: provisioningEnv,
+      extraArgs: [],
+      includeAnthropicHelper: providerId === 'anthropic',
+      contextLabel: `Direct process teammate restart (${input.configuredMember.name})`,
+    });
+
+    const runtimeArgs = mergeJsonSettingsArgs([
+      '--teammate-runtime',
+      'headless',
+      '--agent-id',
+      agentId,
+      '--agent-name',
+      input.configuredMember.name,
+      '--team-name',
+      input.teamName,
+      '--agent-color',
+      color,
+      '--parent-session-id',
+      parentSessionId,
+      ...(input.configuredMember.agentType
+        ? ['--agent-type', input.configuredMember.agentType]
+        : []),
+      '--mcp-config',
+      mcpConfigPath,
+      '--strict-mcp-config',
+      '--disallowedTools',
+      APP_TEAM_RUNTIME_DISALLOWED_TOOLS,
+      ...(input.run.request.skipPermissions !== false
+        ? ['--dangerously-skip-permissions', '--permission-mode', 'bypassPermissions']
+        : ['--permission-prompt-tool', 'stdio', '--permission-mode', 'default']),
+      ...(input.configuredMember.model ? ['--model', input.configuredMember.model] : []),
+      ...(input.configuredMember.effort ? ['--effort', input.configuredMember.effort] : []),
+      ...runtimeArgsPlan.fastModeArgs,
+      ...runtimeArgsPlan.runtimeTurnSettledHookArgs,
+      ...runtimeArgsPlan.providerArgs,
+      ...runtimeArgsPlan.settingsArgs,
+    ]);
+
+    const stdoutLog = fs.createWriteStream(runtimePaths.stdoutPath, { flags: 'a', mode: 0o600 });
+    const stderrLog = fs.createWriteStream(runtimePaths.stderrPath, { flags: 'a', mode: 0o600 });
+    const child = spawnCli(claudePath, runtimeArgs, {
+      cwd,
+      detached: true,
+      env: {
+        ...provisioningEnv.env,
+        ...nativeBootstrapEnv,
+        [TEAMMATE_RUNTIME_ENV]: 'headless',
+        [TEAMMATE_RUNTIME_EVENTS_ENV]: runtimePaths.eventsPath,
+        [TEAMMATE_BOOTSTRAP_PROOF_TOKEN_ENV]: bootstrapProofToken,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    if (!child.pid) {
+      stdoutLog.destroy();
+      stderrLog.destroy();
+      throw new Error(`Failed to spawn teammate process for ${agentId}: missing pid`);
+    }
+
+    const runtimePid = child.pid;
+    const processPaneId = `process:${runtimePid}`;
+    child.stdout?.pipe(stdoutLog);
+    child.stderr?.pipe(stderrLog);
+    child.stdin?.on('error', (error) => {
+      logger.debug(
+        `[${input.teamName}] Direct process restart stdin failed for ${agentId}: ${error.message}`
+      );
+    });
+    child.once('close', (code, signal) => {
+      void this.appendDirectProcessRuntimeEvent({
+        type: 'exited',
+        eventsPath: runtimePaths.eventsPath,
+        pid: runtimePid,
+        teamName: input.teamName,
+        agentName: input.configuredMember.name,
+        agentId,
+        runId: parentSessionId,
+        bootstrapRunId: input.run.runId,
+        source: 'TeamProvisioningService.direct_process_restart',
+        detail:
+          code !== null
+            ? `process exited with code ${code}`
+            : signal
+              ? `process exited from signal ${signal}`
+              : 'process exited',
+      });
+      stdoutLog.end();
+      stderrLog.end();
+    });
+    child.once('error', (error) => {
+      void this.appendDirectProcessRuntimeEvent({
+        type: 'failed',
+        eventsPath: runtimePaths.eventsPath,
+        pid: runtimePid,
+        teamName: input.teamName,
+        agentName: input.configuredMember.name,
+        agentId,
+        runId: parentSessionId,
+        bootstrapRunId: input.run.runId,
+        source: 'TeamProvisioningService.direct_process_restart',
+        detail: `process error: ${error.message}`,
+      });
+    });
+    (child.stdin as { unref?: () => void } | null)?.unref?.();
+    (child.stdout as { unref?: () => void } | null)?.unref?.();
+    (child.stderr as { unref?: () => void } | null)?.unref?.();
+    child.unref();
+
+    await this.appendDirectProcessRuntimeEvent({
+      type: 'process_spawned',
+      eventsPath: runtimePaths.eventsPath,
+      pid: runtimePid,
+      teamName: input.teamName,
+      agentName: input.configuredMember.name,
+      agentId,
+      runId: parentSessionId,
+      bootstrapRunId: input.run.runId,
+      source: 'TeamProvisioningService.direct_process_restart',
+      detail: 'process spawned',
+    });
+    await this.appendDirectProcessRuntimeEvent({
+      type: 'stdout_attached',
+      eventsPath: runtimePaths.eventsPath,
+      pid: runtimePid,
+      teamName: input.teamName,
+      agentName: input.configuredMember.name,
+      agentId,
+      runId: parentSessionId,
+      bootstrapRunId: input.run.runId,
+      source: 'TeamProvisioningService.direct_process_restart',
+      detail: 'stdout and stderr attached',
+    });
+
+    await this.updateDirectTmuxRestartMemberConfig({
+      teamName: input.teamName,
+      memberName: input.memberName,
+      member: input.configuredMember,
+      agentId,
+      color,
+      prompt,
+      paneId: processPaneId,
+      cwd,
+      providerId,
+      joinedAt: Date.now(),
+      bootstrapExpectedAfter,
+      backendType: 'process',
+      runtimePid,
+      bootstrapRuntimeEventsPath: runtimePaths.eventsPath,
+      bootstrapProofToken,
+      bootstrapRunId: input.run.runId,
+      ...(nativeBootstrapSpec
+        ? {
+            bootstrapContextHash: nativeBootstrapSpec.contextHash,
+            bootstrapBriefingHash: nativeBootstrapSpec.briefingHash,
+          }
+        : {}),
+    });
+    this.enqueueDirectRestartPrompt({
+      teamName: input.teamName,
+      memberName: input.configuredMember.name,
+      leadName: input.leadName,
+      leadSessionId: parentSessionId,
+      prompt,
+    });
+    await this.appendDirectProcessRuntimeEvent({
+      type: 'mailbox_bootstrap_written',
+      eventsPath: runtimePaths.eventsPath,
+      pid: runtimePid,
+      teamName: input.teamName,
+      agentName: input.configuredMember.name,
+      agentId,
+      runId: parentSessionId,
+      bootstrapRunId: input.run.runId,
+      source: 'TeamProvisioningService.direct_process_restart',
+    });
+    this.appendMemberBootstrapDiagnostic(
+      input.run,
+      input.memberName,
+      `restart process spawned with pid ${runtimePid}`
+    );
+    this.setMemberSpawnStatus(input.run, input.memberName, 'waiting');
+  }
+
+  private getDirectProcessRestartRuntimePaths(
+    teamName: string,
+    memberName: string
+  ): { dir: string; eventsPath: string; stdoutPath: string; stderrPath: string } {
+    const dir = getTeamRuntimeEventsDir(teamName);
+    const filePrefix = sanitizeProcessRuntimeEventFilePrefix(memberName);
+    return {
+      dir,
+      eventsPath: path.join(dir, `${filePrefix}.runtime.jsonl`),
+      stdoutPath: path.join(dir, `${filePrefix}.stdout.log`),
+      stderrPath: path.join(dir, `${filePrefix}.stderr.log`),
+    };
+  }
+
+  private async materializeDirectProcessNativeBootstrapContext(input: {
+    teamName: string;
+    memberName: string;
+    agentId: string;
+    providerId: TeamProviderId;
+    runId: string;
+    bootstrapProofToken: string;
+    spec: NativeAppManagedBootstrapSpec | null;
+  }): Promise<Record<string, string>> {
+    if (!input.spec || (input.providerId !== 'anthropic' && input.providerId !== 'codex')) {
+      return {};
+    }
+    const context = {
+      ...input.spec,
+      kind: 'native_app_managed_bootstrap',
+      teamName: input.teamName,
+      memberName: input.memberName,
+      agentId: input.agentId,
+      runId: input.runId,
+      provider: input.providerId,
+      bootstrapProofToken: input.bootstrapProofToken,
+    };
+    const dir = path.join(getTeamRuntimeEventsDir(input.teamName), 'native-bootstrap');
+    await fs.promises.mkdir(dir, { recursive: true });
+    const finalPath = path.join(
+      dir,
+      `${sanitizeProcessRuntimeEventFilePrefix(input.memberName)}-${randomUUID()}.native-bootstrap.json`
+    );
+    const tempPath = `${finalPath}.tmp`;
+    await fs.promises.writeFile(tempPath, JSON.stringify(context), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    await fs.promises.rename(tempPath, finalPath);
+    return { [NATIVE_APP_MANAGED_BOOTSTRAP_CONTEXT_ENV]: finalPath };
+  }
+
+  private async appendDirectProcessRuntimeEvent(input: {
+    type: string;
+    eventsPath: string;
+    pid: number;
+    teamName: string;
+    agentName: string;
+    agentId: string;
+    runId: string;
+    bootstrapRunId: string;
+    source: string;
+    detail?: string;
+  }): Promise<void> {
+    await fs.promises.mkdir(path.dirname(input.eventsPath), { recursive: true });
+    await fs.promises.appendFile(
+      input.eventsPath,
+      `${JSON.stringify({
+        version: 1,
+        type: input.type,
+        timestamp: nowIso(),
+        pid: input.pid,
+        teamName: input.teamName,
+        agentName: input.agentName,
+        agentId: input.agentId,
+        runId: input.runId,
+        bootstrapRunId: input.bootstrapRunId,
+        source: input.source,
+        ...(input.detail ? { detail: input.detail } : {}),
+      })}\n`,
+      { encoding: 'utf8', mode: 0o600 }
+    );
   }
 
   private getMemberLifecycleOperationKey(teamName: string, memberName: string): string {
@@ -14388,6 +14839,38 @@ export class TeamProvisioningService {
           configuredMember,
           persistedRuntimeMembers,
           paneId: directTmuxRestartPaneId,
+        });
+        return;
+      } catch (error) {
+        run.pendingMemberRestarts.delete(memberName);
+        this.setMemberSpawnStatus(
+          run,
+          memberName,
+          'error',
+          error instanceof Error ? error.message : String(error)
+        );
+        if (run.isLaunch) {
+          await this.persistLaunchStateSnapshot(
+            run,
+            run.provisioningComplete ? 'finished' : 'active'
+          );
+        }
+        throw error;
+      }
+    }
+
+    const shouldDirectProcessRestart = backendTypes.has('process') || livePids.size > 0;
+    if (shouldDirectProcessRestart) {
+      try {
+        await this.launchDirectProcessMemberRestart({
+          run,
+          teamName,
+          displayName: config?.name?.trim() || teamName,
+          leadName,
+          memberName,
+          config,
+          configuredMember,
+          persistedRuntimeMembers,
         });
         return;
       } catch (error) {
@@ -29518,6 +30001,14 @@ export class TeamProvisioningService {
       }
     );
     run.onProgress(progress);
+    if (hasSpawnFailures) {
+      this.writeLaunchFailureArtifactPackBestEffort(run, {
+        reason: run.isLaunch
+          ? 'launch_completed_with_teammate_errors'
+          : 'provisioning_completed_with_teammate_errors',
+        launchSnapshot: persistedLaunchSnapshot,
+      });
+    }
     this.provisioningRunByTeam.delete(run.teamName);
     this.aliveRunByTeam.set(run.teamName, run.runId);
     logger.info(`[${run.teamName}] Provisioning complete. Process alive for subsequent tasks.`);
@@ -30110,6 +30601,18 @@ export class TeamProvisioningService {
         preserveExistingFailure: true,
       });
       void this.persistLaunchStateSnapshot(run, 'finished');
+    }
+    if (
+      !hasNewerTrackedRun &&
+      (run.progress.state === 'failed' ||
+        (run.isLaunch && !run.provisioningComplete && !run.cancelRequested))
+    ) {
+      this.writeLaunchFailureArtifactPackBestEffort(run, {
+        reason:
+          run.progress.state === 'failed'
+            ? 'launch_progress_failed'
+            : 'launch_cleanup_unconfirmed_bootstrap',
+      });
     }
     this.resetRuntimeToolActivity(run);
     this.setLeadActivity(run, 'offline');

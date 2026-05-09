@@ -615,6 +615,17 @@ function createClaudeLogsRun(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
+async function waitForFile(filePath: string, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(filePath)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for file: ${filePath}`);
+}
+
 describe('TeamProvisioningService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1134,6 +1145,102 @@ describe('TeamProvisioningService', () => {
         total: 4,
         hasMore: false,
         updatedAt: '2026-04-19T10:00:01.000Z',
+      });
+    });
+
+    it('writes a launch failure artifact pack when cleanup finalizes failed launch state', async () => {
+      allowConsoleLogs();
+      const svc = new TeamProvisioningService();
+      const teamName = 'launch-artifact-cleanup-team';
+      const runId = 'run-launch-artifact-cleanup';
+      const startedAt = '2026-05-09T00:25:00.000Z';
+      const run = createClaudeLogsRun({
+        runId,
+        teamName,
+        startedAt,
+        isLaunch: true,
+        provisioningComplete: false,
+        cancelRequested: false,
+        deterministicBootstrap: true,
+        expectedMembers: ['bob'],
+        allEffectiveMembers: [
+          {
+            name: 'bob',
+            role: 'Developer',
+            providerId: 'anthropic',
+            model: 'opus',
+          },
+        ],
+        request: {
+          cwd: '/repo',
+          providerId: 'anthropic',
+          model: 'opus',
+          members: [
+            {
+              name: 'bob',
+              role: 'Developer',
+              providerId: 'anthropic',
+              model: 'opus',
+            },
+          ],
+        },
+        memberSpawnStatuses: new Map([
+          [
+            'bob',
+            createMemberSpawnStatusEntry({
+              status: 'spawning',
+              launchState: 'runtime_pending_bootstrap',
+              runtimeAlive: true,
+              firstSpawnAcceptedAt: '2026-05-09T00:25:05.000Z',
+              updatedAt: '2026-05-09T00:25:05.000Z',
+            }),
+          ],
+        ]),
+        progress: {
+          runId,
+          teamName,
+          state: 'failed',
+          message: 'Launch failed',
+          startedAt,
+          updatedAt: '2026-05-09T00:26:00.000Z',
+          error:
+            'Teammate process bob@signal-ops did not submit bootstrap prompt: timed out waiting for bootstrap_submitted; last transport stage: bootstrap_submit_rejected: submit rejected by local prompt handler retryable=true Last stderr: Warning: no stdin data received in 3s, proceeding without it.',
+        },
+        claudeLogLines: [
+          '[stderr]',
+          'Warning: no stdin data received in 3s, proceeding without it.',
+        ],
+        provisioningOutputParts: [],
+      });
+
+      (svc as any).runs.set(run.runId, run);
+      (svc as any).aliveRunByTeam.set(run.teamName, run.runId);
+      (svc as any).cleanupRun(run);
+
+      const latestPath = path.join(
+        tempTeamsBase,
+        teamName,
+        'launch-failure-artifacts',
+        'latest.json'
+      );
+      await waitForFile(latestPath);
+      const latest = JSON.parse(fs.readFileSync(latestPath, 'utf8')) as { manifestPath: string };
+      const manifest = JSON.parse(fs.readFileSync(latest.manifestPath, 'utf8')) as {
+        reason: string;
+        classification: { code: string };
+        bootstrapTransportBreadcrumb: {
+          submitRejected: boolean;
+          noStdinWarning: boolean;
+          retryable: boolean | null;
+        };
+      };
+
+      expect(manifest.reason).toBe('launch_progress_failed');
+      expect(manifest.classification.code).toBe('transport_rejected');
+      expect(manifest.bootstrapTransportBreadcrumb).toMatchObject({
+        submitRejected: true,
+        noStdinWarning: true,
+        retryable: true,
       });
     });
 
@@ -11589,6 +11696,59 @@ describe('TeamProvisioningService', () => {
 
       expect(vi.mocked(killProcessByPid)).toHaveBeenCalledWith(process.pid);
       expect(sendMessageToRun).not.toHaveBeenCalled();
+    });
+
+    it('restarts a process backend teammate directly without asking the lead to respawn it', async () => {
+      const svc = new TeamProvisioningService();
+      const run = createMemberSpawnRun({
+        teamName: 'process-team',
+        expectedMembers: ['forge'],
+        memberSpawnStatuses: new Map(),
+      });
+      run.child = { pid: 111 };
+      run.processKilled = false;
+      run.cancelRequested = false;
+
+      const sendMessageToRun = vi.fn(async () => {});
+      const directProcessRestart = vi.fn(async () => {});
+      (svc as any).sendMessageToRun = sendMessageToRun;
+      (svc as any).launchDirectProcessMemberRestart = directProcessRestart;
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          name: 'Process Team',
+          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+        })),
+      };
+      (svc as any).membersMetaStore = {
+        getMembers: vi.fn(async () => [
+          {
+            name: 'forge',
+            role: 'Developer',
+            providerId: 'codex',
+            model: 'gpt-5.4',
+            effort: 'medium',
+            agentType: 'general-purpose',
+          },
+        ]),
+      };
+      (svc as any).readPersistedRuntimeMembers = vi.fn(() => [
+        {
+          name: 'forge',
+          agentId: 'forge@process-team',
+          backendType: 'process',
+          tmuxPaneId: 'process:1234',
+          runtimePid: 1234,
+        },
+      ]);
+      (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () => new Map());
+      (svc as any).aliveRunByTeam.set('process-team', run.runId);
+      (svc as any).runs.set(run.runId, run);
+
+      await svc.restartMember('process-team', 'forge');
+
+      expect(directProcessRestart).toHaveBeenCalledTimes(1);
+      expect(sendMessageToRun).not.toHaveBeenCalled();
+      expect(run.pendingMemberRestarts.has('forge')).toBe(true);
     });
 
     it('rejects a second restart request while the first restart is still in flight', async () => {

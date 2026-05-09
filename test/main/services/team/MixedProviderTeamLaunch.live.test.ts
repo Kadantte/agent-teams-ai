@@ -10,6 +10,7 @@ import {
   getTeamsBasePath,
   setClaudeBasePathOverride,
 } from '../../../../src/main/utils/pathDecoder';
+import { killProcessByPid } from '../../../../src/main/utils/processKill';
 import {
   createOpenCodeLiveHarness,
   waitForOpenCodeLanesStopped,
@@ -131,8 +132,7 @@ liveDescribe('Mixed provider team launch live e2e', () => {
   afterEach(async () => {
     const keepProcesses = process.env.MIXED_PROVIDER_TEAM_LIVE_KEEP_PROCESSES === '1';
     if (!keepProcesses && harness && teamName) {
-      await harness.svc.stopTeam(teamName).catch(() => undefined);
-      await waitForOpenCodeLanesStopped(teamName, 90_000).catch(() => undefined);
+      await cleanupMixedProviderSmokeTeam(harness, teamName);
     }
     if (!keepProcesses && usingAnthropicSubscriptionAuth && teamName) {
       await fs.rm(path.join(getTeamsBasePath(), teamName), { recursive: true, force: true });
@@ -529,6 +529,51 @@ async function removeTempDirWithRetries(dirPath: string): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
+}
+
+async function cleanupMixedProviderSmokeTeam(
+  harness: OpenCodeLiveHarness,
+  teamName: string
+): Promise<void> {
+  const beforeStopSnapshot = await harness.svc
+    .getTeamAgentRuntimeSnapshot(teamName)
+    .catch(() => null);
+  await harness.svc.stopTeam(teamName).catch(() => undefined);
+  await waitForOpenCodeLanesStopped(teamName, 90_000).catch(() => undefined);
+  await terminateSmokeOwnedProcessBackends(beforeStopSnapshot);
+  const afterStopSnapshot = await harness.svc
+    .getTeamAgentRuntimeSnapshot(teamName)
+    .catch(() => null);
+  await terminateSmokeOwnedProcessBackends(afterStopSnapshot);
+}
+
+async function terminateSmokeOwnedProcessBackends(
+  snapshot: Awaited<ReturnType<OpenCodeLiveHarness['svc']['getTeamAgentRuntimeSnapshot']>> | null
+): Promise<void> {
+  const pids = new Set<number>();
+  for (const member of Object.values(snapshot?.members ?? {})) {
+    if (member.backendType !== 'process' || member.providerId === 'opencode') {
+      continue;
+    }
+    const pid = member.runtimePid ?? member.pid;
+    if (typeof pid === 'number' && Number.isFinite(pid) && pid > 0) {
+      pids.add(pid);
+    }
+  }
+  await Promise.all(
+    Array.from(pids).map(async (pid) => {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return;
+      }
+      try {
+        killProcessByPid(pid);
+      } catch {
+        // Best-effort smoke cleanup. The process may have exited between the liveness probe and kill.
+      }
+    })
+  );
 }
 
 function formatProgressDump(progressEvents: TeamProvisioningProgress[]): string {
