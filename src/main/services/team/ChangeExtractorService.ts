@@ -47,6 +47,7 @@ import type {
   AgentChangeSet,
   ChangeStats,
   TaskChangeSetV2,
+  TeamConfig,
   TeamTaskChangeSummariesResponse,
   TeamTaskChangeSummaryItem,
   TeamTaskChangeSummaryRequest,
@@ -132,7 +133,7 @@ export class ChangeExtractorService {
     this.taskChangeComputer = new TaskChangeComputer(logsFinder, boundaryParser);
   }
 
-  private readConfigForObservation(teamName: string) {
+  private readConfigForObservation(teamName: string): Promise<TeamConfig | null> {
     return typeof this.configReader.getConfigSnapshot === 'function'
       ? this.configReader.getConfigSnapshot(teamName)
       : this.configReader.getConfig(teamName);

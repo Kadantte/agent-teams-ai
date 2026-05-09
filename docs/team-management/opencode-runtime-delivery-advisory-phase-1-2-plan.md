@@ -1192,6 +1192,8 @@ File:
 
 ```txt
 test/main/services/team/OpenCodeRuntimeDeliveryAdvisoryPolicy.test.ts
+test/main/services/team/opencode/OpenCodeRuntimeDeliveryProofMatching.test.ts
+test/main/services/team/opencode/OpenCodeRuntimeDeliveryProofReader.test.ts
 ```
 
 Cases:
@@ -1212,6 +1214,14 @@ it('uses prompt inbox time rather than failedAt for late proof timestamp eligibi
 it('suppresses when task progress proof is newer than the original prompt inbox time', () => {});
 it('suppresses when a newer terminal success exists', () => {});
 it('treats payload mismatch as immediate hard error', () => {});
+```
+
+Add extraction-preservation tests around existing delivery recovery if they are not already covered:
+
+```ts
+it('keeps visible reply recovery by observed message id behavior unchanged after helper extraction', async () => {});
+it('keeps visible reply recovery by taskRefs behavior unchanged after helper extraction', async () => {});
+it('keeps lead-recipient user fallback candidate behavior unchanged after helper extraction', async () => {});
 ```
 
 ### Member advisory service tests
