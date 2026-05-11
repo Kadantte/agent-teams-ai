@@ -2719,6 +2719,8 @@ export const TeamDetailView = memo(function TeamDetailView({
               <TeamChangesSection
                 teamName={teamName}
                 tasks={data.tasks}
+                memberColorMap={resolvedMemberColorMap}
+                onOpenTask={(task) => setSelectedTask(task)}
                 onViewChanges={handleViewChangesForFile}
               />
 

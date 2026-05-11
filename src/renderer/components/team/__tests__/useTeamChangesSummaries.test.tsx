@@ -15,6 +15,7 @@ import type {
 } from '@shared/types';
 
 const hoisted = vi.hoisted(() => ({
+  fetchConfig: vi.fn(),
   getTeamTaskChangeSummaries: vi.fn(),
   recordTaskChangePresence: vi.fn(),
   setSelectedTeamTaskChangePresence: vi.fn(),
@@ -31,8 +32,15 @@ vi.mock('@renderer/api', () => ({
 vi.mock('@renderer/store', () => ({
   useStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
+      appConfig: { general: { theme: 'dark' } },
+      configLoading: false,
+      fetchConfig: hoisted.fetchConfig,
+      memberActivityMetaByTeam: {},
       recordTaskChangePresence: hoisted.recordTaskChangePresence,
       setSelectedTeamTaskChangePresence: hoisted.setSelectedTeamTaskChangePresence,
+      selectedTeamData: null,
+      selectedTeamName: undefined,
+      teamDataCacheByName: {},
     }),
 }));
 
@@ -187,6 +195,7 @@ interface HookSnapshot {
   loading: boolean;
   refreshing: boolean;
   error: string | null;
+  badgeCount: number | null;
   summariesByTaskId: Record<string, TeamChangeSummaryState>;
 }
 
@@ -207,9 +216,17 @@ const HookHarness = ({
       loading: state.loading,
       refreshing: state.refreshing,
       error: state.error,
+      badgeCount: state.badgeCount,
       summariesByTaskId: state.summariesByTaskId,
     });
-  }, [onSnapshot, state.error, state.loading, state.refreshing, state.summariesByTaskId]);
+  }, [
+    onSnapshot,
+    state.badgeCount,
+    state.error,
+    state.loading,
+    state.refreshing,
+    state.summariesByTaskId,
+  ]);
   return null;
 };
 
@@ -585,6 +602,7 @@ describe('useTeamChangesSummaries', () => {
             React.createElement(TeamChangesSection, {
               teamName: 'team-a',
               tasks: [task()],
+              onOpenTask: vi.fn(),
               onViewChanges: vi.fn(),
             })
           )
@@ -607,6 +625,281 @@ describe('useTeamChangesSummaries', () => {
         'The change summary reported one file without safe review details.'
       );
       expect(hoisted.recordTaskChangePresence).not.toHaveBeenCalled();
+    } finally {
+      if (scrollIntoViewDescriptor) {
+        Object.defineProperty(Element.prototype, 'scrollIntoView', scrollIntoViewDescriptor);
+      } else {
+        delete (Element.prototype as { scrollIntoView?: Element['scrollIntoView'] }).scrollIntoView;
+      }
+    }
+  });
+
+  it('shows the closed-section counter only after the background count load resolves', async () => {
+    const deferred = createDeferred<TeamTaskChangeSummariesResponse>();
+    hoisted.getTeamTaskChangeSummaries.mockReturnValue(deferred.promise);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(TeamChangesSection, {
+            teamName: 'team-a',
+            tasks: [task()],
+            onOpenTask: vi.fn(),
+            onViewChanges: vi.fn(),
+          })
+        )
+      );
+    });
+
+    expect(container.textContent).toContain('Changes');
+    expect(container.textContent).not.toContain('0');
+    expect(hoisted.getTeamTaskChangeSummaries).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      deferred.resolve(response());
+      await deferred.promise;
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('0');
+  });
+
+  it('loads the closed-section counter without rendering full change rows', async () => {
+    hoisted.getTeamTaskChangeSummaries.mockResolvedValue(lowConfidenceFileResponse());
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(TeamChangesSection, {
+            teamName: 'team-a',
+            tasks: [task()],
+            onOpenTask: vi.fn(),
+            onViewChanges: vi.fn(),
+          })
+        )
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(hoisted.getTeamTaskChangeSummaries).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('1');
+    expect(container.textContent).not.toContain('src/app.ts');
+  });
+
+  it('runs a queued closed counter refresh when tasks change during an active count load', async () => {
+    const first = createDeferred<TeamTaskChangeSummariesResponse>();
+    const second = createDeferred<TeamTaskChangeSummariesResponse>();
+    hoisted.getTeamTaskChangeSummaries
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(TeamChangesSection, {
+            teamName: 'team-a',
+            tasks: [task()],
+            onOpenTask: vi.fn(),
+            onViewChanges: vi.fn(),
+          })
+        )
+      );
+    });
+
+    expect(hoisted.getTeamTaskChangeSummaries).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root?.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(TeamChangesSection, {
+            teamName: 'team-a',
+            tasks: [task({ updatedAt: '2026-05-10T10:00:02.000Z' })],
+            onOpenTask: vi.fn(),
+            onViewChanges: vi.fn(),
+          })
+        )
+      );
+    });
+
+    await act(async () => {
+      first.resolve(lowConfidenceFileResponse());
+      await first.promise;
+      await Promise.resolve();
+    });
+
+    expect(hoisted.getTeamTaskChangeSummaries).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      second.resolve(response());
+      await second.promise;
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('0');
+  });
+
+  it('does not lose the full load queued by opening the section during a failed count load', async () => {
+    const first = createDeferred<TeamTaskChangeSummariesResponse>();
+    const second = createDeferred<TeamTaskChangeSummariesResponse>();
+    hoisted.getTeamTaskChangeSummaries
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    const scrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      'scrollIntoView'
+    );
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    try {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+
+      await act(async () => {
+        root?.render(
+          React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(TeamChangesSection, {
+              teamName: 'team-a',
+              tasks: [task()],
+              onOpenTask: vi.fn(),
+              onViewChanges: vi.fn(),
+            })
+          )
+        );
+      });
+
+      const expandButton = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Expand section"]'
+      );
+      expect(expandButton).not.toBeNull();
+
+      await act(async () => {
+        expandButton?.click();
+      });
+
+      expect(container.textContent).toContain('Loading changes...');
+
+      await act(async () => {
+        first.reject(new Error('silent count failed'));
+        await first.promise.catch(() => undefined);
+        await Promise.resolve();
+      });
+
+      expect(hoisted.getTeamTaskChangeSummaries).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        second.resolve(lowConfidenceFileResponse());
+        await second.promise;
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('src/app.ts');
+      expect(container.textContent).not.toContain('silent count failed');
+    } finally {
+      if (scrollIntoViewDescriptor) {
+        Object.defineProperty(Element.prototype, 'scrollIntoView', scrollIntoViewDescriptor);
+      } else {
+        delete (Element.prototype as { scrollIntoView?: Element['scrollIntoView'] }).scrollIntoView;
+      }
+    }
+  });
+
+  it('opens the task popup from summary header and keeps diff on the review action', async () => {
+    const taskItem = task({ changePresence: 'has_changes' });
+    const onOpenTask = vi.fn();
+    const onViewChanges = vi.fn();
+    hoisted.getTeamTaskChangeSummaries.mockResolvedValue(lowConfidenceFileResponse());
+
+    const scrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      'scrollIntoView'
+    );
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    try {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+
+      await act(async () => {
+        root?.render(
+          React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(TeamChangesSection, {
+              teamName: 'team-a',
+              tasks: [taskItem],
+              memberColorMap: new Map([['alice', 'blue']]),
+              onOpenTask,
+              onViewChanges,
+            })
+          )
+        );
+      });
+
+      const expandButton = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Expand section"]'
+      );
+      expect(expandButton).not.toBeNull();
+
+      await act(async () => {
+        expandButton?.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('img')).not.toBeNull();
+
+      const openTaskButton = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Open task Task 1"]'
+      );
+      expect(openTaskButton).not.toBeNull();
+
+      await act(async () => {
+        openTaskButton?.click();
+      });
+
+      expect(onOpenTask).toHaveBeenCalledWith(taskItem);
+      expect(onViewChanges).not.toHaveBeenCalled();
+
+      const reviewTaskDiffButton = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Review task diff"]'
+      );
+      expect(reviewTaskDiffButton).not.toBeNull();
+
+      await act(async () => {
+        reviewTaskDiffButton?.click();
+      });
+
+      expect(onViewChanges).toHaveBeenCalledWith('task-1');
     } finally {
       if (scrollIntoViewDescriptor) {
         Object.defineProperty(Element.prototype, 'scrollIntoView', scrollIntoViewDescriptor);

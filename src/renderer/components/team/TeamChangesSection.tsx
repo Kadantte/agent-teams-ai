@@ -7,6 +7,7 @@ import { AlertTriangle, FileDiff, GitCompareArrows, Info, Loader2, RefreshCw } f
 
 import { FileIcon } from './editor/FileIcon';
 import { CollapsibleTeamSection } from './CollapsibleTeamSection';
+import { MemberBadge } from './MemberBadge';
 import {
   getTeamChangeTaskTimeMs,
   TEAM_CHANGES_MAX_RENDERED_FILE_ROWS,
@@ -18,6 +19,8 @@ import type { FileChangeSummary, TaskChangeSetV2, TeamTaskWithKanban } from '@sh
 interface TeamChangesSectionProps {
   teamName: string;
   tasks: TeamTaskWithKanban[];
+  memberColorMap?: ReadonlyMap<string, string>;
+  onOpenTask: (task: TeamTaskWithKanban) => void;
   onViewChanges: (taskId: string, filePath?: string) => void;
 }
 
@@ -27,6 +30,8 @@ interface RenderedTeamChangeSummary {
   visibleFiles: FileChangeSummary[];
   fileBudget: number;
 }
+
+const EMPTY_MEMBER_COLOR_MAP = new Map<string, string>();
 
 function getChangeSetFiles(changeSet: TaskChangeSetV2 | null): FileChangeSummary[] {
   if (!Array.isArray(changeSet?.files)) {
@@ -121,16 +126,17 @@ function getTaskChangeDiagnosticMessages(changeSet: TaskChangeSetV2): string[] {
 export const TeamChangesSection = memo(function TeamChangesSection({
   teamName,
   tasks,
+  memberColorMap = EMPTY_MEMBER_COLOR_MAP,
+  onOpenTask,
   onViewChanges,
 }: TeamChangesSectionProps): React.JSX.Element {
   const [sectionOpen, setSectionOpen] = useState(false);
-  const { summariesByTaskId, stats, loading, refreshing, error, refresh } = useTeamChangesSummaries(
-    {
+  const { summariesByTaskId, badgeCount, stats, loading, refreshing, error, refresh } =
+    useTeamChangesSummaries({
       teamName,
       tasks,
       sectionOpen,
-    }
-  );
+    });
   const taskMap = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
 
   const visibleSummaries = useMemo(() => {
@@ -153,7 +159,7 @@ export const TeamChangesSection = memo(function TeamChangesSection({
     0
   );
   const hiddenFileRows = Math.max(0, totalFiles - TEAM_CHANGES_MAX_RENDERED_FILE_ROWS);
-  const badge = totalFiles > 0 ? totalFiles : visibleSummaries.length || undefined;
+  const badge = badgeCount ?? undefined;
   const renderedSummaries = useMemo(() => {
     const entries: RenderedTeamChangeSummary[] = [];
     let remainingFileRows = TEAM_CHANGES_MAX_RENDERED_FILE_ROWS;
@@ -233,30 +239,64 @@ export const TeamChangesSection = memo(function TeamChangesSection({
                   key={summary.taskId}
                   className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)]"
                 >
-                  <button
-                    type="button"
-                    className="flex w-full min-w-0 items-center gap-2 rounded-t-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-surface-raised)]"
-                    onClick={() => onViewChanges(task.id)}
-                  >
-                    <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">
-                      #{deriveTaskDisplayId(task.id)}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--color-text)]">
-                      {task.subject}
-                    </span>
-                    <span
-                      className="hidden max-w-[180px] shrink-0 truncate text-[10px] text-[var(--color-text-muted)] sm:inline"
-                      title={contributors.join(', ')}
+                  <div className="flex min-w-0 items-center gap-1 rounded-t-md px-2 py-1.5 transition-colors hover:bg-[var(--color-surface-raised)]">
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      onClick={() => onOpenTask(task)}
+                      aria-label={`Open task ${task.subject}`}
                     >
-                      {contributorLabel}
-                      {extraContributors > 0 ? ` +${extraContributors}` : ''}
-                    </span>
-                    {badgeText ? (
-                      <span className="shrink-0 rounded bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">
-                        {badgeText}
+                      <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">
+                        #{deriveTaskDisplayId(task.id)}
                       </span>
-                    ) : null}
-                  </button>
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--color-text)]">
+                        {task.subject}
+                      </span>
+                      {contributors[0] ? (
+                        <span className="hidden min-w-0 max-w-[220px] shrink-0 items-center gap-1 sm:inline-flex">
+                          <MemberBadge
+                            name={contributors[0]}
+                            color={memberColorMap.get(contributors[0])}
+                            size="xs"
+                            disableHoverCard
+                          />
+                          {extraContributors > 0 ? (
+                            <span
+                              className="shrink-0 text-[10px] text-[var(--color-text-muted)]"
+                              title={contributors.join(', ')}
+                            >
+                              +{extraContributors}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : (
+                        <span
+                          className="hidden max-w-[180px] shrink-0 truncate text-[10px] text-[var(--color-text-muted)] sm:inline"
+                          title={contributors.join(', ')}
+                        >
+                          {contributorLabel}
+                        </span>
+                      )}
+                      {badgeText ? (
+                        <span className="shrink-0 rounded bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">
+                          {badgeText}
+                        </span>
+                      ) : null}
+                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-border-emphasis)] hover:text-[var(--color-text)]"
+                          onClick={() => onViewChanges(task.id)}
+                          aria-label="Review task diff"
+                        >
+                          <GitCompareArrows size={13} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">Review diff</TooltipContent>
+                    </Tooltip>
+                  </div>
 
                   {summary.error ? (
                     <div className="flex items-center gap-2 border-t border-[var(--color-border)] px-2 py-1.5 text-xs text-red-400">

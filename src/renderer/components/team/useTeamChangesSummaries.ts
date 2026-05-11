@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
 import { resolveTaskChangePresenceFromResult } from '@renderer/utils/taskChangePresence';
+import { classifyTaskChangeReviewability } from '@shared/utils/taskChangeReviewability';
 
 import { withTeamChangesLoadTimeout } from './teamChangesLoadTimeout';
 import {
@@ -18,6 +19,7 @@ import type {
 } from '@shared/types';
 
 const TEAM_CHANGES_AUTO_REFRESH_MS = 30_000;
+const TEAM_CHANGES_COUNTER_AUTO_REFRESH_MS = 60_000;
 const TEAM_CHANGES_ERROR_AUTO_RETRY_COOLDOWN_MS = 120_000;
 
 export interface TeamChangeSummaryState {
@@ -36,6 +38,9 @@ interface TeamChangesLoadOptions {
   forceFresh?: boolean;
   showSpinner?: boolean;
   preserveOnError?: boolean;
+  storeSummaries?: boolean;
+  reportError?: boolean;
+  blockAutoRetryOnError?: boolean;
 }
 
 interface UseTeamChangesSummariesInput {
@@ -46,6 +51,7 @@ interface UseTeamChangesSummariesInput {
 
 interface UseTeamChangesSummariesResult {
   summariesByTaskId: Record<string, TeamChangeSummaryState>;
+  badgeCount: number | null;
   stats: TeamChangeStats;
   loading: boolean;
   refreshing: boolean;
@@ -101,6 +107,19 @@ function hasSafeFileSummaries(changeSet: TaskChangeSetV2): boolean {
   );
 }
 
+function hasDisplayableFileSummaries(changeSet: TaskChangeSetV2): boolean {
+  return (
+    Array.isArray(changeSet.files) &&
+    changeSet.files.some(
+      (file) =>
+        file &&
+        typeof file === 'object' &&
+        typeof file.filePath === 'string' &&
+        file.filePath.trim().length > 0
+    )
+  );
+}
+
 function isMinimalPresenceChangeSet(changeSet: TaskChangeSetV2): boolean {
   return Boolean(
     Array.isArray(changeSet.files) &&
@@ -136,6 +155,31 @@ function resolveCacheablePresenceFromChangeSet(
   return null;
 }
 
+function isCountableTeamChangeSummary(item: TeamTaskChangeSummaryItem): boolean {
+  if (item.error) {
+    return true;
+  }
+
+  const changeSet = item.changeSet;
+  if (!changeSet) {
+    return false;
+  }
+  if (hasDisplayableFileSummaries(changeSet)) {
+    return true;
+  }
+
+  const reviewability = classifyTaskChangeReviewability(changeSet).reviewability;
+  return reviewability === 'attention_required' || reviewability === 'diagnostic_only';
+}
+
+function countChangedTasks(changeCountByTaskId: Record<string, boolean>): number {
+  return Object.values(changeCountByTaskId).filter(Boolean).length;
+}
+
+function isDocumentHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
 export function useTeamChangesSummaries({
   teamName,
   tasks,
@@ -146,6 +190,8 @@ export function useTeamChangesSummaries({
   const [summariesByTaskId, setSummariesByTaskId] = useState<
     Record<string, TeamChangeSummaryState>
   >({});
+  const [changeCountByTaskId, setChangeCountByTaskId] = useState<Record<string, boolean>>({});
+  const [counterLoaded, setCounterLoaded] = useState(false);
   const [stats, setStats] = useState<TeamChangeStats>({
     eligibleCount: 0,
     requestedCount: 0,
@@ -161,14 +207,10 @@ export function useTeamChangesSummaries({
   const activeRequestSeqRef = useRef<number | null>(null);
   const queuedRefreshOptionsRef = useRef<TeamChangesLoadOptions | null>(null);
   const autoRefreshBlockedUntilRef = useRef(0);
-  const sectionOpenRef = useRef(sectionOpen);
   const unknownScanCursorRef = useRef(0);
   const lastRequestedTasksFingerprintRef = useRef<string | null>(null);
-  const tasksFingerprint = useMemo(
-    () => (sectionOpen ? buildTeamChangesTasksFingerprint(tasks) : ''),
-    [sectionOpen, tasks]
-  );
-  sectionOpenRef.current = sectionOpen;
+  const lastCounterTasksFingerprintRef = useRef<string | null>(null);
+  const tasksFingerprint = useMemo(() => buildTeamChangesTasksFingerprint(tasks), [tasks]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -181,6 +223,7 @@ export function useTeamChangesSummaries({
       hasLoadedRef.current = false;
       unknownScanCursorRef.current = 0;
       lastRequestedTasksFingerprintRef.current = null;
+      lastCounterTasksFingerprintRef.current = null;
     };
   }, []);
 
@@ -189,6 +232,9 @@ export function useTeamChangesSummaries({
       forceFresh = false,
       showSpinner = false,
       preserveOnError = true,
+      storeSummaries = true,
+      reportError = true,
+      blockAutoRetryOnError = true,
     }: TeamChangesLoadOptions = {}): Promise<void> => {
       if (forceFresh) {
         autoRefreshBlockedUntilRef.current = 0;
@@ -204,8 +250,18 @@ export function useTeamChangesSummaries({
           preserveOnError: previous
             ? Boolean(previous.preserveOnError && preserveOnError)
             : preserveOnError,
+          storeSummaries: Boolean(previous?.storeSummaries || storeSummaries),
+          reportError: previous ? Boolean(previous.reportError || reportError) : reportError,
+          blockAutoRetryOnError: previous
+            ? Boolean(previous.blockAutoRetryOnError || blockAutoRetryOnError)
+            : blockAutoRetryOnError,
         };
-        if (activeRequestSeqRef.current === null && sectionOpenRef.current) {
+        if (showSpinner) {
+          setLoading(true);
+        } else if (storeSummaries) {
+          setRefreshing(true);
+        }
+        if (activeRequestSeqRef.current === null) {
           setQueuedRefreshTick((value) => value + 1);
         }
         return;
@@ -223,7 +279,11 @@ export function useTeamChangesSummaries({
       setError(null);
 
       if (plan.requests.length === 0) {
-        setSummariesByTaskId({});
+        if (storeSummaries) {
+          setSummariesByTaskId({});
+        }
+        setChangeCountByTaskId({});
+        setCounterLoaded(true);
         autoRefreshBlockedUntilRef.current = 0;
         setLoading(false);
         setRefreshing(false);
@@ -232,7 +292,7 @@ export function useTeamChangesSummaries({
 
       if (showSpinner) {
         setLoading(true);
-      } else {
+      } else if (storeSummaries) {
         setRefreshing(true);
       }
       activeRequestSeqRef.current = requestSeq;
@@ -250,6 +310,22 @@ export function useTeamChangesSummaries({
         autoRefreshBlockedUntilRef.current = 0;
         const responseItems = getSafeResponseItems(response);
 
+        setChangeCountByTaskId((previous) => {
+          const next: Record<string, boolean> = {};
+          const currentTaskIds = new Set(tasks.map((task) => task.id));
+          for (const [taskId, countable] of Object.entries(previous)) {
+            if (currentTaskIds.has(taskId) && plan.eligibleTaskIds.has(taskId)) {
+              next[taskId] = countable;
+            }
+          }
+          for (const item of responseItems) {
+            if (!plan.requestOptionsByTaskId.has(item.taskId)) continue;
+            next[item.taskId] = isCountableTeamChangeSummary(item);
+          }
+          return next;
+        });
+        setCounterLoaded(true);
+
         const currentTaskIds = new Set(tasks.map((task) => task.id));
         for (const item of responseItems) {
           const changeSet = item.changeSet;
@@ -262,41 +338,55 @@ export function useTeamChangesSummaries({
           setSelectedTeamTaskChangePresence(teamName, item.taskId, nextPresence);
         }
 
-        setSummariesByTaskId((previous) => {
-          const next: Record<string, TeamChangeSummaryState> = {};
-          for (const [taskId, summary] of Object.entries(previous)) {
-            if (currentTaskIds.has(taskId) && plan.eligibleTaskIds.has(taskId)) {
-              next[taskId] = summary;
+        if (storeSummaries) {
+          setSummariesByTaskId((previous) => {
+            const next: Record<string, TeamChangeSummaryState> = {};
+            for (const [taskId, summary] of Object.entries(previous)) {
+              if (currentTaskIds.has(taskId) && plan.eligibleTaskIds.has(taskId)) {
+                next[taskId] = summary;
+              }
             }
-          }
-          for (const item of responseItems) {
-            const options = plan.requestOptionsByTaskId.get(item.taskId);
-            if (!options) continue;
-            next[item.taskId] = {
-              taskId: item.taskId,
-              changeSet: item.changeSet,
-              error: item.error,
-            };
-          }
-          return next;
-        });
+            for (const item of responseItems) {
+              const options = plan.requestOptionsByTaskId.get(item.taskId);
+              if (!options) continue;
+              next[item.taskId] = {
+                taskId: item.taskId,
+                changeSet: item.changeSet,
+                error: item.error,
+              };
+            }
+            return next;
+          });
+        }
       } catch (err) {
         if (!mountedRef.current || requestSeqRef.current !== requestSeq) {
           return;
         }
-        queuedRefreshOptionsRef.current = null;
-        autoRefreshBlockedUntilRef.current = Date.now() + TEAM_CHANGES_ERROR_AUTO_RETRY_COOLDOWN_MS;
+        const queuedOptions = queuedRefreshOptionsRef.current as TeamChangesLoadOptions | null;
+        const shouldRunVisibleQueuedRefreshAfterSilentFailure =
+          !storeSummaries &&
+          !reportError &&
+          Boolean(queuedOptions?.showSpinner || queuedOptions?.storeSummaries);
+        if (!shouldRunVisibleQueuedRefreshAfterSilentFailure) {
+          queuedRefreshOptionsRef.current = null;
+        }
+        if (blockAutoRetryOnError) {
+          autoRefreshBlockedUntilRef.current =
+            Date.now() + TEAM_CHANGES_ERROR_AUTO_RETRY_COOLDOWN_MS;
+        }
         if (!preserveOnError) {
           setSummariesByTaskId({});
         }
-        setError(err instanceof Error ? err.message : 'Failed to load team changes');
+        if (reportError) {
+          setError(err instanceof Error ? err.message : 'Failed to load team changes');
+        }
       } finally {
         if (mountedRef.current) {
           const hasQueuedRefresh = queuedRefreshOptionsRef.current !== null;
           if (activeRequestSeqRef.current === requestSeq) {
             activeRequestSeqRef.current = null;
           }
-          if (hasQueuedRefresh && activeRequestSeqRef.current === null && sectionOpenRef.current) {
+          if (hasQueuedRefresh && activeRequestSeqRef.current === null) {
             setQueuedRefreshTick((value) => value + 1);
           }
           const shouldStopIndicators =
@@ -320,7 +410,10 @@ export function useTeamChangesSummaries({
     autoRefreshBlockedUntilRef.current = 0;
     unknownScanCursorRef.current = 0;
     lastRequestedTasksFingerprintRef.current = null;
+    lastCounterTasksFingerprintRef.current = null;
     setSummariesByTaskId({});
+    setChangeCountByTaskId({});
+    setCounterLoaded(false);
     setError(null);
     setStats({ eligibleCount: 0, requestedCount: 0, deferredCount: 0 });
   }, [teamName]);
@@ -340,6 +433,23 @@ export function useTeamChangesSummaries({
       setRefreshing(false);
     }
   }, [sectionOpen]);
+
+  useEffect(() => {
+    if (sectionOpen) {
+      return;
+    }
+    if (lastCounterTasksFingerprintRef.current === tasksFingerprint && counterLoaded) {
+      return;
+    }
+    lastCounterTasksFingerprintRef.current = tasksFingerprint;
+    void loadSummaries({
+      showSpinner: false,
+      preserveOnError: true,
+      storeSummaries: false,
+      reportError: false,
+      blockAutoRetryOnError: false,
+    });
+  }, [counterLoaded, loadSummaries, sectionOpen, tasksFingerprint]);
 
   useEffect(() => {
     if (!sectionOpen || hasLoadedRef.current) {
@@ -362,7 +472,7 @@ export function useTeamChangesSummaries({
   }, [loadSummaries, sectionOpen, tasksFingerprint]);
 
   useEffect(() => {
-    if (!sectionOpen || activeRequestSeqRef.current !== null) {
+    if (activeRequestSeqRef.current !== null) {
       return;
     }
     const options = queuedRefreshOptionsRef.current;
@@ -371,7 +481,7 @@ export function useTeamChangesSummaries({
     }
     queuedRefreshOptionsRef.current = null;
     void loadSummaries(options);
-  }, [loadSummaries, queuedRefreshTick, sectionOpen]);
+  }, [loadSummaries, queuedRefreshTick]);
 
   useEffect(() => {
     if (!sectionOpen) {
@@ -390,12 +500,39 @@ export function useTeamChangesSummaries({
     };
   }, [loadSummaries, sectionOpen]);
 
+  useEffect(() => {
+    if (sectionOpen) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      if (isDocumentHidden()) {
+        return;
+      }
+      if (activeRequestSeqRef.current !== null || queuedRefreshOptionsRef.current !== null) {
+        return;
+      }
+      void loadSummaries({
+        showSpinner: false,
+        preserveOnError: true,
+        storeSummaries: false,
+        reportError: false,
+        blockAutoRetryOnError: false,
+      });
+    }, TEAM_CHANGES_COUNTER_AUTO_REFRESH_MS);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [loadSummaries, sectionOpen]);
+
   const refresh = useCallback(() => {
     void loadSummaries({ forceFresh: true, showSpinner: true, preserveOnError: false });
   }, [loadSummaries]);
 
   return {
     summariesByTaskId,
+    badgeCount: counterLoaded ? countChangedTasks(changeCountByTaskId) : null,
     stats,
     loading,
     refreshing,
