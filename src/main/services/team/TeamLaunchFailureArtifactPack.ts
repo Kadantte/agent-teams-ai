@@ -217,7 +217,7 @@ function firstEvidence(parts: readonly string[], pattern: RegExp): string[] {
 }
 
 const WORKSPACE_TRUST_FAILURE_PATTERN =
-  /workspace trust is not accepted|cannot start in headless process runtime because workspace trust|open that workspace once interactively and accept trust/i;
+  /workspace trust is not accepted|cannot start in headless process runtime because workspace trust|open that workspace once interactively and accept trust|workspace_trust_preflight_not_confirmed|workspace trust was not confirmed|workspace trust preflight blocked launch/i;
 
 export function isWorkspaceTrustLaunchFailureText(value: string): boolean {
   return WORKSPACE_TRUST_FAILURE_PATTERN.test(value);

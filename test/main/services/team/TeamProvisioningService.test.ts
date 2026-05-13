@@ -6,6 +6,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildWorkspaceTrustPathCandidates } from '@features/workspace-trust/main';
 
 const hoisted = vi.hoisted(() => ({
   paths: {
@@ -771,8 +772,7 @@ describe('TeamProvisioningService', () => {
             teamEventType: 'team_launched',
             teamName: 'late-all-joined-team',
             dedupeKey: 'team_launched:late-all-joined-team:run-late-all-joined',
-            body:
-              'Team "late-all-joined-team" has been launched - all 2 teammates joined and are ready for tasks.',
+            body: 'Team "late-all-joined-team" has been launched - all 2 teammates joined and are ready for tasks.',
           })
         );
 
@@ -2004,6 +2004,17 @@ describe('TeamProvisioningService', () => {
   });
 
   describe('launch-state no-op persistence guard', () => {
+    it('does not clear persisted launch state for an expected run after tracking is gone', () => {
+      const svc = new TeamProvisioningService();
+
+      expect(
+        (svc as any).canClearPersistedLaunchStateForRun(
+          'workspace-trust-stale-clear-team',
+          'run-stale'
+        )
+      ).toBe(false);
+    });
+
     it('does not rewrite launch-state or invalidate runtime cache for a recent semantic no-op', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-05-02T10:00:05.000Z'));
@@ -8199,10 +8210,10 @@ describe('TeamProvisioningService', () => {
       }));
       await configureOpenCodeBobDeliveryService({ svc, sendMessageToMember });
 
-    await expect(
-      svc.deliverOpenCodeMemberMessage('team-a', {
-        memberName: 'bob',
-        text: 'Work sync check for #task-1.',
+      await expect(
+        svc.deliverOpenCodeMemberMessage('team-a', {
+          memberName: 'bob',
+          text: 'Work sync check for #task-1.',
           messageId: 'msg-work-sync-report',
           replyRecipient: 'team-lead',
           actionMode: 'do',
@@ -13261,7 +13272,9 @@ describe('TeamProvisioningService', () => {
         });
 
         if (adapterLaunch.mock.calls.length === 1) {
-          throw new Error('OpenCode bridge failed: Bridge server runtime manifest high watermark is stale');
+          throw new Error(
+            'OpenCode bridge failed: Bridge server runtime manifest high watermark is stale'
+          );
         }
 
         await writeCommittedOpenCodeSessionStore({
@@ -17606,6 +17619,479 @@ describe('TeamProvisioningService', () => {
       status: 'error',
       launchState: 'failed_to_start',
       hardFailureReason: reason,
+    });
+  });
+
+  it('includes legacy member provider fields when planning workspace trust providers', () => {
+    const svc = new TeamProvisioningService();
+
+    expect(
+      (svc as any).collectWorkspaceTrustProviders({
+        leadProviderId: 'anthropic',
+        members: [{ name: 'alice', provider: 'codex' }],
+      })
+    ).toEqual(['claude', 'codex']);
+  });
+
+  it('dedupes workspace trust providers across lead, member providerId, and legacy provider fields', () => {
+    const svc = new TeamProvisioningService();
+
+    expect(
+      (svc as any).collectWorkspaceTrustProviders({
+        leadProviderId: 'codex',
+        members: [
+          { name: 'alice', providerId: 'anthropic' },
+          { name: 'bob', providerId: 'codex' },
+          { name: 'cara', provider: 'gemini' },
+          { name: 'drew', providerId: 'opencode' },
+        ],
+      })
+    ).toEqual(['claude', 'codex', 'gemini', 'opencode']);
+  });
+
+  it('degrades workspace trust planning failures without blocking launch preparation', async () => {
+    const svc = new TeamProvisioningService();
+    const workspaces = buildWorkspaceTrustPathCandidates({
+      cwd: '/tmp/workspace-trust-planning-fallback',
+      platform: 'posix',
+    });
+    svc.setWorkspaceTrustCoordinator({
+      planArgsOnly: vi.fn(async () => {
+        throw new Error('args planning crashed');
+      }),
+      planFull: vi.fn(async () => {
+        throw new Error('full planning crashed');
+      }),
+      execute: vi.fn(),
+    } as any);
+
+    await expect(
+      (svc as any).planWorkspaceTrustArgsOnlySafely({
+        providers: ['claude', 'codex'],
+        workspaces,
+        featureFlags: {
+          enabled: true,
+          claudePty: true,
+          codexArgs: true,
+          retry: false,
+          fileLock: false,
+        },
+      })
+    ).resolves.toEqual({ launchArgPatches: [] });
+
+    await expect(
+      (svc as any).planWorkspaceTrustFullSafely({
+        providers: ['claude', 'codex'],
+        workspaces,
+        featureFlags: {
+          enabled: true,
+          claudePty: true,
+          codexArgs: true,
+          retry: false,
+          fileLock: false,
+        },
+      })
+    ).resolves.toEqual({ workspaces, launchArgPatches: [] });
+    expect(vi.mocked(console.warn).mock.calls.map((call) => call.join(' '))).toEqual([
+      expect.stringContaining(
+        'Workspace trust args-only planning failed; continuing without trust arg patches'
+      ),
+      expect.stringContaining(
+        'Workspace trust full planning failed; continuing without trust arg patches'
+      ),
+    ]);
+    vi.mocked(console.warn).mockClear();
+  });
+
+  it('keeps launch moving with info diagnostics when workspace trust preflight succeeds', async () => {
+    const progressUpdates: any[] = [];
+    const run = createMemberSpawnRun({
+      runId: 'run-workspace-trust-preflight-ok',
+      teamName: 'workspace-trust-preflight-ok-team',
+      expectedMembers: ['alice'],
+    });
+    Object.assign(run, {
+      cancelRequested: false,
+      processKilled: false,
+      progress: {
+        runId: run.runId,
+        teamName: run.teamName,
+        state: 'validating',
+        message: 'Validating launch',
+        warnings: [],
+        startedAt: '2026-05-12T10:00:00.000Z',
+        updatedAt: '2026-05-12T10:00:00.000Z',
+      },
+      onProgress: (progress: any) => {
+        progressUpdates.push(progress);
+      },
+    });
+    const execute = vi.fn(async () => ({
+      id: 'claude-pty-workspace-trust',
+      provider: 'claude',
+      status: 'ok',
+      workspaceIds: ['workspace-trust-1'],
+      evidence: ['trusted project key'],
+    }));
+    const svc = new TeamProvisioningService();
+    svc.setWorkspaceTrustCoordinator({
+      planArgsOnly: vi.fn(),
+      planFull: vi.fn(),
+      execute,
+    } as any);
+    (svc as any).runs.set(run.runId, run);
+    (svc as any).provisioningRunByTeam.set(run.teamName, run.runId);
+
+    await (svc as any).prepareWorkspaceTrustForDeterministicRun({
+      mode: 'create',
+      run,
+      claudePath: '/usr/local/bin/claude',
+      shellEnv: {},
+      stopAllGenerationAtStart: (svc as any).stopAllTeamsGeneration,
+      workspaceTrustPlan: {
+        launchArgPatches: [],
+        workspaces: buildWorkspaceTrustPathCandidates({
+          cwd: '/tmp/workspace-trust-preflight-ok-team',
+          platform: 'posix',
+        }),
+      },
+      featureFlags: {
+        enabled: true,
+        claudePty: true,
+        codexArgs: true,
+        retry: false,
+        fileLock: false,
+      },
+      provisioningEnv: {
+        anthropicApiKeyHelper: null,
+      },
+    });
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(run.workspaceTrustExecution).toMatchObject({ status: 'ok' });
+    expect(run.progress.warnings).toEqual([]);
+    expect(progressUpdates.at(-1).launchDiagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'info',
+        code: 'workspace_trust_preflight',
+        label: 'Workspace trust preflight completed',
+        detail: 'trusted project key',
+      }),
+    ]);
+  });
+
+  it('keeps launch alive with diagnostics when workspace trust preflight throws', async () => {
+    const progressUpdates: any[] = [];
+    const run = createMemberSpawnRun({
+      runId: 'run-workspace-trust-preflight-throw',
+      teamName: 'workspace-trust-preflight-team',
+      expectedMembers: ['alice'],
+    });
+    Object.assign(run, {
+      cancelRequested: false,
+      processKilled: false,
+      progress: {
+        runId: run.runId,
+        teamName: run.teamName,
+        state: 'validating',
+        message: 'Validating launch',
+        warnings: [],
+        startedAt: '2026-05-12T10:00:00.000Z',
+        updatedAt: '2026-05-12T10:00:00.000Z',
+      },
+      onProgress: (progress: any) => {
+        progressUpdates.push(progress);
+      },
+    });
+    const svc = new TeamProvisioningService();
+    svc.setWorkspaceTrustCoordinator({
+      planArgsOnly: vi.fn(),
+      planFull: vi.fn(),
+      execute: vi.fn(async () => {
+        throw new Error('preflight adapter crashed');
+      }),
+    } as any);
+    (svc as any).runs.set(run.runId, run);
+    (svc as any).provisioningRunByTeam.set(run.teamName, run.runId);
+
+    await (svc as any).prepareWorkspaceTrustForDeterministicRun({
+      mode: 'create',
+      run,
+      claudePath: '/usr/local/bin/claude',
+      shellEnv: {
+        CLAUDE_ENABLE_DETERMINISTIC_TEAM_BOOTSTRAP: '1',
+        CLAUDE_TEAM_ANTHROPIC_API_KEY_HELPER_SETTINGS_PATH: '/tmp/helper.json',
+      },
+      stopAllGenerationAtStart: (svc as any).stopAllTeamsGeneration,
+      workspaceTrustPlan: {
+        launchArgPatches: [],
+        workspaces: buildWorkspaceTrustPathCandidates({
+          cwd: '/tmp/workspace-trust-preflight-team',
+          platform: 'posix',
+        }),
+      },
+      featureFlags: {
+        enabled: true,
+        claudePty: true,
+        codexArgs: true,
+        retry: false,
+        fileLock: false,
+      },
+      provisioningEnv: {
+        anthropicApiKeyHelper: null,
+      },
+    });
+
+    expect(run.workspaceTrustExecution).toMatchObject({
+      status: 'soft_failed',
+      errorCode: 'workspace_trust_preflight_error',
+      errorMessage: 'preflight adapter crashed',
+    });
+    expect(run.workspaceTrustDiagnostics).toMatchObject({
+      attempt: 1,
+      strategyResults: [
+        expect.objectContaining({
+          status: 'soft_failed',
+          errorMessage: 'preflight adapter crashed',
+        }),
+      ],
+    });
+    expect(run.progress.warnings).toContain('preflight adapter crashed');
+    expect(progressUpdates.at(0)).toMatchObject({
+      state: 'spawning',
+      message: 'Preparing workspace trust',
+    });
+    expect(progressUpdates.at(-1).warnings).toContain('preflight adapter crashed');
+    expect(progressUpdates.at(-1).launchDiagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'workspace_trust_preflight',
+        label: 'Workspace trust preflight could not verify trust',
+        detail: 'preflight adapter crashed',
+      }),
+    ]);
+  });
+
+  it('blocks launch with structured workspace trust diagnostics when preflight is blocked', async () => {
+    const progressUpdates: any[] = [];
+    const run = createMemberSpawnRun({
+      runId: 'run-workspace-trust-preflight-blocked',
+      teamName: 'workspace-trust-preflight-blocked-team',
+      expectedMembers: ['alice'],
+    });
+    Object.assign(run, {
+      cancelRequested: false,
+      processKilled: false,
+      progress: {
+        runId: run.runId,
+        teamName: run.teamName,
+        state: 'validating',
+        message: 'Validating launch',
+        warnings: [],
+        startedAt: '2026-05-12T10:00:00.000Z',
+        updatedAt: '2026-05-12T10:00:00.000Z',
+      },
+      onProgress: (progress: any) => {
+        progressUpdates.push(progress);
+      },
+    });
+    const svc = new TeamProvisioningService();
+    svc.setWorkspaceTrustCoordinator({
+      planArgsOnly: vi.fn(),
+      planFull: vi.fn(),
+      execute: vi.fn(async () => ({
+        id: 'claude-pty-workspace-trust',
+        provider: 'claude',
+        status: 'blocked',
+        workspaceIds: ['workspace-trust-1'],
+        errorCode: 'workspace_trust_preflight_not_confirmed',
+        errorMessage: 'Claude workspace trust was not confirmed for /tmp/project',
+        evidence: ['claude workspace trust prompt'],
+      })),
+    } as any);
+    vi.spyOn(svc as any, 'cleanupRun').mockImplementation(() => {});
+    (svc as any).runs.set(run.runId, run);
+    (svc as any).provisioningRunByTeam.set(run.teamName, run.runId);
+
+    await expect(
+      (svc as any).prepareWorkspaceTrustForDeterministicRun({
+        mode: 'create',
+        run,
+        claudePath: '/usr/local/bin/claude',
+        shellEnv: {},
+        stopAllGenerationAtStart: (svc as any).stopAllTeamsGeneration,
+        workspaceTrustPlan: {
+          launchArgPatches: [],
+          workspaces: buildWorkspaceTrustPathCandidates({
+            cwd: '/tmp/project',
+            platform: 'posix',
+          }),
+        },
+        featureFlags: {
+          enabled: true,
+          claudePty: true,
+          codexArgs: true,
+          retry: false,
+          fileLock: false,
+        },
+        provisioningEnv: {
+          anthropicApiKeyHelper: null,
+        },
+      })
+    ).rejects.toThrow('Claude workspace trust was not confirmed for /tmp/project');
+
+    expect(progressUpdates.at(-1)).toMatchObject({
+      state: 'failed',
+      message: 'Workspace trust required',
+      error: 'Claude workspace trust was not confirmed for /tmp/project',
+    });
+    expect(progressUpdates.at(-1).launchDiagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        code: 'workspace_trust_preflight',
+        label: 'Workspace trust preflight blocked launch',
+        detail: 'Claude workspace trust was not confirmed for /tmp/project',
+      }),
+    ]);
+  });
+
+  it('cancels launch before spawn when workspace trust preflight is cancelled', async () => {
+    const progressUpdates: any[] = [];
+    const run = createMemberSpawnRun({
+      runId: 'run-workspace-trust-preflight-cancelled',
+      teamName: 'workspace-trust-preflight-cancelled-team',
+      expectedMembers: ['alice'],
+    });
+    Object.assign(run, {
+      cancelRequested: false,
+      processKilled: false,
+      progress: {
+        runId: run.runId,
+        teamName: run.teamName,
+        state: 'validating',
+        message: 'Validating launch',
+        warnings: [],
+        startedAt: '2026-05-12T10:00:00.000Z',
+        updatedAt: '2026-05-12T10:00:00.000Z',
+      },
+      onProgress: (progress: any) => {
+        progressUpdates.push(progress);
+      },
+    });
+    const svc = new TeamProvisioningService();
+    svc.setWorkspaceTrustCoordinator({
+      planArgsOnly: vi.fn(),
+      planFull: vi.fn(),
+      execute: vi.fn(async () => ({
+        id: 'claude-pty-workspace-trust',
+        provider: 'claude',
+        status: 'cancelled',
+        workspaceIds: ['workspace-trust-1'],
+        errorCode: 'workspace_trust_lock_cancelled',
+      })),
+    } as any);
+    vi.spyOn(svc as any, 'cleanupRun').mockImplementation(() => {});
+    (svc as any).runs.set(run.runId, run);
+    (svc as any).provisioningRunByTeam.set(run.teamName, run.runId);
+
+    await expect(
+      (svc as any).prepareWorkspaceTrustForDeterministicRun({
+        mode: 'create',
+        run,
+        claudePath: '/usr/local/bin/claude',
+        shellEnv: {},
+        stopAllGenerationAtStart: (svc as any).stopAllTeamsGeneration,
+        workspaceTrustPlan: {
+          launchArgPatches: [],
+          workspaces: buildWorkspaceTrustPathCandidates({
+            cwd: '/tmp/workspace-trust-preflight-cancelled-team',
+            platform: 'posix',
+          }),
+        },
+        featureFlags: {
+          enabled: true,
+          claudePty: true,
+          codexArgs: true,
+          retry: false,
+          fileLock: false,
+        },
+        provisioningEnv: {
+          anthropicApiKeyHelper: null,
+        },
+      })
+    ).rejects.toThrow('Team launch cancelled');
+
+    expect(run.cancelRequested).toBe(true);
+    expect(progressUpdates.at(-1)).toMatchObject({
+      state: 'cancelled',
+      message: 'Team launch cancelled',
+    });
+    expect(progressUpdates.at(-1).launchDiagnostics).toBeUndefined();
+  });
+
+  it('does not execute workspace trust preflight when the feature is disabled', async () => {
+    const progressUpdates: any[] = [];
+    const run = createMemberSpawnRun({
+      runId: 'run-workspace-trust-disabled',
+      teamName: 'workspace-trust-disabled-team',
+      expectedMembers: ['alice'],
+    });
+    Object.assign(run, {
+      cancelRequested: false,
+      processKilled: false,
+      progress: {
+        runId: run.runId,
+        teamName: run.teamName,
+        state: 'validating',
+        message: 'Validating launch',
+        warnings: [],
+        startedAt: '2026-05-12T10:00:00.000Z',
+        updatedAt: '2026-05-12T10:00:00.000Z',
+      },
+      onProgress: (progress: any) => {
+        progressUpdates.push(progress);
+      },
+    });
+    const execute = vi.fn();
+    const svc = new TeamProvisioningService();
+    svc.setWorkspaceTrustCoordinator({
+      planArgsOnly: vi.fn(),
+      planFull: vi.fn(),
+      execute,
+    } as any);
+
+    await (svc as any).prepareWorkspaceTrustForDeterministicRun({
+      mode: 'create',
+      run,
+      claudePath: '/usr/local/bin/claude',
+      shellEnv: {},
+      stopAllGenerationAtStart: (svc as any).stopAllTeamsGeneration,
+      workspaceTrustPlan: {
+        launchArgPatches: [],
+        workspaces: buildWorkspaceTrustPathCandidates({
+          cwd: '/tmp/workspace-trust-disabled-team',
+          platform: 'posix',
+        }),
+      },
+      featureFlags: {
+        enabled: false,
+        claudePty: false,
+        codexArgs: false,
+        retry: false,
+        fileLock: false,
+      },
+      provisioningEnv: {
+        anthropicApiKeyHelper: null,
+      },
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(progressUpdates).toEqual([]);
+    expect(run.workspaceTrustExecution).toBeUndefined();
+    expect(run.workspaceTrustDiagnostics).toBeUndefined();
+    expect(run.progress).toMatchObject({
+      state: 'validating',
+      message: 'Validating launch',
     });
   });
 

@@ -56,6 +56,7 @@ import {
   removeRuntimeProviderManagementIpc,
   type RuntimeProviderManagementFeatureFacade,
 } from '@features/runtime-provider-management/main';
+import { createWorkspaceTrustCoordinator } from '@features/workspace-trust/main';
 import { ClaudeMultimodelBridgeService } from '@main/services/runtime/ClaudeMultimodelBridgeService';
 import { applyOpenCodeAutoUpdatePolicy } from '@main/services/runtime/openCodeAutoUpdatePolicy';
 import { providerConnectionService } from '@main/services/runtime/ProviderConnectionService';
@@ -160,7 +161,9 @@ import {
 import { TeamSentMessagesStore } from './services/team/TeamSentMessagesStore';
 import { getAppIconPath } from './utils/appIcon';
 import {
+  getAutoDetectedClaudeBasePath,
   getClaudeBasePath,
+  getHomeDir,
   getProjectsBasePath,
   getTeamsBasePath,
   getTodosBasePath,
@@ -1359,6 +1362,17 @@ async function initializeServices(): Promise<void> {
   teamDataService = new TeamDataService();
   teamDataService.setMemberRuntimeAdvisoryService(teamMemberRuntimeAdvisoryService);
   teamProvisioningService = new TeamProvisioningService();
+  teamProvisioningService.setWorkspaceTrustCoordinator(
+    createWorkspaceTrustCoordinator({
+      claudeConfigDir: () => getClaudeBasePath(),
+      globalConfigFilePath: () => {
+        const claudeBasePath = getClaudeBasePath();
+        return claudeBasePath !== getAutoDetectedClaudeBasePath()
+          ? join(claudeBasePath, '.claude.json')
+          : join(getHomeDir(), '.claude.json');
+      },
+    })
+  );
   teamProvisioningService.setMemberRuntimeAdvisoryInvalidator((teamName, memberName) => {
     teamDataService?.invalidateMemberRuntimeAdvisory(teamName, memberName);
     getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(teamName, memberName);
@@ -1610,16 +1624,37 @@ async function initializeServices(): Promise<void> {
       },
     ],
     nudgeDeliveryWake: {
-      schedule: (input) => {
-        if (input.providerId !== 'opencode') {
+      schedule: async (input) => {
+        if (input.providerId === 'opencode') {
+          teamProvisioningService.scheduleOpenCodeMemberInboxDeliveryWake({
+            teamName: input.teamName,
+            memberName: input.memberName,
+            messageId: input.messageId,
+            delayMs: input.delayMs,
+          });
           return;
         }
-        teamProvisioningService.scheduleOpenCodeMemberInboxDeliveryWake({
-          teamName: input.teamName,
-          memberName: input.memberName,
-          messageId: input.messageId,
-          delayMs: input.delayMs,
-        });
+
+        const leadName = await teamDataService.getLeadMemberName(input.teamName).catch(() => null);
+        if (leadName?.trim().toLowerCase() !== input.memberName.trim().toLowerCase()) {
+          return;
+        }
+
+        const timer = setTimeout(
+          () => {
+            void teamProvisioningService
+              .relayLeadInboxMessages(input.teamName)
+              .catch((error: unknown) =>
+                logger.warn(
+                  `[${input.teamName}] member-work-sync lead nudge relay wake failed: ${String(
+                    error
+                  )}`
+                )
+              );
+          },
+          Math.max(0, input.delayMs ?? 0)
+        );
+        timer.unref?.();
       },
     },
     reviewPickupDelivery: {

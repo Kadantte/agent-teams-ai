@@ -14,8 +14,15 @@ vi.mock('@renderer/api', () => ({
 }));
 
 vi.mock('@renderer/components/ui/button', () => ({
-  Button: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) =>
-    React.createElement('button', { type: 'button', onClick }, children),
+  Button: ({
+    children,
+    variant: _variant,
+    size: _size,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+    variant?: string;
+    size?: string;
+  }) => React.createElement('button', { type: 'button', ...props }, children),
 }));
 
 vi.mock('@renderer/components/chat/viewers/MarkdownViewer', () => ({
@@ -274,6 +281,40 @@ describe('ProvisioningProgressBlock', () => {
     expect(copied).toContain('--api-key [redacted]');
     expect(copied).not.toContain('secret-value');
     expect(copied).not.toContain('hidden-value');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('emphasizes the copy diagnostics CTA when launch has failed', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(ProvisioningProgressBlock, {
+          title: 'Workspace trust required',
+          message: 'Claude workspace trust was not confirmed',
+          tone: 'error',
+          messageSeverity: 'error',
+          currentStepIndex: -1,
+          loading: false,
+          defaultLiveOutputOpen: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const button = host.querySelector('[aria-label="Copy diagnostics"]');
+    expect(button).toBeTruthy();
+    expect(button?.className).toContain('h-8');
+    expect(button?.className).toContain('border-red-500/60');
+    expect(button?.className).toContain('bg-red-500/15');
+    expect(button?.className).toContain('animate-pulse');
 
     await act(async () => {
       root.unmount();

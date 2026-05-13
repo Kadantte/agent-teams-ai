@@ -1472,6 +1472,7 @@ export interface TeamLaunchDiagnosticItem {
     | 'permission_pending'
     | 'bootstrap_confirmed'
     | 'bootstrap_stalled'
+    | 'workspace_trust_preflight'
     | 'stale_runtime_event_rejected'
     | 'process_table_unavailable';
   label: string;

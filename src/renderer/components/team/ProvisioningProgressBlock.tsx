@@ -574,14 +574,24 @@ export const ProvisioningProgressBlock = ({
           </button>
           <Button
             type="button"
-            variant="ghost"
+            variant={isError ? 'outline' : 'ghost'}
             size="sm"
-            className="h-6 shrink-0 gap-1 px-2 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            className={cn(
+              'shrink-0 gap-1',
+              isError
+                ? 'h-8 animate-pulse border-red-500/60 bg-red-500/15 px-3 text-xs font-medium text-[var(--step-error-text)] shadow-[0_0_0_1px_rgba(248,113,113,0.25)] hover:bg-red-500/20 hover:text-red-100'
+                : 'h-6 px-2 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
+              isError && diagnosticsCopied && 'animate-none'
+            )}
             title={diagnosticsCopied ? 'Diagnostics copied' : 'Copy diagnostics'}
             aria-label={diagnosticsCopied ? 'Diagnostics copied' : 'Copy diagnostics'}
             onClick={() => void copyDiagnostics()}
           >
-            {diagnosticsCopied ? <Check size={12} /> : <ClipboardList size={12} />}
+            {diagnosticsCopied ? (
+              <Check size={isError ? 14 : 12} />
+            ) : (
+              <ClipboardList size={isError ? 14 : 12} />
+            )}
             <span>{diagnosticsCopied ? 'Copied' : 'Copy diagnostics'}</span>
           </Button>
         </div>

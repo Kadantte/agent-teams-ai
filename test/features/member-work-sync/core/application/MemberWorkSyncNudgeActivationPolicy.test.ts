@@ -304,10 +304,40 @@ describe('MemberWorkSyncNudgeActivationPolicy', () => {
     ).toEqual({ active: true, reason: 'review_pickup_required' });
   });
 
-  it('does not activate when blocking safety metrics are present', () => {
+  it('activates targeted OpenCode nudges even when global blocking metrics are noisy', () => {
     expect(
       decideMemberWorkSyncNudgeActivation({
         status: status(),
+        metrics: metrics({
+          phase2Readiness: {
+            ...metrics().phase2Readiness,
+            state: 'blocked',
+            reasons: ['would_nudge_rate_high', 'fingerprint_churn_high'],
+          },
+        }),
+      })
+    ).toEqual({ active: true, reason: 'opencode_targeted_shadow_collecting' });
+  });
+
+  it('activates targeted lead nudges even when global blocking metrics are noisy', () => {
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: status({ providerId: 'codex', memberName: 'team-lead' }),
+        metrics: metrics({
+          phase2Readiness: {
+            ...metrics().phase2Readiness,
+            state: 'blocked',
+            reasons: ['would_nudge_rate_high', 'fingerprint_churn_high'],
+          },
+        }),
+      })
+    ).toEqual({ active: true, reason: 'lead_targeted_shadow_collecting' });
+  });
+
+  it('does not activate non-OpenCode nudges when blocking safety metrics are present', () => {
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: status({ providerId: 'codex' }),
         metrics: metrics({
           phase2Readiness: {
             ...metrics().phase2Readiness,

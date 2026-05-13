@@ -759,6 +759,23 @@ const ACTIVE_PROVISIONING_STATES = new Set([
 ]);
 const TERMINAL_PROVISIONING_STATES = new Set(['ready', 'failed', 'disconnected', 'cancelled']);
 
+function shouldIgnoreProvisioningProgressRegression(
+  currentState: TeamProvisioningProgress['state'],
+  nextState: TeamProvisioningProgress['state']
+): boolean {
+  if (currentState === 'ready') {
+    return nextState !== 'ready' && nextState !== 'disconnected';
+  }
+  if (
+    currentState === 'failed' ||
+    currentState === 'cancelled' ||
+    currentState === 'disconnected'
+  ) {
+    return nextState !== currentState;
+  }
+  return false;
+}
+
 function isPendingProvisioningRunId(runId: string): boolean {
   return runId.startsWith('pending:');
 }
@@ -5803,6 +5820,13 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       existingProgress?.error === progress.error &&
       existingProgress?.pid === progress.pid;
     if (isDuplicateProgress && currentRunId === progress.runId) {
+      return;
+    }
+    if (
+      existingProgress &&
+      currentRunId === progress.runId &&
+      shouldIgnoreProvisioningProgressRegression(existingProgress.state, progress.state)
+    ) {
       return;
     }
 

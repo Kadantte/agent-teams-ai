@@ -729,7 +729,7 @@ describe('createMemberWorkSyncFeature composition', () => {
     }
   });
 
-  it('blocks targeted OpenCode nudges when phase2 metrics are unsafe', async () => {
+  it('delivers targeted OpenCode nudges even when global phase2 metrics are noisy', async () => {
     const claudeRoot = makeTempRoot();
     setClaudeBasePathOverride(claudeRoot);
     const teamsBasePath = getTeamsBasePath();
@@ -751,7 +751,7 @@ describe('createMemberWorkSyncFeature composition', () => {
           {
             id: 'task-1',
             displayId: '11111111',
-            subject: 'Do not nudge when metrics are unsafe',
+            subject: 'Nudge OpenCode despite noisy global metrics',
             status: 'pending',
             owner: memberName,
           },
@@ -778,9 +778,20 @@ describe('createMemberWorkSyncFeature composition', () => {
 
       await waitForAssertion(async () => {
         expect(feature.getQueueDiagnostics()).toMatchObject({ reconciled: 1 });
-        expect(await readInboxMessages({ teamsBasePath, teamName, memberName })).toEqual([]);
-        expect(await readMemberOutboxItems({ teamsBasePath, teamName, memberName })).toEqual({});
-        expect(nudgeDeliveryWake.schedule).not.toHaveBeenCalled();
+        const nudges = (await readInboxMessages({ teamsBasePath, teamName, memberName })).filter(
+          (message) => message.messageKind === 'member_work_sync_nudge'
+        );
+        expect(nudges).toHaveLength(1);
+        expect(nudges[0]?.text).toContain('11111111');
+        expect(nudgeDeliveryWake.schedule).toHaveBeenCalledTimes(1);
+        expect(nudgeDeliveryWake.schedule).toHaveBeenCalledWith({
+          teamName,
+          memberName,
+          messageId: nudges[0]?.messageId,
+          providerId: 'opencode',
+          reason: 'member_work_sync_nudge_inserted',
+          delayMs: 500,
+        });
         await expect(feature.getMetrics({ teamName })).resolves.toMatchObject({
           phase2Readiness: {
             reasons: expect.arrayContaining(['would_nudge_rate_high']),
@@ -799,15 +810,102 @@ describe('createMemberWorkSyncFeature composition', () => {
         ),
         'utf8'
       );
-      expect(journal).toContain('"event":"nudge_skipped"');
-      expect(journal).toContain('"reason":"blocking_metrics"');
-      expect(journal).not.toContain('"event":"nudge_delivered"');
+      expect(journal).toContain('"event":"nudge_delivered"');
+      expect(journal).not.toContain('"reason":"blocking_metrics"');
     } finally {
       await feature.dispose();
     }
   });
 
-  it('recovers targeted OpenCode nudge delivery after unsafe metrics become ready', async () => {
+  it('delivers targeted lead nudges even when global phase2 metrics are noisy', async () => {
+    const claudeRoot = makeTempRoot();
+    setClaudeBasePathOverride(claudeRoot);
+    const teamsBasePath = getTeamsBasePath();
+    const teamName = 'team-lead-blocking-metrics';
+    const memberName = 'team-lead';
+    const nudgeDeliveryWake = {
+      schedule: vi.fn(async () => undefined),
+    };
+    const feature = createMemberWorkSyncFeature({
+      teamsBasePath,
+      configReader: {
+        getConfig: vi.fn(async () => ({
+          name: teamName,
+          members: [{ name: memberName, providerId: 'codex', agentType: 'team-lead' }],
+        })),
+      } as never,
+      taskReader: {
+        getTasks: vi.fn(async () => [
+          {
+            id: 'task-1',
+            displayId: '11111111',
+            subject: 'Resolve lead clarification',
+            status: 'pending',
+            owner: memberName,
+          },
+        ]),
+      } as never,
+      kanbanManager: {
+        getState: vi.fn(async () => ({
+          teamName,
+          reviewers: [],
+          tasks: {},
+        })),
+      } as never,
+      membersMetaStore: {
+        getMembers: vi.fn(async () => []),
+      } as never,
+      isTeamActive: vi.fn(async () => true),
+      nudgeDeliveryWake,
+      queueQuietWindowMs: 1,
+    });
+
+    try {
+      await seedBlockingShadowCollectingMetrics({ teamsBasePath, teamName, memberName });
+      feature.noteTeamChange({ type: 'task', teamName, taskId: 'task-1' } as never);
+
+      await waitForAssertion(async () => {
+        expect(feature.getQueueDiagnostics()).toMatchObject({ reconciled: 1 });
+        const nudges = (await readInboxMessages({ teamsBasePath, teamName, memberName })).filter(
+          (message) => message.messageKind === 'member_work_sync_nudge'
+        );
+        expect(nudges).toHaveLength(1);
+        expect(nudges[0]?.text).toContain('11111111');
+        expect(nudgeDeliveryWake.schedule).toHaveBeenCalledTimes(1);
+        expect(nudgeDeliveryWake.schedule).toHaveBeenCalledWith({
+          teamName,
+          memberName,
+          messageId: nudges[0]?.messageId,
+          providerId: 'codex',
+          reason: 'member_work_sync_nudge_inserted',
+          delayMs: 500,
+        });
+        await expect(feature.getMetrics({ teamName })).resolves.toMatchObject({
+          phase2Readiness: {
+            reasons: expect.arrayContaining(['would_nudge_rate_high']),
+          },
+        });
+      });
+
+      const journal = await fs.promises.readFile(
+        path.join(
+          teamsBasePath,
+          teamName,
+          'members',
+          memberName,
+          '.member-work-sync',
+          'journal.jsonl'
+        ),
+        'utf8'
+      );
+      expect(journal).toContain('"event":"nudge_delivered"');
+      expect(journal).not.toContain('"reason":"blocking_metrics"');
+    } finally {
+      await feature.dispose();
+    }
+  });
+
+  it('keeps targeted OpenCode nudge idempotent after noisy metrics become ready', async () => {
     const claudeRoot = makeTempRoot();
     setClaudeBasePathOverride(claudeRoot);
     const teamsBasePath = getTeamsBasePath();
@@ -829,7 +927,7 @@ describe('createMemberWorkSyncFeature composition', () => {
           {
             id: 'task-1',
             displayId: '11111111',
-            subject: 'Recover OpenCode nudge after metrics ready',
+            subject: 'Keep OpenCode nudge idempotent after metrics ready',
             status: 'pending',
             owner: memberName,
           },
@@ -856,9 +954,11 @@ describe('createMemberWorkSyncFeature composition', () => {
 
       await waitForAssertion(async () => {
         expect(feature.getQueueDiagnostics()).toMatchObject({ reconciled: 1 });
-        expect(await readInboxMessages({ teamsBasePath, teamName, memberName })).toEqual([]);
-        expect(await readMemberOutboxItems({ teamsBasePath, teamName, memberName })).toEqual({});
-        expect(nudgeDeliveryWake.schedule).not.toHaveBeenCalled();
+        const nudges = (await readInboxMessages({ teamsBasePath, teamName, memberName })).filter(
+          (message) => message.messageKind === 'member_work_sync_nudge'
+        );
+        expect(nudges).toHaveLength(1);
+        expect(nudgeDeliveryWake.schedule).toHaveBeenCalledTimes(1);
       });
 
       await seedShadowReadyMetrics({ teamsBasePath, teamName, memberName });
@@ -871,7 +971,7 @@ describe('createMemberWorkSyncFeature composition', () => {
         expect(nudges).toHaveLength(1);
         expect(nudges[0]?.text).toContain('11111111');
         expect(nudgeDeliveryWake.schedule).toHaveBeenCalledTimes(1);
-        expect(nudgeDeliveryWake.schedule).toHaveBeenCalledWith({
+        expect(nudgeDeliveryWake.schedule).toHaveBeenLastCalledWith({
           teamName,
           memberName,
           messageId: nudges[0]?.messageId,

@@ -30,6 +30,25 @@ import {
   sendKeysToTmuxPaneForCurrentPlatform,
   type TmuxPaneRuntimeInfo,
 } from '@features/tmux-installer/main';
+import {
+  applyWorkspaceTrustLaunchArgPatches,
+  budgetWorkspaceTrustDiagnosticsManifest,
+  buildWorkspaceTrustPathCandidates,
+  buildWorkspaceTrustPreflightEnv,
+  resolveWorkspaceTrustFeatureFlags,
+  type WorkspaceTrustCoordinator,
+  type WorkspaceTrustArgsOnlyPlanRequest,
+  type WorkspaceTrustArgsOnlyPlanResult,
+  type WorkspaceTrustDiagnosticsManifest,
+  type WorkspaceTrustExecutionResult,
+  type WorkspaceTrustFeatureFlags,
+  type WorkspaceTrustFullPlanRequest,
+  type WorkspaceTrustFullPlanResult,
+  type WorkspaceTrustLaunchArgPatch,
+  type WorkspaceTrustLaunchArgTargetSurface,
+  type WorkspaceTrustProvider,
+  type WorkspaceTrustWorkspace,
+} from '@features/workspace-trust/main';
 import { ConfigManager } from '@main/services/infrastructure/ConfigManager';
 import { NotificationManager } from '@main/services/infrastructure/NotificationManager';
 import { getAppIconPath } from '@main/utils/appIcon';
@@ -124,7 +143,7 @@ import {
   parseAgentToolResultStatus,
 } from '@shared/utils/toolSummary';
 import * as agentTeamsControllerModule from 'agent-teams-controller';
-import { type ChildProcess, execFileSync, type spawn } from 'child_process';
+import { type ChildProcess, execFile, execFileSync, type spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -1681,6 +1700,19 @@ function isTerminalFailureProvisioningState(state: TeamProvisioningProgress['sta
   return state === 'failed' || state === 'cancelled' || state === 'disconnected';
 }
 
+function shouldIgnoreProvisioningProgressRegression(
+  currentState: TeamProvisioningProgress['state'],
+  nextState: TeamProvisioningProgress['state']
+): boolean {
+  if (currentState === 'ready') {
+    return nextState !== 'ready' && nextState !== 'disconnected';
+  }
+  if (isTerminalFailureProvisioningState(currentState)) {
+    return nextState !== currentState;
+  }
+  return false;
+}
+
 interface ProvisioningRun {
   runId: string;
   teamName: string;
@@ -1756,7 +1788,12 @@ interface ProvisioningRun {
   /** Path to the deferred first-user-task file consumed by runtime after bootstrap. */
   bootstrapUserPromptPath: string | null;
   isLaunch: boolean;
+  launchStateClearedForRun: boolean;
   deterministicBootstrap: boolean;
+  workspaceTrustPlan?: WorkspaceTrustFullPlanResult | null;
+  workspaceTrustExecution?: WorkspaceTrustExecutionResult | null;
+  workspaceTrustDiagnostics?: WorkspaceTrustDiagnosticsManifest | null;
+  workspaceTrustRetryAttempted?: boolean;
   leadRelayCapture: {
     leadName: string;
     startedAt: string;
@@ -4805,6 +4842,10 @@ function updateProgress(
     | 'launchDiagnostics'
   >
 ): TeamProvisioningProgress {
+  if (shouldIgnoreProvisioningProgressRegression(run.progress.state, state)) {
+    return run.progress;
+  }
+
   // Cap assistant output on every progress tick. `updateProgress` is invoked
   // from ~20 event-driven sites (auth retries, stall warnings, spawn events),
   // and an unbounded `provisioningOutputParts.join` was part of the same OOM
@@ -4966,6 +5007,47 @@ function buildLaunchDiagnosticsFromRun(
     }
   }
   return items.length > 0 ? items : undefined;
+}
+
+function buildWorkspaceTrustPreflightLaunchDiagnostic(
+  execution: WorkspaceTrustExecutionResult
+): TeamLaunchDiagnosticItem | null {
+  if (execution.status === 'cancelled') {
+    return null;
+  }
+
+  const severity =
+    execution.status === 'blocked'
+      ? 'error'
+      : execution.status === 'soft_failed'
+        ? 'warning'
+        : 'info';
+  const label =
+    execution.status === 'blocked'
+      ? 'Workspace trust preflight blocked launch'
+      : execution.status === 'soft_failed'
+        ? 'Workspace trust preflight could not verify trust'
+        : 'Workspace trust preflight completed';
+  const detail =
+    execution.errorMessage?.trim() ||
+    execution.errorCode?.trim() ||
+    execution.evidence?.find((item) => item.trim().length > 0)?.trim();
+
+  return {
+    id: 'workspace-trust:preflight',
+    severity,
+    code: 'workspace_trust_preflight',
+    label,
+    ...(detail ? { detail } : {}),
+    observedAt: nowIso(),
+  };
+}
+
+function mergeLaunchDiagnosticItem(
+  items: readonly TeamLaunchDiagnosticItem[] | undefined,
+  item: TeamLaunchDiagnosticItem
+): TeamLaunchDiagnosticItem[] {
+  return [...(items ?? []).filter((candidate) => candidate.id !== item.id), item];
 }
 
 function buildCombinedLogs(
@@ -5545,6 +5627,7 @@ export class TeamProvisioningService {
   private inFlightResponses = new Set<string>();
   private runtimeAdapterRegistry: TeamRuntimeAdapterRegistry | null = null;
   private controlApiBaseUrlResolver: (() => Promise<string | null>) | null = null;
+  private workspaceTrustCoordinator: WorkspaceTrustCoordinator | null = null;
   private runtimeTurnSettledHookSettingsProvider:
     | ((input: { provider: RuntimeTurnSettledProvider }) => Promise<Record<string, unknown> | null>)
     | null = null;
@@ -5659,6 +5742,7 @@ export class TeamProvisioningService {
         isLaunch: run.isLaunch,
         provisioningComplete: run.provisioningComplete,
         deterministicBootstrap: run.deterministicBootstrap,
+        workspaceTrustPreflight: run.workspaceTrustDiagnostics ?? null,
         processKilled: run.processKilled,
         finalizingByTimeout: run.finalizingByTimeout,
         cancelRequested: run.cancelRequested,
@@ -5907,6 +5991,10 @@ export class TeamProvisioningService {
     this.controlApiBaseUrlResolver = resolver;
   }
 
+  setWorkspaceTrustCoordinator(coordinator: WorkspaceTrustCoordinator | null): void {
+    this.workspaceTrustCoordinator = coordinator;
+  }
+
   setRuntimeTurnSettledHookSettingsProvider(
     provider:
       | ((input: {
@@ -5927,11 +6015,345 @@ export class TeamProvisioningService {
     this.runtimeTurnSettledEnvironmentProvider = provider;
   }
 
+  private toWorkspaceTrustProvider(providerId: TeamProviderId): WorkspaceTrustProvider {
+    return providerId === 'anthropic' ? 'claude' : providerId;
+  }
+
+  private collectWorkspaceTrustProviders(input: {
+    leadProviderId?: TeamProviderId;
+    members: TeamCreateRequest['members'];
+  }): WorkspaceTrustProvider[] {
+    const providers = new Set<WorkspaceTrustProvider>(['claude']);
+    providers.add(this.toWorkspaceTrustProvider(resolveTeamProviderId(input.leadProviderId)));
+    for (const member of input.members) {
+      const providerId =
+        normalizeTeamMemberProviderId(member.providerId) ??
+        normalizeTeamMemberProviderId((member as { provider?: unknown }).provider);
+      if (providerId) {
+        providers.add(this.toWorkspaceTrustProvider(providerId));
+      }
+    }
+    return [...providers];
+  }
+
+  private resolveWorkspaceTrustGitRoot(cwd: string): Promise<string | null> {
+    const normalizedCwd = cwd.trim();
+    if (!normalizedCwd) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      execFile(
+        'git',
+        ['-C', normalizedCwd, 'rev-parse', '--show-toplevel'],
+        {
+          encoding: 'utf8',
+          maxBuffer: 16 * 1024,
+          timeout: 1000,
+        },
+        (error, stdout) => {
+          if (error) {
+            resolve(null);
+            return;
+          }
+          const gitRoot = stdout.trim();
+          resolve(gitRoot && path.isAbsolute(gitRoot) ? gitRoot : null);
+        }
+      );
+    });
+  }
+
+  private async collectWorkspaceTrustWorkspaces(input: {
+    cwd: string;
+    members: TeamCreateRequest['members'];
+  }): Promise<WorkspaceTrustWorkspace[]> {
+    const homeDir = getHomeDir();
+    const candidates: WorkspaceTrustWorkspace[] = [];
+    const gitRootCache = new Map<string, string | null>();
+    const addPath = async (
+      cwd: string,
+      source: WorkspaceTrustWorkspace['source'],
+      memberId?: string
+    ): Promise<void> => {
+      const realCwd = await fs.promises.realpath(cwd).catch(() => null);
+      let gitRoot = gitRootCache.get(cwd);
+      if (gitRoot === undefined) {
+        const resolvedGitRoot = await this.resolveWorkspaceTrustGitRoot(cwd);
+        gitRoot = resolvedGitRoot
+          ? await fs.promises.realpath(resolvedGitRoot).catch(() => resolvedGitRoot)
+          : null;
+        gitRootCache.set(cwd, gitRoot);
+      }
+      candidates.push(
+        ...buildWorkspaceTrustPathCandidates({
+          cwd,
+          realCwd,
+          gitRoot,
+          homeDir,
+          source,
+          memberId,
+          platform: process.platform === 'win32' ? 'win32' : 'posix',
+        })
+      );
+    };
+
+    await addPath(input.cwd, 'team-root');
+    for (const member of input.members) {
+      const memberCwd = member.cwd?.trim();
+      if (!memberCwd) {
+        continue;
+      }
+      await addPath(
+        memberCwd,
+        member.isolation === 'worktree' ? 'member-worktree' : 'member-cwd',
+        member.name
+      );
+    }
+    const seen = new Set<string>();
+    return candidates.filter((workspace) => {
+      if (seen.has(workspace.comparisonKey)) {
+        return false;
+      }
+      seen.add(workspace.comparisonKey);
+      return true;
+    });
+  }
+
+  private applyWorkspaceTrustArgPatches(input: {
+    args: string[];
+    patches: WorkspaceTrustLaunchArgPatch[];
+    targetProvider: TeamProviderId;
+    targetSurface: WorkspaceTrustLaunchArgTargetSurface;
+  }): string[] {
+    if (input.patches.length === 0) {
+      return input.args;
+    }
+    return applyWorkspaceTrustLaunchArgPatches({
+      args: input.args,
+      patches: input.patches,
+      targetProvider: this.toWorkspaceTrustProvider(input.targetProvider),
+      targetSurface: input.targetSurface,
+    }).args;
+  }
+
+  private async planWorkspaceTrustArgsOnlySafely(
+    request: WorkspaceTrustArgsOnlyPlanRequest
+  ): Promise<WorkspaceTrustArgsOnlyPlanResult> {
+    if (!this.workspaceTrustCoordinator) {
+      return { launchArgPatches: [] };
+    }
+    try {
+      return await this.workspaceTrustCoordinator.planArgsOnly(request);
+    } catch (error) {
+      logger.warn(
+        `Workspace trust args-only planning failed; continuing without trust arg patches: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return { launchArgPatches: [] };
+    }
+  }
+
+  private async planWorkspaceTrustFullSafely(
+    request: WorkspaceTrustFullPlanRequest
+  ): Promise<WorkspaceTrustFullPlanResult | null> {
+    if (!this.workspaceTrustCoordinator) {
+      return null;
+    }
+    try {
+      return await this.workspaceTrustCoordinator.planFull(request);
+    } catch (error) {
+      logger.warn(
+        `Workspace trust full planning failed; continuing without trust arg patches: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return { workspaces: request.workspaces, launchArgPatches: [] };
+    }
+  }
+
+  private isLaunchRunStillCurrent(run: ProvisioningRun): boolean {
+    return (
+      this.runs.get(run.runId) === run &&
+      this.provisioningRunByTeam.get(run.teamName) === run.runId &&
+      !run.cancelRequested &&
+      !run.processKilled
+    );
+  }
+
   private async buildRuntimeTurnSettledHookSettingsArgs(
     providerId: TeamProviderId
   ): Promise<string[]> {
     const settings = await this.buildRuntimeTurnSettledHookSettingsObject(providerId);
     return settings ? ['--settings', JSON.stringify(settings)] : [];
+  }
+
+  private async prepareWorkspaceTrustForDeterministicRun(input: {
+    mode: 'create' | 'launch';
+    run: ProvisioningRun;
+    claudePath: string;
+    shellEnv: NodeJS.ProcessEnv;
+    stopAllGenerationAtStart: number;
+    workspaceTrustPlan: WorkspaceTrustFullPlanResult | null;
+    featureFlags: WorkspaceTrustFeatureFlags;
+    provisioningEnv: ProvisioningEnvResolution;
+  }): Promise<void> {
+    if (
+      !this.workspaceTrustCoordinator ||
+      !input.workspaceTrustPlan ||
+      !input.featureFlags.enabled
+    ) {
+      return;
+    }
+
+    input.run.workspaceTrustPlan = input.workspaceTrustPlan;
+    updateProgress(input.run, 'spawning', 'Preparing workspace trust', {
+      warnings: input.run.progress.warnings,
+    });
+    input.run.onProgress(input.run.progress);
+
+    let execution: WorkspaceTrustExecutionResult;
+    try {
+      execution = await this.workspaceTrustCoordinator.execute({
+        claudePath: input.claudePath,
+        workspaces: input.workspaceTrustPlan.workspaces,
+        env: buildWorkspaceTrustPreflightEnv(input.shellEnv),
+        featureFlags: input.featureFlags,
+        isCancelled: () =>
+          input.run.cancelRequested ||
+          input.run.processKilled ||
+          this.stopAllTeamsGeneration !== input.stopAllGenerationAtStart,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      execution = {
+        id: 'workspace-trust-coordinator',
+        provider: 'claude',
+        status: 'soft_failed',
+        workspaceIds: input.workspaceTrustPlan.workspaces.map((workspace) => workspace.id),
+        errorCode: 'workspace_trust_preflight_error',
+        errorMessage: message,
+        evidence: [message],
+      };
+    }
+    input.run.workspaceTrustExecution = execution;
+    input.run.workspaceTrustDiagnostics = budgetWorkspaceTrustDiagnosticsManifest({
+      attempt: 1,
+      featureFlags: input.featureFlags,
+      strategyResults: [execution],
+    });
+    const workspaceTrustLaunchDiagnostic = buildWorkspaceTrustPreflightLaunchDiagnostic(execution);
+    const workspaceTrustLaunchDiagnostics = workspaceTrustLaunchDiagnostic
+      ? boundLaunchDiagnostics(
+          mergeLaunchDiagnosticItem(
+            input.run.progress.launchDiagnostics,
+            workspaceTrustLaunchDiagnostic
+          )
+        )
+      : input.run.progress.launchDiagnostics;
+
+    if (!this.isLaunchRunStillCurrent(input.run)) {
+      if (this.runs.get(input.run.runId) === input.run) {
+        await this.cancelDeterministicRunBeforeSpawn(input.run, {
+          mode: input.mode,
+          provisioningEnv: input.provisioningEnv,
+        });
+      }
+      throw new Error('Team launch cancelled by app shutdown');
+    }
+
+    if (execution.status === 'cancelled') {
+      await this.cancelDeterministicRunBeforeSpawn(input.run, {
+        mode: input.mode,
+        provisioningEnv: input.provisioningEnv,
+      });
+    }
+
+    if (execution.status === 'blocked') {
+      await this.failDeterministicRunBeforeSpawn(input.run, {
+        mode: input.mode,
+        message: 'Workspace trust required',
+        error:
+          execution.errorMessage ||
+          execution.errorCode ||
+          'Workspace trust preflight blocked this launch.',
+        launchDiagnostics: workspaceTrustLaunchDiagnostics,
+        provisioningEnv: input.provisioningEnv,
+      });
+    }
+
+    if (execution.status === 'soft_failed') {
+      const warning =
+        execution.errorMessage ||
+        execution.errorCode ||
+        'Workspace trust preflight could not verify trust before launch.';
+      input.run.progress = {
+        ...input.run.progress,
+        warnings: mergeProvisioningWarnings(input.run.progress.warnings, warning),
+        launchDiagnostics: workspaceTrustLaunchDiagnostics,
+      };
+      input.run.onProgress(input.run.progress);
+    } else if (workspaceTrustLaunchDiagnostics) {
+      input.run.progress = {
+        ...input.run.progress,
+        updatedAt: nowIso(),
+        launchDiagnostics: workspaceTrustLaunchDiagnostics,
+      };
+      input.run.onProgress(input.run.progress);
+    }
+  }
+
+  private async failDeterministicRunBeforeSpawn(
+    run: ProvisioningRun,
+    input: {
+      mode: 'create' | 'launch';
+      message: string;
+      error: string;
+      launchDiagnostics?: TeamLaunchDiagnosticItem[];
+      provisioningEnv: ProvisioningEnvResolution;
+    }
+  ): Promise<never> {
+    updateProgress(run, 'failed', input.message, {
+      error: input.error,
+      warnings: run.progress.warnings,
+      launchDiagnostics: input.launchDiagnostics,
+    });
+    run.onProgress(run.progress);
+
+    if (input.provisioningEnv.anthropicApiKeyHelper) {
+      await cleanupAnthropicTeamApiKeyHelperMaterial({
+        directory: input.provisioningEnv.anthropicApiKeyHelper.directory,
+      }).catch(() => undefined);
+    }
+    if (input.mode === 'launch') {
+      await this.restorePrelaunchConfig(run.teamName).catch(() => undefined);
+    }
+    this.cleanupRun(run);
+    throw new Error(input.error);
+  }
+
+  private async cancelDeterministicRunBeforeSpawn(
+    run: ProvisioningRun,
+    input: {
+      mode: 'create' | 'launch';
+      provisioningEnv: ProvisioningEnvResolution;
+    }
+  ): Promise<never> {
+    updateProgress(run, 'cancelled', 'Team launch cancelled', {
+      warnings: run.progress.warnings,
+    });
+    run.cancelRequested = true;
+    run.onProgress(run.progress);
+
+    if (input.provisioningEnv.anthropicApiKeyHelper) {
+      await cleanupAnthropicTeamApiKeyHelperMaterial({
+        directory: input.provisioningEnv.anthropicApiKeyHelper.directory,
+      }).catch(() => undefined);
+    }
+    if (input.mode === 'launch') {
+      await this.restorePrelaunchConfig(run.teamName).catch(() => undefined);
+    }
+    this.cleanupRun(run);
+    throw new Error('Team launch cancelled by app shutdown');
   }
 
   private async buildRuntimeTurnSettledHookSettingsObject(
@@ -17526,6 +17948,11 @@ export class TeamProvisioningService {
     primaryEnv?: ProvisioningEnvResolution;
     teamRuntimeAuth?: TeamRuntimeAuthContext;
     limitContext?: boolean;
+    providerArgsResolver?: (input: {
+      providerId: TeamProviderId;
+      providerArgs: string[];
+      phase: 'default-model-resolution';
+    }) => string[];
   }): Promise<TeamCreateRequest['members']> {
     const envByProvider = new Map<TeamProviderId, Promise<ProvisioningEnvResolution>>();
     const defaultModelByProvider = new Map<TeamProviderId, Promise<string>>();
@@ -17566,7 +17993,13 @@ export class TeamProvisioningService {
           params.cwd,
           providerId,
           envResolution.env,
-          envResolution.providerArgs,
+          params.providerArgsResolver?.({
+            providerId,
+            providerArgs: envResolution.providerArgs ?? [],
+            phase: 'default-model-resolution',
+          }) ??
+            envResolution.providerArgs ??
+            [],
           params.limitContext === true
         );
         const normalized = resolvedDefaultModel?.trim();
@@ -18659,6 +19092,38 @@ export class TeamProvisioningService {
       if (envWarning) {
         throw new Error(envWarning);
       }
+      const workspaceTrustFeatureFlags = resolveWorkspaceTrustFeatureFlags();
+      const workspaceTrustProviders = workspaceTrustFeatureFlags.enabled
+        ? this.collectWorkspaceTrustProviders({
+            leadProviderId: request.providerId,
+            members: request.members,
+          })
+        : [];
+      const workspaceTrustEarlyWorkspaces = workspaceTrustFeatureFlags.enabled
+        ? await this.collectWorkspaceTrustWorkspaces({
+            cwd: request.cwd,
+            members: [],
+          })
+        : [];
+      const workspaceTrustEarlyPlan = workspaceTrustFeatureFlags.enabled
+        ? await this.planWorkspaceTrustArgsOnlySafely({
+            providers: workspaceTrustProviders,
+            workspaces: workspaceTrustEarlyWorkspaces,
+            targetSurfaces: ['default_model_probe'],
+            featureFlags: workspaceTrustFeatureFlags,
+          })
+        : { launchArgPatches: [] };
+      const workspaceTrustProviderArgsResolver = (input: {
+        providerId: TeamProviderId;
+        providerArgs: string[];
+        phase: 'default-model-resolution';
+      }): string[] =>
+        this.applyWorkspaceTrustArgPatches({
+          args: input.providerArgs,
+          patches: workspaceTrustEarlyPlan.launchArgPatches,
+          targetProvider: input.providerId,
+          targetSurface: 'default_model_probe',
+        });
       const materializedMemberSpecs = await this.materializeEffectiveTeamMemberSpecs({
         claudePath,
         cwd: request.cwd,
@@ -18672,6 +19137,7 @@ export class TeamProvisioningService {
         primaryEnv: provisioningEnv,
         teamRuntimeAuth,
         limitContext: request.limitContext,
+        providerArgsResolver: workspaceTrustProviderArgsResolver,
       });
       const allEffectiveMemberSpecs = await this.resolveOpenCodeMemberWorkspacesForRuntime({
         teamName: request.teamName,
@@ -18697,16 +19163,62 @@ export class TeamProvisioningService {
         effectiveMemberSpecs,
         { teamRuntimeAuth }
       );
+      const workspaceTrustFullWorkspaces = workspaceTrustFeatureFlags.enabled
+        ? await this.collectWorkspaceTrustWorkspaces({
+            cwd: request.cwd,
+            members: allEffectiveMemberSpecs,
+          })
+        : [];
+      const workspaceTrustFullPlan = workspaceTrustFeatureFlags.enabled
+        ? await this.planWorkspaceTrustFullSafely({
+            providers: this.collectWorkspaceTrustProviders({
+              leadProviderId: request.providerId,
+              members: allEffectiveMemberSpecs,
+            }),
+            workspaces: workspaceTrustFullWorkspaces,
+            featureFlags: workspaceTrustFeatureFlags,
+          })
+        : null;
+      const workspaceTrustPatches = workspaceTrustFullPlan?.launchArgPatches ?? [];
+      const providerArgsForLaunch = this.applyWorkspaceTrustArgPatches({
+        args: providerArgs,
+        patches: workspaceTrustPatches,
+        targetProvider: resolvedProviderId,
+        targetSurface: 'primary_provider_args',
+      });
+      const crossProviderArgsForLaunch = crossProviderMemberArgs.providerArgsByProvider.has('codex')
+        ? this.applyWorkspaceTrustArgPatches({
+            args: crossProviderMemberArgs.args,
+            patches: workspaceTrustPatches,
+            targetProvider: 'codex',
+            targetSurface: 'cross_provider_member_args',
+          })
+        : crossProviderMemberArgs.args;
+      const crossProviderMemberArgsForLaunch = {
+        ...crossProviderMemberArgs,
+        args: crossProviderArgsForLaunch,
+      };
       Object.assign(shellEnv, crossProviderMemberArgs.envPatch);
       if (crossProviderMemberArgs.usesAnthropicApiKeyHelper) {
         for (const key of ANTHROPIC_HELPER_MODE_COMPETING_AUTH_ENV_KEYS) {
           delete shellEnv[key];
         }
       }
-      const providerArgsByProvider = new Map<TeamProviderId, string[]>([
-        [resolvedProviderId, providerArgs],
+      const providerArgsByProvider = new Map<TeamProviderId, string[]>();
+      for (const [providerId, args] of new Map<TeamProviderId, string[]>([
+        [resolvedProviderId, providerArgsForLaunch],
         ...crossProviderMemberArgs.providerArgsByProvider,
-      ]);
+      ])) {
+        providerArgsByProvider.set(
+          providerId,
+          this.applyWorkspaceTrustArgPatches({
+            args,
+            patches: workspaceTrustPatches,
+            targetProvider: providerId,
+            targetSurface: 'provider_facts_probe',
+          })
+        );
+      }
       const launchIdentity = await this.resolveAndValidateLaunchIdentity({
         claudePath,
         cwd: request.cwd,
@@ -18760,7 +19272,12 @@ export class TeamProvisioningService {
         bootstrapSpecPath: null,
         bootstrapUserPromptPath: null,
         isLaunch: false,
+        launchStateClearedForRun: false,
         deterministicBootstrap: true,
+        workspaceTrustPlan: workspaceTrustFullPlan,
+        workspaceTrustExecution: null,
+        workspaceTrustDiagnostics: null,
+        workspaceTrustRetryAttempted: false,
         fsPhase: 'waiting_config',
         leadRelayCapture: null,
         activeCrossTeamReplyHints: [],
@@ -18818,8 +19335,19 @@ export class TeamProvisioningService {
       this.provisioningRunByTeam.set(request.teamName, runId);
       initializeProvisioningTrace(run);
       run.onProgress(run.progress);
+      await this.prepareWorkspaceTrustForDeterministicRun({
+        mode: 'create',
+        run,
+        claudePath,
+        shellEnv,
+        stopAllGenerationAtStart,
+        workspaceTrustPlan: workspaceTrustFullPlan,
+        featureFlags: workspaceTrustFeatureFlags,
+        provisioningEnv,
+      });
       emitProvisioningCheckpoint(run, 'Clearing persisted launch state');
-      await this.clearPersistedLaunchState(request.teamName);
+      await this.clearPersistedLaunchState(request.teamName, { expectedRunId: run.runId });
+      run.launchStateClearedForRun = true;
 
       const initialUserPrompt = request.prompt?.trim() ?? '';
       const promptSize = getPromptSizeSummary(initialUserPrompt);
@@ -18945,7 +19473,7 @@ export class TeamProvisioningService {
         teamName: request.teamName,
         providerId: resolvedProviderId,
         launchIdentity,
-        envResolution: provisioningEnv,
+        envResolution: { ...provisioningEnv, providerArgs: providerArgsForLaunch },
         extraArgs: extraCliArgs,
         includeAnthropicHelper: resolvedProviderId === 'anthropic',
         contextLabel: 'Team create launch',
@@ -18981,7 +19509,7 @@ export class TeamProvisioningService {
         ...runtimeArgsPlan.extraArgs,
         ...runtimeArgsPlan.providerArgs,
         ...runtimeArgsPlan.settingsArgs,
-        ...crossProviderMemberArgs.args,
+        ...crossProviderMemberArgsForLaunch.args,
       ]);
       const runtimeWarning = buildRuntimeLaunchWarning(request, shellEnv, {
         geminiRuntimeAuth,
@@ -19811,6 +20339,38 @@ export class TeamProvisioningService {
       if (envWarning) {
         throw new Error(envWarning);
       }
+      const workspaceTrustFeatureFlags = resolveWorkspaceTrustFeatureFlags();
+      const workspaceTrustProviders = workspaceTrustFeatureFlags.enabled
+        ? this.collectWorkspaceTrustProviders({
+            leadProviderId: request.providerId,
+            members: expectedMemberSpecs,
+          })
+        : [];
+      const workspaceTrustEarlyWorkspaces = workspaceTrustFeatureFlags.enabled
+        ? await this.collectWorkspaceTrustWorkspaces({
+            cwd: request.cwd,
+            members: [],
+          })
+        : [];
+      const workspaceTrustEarlyPlan = workspaceTrustFeatureFlags.enabled
+        ? await this.planWorkspaceTrustArgsOnlySafely({
+            providers: workspaceTrustProviders,
+            workspaces: workspaceTrustEarlyWorkspaces,
+            targetSurfaces: ['default_model_probe'],
+            featureFlags: workspaceTrustFeatureFlags,
+          })
+        : { launchArgPatches: [] };
+      const workspaceTrustProviderArgsResolver = (input: {
+        providerId: TeamProviderId;
+        providerArgs: string[];
+        phase: 'default-model-resolution';
+      }): string[] =>
+        this.applyWorkspaceTrustArgPatches({
+          args: input.providerArgs,
+          patches: workspaceTrustEarlyPlan.launchArgPatches,
+          targetProvider: input.providerId,
+          targetSurface: 'default_model_probe',
+        });
 
       const materializedMemberSpecs = await this.materializeEffectiveTeamMemberSpecs({
         claudePath,
@@ -19825,6 +20385,7 @@ export class TeamProvisioningService {
         primaryEnv: provisioningEnv,
         teamRuntimeAuth,
         limitContext: request.limitContext,
+        providerArgsResolver: workspaceTrustProviderArgsResolver,
       });
       const allEffectiveMemberSpecs = await this.resolveOpenCodeMemberWorkspacesForRuntime({
         teamName: request.teamName,
@@ -19851,16 +20412,62 @@ export class TeamProvisioningService {
         effectiveMemberSpecs,
         { teamRuntimeAuth }
       );
+      const workspaceTrustFullWorkspaces = workspaceTrustFeatureFlags.enabled
+        ? await this.collectWorkspaceTrustWorkspaces({
+            cwd: request.cwd,
+            members: allEffectiveMemberSpecs,
+          })
+        : [];
+      const workspaceTrustFullPlan = workspaceTrustFeatureFlags.enabled
+        ? await this.planWorkspaceTrustFullSafely({
+            providers: this.collectWorkspaceTrustProviders({
+              leadProviderId: request.providerId,
+              members: allEffectiveMemberSpecs,
+            }),
+            workspaces: workspaceTrustFullWorkspaces,
+            featureFlags: workspaceTrustFeatureFlags,
+          })
+        : null;
+      const workspaceTrustPatches = workspaceTrustFullPlan?.launchArgPatches ?? [];
+      const providerArgsForLaunch = this.applyWorkspaceTrustArgPatches({
+        args: providerArgs,
+        patches: workspaceTrustPatches,
+        targetProvider: resolvedProviderId,
+        targetSurface: 'primary_provider_args',
+      });
+      const crossProviderArgsForLaunch = crossProviderMemberArgs.providerArgsByProvider.has('codex')
+        ? this.applyWorkspaceTrustArgPatches({
+            args: crossProviderMemberArgs.args,
+            patches: workspaceTrustPatches,
+            targetProvider: 'codex',
+            targetSurface: 'cross_provider_member_args',
+          })
+        : crossProviderMemberArgs.args;
+      const crossProviderMemberArgsForLaunch = {
+        ...crossProviderMemberArgs,
+        args: crossProviderArgsForLaunch,
+      };
       Object.assign(shellEnv, crossProviderMemberArgs.envPatch);
       if (crossProviderMemberArgs.usesAnthropicApiKeyHelper) {
         for (const key of ANTHROPIC_HELPER_MODE_COMPETING_AUTH_ENV_KEYS) {
           delete shellEnv[key];
         }
       }
-      const providerArgsByProvider = new Map<TeamProviderId, string[]>([
-        [resolvedProviderId, providerArgs],
+      const providerArgsByProvider = new Map<TeamProviderId, string[]>();
+      for (const [providerId, args] of new Map<TeamProviderId, string[]>([
+        [resolvedProviderId, providerArgsForLaunch],
         ...crossProviderMemberArgs.providerArgsByProvider,
-      ]);
+      ])) {
+        providerArgsByProvider.set(
+          providerId,
+          this.applyWorkspaceTrustArgPatches({
+            args,
+            patches: workspaceTrustPatches,
+            targetProvider: providerId,
+            targetSurface: 'provider_facts_probe',
+          })
+        );
+      }
       const launchIdentity = await this.resolveAndValidateLaunchIdentity({
         claudePath,
         cwd: request.cwd,
@@ -19939,7 +20546,12 @@ export class TeamProvisioningService {
         bootstrapSpecPath: null,
         bootstrapUserPromptPath: null,
         isLaunch: true,
+        launchStateClearedForRun: false,
         deterministicBootstrap: true,
+        workspaceTrustPlan: workspaceTrustFullPlan,
+        workspaceTrustExecution: null,
+        workspaceTrustDiagnostics: null,
+        workspaceTrustRetryAttempted: false,
         fsPhase: 'waiting_members',
         leadRelayCapture: null,
         activeCrossTeamReplyHints: [],
@@ -20003,8 +20615,19 @@ export class TeamProvisioningService {
       this.provisioningRunByTeam.set(request.teamName, runId);
       initializeProvisioningTrace(run);
       run.onProgress(run.progress);
+      await this.prepareWorkspaceTrustForDeterministicRun({
+        mode: 'launch',
+        run,
+        claudePath,
+        shellEnv,
+        stopAllGenerationAtStart,
+        workspaceTrustPlan: workspaceTrustFullPlan,
+        featureFlags: workspaceTrustFeatureFlags,
+        provisioningEnv,
+      });
       emitProvisioningCheckpoint(run, 'Clearing persisted launch state');
-      await this.clearPersistedLaunchState(request.teamName);
+      await this.clearPersistedLaunchState(request.teamName, { expectedRunId: run.runId });
+      run.launchStateClearedForRun = true;
       emitProvisioningCheckpoint(run, 'Publishing mixed secondary lane status');
       for (const lane of run.mixedSecondaryLanes ?? []) {
         await this.publishMixedSecondaryLaneStatusChange(run, lane);
@@ -20137,7 +20760,7 @@ export class TeamProvisioningService {
         teamName: request.teamName,
         providerId: resolvedProviderId,
         launchIdentity,
-        envResolution: provisioningEnv,
+        envResolution: { ...provisioningEnv, providerArgs: providerArgsForLaunch },
         extraArgs: extraCliArgs,
         includeAnthropicHelper: resolvedProviderId === 'anthropic',
         contextLabel: 'Team launch',
@@ -20163,7 +20786,7 @@ export class TeamProvisioningService {
       // Without this, a codex teammate spawned from an anthropic lead has no way to learn
       // about the required forced_login_method (chatgpt/api) and fails to start.
       emitProvisioningCheckpoint(run, 'Resolving cross-provider member launch args');
-      launchArgs.push(...crossProviderMemberArgs.args);
+      launchArgs.push(...crossProviderMemberArgsForLaunch.args);
       const finalLaunchArgs = mergeJsonSettingsArgs(launchArgs);
       const runtimeWarning = buildRuntimeLaunchWarning(request, shellEnv, {
         geminiRuntimeAuth,
@@ -23525,7 +24148,9 @@ export class TeamProvisioningService {
           : undefined;
       const status = this.shouldPreferCurrentLaunchMemberStatus(trackedStatus, launchStatus)
         ? launchStatus
-        : (trackedStatus ?? adapterStatus ?? launchStatus);
+        : this.shouldPreferCurrentLaunchMemberStatus(trackedStatus, adapterStatus)
+          ? adapterStatus
+          : (trackedStatus ?? adapterStatus ?? launchStatus);
       const resolved = resolveTeamMemberRuntimeLiveness({
         teamName,
         memberName,
@@ -23660,7 +24285,7 @@ export class TeamProvisioningService {
       return true;
     }
     const trackedRunId = this.getTrackedRunId(teamName);
-    if (trackedRunId && trackedRunId !== expectedRunId) {
+    if (trackedRunId !== expectedRunId) {
       return false;
     }
     const lastWrittenRunId = this.launchStateWrittenRunIdByTeam.get(teamName);
@@ -31053,7 +31678,13 @@ export class TeamProvisioningService {
       peekAutoResumeService()?.cancelPendingAutoResume(run.teamName);
     }
 
-    if (!hasNewerTrackedRun && run.isLaunch && !run.provisioningComplete && !run.cancelRequested) {
+    if (
+      !hasNewerTrackedRun &&
+      run.isLaunch &&
+      run.launchStateClearedForRun !== false &&
+      !run.provisioningComplete &&
+      !run.cancelRequested
+    ) {
       const cleanupReason =
         typeof run.progress.error === 'string' && run.progress.error.trim()
           ? run.progress.error.trim()
@@ -31078,7 +31709,10 @@ export class TeamProvisioningService {
     if (
       !hasNewerTrackedRun &&
       (run.progress.state === 'failed' ||
-        (run.isLaunch && !run.provisioningComplete && !run.cancelRequested))
+        (run.isLaunch &&
+          run.launchStateClearedForRun !== false &&
+          !run.provisioningComplete &&
+          !run.cancelRequested))
     ) {
       this.writeLaunchFailureArtifactPackBestEffort(run, {
         reason:

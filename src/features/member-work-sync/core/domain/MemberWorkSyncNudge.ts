@@ -88,6 +88,12 @@ function buildAgendaPreview(status: MemberWorkSyncStatus): string {
     .join('; ');
 }
 
+function hasLeadClarificationItem(status: MemberWorkSyncStatus): boolean {
+  return status.agenda.items.some(
+    (item) => item.kind === 'clarification' && item.evidence.needsClarification === 'lead'
+  );
+}
+
 function buildReviewPickupNudgePayload(status: MemberWorkSyncStatus): MemberWorkSyncNudgePayload {
   const taskRefs = buildTaskRefs(status);
   const preview = buildAgendaPreview(status);
@@ -133,6 +139,7 @@ export function buildMemberWorkSyncNudgePayload(
     .map((item) => `${item.displayId ?? item.taskId.slice(0, 8)} ${item.subject}`)
     .join('; ');
   const taskIds = status.agenda.items.map((item) => item.taskId).filter(Boolean);
+  const hasLeadClarification = hasLeadClarificationItem(status);
 
   return {
     from: 'system',
@@ -151,6 +158,9 @@ export function buildMemberWorkSyncNudgePayload(
         : '',
       `Do not use provider names, runtime names, or team names as memberName; use exactly "${status.memberName}".`,
       'If you are still working, report state "still_working"; if you are blocked, report state "blocked" and record the blocker on the task.',
+      hasLeadClarification
+        ? 'If a lead clarification was already escalated to the user, update the task board first with task_set_clarification value "user"; do not rely on a message alone.'
+        : '',
       'Continue concrete task work, report a real blocker with task tools, or sync your current fingerprint before going idle.',
       'Do not reply only with acknowledgement.',
     ]
