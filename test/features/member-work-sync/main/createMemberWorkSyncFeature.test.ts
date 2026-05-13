@@ -388,6 +388,90 @@ describe('createMemberWorkSyncFeature composition', () => {
     }
   });
 
+  it('does not deliver pending nudges until the team is ready for nudge dispatch', async () => {
+    const claudeRoot = makeTempRoot();
+    setClaudeBasePathOverride(claudeRoot);
+    const teamsBasePath = getTeamsBasePath();
+    const teamName = 'team-a';
+    const memberName = 'bob';
+    let canDispatchNudges = false;
+    const feature = createMemberWorkSyncFeature({
+      teamsBasePath,
+      configReader: {
+        getConfig: vi.fn(async () => ({
+          name: teamName,
+          members: [{ name: memberName }],
+        })),
+      } as never,
+      taskReader: {
+        getTasks: vi.fn(async () => [
+          {
+            id: 'task-1',
+            displayId: '11111111',
+            subject: 'Ship sync',
+            status: 'pending',
+            owner: memberName,
+          },
+        ]),
+      } as never,
+      kanbanManager: {
+        getState: vi.fn(async () => ({
+          teamName,
+          reviewers: [],
+          tasks: {},
+        })),
+      } as never,
+      membersMetaStore: {
+        getMembers: vi.fn(async () => []),
+      } as never,
+      canDispatchNudges: vi.fn(async () => canDispatchNudges),
+    });
+
+    try {
+      await seedShadowReadyMetrics({ teamsBasePath, teamName, memberName });
+      const status = await feature.refreshStatus({ teamName, memberName });
+      const outboxInput = buildMemberWorkSyncOutboxEnsureInput({
+        status,
+        hash: new NodeHashAdapter(),
+        nowIso: status.evaluatedAt,
+      });
+      expect(outboxInput).not.toBeNull();
+      const store = new JsonMemberWorkSyncStore(new MemberWorkSyncStorePaths(teamsBasePath));
+      await expect(store.ensurePending(outboxInput!)).resolves.toMatchObject({
+        ok: true,
+        outcome: 'created',
+      });
+
+      await expect(feature.dispatchDueNudges([teamName])).resolves.toEqual({
+        claimed: 0,
+        delivered: 0,
+        superseded: 0,
+        retryable: 0,
+        terminal: 0,
+      });
+      await expect(readInboxMessages({ teamsBasePath, teamName, memberName })).resolves.toEqual([]);
+      await expect(
+        readMemberOutboxItems({ teamsBasePath, teamName, memberName })
+      ).resolves.toMatchObject({
+        [outboxInput!.id]: { status: 'pending' },
+      });
+
+      canDispatchNudges = true;
+      await expect(feature.dispatchDueNudges([teamName])).resolves.toEqual({
+        claimed: 1,
+        delivered: 1,
+        superseded: 0,
+        retryable: 0,
+        terminal: 0,
+      });
+      await expect(
+        readInboxMessages({ teamsBasePath, teamName, memberName })
+      ).resolves.toMatchObject([{ messageId: outboxInput!.id }]);
+    } finally {
+      await feature.dispose();
+    }
+  });
+
   it('plans and dispatches due nudges after queued reconcile by default', async () => {
     const claudeRoot = makeTempRoot();
     setClaudeBasePathOverride(claudeRoot);

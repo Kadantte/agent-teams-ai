@@ -125,6 +125,7 @@ export function createMemberWorkSyncFeature(deps: {
   kanbanManager: TeamKanbanManager;
   membersMetaStore: TeamMembersMetaStore;
   isTeamActive?: (teamName: string) => Promise<boolean> | boolean;
+  canDispatchNudges?: (teamName: string) => Promise<boolean> | boolean;
   listLifecycleActiveTeamNames?: () => Promise<string[]>;
   queueQuietWindowMs?: number;
   runtimeTurnSettledTargetResolver?: RuntimeTurnSettledTargetResolverPort;
@@ -208,13 +209,51 @@ export function createMemberWorkSyncFeature(deps: {
   const reconciler = new MemberWorkSyncReconciler(useCaseDeps);
   const pendingReportReplayer = new MemberWorkSyncPendingReportIntentReplayer(useCaseDeps);
   const nudgeDispatcher = new MemberWorkSyncNudgeDispatcher(useCaseDeps);
+  const emptyNudgeDispatchSummary = (): MemberWorkSyncNudgeDispatchSummary => ({
+    claimed: 0,
+    delivered: 0,
+    superseded: 0,
+    retryable: 0,
+    terminal: 0,
+  });
+  const filterNudgeDispatchReadyTeamNames = async (teamNames: string[]): Promise<string[]> => {
+    const uniqueTeamNames = [...new Set(teamNames.map((name) => name.trim()).filter(Boolean))];
+    if (!deps.canDispatchNudges) {
+      return uniqueTeamNames;
+    }
+
+    const readiness = await Promise.all(
+      uniqueTeamNames.map(async (teamName) => {
+        try {
+          return { teamName, ready: await deps.canDispatchNudges!(teamName) };
+        } catch (error) {
+          deps.logger?.warn('member work sync nudge dispatch readiness check failed', {
+            teamName,
+            error: String(error),
+          });
+          return { teamName, ready: false };
+        }
+      })
+    );
+    return readiness.filter((item) => item.ready).map((item) => item.teamName);
+  };
+  const dispatchNudgesForReadyTeams = async (
+    teamNames: string[],
+    claimedBy: string
+  ): Promise<MemberWorkSyncNudgeDispatchSummary> => {
+    const readyTeamNames = await filterNudgeDispatchReadyTeamNames(teamNames);
+    if (readyTeamNames.length === 0) {
+      return emptyNudgeDispatchSummary();
+    }
+    return nudgeDispatcher.dispatchDue({
+      teamNames: readyTeamNames,
+      claimedBy,
+    });
+  };
   const queue = new MemberWorkSyncEventQueue({
     reconcile: async (request, context: MemberWorkSyncReconcileContext) => {
       await reconciler.execute(request, context);
-      await nudgeDispatcher.dispatchDue({
-        teamNames: [request.teamName],
-        claimedBy: `member-work-sync:${process.pid}`,
-      });
+      await dispatchNudgesForReadyTeams([request.teamName], `member-work-sync:${process.pid}`);
     },
     isTeamActive: deps.isTeamActive ?? (() => true),
     ...(deps.queueQuietWindowMs != null ? { quietWindowMs: deps.queueQuietWindowMs } : {}),
@@ -264,10 +303,7 @@ export function createMemberWorkSyncFeature(deps: {
     ? new MemberWorkSyncNudgeDispatchScheduler({
         listLifecycleActiveTeamNames: deps.listLifecycleActiveTeamNames,
         dispatchDue: (teamNames) =>
-          nudgeDispatcher.dispatchDue({
-            teamNames,
-            claimedBy: `member-work-sync:${process.pid}:scheduled`,
-          }),
+          dispatchNudgesForReadyTeams(teamNames, `member-work-sync:${process.pid}:scheduled`),
         logger: deps.logger,
       })
     : null;
@@ -322,10 +358,7 @@ export function createMemberWorkSyncFeature(deps: {
       );
     },
     dispatchDueNudges: (teamNames) =>
-      nudgeDispatcher.dispatchDue({
-        teamNames,
-        claimedBy: `member-work-sync:${process.pid}`,
-      }),
+      dispatchNudgesForReadyTeams(teamNames, `member-work-sync:${process.pid}`),
     buildRuntimeTurnSettledHookSettings: async ({ provider }) =>
       runtimeTurnSettledSpool.buildHookSettings({ provider }),
     buildRuntimeTurnSettledEnvironment: async ({ provider }) =>

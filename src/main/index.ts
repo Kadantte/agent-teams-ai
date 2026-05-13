@@ -1607,6 +1607,7 @@ async function initializeServices(): Promise<void> {
     isTeamActive: (teamName) =>
       teamProvisioningService.isTeamAlive(teamName) ||
       teamProvisioningService.hasProvisioningRun(teamName),
+    canDispatchNudges: (teamName) => teamProvisioningService.isTeamAlive(teamName),
     listLifecycleActiveTeamNames: async () => {
       const teams = await teamDataService.listTeams();
       return teams

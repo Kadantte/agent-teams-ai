@@ -25458,7 +25458,7 @@ export class TeamProvisioningService {
 
     return expectedMembers.every((memberName) => {
       const member = run.memberSpawnStatuses.get(memberName);
-      return member?.launchState === 'confirmed_alive' || member?.bootstrapConfirmed === true;
+      return member?.launchState === 'confirmed_alive';
     });
   }
 
@@ -31174,6 +31174,9 @@ export class TeamProvisioningService {
       const displayName = run.request.displayName || run.teamName;
       const joinedCount = run.expectedMembers?.length ?? 0;
       const allJoined = joinedCount > 0 && this.areAllExpectedLaunchMembersConfirmed(run);
+      if (run.isLaunch && joinedCount > 0 && !allJoined) {
+        return;
+      }
       const body = run.isLaunch
         ? allJoined
           ? `Team "${displayName}" has been launched - all ${joinedCount} teammates joined and are ready for tasks.`
