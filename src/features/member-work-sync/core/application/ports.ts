@@ -205,6 +205,7 @@ export interface MemberWorkSyncBusySignalPort {
     memberName: string;
     nowIso: string;
     workSyncIntent?: MemberWorkSyncOutboxItem['payload']['workSyncIntent'];
+    workSyncIntentKey?: MemberWorkSyncOutboxItem['payload']['workSyncIntentKey'];
     taskRefs?: MemberWorkSyncOutboxItem['payload']['taskRefs'];
   }): Promise<{ busy: boolean; reason?: string; retryAfterIso?: string }>;
 }

@@ -12753,6 +12753,7 @@ export class TeamProvisioningService {
     memberName: string;
     nowIso: string;
     workSyncIntent?: 'agenda_sync' | 'review_pickup';
+    workSyncIntentKey?: string;
     taskRefs?: TaskRef[];
   }): Promise<{
     busy: boolean;
@@ -12785,7 +12786,9 @@ export class TeamProvisioningService {
       (message) => message.messageKind !== 'member_work_sync_nudge'
     );
     const blockingForegroundMessages = foregroundMessages.filter(
-      (message) => !this.isCurrentReviewPickupRequestForegroundMessage(message, input)
+      (message) =>
+        !this.isCurrentReviewPickupRequestForegroundMessage(message, input) &&
+        !this.isCurrentProofMissingRecoveryForegroundMessage(message, input)
     );
     const unreadForeground = blockingForegroundMessages.find(
       (message) =>
@@ -22212,6 +22215,24 @@ export class TeamProvisioningService {
     return expectedRefs.some((taskRef) =>
       this.openCodeReviewPickupRequestTextMentionsTask({ summary, text, taskRef })
     );
+  }
+
+  private isCurrentProofMissingRecoveryForegroundMessage(
+    message: InboxMessage,
+    input: { workSyncIntent?: 'agenda_sync' | 'review_pickup'; workSyncIntentKey?: string }
+  ): boolean {
+    if (input.workSyncIntent !== 'agenda_sync') {
+      return false;
+    }
+
+    const prefix = 'proof-missing:';
+    const intentKey = input.workSyncIntentKey?.trim();
+    if (!intentKey?.startsWith(prefix)) {
+      return false;
+    }
+
+    const originalMessageId = intentKey.slice(prefix.length).trim();
+    return this.hasStableMessageId(message) && message.messageId.trim() === originalMessageId;
   }
 
   private openCodeReviewPickupRequestTextMentionsTask(input: {

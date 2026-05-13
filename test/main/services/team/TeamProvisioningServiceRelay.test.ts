@@ -3127,6 +3127,81 @@ Messages:
     });
   });
 
+  it('does not let proof-missing recovery get blocked by its original unread message', async () => {
+    const service = new TeamProvisioningService();
+    const teamName = 'my-team';
+    const laneId = 'secondary:opencode:jack';
+    const teamsBasePath = getTeamsBasePath();
+    hoisted.files.set(
+      `${teamsBasePath}/${teamName}/config.json`,
+      JSON.stringify({
+        name: teamName,
+        projectPath: '/tmp/my-team',
+        members: [
+          { name: 'team-lead', agentType: 'team-lead' },
+          { name: 'jack', role: 'developer', providerId: 'opencode', model: 'openrouter/test' },
+        ],
+      })
+    );
+    hoisted.files.set(
+      `${teamsBasePath}/${teamName}/inboxes/jack.json`,
+      JSON.stringify([
+        {
+          from: 'user',
+          to: 'jack',
+          text: 'Please check the current issue.',
+          timestamp: '2026-02-23T17:31:00.000Z',
+          read: false,
+          messageId: 'foreground-message-1',
+          messageKind: 'direct',
+        },
+      ])
+    );
+    (service as any).resolveOpenCodeMemberDeliveryIdentity = vi.fn(async () => ({
+      ok: true,
+      canonicalMemberName: 'jack',
+      laneId,
+    }));
+    vi.spyOn(OpenCodeRuntimeStore, 'readOpenCodeRuntimeLaneIndex').mockResolvedValue({
+      version: 1,
+      updatedAt: '2026-02-23T17:30:00.000Z',
+      lanes: {
+        [laneId]: {
+          laneId,
+          state: 'active',
+          updatedAt: '2026-02-23T17:30:00.000Z',
+        },
+      },
+    });
+    vi.spyOn(service as any, 'createOpenCodePromptDeliveryLedger').mockReturnValue({
+      getActiveForMember: vi.fn(async () => null),
+    });
+
+    const sameMessageRecoveryBusy = await service.getOpenCodeMemberDeliveryBusyStatus({
+      teamName,
+      memberName: 'jack',
+      nowIso: '2026-02-23T17:31:10.000Z',
+      workSyncIntent: 'agenda_sync',
+      workSyncIntentKey: 'proof-missing:foreground-message-1',
+    });
+
+    expect(sameMessageRecoveryBusy).toEqual({ busy: false });
+
+    const unrelatedRecoveryBusy = await service.getOpenCodeMemberDeliveryBusyStatus({
+      teamName,
+      memberName: 'jack',
+      nowIso: '2026-02-23T17:31:10.000Z',
+      workSyncIntent: 'agenda_sync',
+      workSyncIntentKey: 'proof-missing:another-message',
+    });
+
+    expect(unrelatedRecoveryBusy).toMatchObject({
+      busy: true,
+      reason: 'opencode_foreground_inbox_unread',
+      activeMessageId: 'foreground-message-1',
+    });
+  });
+
   it('does not treat the current unread OpenCode review request as busy for review-pickup checks', async () => {
     const service = new TeamProvisioningService();
     const teamName = 'my-team';
