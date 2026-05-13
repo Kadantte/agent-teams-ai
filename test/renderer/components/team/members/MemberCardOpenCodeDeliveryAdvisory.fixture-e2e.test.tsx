@@ -241,6 +241,37 @@ describe('MemberCard OpenCode delivery advisory fixture e2e', () => {
     expect(sideEffects.sendMessageToRun).not.toHaveBeenCalled();
     expect(sideEffects.invalidations).toEqual([{ teamName: TEAM_NAME, memberName: MEMBER_NAME }]);
   });
+
+  it('suppresses protocol proof-missing recovery after visible reply proof appears', async () => {
+    const record = makeDeliveryRecord({
+      failedAt: OLD_FAILURE_ISO,
+      updatedAt: OLD_FAILURE_ISO,
+      lastObservedAt: OLD_FAILURE_ISO,
+      respondedAt: OLD_FAILURE_ISO,
+      responseState: 'responded_non_visible_tool',
+      lastReason: 'non_visible_tool_without_task_progress',
+      diagnostics: [
+        'OpenCode used tools, but did not create a visible reply or task progress proof.',
+      ],
+    });
+    await writeDeliveryFixture(record);
+    await writeVisibleRuntimeReplyProof(record);
+    const scheduleProofMissingRecovery = vi.fn(async () => ({
+      scheduled: true,
+      reason: 'scheduled' as const,
+      intentKey: 'proof-missing:msg-empty-turn',
+    }));
+
+    const advisory = await readMemberAdvisory();
+    expect(advisory).toBeNull();
+
+    const sideEffects = await runUserFacingSideEffects(record, scheduleProofMissingRecovery);
+
+    expect(scheduleProofMissingRecovery).not.toHaveBeenCalled();
+    expect(sideEffects.addTeamNotification).not.toHaveBeenCalled();
+    expect(sideEffects.sendMessageToRun).not.toHaveBeenCalled();
+    expect(sideEffects.invalidations).toEqual([{ teamName: TEAM_NAME, memberName: MEMBER_NAME }]);
+  });
 });
 
 async function readMemberAdvisory(): Promise<MemberRuntimeAdvisory | null> {
