@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   OPEN_CODE_APP_MANAGED_BOOTSTRAP_CONTRACT_VERSION,
+  OPEN_CODE_DELIVERY_ACCEPTANCE_CONTRACT_VERSION,
   createOpenCodeBridgeHandshakeIdentityHash,
   type OpenCodeBridgeCommandName,
   type OpenCodeBridgeHandshake,
@@ -83,6 +84,45 @@ describe('OpenCodeStateChangingBridgeCommandService', () => {
     expect(bridge.calls).toHaveLength(0);
     await expect(ledger.list()).resolves.toEqual([]);
     await expect(leaseStore.getActive('team-a')).resolves.toBeNull();
+  });
+
+  it('requires delivery acceptance contract only for acceptance-mode sendMessage', async () => {
+    clientIdentity.bridgeProtocol.supportedCommands.push('opencode.sendMessage');
+    const server = peerIdentity('agent_teams_orchestrator');
+    server.bridgeProtocol.supportedCommands.push('opencode.sendMessage');
+    handshakePort.nextHandshake = buildHandshakeWithAcceptedCommands(
+      { client: clientIdentity, server },
+      ['opencode.launchTeam', 'opencode.stopTeam', 'opencode.sendMessage']
+    );
+    const service = createService();
+
+    await expect(service.execute(buildSendInput('acceptance'))).rejects.toThrow(
+      'OpenCode delivery acceptance mode is required'
+    );
+    expect(bridge.calls).toHaveLength(0);
+    await expect(ledger.list()).resolves.toEqual([]);
+    await expect(leaseStore.getActive('team-a')).resolves.toBeNull();
+
+    server.bridgeProtocol.opencodeDeliveryAcceptanceContractVersion =
+      OPEN_CODE_DELIVERY_ACCEPTANCE_CONTRACT_VERSION;
+    handshakePort.nextHandshake = buildHandshakeWithAcceptedCommands(
+      { client: clientIdentity, server },
+      ['opencode.launchTeam', 'opencode.stopTeam', 'opencode.sendMessage']
+    );
+    bridge.resultFactory = ({ body, command, options }) =>
+      bridgeSuccess({
+        requestId: options.requestId,
+        command,
+        data: {
+          runId: 'run-1',
+          idempotencyKey: body.preconditions.idempotencyKey,
+          runtimeStoreManifestHighWatermark: 10,
+        },
+      });
+    await expect(service.execute(buildSendInput('acceptance'))).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(bridge.calls).toHaveLength(1);
   });
 
   it('adds preconditions, commits ledger, and releases lease on success', async () => {
@@ -227,6 +267,32 @@ function buildLaunchInput(): Parameters<OpenCodeStateChangingBridgeCommandServic
   };
 }
 
+function buildSendInput(
+  settlementMode: 'observed' | 'acceptance'
+): Parameters<OpenCodeStateChangingBridgeCommandService['execute']>[0] {
+  return {
+    command: 'opencode.sendMessage',
+    teamName: 'team-a',
+    laneId: 'secondary:opencode:bob',
+    runId: 'run-1',
+    capabilitySnapshotId: null,
+    behaviorFingerprint: null,
+    body: {
+      runId: 'run-1',
+      laneId: 'secondary:opencode:bob',
+      teamId: 'team-a',
+      teamName: 'team-a',
+      projectPath: '/tmp/project',
+      memberName: 'bob',
+      text: 'hello',
+      messageId: 'msg-1',
+      settlementMode,
+    },
+    cwd: '/tmp/project',
+    timeoutMs: 10_000,
+  };
+}
+
 function bridgeSuccess(
   overrides: Partial<OpenCodeBridgeSuccess<unknown>> = {}
 ): OpenCodeBridgeSuccess<unknown> {
@@ -304,6 +370,29 @@ function buildHandshake(input: {
     server: input.server,
     agreedProtocolVersion: 1,
     acceptedCommands: ['opencode.launchTeam', 'opencode.stopTeam'],
+    serverTime: '2026-04-21T12:00:00.000Z',
+  };
+
+  return {
+    ...withoutHash,
+    identityHash: createOpenCodeBridgeHandshakeIdentityHash(withoutHash),
+  };
+}
+
+function buildHandshakeWithAcceptedCommands(
+  input: {
+    client: OpenCodeBridgePeerIdentity;
+    server: OpenCodeBridgePeerIdentity;
+  },
+  acceptedCommands: OpenCodeBridgeHandshake['acceptedCommands']
+): OpenCodeBridgeHandshake {
+  const withoutHash: Omit<OpenCodeBridgeHandshake, 'identityHash'> = {
+    schemaVersion: 1,
+    requestId: 'handshake-1',
+    client: input.client,
+    server: input.server,
+    agreedProtocolVersion: 1,
+    acceptedCommands,
     serverTime: '2026-04-21T12:00:00.000Z',
   };
 

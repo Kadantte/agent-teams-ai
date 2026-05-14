@@ -37,6 +37,9 @@ function createLedgerRecord(
     laneId: 'lane-a',
     runId: 'run-a',
     runtimeSessionId: 'session-a',
+    runtimePromptMessageIds: [],
+    lastRuntimePromptMessageId: null,
+    lastDeliveryAttemptIdWithAcceptedPrompt: null,
     inboxMessageId: 'inbox-a',
     inboxTimestamp: '2026-04-21T10:00:00.000Z',
     source: 'watcher',
@@ -202,5 +205,34 @@ describe('TaskLogOpenCodeSessionEvidenceSource', () => {
     const source = new TaskLogOpenCodeSessionEvidenceSource({ teamsBasePath });
 
     await expect(source.readTaskRecords('team-a', createTask())).resolves.toEqual([]);
+  });
+
+  it('uses accepted runtime prompt id as task-log start anchor before observation catches up', async () => {
+    const teamsBasePath = await createTempTeamsBasePath();
+    await writeLedger({
+      teamsBasePath,
+      teamName: 'team-a',
+      laneId: 'lane-a',
+      records: [
+        createLedgerRecord({
+          id: 'record-accepted-only',
+          runtimeSessionId: 'session-accepted-only',
+          runtimePromptMessageId: 'msg_prompt_current',
+          runtimePromptMessageIds: ['msg_prompt_previous', 'msg_prompt_current'],
+          lastRuntimePromptMessageId: 'msg_prompt_current',
+          deliveredUserMessageId: null,
+        }),
+      ],
+    });
+
+    const source = new TaskLogOpenCodeSessionEvidenceSource({ teamsBasePath });
+    const records = await source.readTaskRecords('team-a', createTask());
+
+    expect(records).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-accepted-only',
+        startMessageUuid: 'msg_prompt_current',
+      }),
+    ]);
   });
 });

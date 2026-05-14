@@ -232,29 +232,56 @@ export class OpenCodeReadinessBridge implements OpenCodeTeamRuntimeBridgePort {
       ...input,
       payloadHash: input.payloadHash ?? buildSendPayloadHash(input),
     };
-    const result = await this.bridge.execute<
-      OpenCodeSendMessageCommandBody,
-      OpenCodeSendMessageCommandData
-    >('opencode.sendMessage', body, {
-      cwd: body.projectPath,
-      timeoutMs: this.options.sendTimeoutMs ?? DEFAULT_SEND_TIMEOUT_MS,
-      requestId: commandRequestId,
-    });
+    let activeRequestId = commandRequestId;
+    let activeBody = body;
+    let usedObservedFallback = false;
+    const executeSend = (nextBody: OpenCodeSendMessageCommandBody, requestId: string) =>
+      this.bridge.execute<OpenCodeSendMessageCommandBody, OpenCodeSendMessageCommandData>(
+        'opencode.sendMessage',
+        nextBody,
+        {
+          cwd: nextBody.projectPath,
+          timeoutMs: this.options.sendTimeoutMs ?? DEFAULT_SEND_TIMEOUT_MS,
+          requestId,
+        }
+      );
+
+    let result: OpenCodeBridgeResult<OpenCodeSendMessageCommandData>;
+    try {
+      result = await executeSend(activeBody, activeRequestId);
+    } catch (error) {
+      if (
+        body.settlementMode !== 'acceptance' ||
+        !isOpenCodeAcceptanceContractMissingError(error)
+      ) {
+        throw error;
+      }
+      activeRequestId = `${commandRequestId}-observed`;
+      activeBody = {
+        ...body,
+        settlementMode: 'observed',
+      };
+      usedObservedFallback = true;
+      result = await executeSend(activeBody, activeRequestId);
+    }
+
     if (result.ok) {
-      return result.data;
+      return usedObservedFallback
+        ? withOpenCodeObservedFallbackDiagnostic(result.data)
+        : result.data;
     }
     if (result.error.kind === 'timeout') {
       const recovered = await this.recoverTimedOutSendMessage({
-        originalRequestId: commandRequestId,
-        body,
+        originalRequestId: activeRequestId,
+        body: activeBody,
       });
       if (recovered) {
-        return recovered;
+        return usedObservedFallback ? withOpenCodeObservedFallbackDiagnostic(recovered) : recovered;
       }
     }
     return {
       accepted: false,
-      memberName: body.memberName,
+      memberName: activeBody.memberName,
       diagnostics: [
         {
           code: result.error.kind,
@@ -541,6 +568,28 @@ function mapBridgeFailureToReadinessState(
 
 function formatDiagnosticEvent(event: OpenCodeBridgeDiagnosticEvent): string {
   return `${event.type}: ${event.message}`;
+}
+
+function isOpenCodeAcceptanceContractMissingError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('OpenCode delivery acceptance mode is required');
+}
+
+function withOpenCodeObservedFallbackDiagnostic(
+  data: OpenCodeSendMessageCommandData
+): OpenCodeSendMessageCommandData {
+  return {
+    ...data,
+    diagnostics: [
+      {
+        code: 'opencode_accept_fast_capability_missing',
+        severity: 'warning',
+        message:
+          'OpenCode delivery acceptance capability was not advertised by the orchestrator; used observed delivery mode.',
+      },
+      ...data.diagnostics,
+    ],
+  };
 }
 
 function thrownBridgeFailure<TData>(

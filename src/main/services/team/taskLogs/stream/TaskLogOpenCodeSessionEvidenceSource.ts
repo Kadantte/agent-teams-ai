@@ -3,6 +3,7 @@ import * as path from 'node:path';
 
 import {
   createOpenCodePromptDeliveryLedgerStore,
+  getLatestOpenCodeRuntimePromptMessageId,
   type OpenCodePromptDeliveryLedgerRecord,
 } from '../../opencode/delivery/OpenCodePromptDeliveryLedger';
 import {
@@ -158,7 +159,10 @@ function toAttributionRecord(
         ])
       : undefined;
   const until = addMsToIso(terminalUntil ?? fallbackUntil, TERMINAL_EVIDENCE_GRACE_MS);
-  const startMessageUuid = record.deliveredUserMessageId?.trim() || undefined;
+  const startMessageUuid =
+    record.deliveredUserMessageId?.trim() ||
+    getLatestOpenCodeRuntimePromptMessageId(record) ||
+    undefined;
 
   return {
     taskId: task.id,
@@ -241,7 +245,9 @@ export class TaskLogOpenCodeSessionEvidenceSource implements OpenCodeTaskLogSess
         record.memberName.trim().toLowerCase(),
         record.laneId.trim(),
         sessionId,
-        record.deliveredUserMessageId ?? record.inboxMessageId,
+        record.deliveredUserMessageId ??
+          getLatestOpenCodeRuntimePromptMessageId(record) ??
+          record.inboxMessageId,
       ].join('::');
       if (seen.has(key)) {
         continue;

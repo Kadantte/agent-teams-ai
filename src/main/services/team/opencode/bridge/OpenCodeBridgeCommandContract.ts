@@ -438,6 +438,7 @@ export interface OpenCodeBridgePeerIdentity {
     supportedCommands: OpenCodeBridgeCommandName[];
     opencodeTaskLedgerEvidenceContractVersion?: number;
     opencodeAppManagedBootstrapContractVersion?: number;
+    opencodeDeliveryAcceptanceContractVersion?: number;
   };
   runtime: {
     providerId: 'opencode';
@@ -618,6 +619,7 @@ export function validateOpenCodeBridgeHandshake(input: {
   expectedCapabilitySnapshotId: string | null;
   expectedManifestHighWatermark: number | null;
   expectedRunId: string | null;
+  requiresDeliveryAcceptanceContract?: boolean;
 }): { ok: true } | { ok: false; reason: string } {
   const shape = validateOpenCodeBridgeHandshakeShape(input.handshake);
   if (!shape.ok) {
@@ -674,6 +676,19 @@ export function validateOpenCodeBridgeHandshake(input: {
           'OpenCode app-managed bootstrap is required, but the orchestrator does not advertise contract version 1. Update agent_teams_orchestrator and restart the app.',
       };
     }
+  }
+
+  if (
+    input.requiredCommand === 'opencode.sendMessage' &&
+    input.requiresDeliveryAcceptanceContract === true &&
+    input.handshake.server.bridgeProtocol.opencodeDeliveryAcceptanceContractVersion !==
+      OPEN_CODE_DELIVERY_ACCEPTANCE_CONTRACT_VERSION
+  ) {
+    return {
+      ok: false,
+      reason:
+        'OpenCode delivery acceptance mode is required, but the orchestrator does not advertise contract version 1. Falling back to observed delivery mode is required.',
+    };
   }
 
   if (
@@ -948,7 +963,10 @@ function isPeerIdentity(value: unknown): value is OpenCodeBridgePeerIdentity {
         (bridgeProtocol.opencodeTaskLedgerEvidenceContractVersion as number) < 1)) ||
     (bridgeProtocol.opencodeAppManagedBootstrapContractVersion !== undefined &&
       (!Number.isInteger(bridgeProtocol.opencodeAppManagedBootstrapContractVersion) ||
-        (bridgeProtocol.opencodeAppManagedBootstrapContractVersion as number) < 1))
+        (bridgeProtocol.opencodeAppManagedBootstrapContractVersion as number) < 1)) ||
+    (bridgeProtocol.opencodeDeliveryAcceptanceContractVersion !== undefined &&
+      (!Number.isInteger(bridgeProtocol.opencodeDeliveryAcceptanceContractVersion) ||
+        (bridgeProtocol.opencodeDeliveryAcceptanceContractVersion as number) < 1))
   ) {
     return false;
   }

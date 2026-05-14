@@ -308,6 +308,63 @@ describe('OpenCodeReadinessBridge', () => {
     );
   });
 
+  it('falls back to observed sendMessage when acceptance capability is missing', async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          'OpenCode delivery acceptance mode is required, but the orchestrator does not advertise contract version 1.'
+        )
+      )
+      .mockResolvedValueOnce(
+        bridgeCommandSuccess({
+          command: 'opencode.sendMessage',
+          requestId: 'send-req-observed',
+          data: {
+            accepted: true,
+            memberName: 'bob',
+            sessionId: 'session-bob',
+            diagnostics: [],
+          },
+        })
+      );
+    const executor = {
+      execute: execute as unknown as OpenCodeReadinessBridgeCommandExecutor['execute'] &
+        ReturnType<typeof vi.fn>,
+    };
+    const bridge = new OpenCodeReadinessBridge(executor);
+
+    await expect(
+      bridge.sendOpenCodeTeamMessage({
+        teamId: 'team-a',
+        teamName: 'team-a',
+        laneId: 'secondary:opencode:bob',
+        projectPath: '/repo',
+        memberName: 'bob',
+        text: 'hello',
+        messageId: 'message-1',
+        deliveryAttemptId: 'ledger-1:1:payload',
+        settlementMode: 'acceptance',
+      })
+    ).resolves.toMatchObject({
+      accepted: true,
+      sessionId: 'session-bob',
+      diagnostics: [
+        expect.objectContaining({
+          code: 'opencode_accept_fast_capability_missing',
+          severity: 'warning',
+        }),
+      ],
+    });
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({ settlementMode: 'acceptance' });
+    expect(execute.mock.calls[1]?.[1]).toMatchObject({ settlementMode: 'observed' });
+    expect(execute.mock.calls[1]?.[2]).toMatchObject({
+      requestId: expect.stringMatching(/-observed$/),
+    });
+  });
+
   it('recovers accepted OpenCode sendMessage after bridge timeout through commandStatus by default', async () => {
     const executor = fakeSequenceExecutor([
       bridgeFailure('timeout', 'OpenCode bridge command timed out', []),

@@ -8363,7 +8363,10 @@ export class TeamProvisioningService {
           taskRefs: input.taskRefs,
           prePromptCursor: ledgerRecord.prePromptCursor,
           sessionId: ledgerRecord.runtimeSessionId ?? undefined,
-          runtimePromptMessageId: ledgerRecord.runtimePromptMessageId ?? undefined,
+          runtimePromptMessageId:
+            ledgerRecord.lastRuntimePromptMessageId ??
+            ledgerRecord.runtimePromptMessageId ??
+            undefined,
         });
       } catch (error) {
         const reason = `opencode_direct_user_delivery_inline_observe_failed: ${getErrorMessage(
@@ -8416,6 +8419,8 @@ export class TeamProvisioningService {
           latestAssistantPreview: null,
           reason: observed.diagnostics[0] ?? null,
         },
+        sessionId: observed.sessionId,
+        runtimePromptMessageId: observed.runtimePromptMessageId,
         diagnostics: [
           `opencode_direct_user_delivery_inline_observe_attempt_${inlineObserveAttempt}`,
           ...(hadMessageSendToolError ? ['opencode_message_send_tool_error_inline_observe'] : []),
@@ -9815,7 +9820,10 @@ export class TeamProvisioningService {
           taskRefs: input.taskRefs,
           prePromptCursor: ledgerRecord.prePromptCursor,
           sessionId: ledgerRecord.runtimeSessionId ?? undefined,
-          runtimePromptMessageId: ledgerRecord.runtimePromptMessageId ?? undefined,
+          runtimePromptMessageId:
+            ledgerRecord.lastRuntimePromptMessageId ??
+            ledgerRecord.runtimePromptMessageId ??
+            undefined,
         });
         await this.rememberOpenCodeRuntimePidFromBridge({
           teamName,
@@ -9842,6 +9850,8 @@ export class TeamProvisioningService {
             latestAssistantPreview: null,
             reason: observed.diagnostics[0] ?? null,
           },
+          sessionId: observed.sessionId,
+          runtimePromptMessageId: observed.runtimePromptMessageId,
           diagnostics: observed.diagnostics,
           observedAt: nowIso(),
         });
@@ -9982,8 +9992,17 @@ export class TeamProvisioningService {
     const responseObservation = this.normalizeOpenCodeDeliveryResponseObservation(
       result.responseObservation
     );
-    const promptAccepted =
-      result.ok || this.isOpenCodePromptAcceptedByObservation(responseObservation);
+    const promptAcceptedByRuntimeIdentity = Boolean(
+      result.ok && result.runtimePromptMessageId?.trim()
+    );
+    const promptAcceptedByObservation =
+      this.isOpenCodePromptAcceptedByObservation(responseObservation);
+    const promptAccepted = promptAcceptedByRuntimeIdentity || promptAcceptedByObservation;
+    const promptAcceptanceMissingRuntimePromptId =
+      result.ok && !promptAcceptedByRuntimeIdentity && !promptAcceptedByObservation;
+    const deliveryDiagnostics = promptAcceptanceMissingRuntimePromptId
+      ? [...result.diagnostics, 'opencode_prompt_acceptance_missing_runtime_prompt_id']
+      : result.diagnostics;
     if (ledgerRecord && ledger) {
       ledgerRecord = await ledger.applyDeliveryResult({
         id: ledgerRecord.id,
@@ -9992,9 +10011,10 @@ export class TeamProvisioningService {
         responseObservation,
         sessionId: result.sessionId,
         runtimePromptMessageId: result.runtimePromptMessageId,
+        deliveryAttemptId,
         prePromptCursor: result.prePromptCursor,
-        diagnostics: result.diagnostics,
-        reason: promptAccepted ? responseObservation?.reason : result.diagnostics[0],
+        diagnostics: deliveryDiagnostics,
+        reason: promptAccepted ? responseObservation?.reason : deliveryDiagnostics[0],
         now: nowIso(),
       });
       this.emitOpenCodePromptDeliveryTaskLogChange(
@@ -10049,7 +10069,7 @@ export class TeamProvisioningService {
         ledgerRecord,
         {
           accepted: promptAccepted,
-          reason: ledgerRecord.lastReason ?? result.diagnostics[0] ?? null,
+          reason: ledgerRecord.lastReason ?? deliveryDiagnostics[0] ?? null,
         }
       );
     }
@@ -10112,16 +10132,21 @@ export class TeamProvisioningService {
       }
     }
     if (ledgerRecord && !promptAccepted) {
-      const reason = this.isOpenCodePromptAcceptanceUnknownFailure(result.diagnostics)
-        ? 'opencode_prompt_acceptance_unknown_after_bridge_timeout'
-        : (result.diagnostics[0] ?? 'opencode_message_delivery_failed');
-      if (reason === 'opencode_prompt_acceptance_unknown_after_bridge_timeout') {
+      const reason = promptAcceptanceMissingRuntimePromptId
+        ? 'opencode_prompt_acceptance_unknown_missing_runtime_prompt_id'
+        : this.isOpenCodePromptAcceptanceUnknownFailure(deliveryDiagnostics)
+          ? 'opencode_prompt_acceptance_unknown_after_bridge_timeout'
+          : (deliveryDiagnostics[0] ?? 'opencode_message_delivery_failed');
+      if (
+        reason === 'opencode_prompt_acceptance_unknown_after_bridge_timeout' ||
+        reason === 'opencode_prompt_acceptance_unknown_missing_runtime_prompt_id'
+      ) {
         const delayMs = OPENCODE_PROMPT_DELIVERY_OBSERVE_DELAY_MS;
         ledgerRecord = await ledger!.markAcceptanceUnknown({
           id: ledgerRecord.id,
           reason,
           nextAttemptAt: new Date(Date.now() + delayMs).toISOString(),
-          diagnostics: result.diagnostics,
+          diagnostics: deliveryDiagnostics,
           markedAt: nowIso(),
         });
         this.scheduleOpenCodePromptDeliveryWatchdog({

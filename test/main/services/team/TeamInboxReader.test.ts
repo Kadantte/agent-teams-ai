@@ -206,6 +206,31 @@ describe('TeamInboxReader', () => {
     });
   });
 
+  it('preserves task-stall remediation semantic kind', async () => {
+    hoisted.files.set(
+      '/mock/teams/my-team/inboxes/alice.json',
+      JSON.stringify([
+        {
+          from: 'system',
+          to: 'alice',
+          text: 'Please continue the stalled task or report a blocker.',
+          timestamp: '2026-01-01T02:45:00.000Z',
+          read: false,
+          messageId: 'task-stall:my-team:alice:task-a',
+          source: 'system_notification',
+          messageKind: 'task_stall_remediation',
+        },
+      ])
+    );
+
+    const messages = await reader.getMessagesFor('my-team', 'alice');
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      messageId: 'task-stall:my-team:alice:task-a',
+      messageKind: 'task_stall_remediation',
+    });
+  });
+
   it('preserves agent error semantic kind from the team lead inbox', async () => {
     hoisted.files.set(
       '/mock/teams/my-team/inboxes/team-lead.json',

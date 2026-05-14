@@ -5426,6 +5426,7 @@ describe('TeamProvisioningService', () => {
         providerId: 'opencode',
         memberName: String(input.memberName),
         sessionId: 'oc-session-bob',
+        runtimePromptMessageId: 'msg_prompt_direct_lane',
         runtimePid: 456,
         diagnostics: [],
       }));
@@ -5507,6 +5508,7 @@ describe('TeamProvisioningService', () => {
         providerId: 'opencode',
         memberName: String(input.memberName),
         sessionId: 'oc-session-bob',
+        runtimePromptMessageId: 'msg_prompt_verified_pid',
         runtimePid: 456,
         diagnostics: [],
       }));
@@ -5632,6 +5634,7 @@ describe('TeamProvisioningService', () => {
         providerId: 'opencode',
         memberName: String(input.memberName),
         sessionId: 'oc-session-bob',
+        runtimePromptMessageId: 'msg_prompt_unverified_pid',
         runtimePid: 456,
         diagnostics: [],
       }));
@@ -5734,6 +5737,7 @@ describe('TeamProvisioningService', () => {
         providerId: 'opencode',
         memberName: String(input.memberName),
         sessionId: 'oc-session-bob',
+        runtimePromptMessageId: 'msg_prompt_snapshot_config',
         diagnostics: [],
       }));
       svc.setRuntimeAdapterRegistry(
@@ -5824,6 +5828,7 @@ describe('TeamProvisioningService', () => {
         providerId: 'opencode',
         memberName: String(input.memberName),
         sessionId: 'oc-session-bob',
+        runtimePromptMessageId: 'msg_prompt_worktree_cwd',
         diagnostics: [],
       }));
       svc.setRuntimeAdapterRegistry(
@@ -7069,6 +7074,109 @@ describe('TeamProvisioningService', () => {
         lastReason: 'opencode_prompt_acceptance_unknown_after_bridge_timeout',
       });
       expect(ledgerEnvelope.data[0].nextAttemptAt).toBeTruthy();
+    });
+
+    it('keeps accepted OpenCode responses without exact prompt identity acceptance-unknown', async () => {
+      const svc = new TeamProvisioningService();
+      const sendMessageToMember = vi.fn(async (input: Record<string, unknown>) => ({
+        ok: true,
+        providerId: 'opencode',
+        memberName: String(input.memberName),
+        sessionId: 'oc-session-bob',
+        prePromptCursor: 'cursor-before',
+        diagnostics: [],
+      }));
+      const registry = new TeamRuntimeAdapterRegistry([
+        {
+          providerId: 'opencode',
+          prepare: vi.fn(),
+          launch: vi.fn(),
+          reconcile: vi.fn(),
+          stop: vi.fn(),
+          sendMessageToMember,
+          observeMessageDelivery: vi.fn(),
+        } as any,
+      ]);
+      svc.setRuntimeAdapterRegistry(registry);
+
+      (svc as any).getTrackedRunId = vi.fn(() => 'run-1');
+      (svc as any).provisioningRunByTeam.set('team-a', 'run-1');
+      (svc as any).setSecondaryRuntimeRun({
+        teamName: 'team-a',
+        runId: 'opencode-run-bob',
+        providerId: 'opencode',
+        laneId: 'secondary:opencode:bob',
+        memberName: 'bob',
+        cwd: '/repo',
+      });
+      await writeDefaultBobOpenCodeBootstrapEvidence();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          projectPath: '/repo',
+          members: [
+            { name: 'team-lead', providerId: 'codex', model: 'gpt-5.4' },
+            { name: 'bob', providerId: 'opencode', model: 'minimax-m2.5-free' },
+          ],
+        })),
+      };
+      (svc as any).teamMetaStore = {
+        getMeta: vi.fn(async () => ({
+          launchIdentity: { providerId: 'codex' },
+          providerId: 'codex',
+        })),
+      };
+      (svc as any).membersMetaStore = {
+        getMembers: vi.fn(async () => [
+          {
+            name: 'bob',
+            providerId: 'opencode',
+            model: 'opencode/minimax-m2.5-free',
+          },
+        ]),
+      };
+
+      await expect(
+        svc.deliverOpenCodeMemberMessage('team-a', {
+          memberName: 'bob',
+          text: 'Please handle this.',
+          messageId: 'msg-accepted-missing-prompt-id',
+          replyRecipient: 'user',
+          actionMode: 'ask',
+          source: 'watcher',
+          inboxTimestamp: '2026-04-25T10:00:00.000Z',
+        })
+      ).resolves.toMatchObject({
+        delivered: true,
+        accepted: false,
+        responsePending: true,
+        acceptanceUnknown: true,
+        reason: 'opencode_prompt_acceptance_unknown_missing_runtime_prompt_id',
+      });
+
+      const ledgerPath = getOpenCodeLaneScopedRuntimeFilePath({
+        teamsBasePath: tempTeamsBase,
+        teamName: 'team-a',
+        laneId: 'secondary:opencode:bob',
+        fileName: 'opencode-prompt-delivery-ledger.json',
+      });
+      const ledgerEnvelope = JSON.parse(await fsPromises.readFile(ledgerPath, 'utf8')) as {
+        data: Array<{
+          acceptanceUnknown: boolean;
+          status: string;
+          runtimePromptMessageId: string | null;
+          lastReason: string | null;
+          diagnostics: string[];
+        }>;
+      };
+      expect(ledgerEnvelope.data[0]).toMatchObject({
+        acceptanceUnknown: true,
+        status: 'failed_retryable',
+        runtimePromptMessageId: null,
+        lastReason: 'opencode_prompt_acceptance_unknown_missing_runtime_prompt_id',
+      });
+      expect(ledgerEnvelope.data[0].diagnostics).toContain(
+        'opencode_prompt_acceptance_missing_runtime_prompt_id'
+      );
     });
 
     it('marks OpenCode payload hash mismatch terminal without sending a duplicate prompt', async () => {
@@ -8923,6 +9031,7 @@ describe('TeamProvisioningService', () => {
         providerId: 'opencode',
         memberName: String(input.memberName),
         sessionId: 'oc-session-bob',
+        runtimePromptMessageId: 'msg_prompt_after_restart',
         diagnostics: [],
       }));
       const registry = new TeamRuntimeAdapterRegistry([
@@ -9015,6 +9124,7 @@ describe('TeamProvisioningService', () => {
         providerId: 'opencode',
         memberName: String(input.memberName),
         sessionId: 'oc-session-bob',
+        runtimePromptMessageId: 'msg_prompt_live_lane',
         diagnostics: [],
       }));
       svc.setRuntimeAdapterRegistry(

@@ -118,6 +118,10 @@ export class OpenCodeStateChangingBridgeCommandService {
       expectedCapabilitySnapshotId: input.capabilitySnapshotId,
       expectedManifestHighWatermark: manifest.highWatermark,
       expectedRunId: input.runId,
+      requiresDeliveryAcceptanceContract: requiresOpenCodeDeliveryAcceptanceContract(
+        input.command,
+        input.body
+      ),
     });
 
     if (!handshakeValidation.ok) {
@@ -297,6 +301,16 @@ export function attachBridgePreconditions<TBody>(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requiresOpenCodeDeliveryAcceptanceContract(
+  command: OpenCodeBridgeCommandName,
+  body: unknown
+): boolean {
+  if (command !== 'opencode.sendMessage' || !isRecord(body)) {
+    return false;
+  }
+  return body.settlementMode === 'acceptance';
 }
 
 function stringifyError(error: unknown): string {
