@@ -230,7 +230,7 @@
   },
   "build": {
     "appId": "com.agent-teams.app",
-    "productName": "Agent Teams UI",
+    "productName": "Agent-Teams-UI",
     "directories": {
       "output": "release"
     },
@@ -305,7 +305,10 @@
         "pacman"
       ],
       "icon": "resources/icons/png",
-      "category": "Development"
+      "category": "Development",
+      "desktop": {
+        "Name": "Agent Teams UI"
+      }
     },
     "appImage": {
       "artifactName": "Agent.Teams.AI-${version}.${ext}"
