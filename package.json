@@ -32,12 +32,12 @@
     "team:smoke-changes-real-data": "tsx scripts/team-changes-real-data-smoke.ts",
     "prebuild": "tsx scripts/fetch-pricing-data.ts && pnpm --filter agent-teams-controller build && pnpm --filter agent-teams-mcp build",
     "build": "node --max-old-space-size=8192 ./node_modules/electron-vite/bin/electron-vite.js build",
-    "dist": "electron-builder --mac --win --linux",
-    "dist:mac": "electron-builder --mac",
-    "dist:mac:arm64": "electron-builder --mac --arm64",
-    "dist:mac:x64": "electron-builder --mac --x64",
-    "dist:win": "electron-builder --win",
-    "dist:linux": "electron-builder --linux",
+    "dist": "node ./scripts/electron-builder/dist.mjs --mac --win --linux",
+    "dist:mac": "node ./scripts/electron-builder/dist.mjs --mac",
+    "dist:mac:arm64": "node ./scripts/electron-builder/dist.mjs --mac --arm64",
+    "dist:mac:x64": "node ./scripts/electron-builder/dist.mjs --mac --x64",
+    "dist:win": "node ./scripts/electron-builder/dist.mjs --win",
+    "dist:linux": "node ./scripts/electron-builder/dist.mjs --linux",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "typecheck:workspace": "pnpm typecheck && pnpm --filter agent-teams-mcp typecheck && pnpm --filter agent-teams-mcp typecheck:test",
@@ -230,7 +230,7 @@
   },
   "build": {
     "appId": "com.agent-teams.app",
-    "productName": "Agent-Teams-UI",
+    "productName": "Agent Teams UI",
     "directories": {
       "output": "release"
     },
@@ -305,10 +305,7 @@
         "pacman"
       ],
       "icon": "resources/icons/png",
-      "category": "Development",
-      "desktop": {
-        "Name": "Agent Teams UI"
-      }
+      "category": "Development"
     },
     "appImage": {
       "artifactName": "Agent.Teams.AI-${version}.${ext}"

@@ -107,10 +107,6 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { existsSync } from 'fs';
 import { join } from 'path';
 
-// productName uses hyphens to avoid spaces in the Linux install path (/opt/Agent-Teams-UI/).
-// Restore the human-readable display name for macOS menus and Windows system dialogs.
-app.setName('Agent Teams UI');
-
 import { cleanupEditorState, setEditorMainWindow } from './ipc/editor';
 import { initializeIpcHandlers, removeIpcHandlers } from './ipc/handlers';
 import { registerRendererLogHandlers } from './ipc/rendererLogs';
