@@ -1052,6 +1052,51 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     expect(prepare).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps deep OpenCode runtime failures provider-scoped instead of model-scoped', async () => {
+    const runtimeFailure =
+      'OpenCode /experimental/tool/ids unavailable - Unable to connect. Is the computer able to access the url?';
+    const prepare = vi.fn(async () => ({
+      ok: false as const,
+      providerId: 'opencode' as const,
+      reason: 'mcp_unavailable',
+      retryable: true,
+      diagnostics: [runtimeFailure],
+      warnings: [],
+    }));
+    const registry = new TeamRuntimeAdapterRegistry([
+      {
+        providerId: 'opencode',
+        prepare,
+        launch: vi.fn(),
+        reconcile: vi.fn(),
+        stop: vi.fn(),
+      } as any,
+    ]);
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(registry);
+
+    const result = await svc.prepareForProvisioning(tempRoot, {
+      providerId: 'opencode',
+      forceFresh: true,
+      modelIds: ['opencode/big-pickle'],
+      modelVerificationMode: 'deep',
+    });
+
+    expect(result.ready).toBe(false);
+    expect(result.message).toBe(runtimeFailure);
+    expect(result.details).toEqual([runtimeFailure]);
+    expect(result.warnings).toEqual([runtimeFailure]);
+    expect(result.issues).toEqual([
+      {
+        providerId: 'opencode',
+        scope: 'provider',
+        severity: 'blocking',
+        code: 'mcp_unavailable',
+        message: runtimeFailure,
+      },
+    ]);
+  });
+
   it('keeps shared OpenCode auth compatibility failures provider-scoped', async () => {
     const prepare = vi.fn(async () => ({
       ok: false as const,

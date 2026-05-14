@@ -572,6 +572,60 @@ describe('runProviderPrepareDiagnostics', () => {
     expect(prepareProvisioning).toHaveBeenCalledTimes(2);
   });
 
+  it('uses structured provider-scoped issues from OpenCode deep verification', async () => {
+    const prepareProvisioning = vi.fn<
+      (
+        cwd?: string,
+        providerId?: TeamProviderId,
+        providerIds?: TeamProviderId[],
+        selectedModels?: string[],
+        limitContext?: boolean,
+        modelVerificationMode?: 'compatibility' | 'deep'
+      ) => Promise<TeamProvisioningPrepareResult>
+    >((_cwd, _providerId, _providerIds, selectedModels, _limitContext, modelVerificationMode) => {
+      if (modelVerificationMode === 'compatibility') {
+        expect(selectedModels).toEqual(['opencode/big-pickle']);
+        return Promise.resolve({
+          ready: true,
+          message: 'CLI is ready to launch',
+          details: [
+            'Selected model opencode/big-pickle is compatible. Deep verification pending.',
+          ],
+        });
+      }
+
+      expect(modelVerificationMode).toBe('deep');
+      expect(selectedModels).toEqual(['opencode/big-pickle']);
+      return Promise.resolve({
+        ready: false,
+        message: 'Future OpenCode runtime health failed',
+        details: ['Future OpenCode runtime health failed'],
+        issues: [
+          {
+            providerId: 'opencode',
+            scope: 'provider',
+            severity: 'blocking',
+            code: 'future_runtime_failure',
+            message: 'Future OpenCode runtime health failed',
+          },
+        ],
+      });
+    });
+
+    const result = await runProviderPrepareDiagnostics({
+      cwd: '/tmp/project',
+      providerId: 'opencode',
+      selectedModelIds: ['opencode/big-pickle'],
+      prepareProvisioning,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.details).toEqual(['Future OpenCode runtime health failed']);
+    expect(result.modelResultsById).toEqual({});
+    expect(result.details.join('\n')).not.toContain('big-pickle - unavailable');
+    expect(prepareProvisioning).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps OpenCode deep selected-model failures scoped to the selected model', async () => {
     const prepareProvisioning = vi.fn<
       (

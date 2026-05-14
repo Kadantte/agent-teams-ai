@@ -9488,6 +9488,7 @@ describe('TeamProvisioningService', () => {
         providerId: 'opencode',
         memberName: String(input.memberName),
         sessionId: 'oc-session-bob',
+        runtimePromptMessageId: 'msg_prompt_manifest_fallback',
         diagnostics: [],
       }));
       const registry = new TeamRuntimeAdapterRegistry([

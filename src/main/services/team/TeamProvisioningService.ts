@@ -847,6 +847,34 @@ const PREFLIGHT_BINARY_TIMEOUT_MS = 8000;
 const PREFLIGHT_AUTH_RETRY_DELAY_MS = 2000;
 const PREFLIGHT_AUTH_MAX_RETRIES = 2;
 const OPENCODE_PREFLIGHT_MODEL_PROBE_CONCURRENCY = 2;
+const OPENCODE_PROVIDER_SCOPED_PREPARE_FAILURE_REASONS = new Set([
+  'not_installed',
+  'not_authenticated',
+  'unsupported_version',
+  'capabilities_missing',
+  'runtime_store_blocked',
+  'mcp_unavailable',
+  'adapter_disabled',
+]);
+
+function pushUniqueLine(lines: string[], line: string): void {
+  const trimmed = line.trim();
+  if (trimmed.length > 0 && !lines.includes(trimmed)) {
+    lines.push(trimmed);
+  }
+}
+
+function looksLikeOpenCodeProviderPrepareDiagnostic(value: string): boolean {
+  const lower = value.trim().toLowerCase();
+  return (
+    lower.includes('opencode /experimental/tool') ||
+    lower.includes('/experimental/tool') ||
+    lower.includes('mcp_unavailable') ||
+    lower.includes('runtime store') ||
+    lower.includes('opencode cli') ||
+    lower.includes('unable to connect')
+  );
+}
 
 function applyDistinctProvisioningMemberColors<
   T extends { name: string; color?: string; removedAt?: number },
@@ -17698,6 +17726,30 @@ export class TeamProvisioningService {
 
       const primaryReason =
         prepare.diagnostics.find((entry) => entry.trim().length > 0) ?? prepare.reason;
+      if (this.isProviderScopedOpenCodePrepareFailure(prepare, primaryReason)) {
+        pushUniqueLine(details, primaryReason);
+        pushUniqueLine(blockingMessages, primaryReason);
+        if (
+          !issues.some(
+            (issue) =>
+              issue.providerId === 'opencode' &&
+              issue.scope === 'provider' &&
+              issue.severity === 'blocking' &&
+              issue.code === prepare.reason &&
+              issue.message === primaryReason
+          )
+        ) {
+          issues.push({
+            providerId: 'opencode',
+            scope: 'provider',
+            severity: 'blocking',
+            code: prepare.reason,
+            message: primaryReason,
+          });
+        }
+        continue;
+      }
+
       const unavailableLine = `Selected model ${modelId} is unavailable. ${primaryReason}`;
       const verificationWarningLine = `Selected model ${modelId} could not be verified. ${primaryReason}`;
       const issueSeverity =
@@ -17734,6 +17786,19 @@ export class TeamProvisioningService {
     });
 
     return { details, warnings, blockingMessages, issues };
+  }
+
+  private isProviderScopedOpenCodePrepareFailure(
+    prepare: Extract<TeamRuntimePrepareResult, { ok: false }>,
+    primaryReason: string
+  ): boolean {
+    if (OPENCODE_PROVIDER_SCOPED_PREPARE_FAILURE_REASONS.has(prepare.reason)) {
+      return true;
+    }
+    return (
+      prepare.reason === 'unknown_error' &&
+      [primaryReason, ...prepare.diagnostics].some(looksLikeOpenCodeProviderPrepareDiagnostic)
+    );
   }
 
   private async prepareSelectedOpenCodeModelsCompatibilityBatch({
