@@ -1,5 +1,5 @@
 ---
-title: MCP Integration - Agent Teams Docs
+title: MCP Integration – Agent Teams Docs
 description: Configure MCP in Agent Teams for board operations, teammate coordination, external tool servers, and custom tool development.
 ---
 
@@ -200,7 +200,7 @@ After install, run diagnostics and create a small read-only task to prove the to
 ## Task example
 
 ```text
-Audit the docs home page with the browser MCP. Check desktop and mobile widths, capture any layout issue as a task comment, and only edit landing/product-docs files. Run the docs build before completion.
+Audit the docs home page with the browser MCP. Check desktop and mobile widths, capture any layout issue as a task comment, and only edit landing/product-docs files. Run `pnpm --dir landing docs:build` before completion.
 ```
 
 This works because it names the tool, the surface, the write boundary, and the verification step.

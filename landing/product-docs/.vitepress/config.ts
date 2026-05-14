@@ -39,8 +39,7 @@ const rootGuide: DefaultTheme.SidebarItem[] = [
     text: "Start",
     items: [
       { text: "Quickstart", link: "/guide/quickstart" },
-      { text: "Installation", link: "/guide/installation" },
-      { text: "Create a team", link: "/guide/create-team" }
+      { text: "Installation", link: "/guide/installation" }
     ]
   },
   {
@@ -49,9 +48,15 @@ const rootGuide: DefaultTheme.SidebarItem[] = [
       { text: "Runtime setup", link: "/guide/runtime-setup" },
       { text: "Agent workflow", link: "/guide/agent-workflow" },
       { text: "MCP integration", link: "/guide/mcp-integration" },
+      { text: "Code review", link: "/guide/code-review" }
+    ]
+  },
+  {
+    text: "Team Management",
+    items: [
+      { text: "Create a team", link: "/guide/create-team" },
       { text: "Team brief examples", link: "/guide/team-brief-examples" },
       { text: "Git and worktree strategy", link: "/guide/git-worktree-strategy" },
-      { text: "Code review", link: "/guide/code-review" },
       { text: "Troubleshooting", link: "/guide/troubleshooting" }
     ]
   },
@@ -77,8 +82,7 @@ const ruGuide: DefaultTheme.SidebarItem[] = [
     text: "Старт",
     items: [
       { text: "Быстрый старт", link: "/ru/guide/quickstart" },
-      { text: "Установка", link: "/ru/guide/installation" },
-      { text: "Создание команды", link: "/ru/guide/create-team" }
+      { text: "Установка", link: "/ru/guide/installation" }
     ]
   },
   {
@@ -87,9 +91,15 @@ const ruGuide: DefaultTheme.SidebarItem[] = [
       { text: "Настройка рантайма", link: "/ru/guide/runtime-setup" },
       { text: "Работа агентов", link: "/ru/guide/agent-workflow" },
       { text: "MCP integration", link: "/ru/guide/mcp-integration" },
+      { text: "Код-ревью", link: "/ru/guide/code-review" }
+    ]
+  },
+  {
+    text: "Управление командами",
+    items: [
+      { text: "Создание команды", link: "/ru/guide/create-team" },
       { text: "Team brief examples", link: "/ru/guide/team-brief-examples" },
       { text: "Git and worktree strategy", link: "/ru/guide/git-worktree-strategy" },
-      { text: "Код-ревью", link: "/ru/guide/code-review" },
       { text: "Диагностика", link: "/ru/guide/troubleshooting" }
     ]
   },

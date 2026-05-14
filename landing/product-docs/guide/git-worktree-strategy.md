@@ -1,5 +1,5 @@
 ---
-title: Git and Worktree Strategy - Agent Teams Docs
+title: Git and Worktree Strategy – Agent Teams Docs
 description: Decide when to use the main worktree, feature branches, or OpenCode worktree isolation for parallel agent work.
 ---
 
@@ -98,3 +98,4 @@ This prompt works because it names the allowed area, sensitive boundaries, and c
 - [Create a team](/guide/create-team)
 - [Code review](/guide/code-review)
 - [Team brief examples](/guide/team-brief-examples)
+- [Runtime setup](/guide/runtime-setup)

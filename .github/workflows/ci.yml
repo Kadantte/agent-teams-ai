@@ -10,6 +10,7 @@ on:
       - 'mcp-server/**'
       - 'packages/**'
       - 'resources/runtime/**'
+      - '.runtime-download/**'
       - 'runtime.lock.json'
       - 'test/**'
       - '.github/workflows/**'
@@ -29,6 +30,7 @@ on:
       - 'mcp-server/**'
       - 'packages/**'
       - 'resources/runtime/**'
+      - '.runtime-download/**'
       - 'runtime.lock.json'
       - 'test/**'
       - '.github/workflows/**'
@@ -48,6 +50,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Guard runtime artifacts
+        run: node ./scripts/ci/forbid-runtime-artifacts.cjs
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6

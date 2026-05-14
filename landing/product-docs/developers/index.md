@@ -1,5 +1,5 @@
 ---
-title: Developers - Agent Teams Docs
+title: Developers – Agent Teams Docs
 description: Contributor and developer entry point for Agent Teams architecture, guardrails, debugging, and MCP extension paths.
 ---
 

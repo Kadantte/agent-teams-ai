@@ -47,7 +47,7 @@ git status --short
 | OpenCode | Для multi-model команд и большого числа provider backends           |
 
 ::: info
-Поддержка провайдера Gemini в разработке. Текущий статус провайдеров смотрите в разделе [Провайдеры и рантаймы](/ru/reference/providers-runtimes).
+Gemini — поддерживаемый провайдер. Варианты auth смотрите в разделе [Провайдеры и рантаймы](/ru/reference/providers-runtimes).
 :::
 
 Подробная настройка каждого провайдера — в разделе [Настройка рантайма](/ru/guide/runtime-setup).
@@ -89,7 +89,7 @@ opencode --version
 Хороший первый prompt содержит scope, safety boundaries и verification:
 
 ```text
-Improve the docs quickstart. Keep edits inside landing/product-docs. Add practical examples, preserve existing VitePress syntax, and run the docs build before marking tasks done.
+Improve the docs quickstart. Keep edits inside landing/product-docs. Add practical examples, preserve existing VitePress syntax, and run `pnpm --dir landing docs:build` before marking tasks done.
 ```
 
 Избегайте размытых prompts вроде "make the app better" для первого запуска. Lead может дробить большие цели, но хороший input даёт более маленькие tasks и чище review.

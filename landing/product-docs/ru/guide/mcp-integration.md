@@ -1,9 +1,10 @@
 ---
-title: MCP Integration - Agent Teams Docs
+title: MCP интеграция – Документация Agent Teams
 description: Как использовать MCP в Agent Teams для board operations, координации teammates и внешних tool servers.
+lang: ru-RU
 ---
 
-# MCP Integration
+# MCP интеграция
 
 Agent Teams использует MCP двумя практическими способами:
 
@@ -81,7 +82,7 @@ Agent Teams распознаёт shared и project-oriented MCP scopes.
 ## Task example
 
 ```text
-Audit the docs home page with the browser MCP. Check desktop and mobile widths, capture any layout issue as a task comment, and only edit landing/product-docs files. Run the docs build before completion.
+Audit the docs home page with the browser MCP. Check desktop and mobile widths, capture any layout issue as a task comment, and only edit landing/product-docs files. Run `pnpm --dir landing docs:build` before completion.
 ```
 
 Такой task работает, потому что называет tool, surface, write boundary и verification step.
@@ -96,6 +97,6 @@ Audit the docs home page with the browser MCP. Check desktop and mobile widths, 
 
 ## Related guides
 
-- [Runtime setup](/ru/guide/runtime-setup)
-- [Team brief examples](/ru/guide/team-brief-examples)
+- [Настройка рантайма](/ru/guide/runtime-setup)
+- [Примеры team brief](/ru/guide/team-brief-examples)
 - [Работа агентов](/ru/guide/agent-workflow)

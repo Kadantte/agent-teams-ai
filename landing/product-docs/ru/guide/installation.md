@@ -31,11 +31,11 @@ Agent Teams распространяется как desktop-приложение
 | ------------------ | ---------------------------------------------------------- |
 | Claude (Anthropic) | Claude Code CLI login или API key                          |
 | Codex (OpenAI)     | Codex CLI login или API key                                |
-| Gemini (Google)    | _В разработке_                                             |
+| Gemini (Google)    | Google ADC, Gemini CLI или API key                         |
 | OpenCode           | API key для поддерживаемого бэкенда (например, OpenRouter) |
 
 ::: info
-Поддержка провайдера Gemini в разработке. Текущий статус всех провайдеров смотрите в разделе [Провайдеры и рантаймы](/ru/reference/providers-runtimes).
+Gemini — поддерживаемый провайдер. Варианты auth смотрите в разделе [Провайдеры и рантаймы](/ru/reference/providers-runtimes).
 :::
 
 Для запуска из исходников также нужны:

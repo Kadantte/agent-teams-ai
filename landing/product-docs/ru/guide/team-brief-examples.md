@@ -1,9 +1,10 @@
 ---
-title: Team Brief Examples - Agent Teams Docs
+title: Примеры team brief – Документация Agent Teams
 description: Практические шаблоны team brief для small fixes, docs work, implementation tasks, review и risky areas.
+lang: ru-RU
 ---
 
-# Team Brief Examples
+# Примеры team brief
 
 Хороший team brief даёт lead достаточно структуры, чтобы создать small tasks, но не требует заранее расписать каждую деталь реализации.
 
@@ -27,7 +28,7 @@ Outcome: Improve the quickstart so a new user can launch one team successfully.
 Scope: Keep edits inside landing/product-docs.
 Boundaries: Do not rewrite the whole docs structure.
 Coordination: Create one or two tasks, keep comments on the task.
-Verification: Run the docs build.
+Verification: Run `pnpm --dir landing docs:build`.
 Review: Summarize changed pages and any remaining gaps.
 ```
 
@@ -53,7 +54,7 @@ Outcome: Draft practical workflow guides from the docs audit.
 Scope: Add concise VitePress pages under landing/product-docs/guide.
 Boundaries: Avoid moving existing navigation hubs owned by other tasks.
 Coordination: Check related docs tasks before editing nav.
-Verification: Run the VitePress docs build.
+Verification: Run `pnpm --dir landing docs:build`.
 Review: Include links added to sidebar and any pages intentionally left as drafts.
 ```
 
@@ -83,6 +84,24 @@ Verification: Builder runs focused tests. Reviewer checks failure output and cha
 Review: Lead approves only after reviewer comments are resolved.
 ```
 
+## Agent blocks в briefs
+
+Agent blocks - это скрытый текст для агентов, обёрнутый в маркеры `<info_for_agent>...</info_for_agent>`. Приложение убирает их из обычного отображения, но оставляет для координации агентов. Используйте их, когда brief должен сказать агентам то, что будет шумом для человека.
+
+Пример - brief, который указывает lead, как разделить работу, не показывая инструкции пользователю:
+
+```text
+Outcome: Add a dark mode toggle to the application settings.
+Scope: Settings UI, theme context, and CSS variables.
+Boundaries: Do not change existing light theme values or provider auth screens.
+
+<info_for_agent>
+Split this into three tasks: (1) theme context and CSS vars, (2) toggle component and settings wiring, (3) dark mode preview in existing docs screenshots if practical.
+</info_for_agent>
+```
+
+Блок оставляет human-facing brief чистым, а lead получает структурированные указания по разделению задач.
+
 ## What to avoid
 
 | Weak brief | Better replacement |
@@ -108,5 +127,5 @@ Review: Lead approves only after reviewer comments are resolved.
 ## Related guides
 
 - [Создание команды](/ru/guide/create-team)
-- [MCP integration](/ru/guide/mcp-integration)
-- [Git and worktree strategy](/ru/guide/git-worktree-strategy)
+- [MCP интеграция](/ru/guide/mcp-integration)
+- [Git и стратегия worktree](/ru/guide/git-worktree-strategy)

@@ -1,6 +1,7 @@
 ---
 title: Документация Agent Teams – Запускайте команды AI-агентов из локального desktop-приложения
 description: Документация Agent Teams, бесплатного desktop-приложения для оркестрации AI-агентов. Создавайте команды, наблюдайте за канбан-доской, ревьюйте изменения и координируйте Claude, Codex, OpenCode и multimodel workflows.
+lang: ru-RU
 layout: home
 hero:
   name: Документация Agent Teams
@@ -56,6 +57,18 @@ features:
 Agent Teams - бесплатное desktop-приложение для оркестрации команд AI-агентов. Это не просто одиночные промпты одному агенту: вы создаёте команду, задаёте роли и смотрите, как агенты координируют работу через task board.
 
 <DocsCardGrid />
+
+## Что дальше после запуска
+
+После создания первой команды изучите эти руководства:
+
+- **Настройка рантайма** - настройте Claude, Codex, OpenCode или multimodel-провайдеров: [Настроить рантаймы](/ru/guide/runtime-setup)
+- **Workflow агентов** - как агенты координируются через task board: [Разобрать workflow](/ru/guide/agent-workflow)
+- **Примеры team briefs** - паттерны промптов из реальных примеров: [Примеры](/ru/guide/team-brief-examples)
+- **Код-ревью** - проверяйте diff, принимайте или отклоняйте изменения: [Ревью изменений](/ru/guide/code-review)
+- **Диагностика** - исправляйте проблемы запуска и missing teammates: [Диагностика](/ru/guide/troubleshooting)
+- **Стратегия git worktree** - используйте изоляцию worktree, когда несколько участников редактируют один репозиторий параллельно: [О работе с worktree](/ru/guide/git-worktree-strategy)
+- **Релизы** - что нового в каждой версии: [Релизы](/ru/reference/release-notes)
 
 ## Справочник
 

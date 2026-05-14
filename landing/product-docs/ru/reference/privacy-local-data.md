@@ -1,9 +1,4 @@
 ---
-title: Приватность и локальные данные
-description: Что desktop-приложение Agent Teams хранит локально и какие данные могут покинуть машину через provider-backed models.
----
-
----
 title: Приватность и локальные данные – Документация Agent Teams
 description: Что Agent Teams хранит локально, что может покинуть машину через provider-backed model calls, и практические рекомендации по приватности.
 lang: ru-RU

@@ -9,7 +9,7 @@ This guide gets you from a fresh install to a running team in a few minutes.
 
 ## 1. Install Agent Teams
 
-Download the latest release for your platform from the <a href="https://github.com/777genius/agent-teams-ai/releases" target="_self">download page</a> or [GitHub releases](https://github.com/777genius/agent-teams-ai/releases).
+Download the latest release for your platform from the <a href="/download/" target="_self">download page</a> or [GitHub releases](https://github.com/777genius/agent-teams-ai/releases).
 
 ::: tip
 The app is free and open source. The agent runtime you choose may still require provider access — see [Installation](/guide/installation) for details.
@@ -46,7 +46,7 @@ The setup flow auto-detects installed runtimes on your machine. A common first s
 | OpenCode | Multi-model teams and many provider backends    |
 
 ::: info
-Gemini provider support is in development. See [Providers and runtimes](/reference/providers-runtimes) for current provider status.
+Gemini is available as a supported provider path. See [Providers and runtimes](/reference/providers-runtimes) for auth options and current provider status.
 :::
 
 See [Runtime setup](/guide/runtime-setup) for detailed configuration per provider.
@@ -88,7 +88,7 @@ Improve the onboarding flow. Split the work into tasks, keep changes small, and 
 Good first prompts include concrete scope, safety boundaries, and verification:
 
 ```text
-Improve the docs quickstart. Keep edits inside landing/product-docs. Add practical examples, preserve existing VitePress syntax, and run the docs build before marking tasks done.
+Improve the docs quickstart. Keep edits inside landing/product-docs. Add practical examples, preserve existing VitePress syntax, and run `pnpm --dir landing docs:build` before marking tasks done.
 ```
 
 Avoid vague prompts such as "make the app better" for the first run. The lead can break down large goals, but better input produces smaller tasks and cleaner review.

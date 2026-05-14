@@ -56,6 +56,7 @@
     "check:ci": "pnpm check:workspace:ci && pnpm lint && pnpm lint:mcp",
     "fix": "pnpm lint:fix && pnpm format",
     "quality": "pnpm check && pnpm format:check && npx knip",
+    "guard:runtime-artifacts": "node ./scripts/ci/forbid-runtime-artifacts.cjs",
     "test:chunks": "tsx test/test-chunk-building.ts",
     "test:semantic": "tsx test/test-semantic-steps.ts",
     "test:noise": "tsx test/test-noise-filtering.ts",

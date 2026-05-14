@@ -56,7 +56,7 @@ Yes. Agents can message teammates, comment on tasks, coordinate across teams, an
 Give the lead a concrete outcome, file or feature boundaries, risk limits, and verification expectations. For example:
 
 ```text
-Improve the docs quickstart. Keep edits inside landing/product-docs, add practical examples, and run the docs build before marking work done.
+Improve the docs quickstart. Keep edits inside landing/product-docs, add practical examples, and run `pnpm --dir landing docs:build` before marking work done.
 ```
 
 ## Can I review code before accepting it?

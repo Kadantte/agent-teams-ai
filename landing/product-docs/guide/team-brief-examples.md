@@ -1,5 +1,5 @@
 ---
-title: Team Brief Examples - Agent Teams Docs
+title: Team Brief Examples – Agent Teams Docs
 description: Practical team brief templates for small fixes, docs work, implementation tasks, reviews, and high-risk areas.
 ---
 
@@ -27,7 +27,7 @@ Outcome: Improve the quickstart so a new user can launch one team successfully.
 Scope: Keep edits inside landing/product-docs.
 Boundaries: Do not rewrite the whole docs structure.
 Coordination: Create one or two tasks, keep comments on the task.
-Verification: Run the docs build.
+Verification: Run `pnpm --dir landing docs:build`.
 Review: Summarize changed pages and any remaining gaps.
 ```
 
@@ -53,7 +53,7 @@ Outcome: Draft practical workflow guides from the docs audit.
 Scope: Add concise VitePress pages under landing/product-docs/guide.
 Boundaries: Avoid moving existing navigation hubs owned by other tasks.
 Coordination: Check related docs tasks before editing nav.
-Verification: Run the VitePress docs build.
+Verification: Run `pnpm --dir landing docs:build`.
 Review: Include links added to sidebar and any pages intentionally left as drafts.
 ```
 
@@ -82,6 +82,24 @@ Coordination: Builder posts result comment first. Reviewer posts findings as tas
 Verification: Builder runs focused tests. Reviewer checks failure output and changed scope.
 Review: Lead approves only after reviewer comments are resolved.
 ```
+
+## Agent blocks in briefs
+
+Agent blocks are hidden agent-only text wrapped in markers such as `<info_for_agent>...</info_for_agent>`. The app strips them from normal display but keeps them available for agent coordination. Use them when the brief needs to say something to agents that would be noise for a human reader.
+
+Example - a brief that tells the lead how to split work without exposing coordination instructions to the user:
+
+```text
+Outcome: Add a dark mode toggle to the application settings.
+Scope: Settings UI, theme context, and CSS variables.
+Boundaries: Do not change existing light theme values or provider auth screens.
+
+<info_for_agent>
+Split this into three tasks: (1) theme context and CSS vars, (2) toggle component and settings wiring, (3) dark mode preview in existing docs screenshots if practical.
+</info_for_agent>
+```
+
+The block keeps the human-facing brief clean while giving the lead structured task-splitting guidance.
 
 ## What to avoid
 

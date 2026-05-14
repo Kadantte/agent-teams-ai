@@ -1,13 +1,14 @@
 ---
-title: Git and Worktree Strategy - Agent Teams Docs
+title: Git и стратегия worktree – Документация Agent Teams
 description: Как выбирать main worktree, feature branches или OpenCode worktree isolation для parallel agent work.
+lang: ru-RU
 ---
 
-# Git and Worktree Strategy
+# Git и стратегия worktree
 
 Git даёт Agent Teams самый сильный review path: narrow diffs, branch visibility, task-scoped changes и более безопасную parallel work.
 
-## Choose a strategy
+## Выбор стратегии
 
 | Strategy | Когда использовать | Tradeoff |
 | --- | --- | --- |
@@ -17,7 +18,7 @@ Git даёт Agent Teams самый сильный review path: narrow diffs, br
 
 Начинайте просто. Включайте worktree isolation, когда parallel edits вероятны, а не потому что каждому task нужен отдельный checkout.
 
-## When to enable worktree isolation
+## Когда включать изоляцию worktree
 
 Включайте для OpenCode teammates, когда:
 
@@ -37,7 +38,7 @@ Git даёт Agent Teams самый сильный review path: narrow diffs, br
 Worktree isolation сейчас применяется к OpenCode members и требует Git-tracked project.
 :::
 
-## Branch hygiene
+## Гигиена веток
 
 Перед parallel work:
 
@@ -62,7 +63,7 @@ agent/review/task-log-filtering
 agent/ui/code-review-polish
 ```
 
-## Review flow
+## Процесс ревью
 
 Для isolated worktrees проверяйте diff teammate до merge или apply в main workspace.
 
@@ -74,7 +75,7 @@ agent/ui/code-review-polish
 
 Не auto-merge worktree output только потому, что task complete. Completion значит, что agent считает работу ready for review.
 
-## Conflict policy
+## Политика разрешения конфликтов
 
 | Situation | Action |
 | --- | --- |
@@ -83,7 +84,7 @@ agent/ui/code-review-polish
 | Main worktree имеет unrelated changes | Preserve them и review только task-owned changes |
 | Worktree branch diverges | Rebase или merge manually после review, не внутри vague agent task |
 
-## Task prompt example
+## Пример промпта для задачи
 
 ```text
 Implement the settings validation fix in your assigned worktree. Keep edits inside src/features/settings and focused tests. Do not touch provider auth or task storage. Post the test command and result before completing the task.
@@ -91,8 +92,8 @@ Implement the settings validation fix in your assigned worktree. Keep edits insi
 
 Этот prompt работает, потому что называет allowed area, sensitive boundaries и completion evidence.
 
-## Related guides
+## Связанные руководства
 
 - [Создание команды](/ru/guide/create-team)
 - [Код-ревью](/ru/guide/code-review)
-- [Team brief examples](/ru/guide/team-brief-examples)
+- [Примеры team brief](/ru/guide/team-brief-examples)

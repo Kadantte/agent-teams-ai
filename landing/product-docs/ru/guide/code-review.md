@@ -55,7 +55,7 @@ lang: ru-RU
 Пример request-changes comment:
 
 ```text
-Please keep the copy improvements, but revert the unrelated runtime wording in the provider table. Add a docs build result before resubmitting.
+Please keep the copy improvements, but revert the unrelated runtime wording in the provider table. Add the `pnpm --dir landing docs:build` result before resubmitting.
 ```
 
 ## Состояния ревью

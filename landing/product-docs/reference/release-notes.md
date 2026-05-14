@@ -5,7 +5,7 @@ description: Release notes and changelog for Agent Teams. Links to the canonical
 
 # Release Notes
 
-Current version: **v1.2.0** (2026-03-31)
+Current release: **v1.2.0** (2026-03-31). Active development continues on the `main` branch with unreleased changes for member work-sync, OpenCode delivery hardening, and CI stabilization.
 
 ## How releases work
 

@@ -8462,6 +8462,7 @@ describe('TeamProvisioningService', () => {
         diagnostics: [],
       }));
       await configureOpenCodeBobDeliveryService({ svc, sendMessageToMember });
+      svc.setControlApiBaseUrlResolver(async () => 'http://127.0.0.1:43123');
 
       await expect(
         svc.deliverOpenCodeMemberMessage('team-a', {
@@ -8488,6 +8489,11 @@ describe('TeamProvisioningService', () => {
         responseState: 'responded_non_visible_tool',
         ledgerStatus: 'responded',
       });
+      expect(sendMessageToMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          controlUrl: 'http://127.0.0.1:43123',
+        })
+      );
     });
 
     it('accepts review workflow tools as review pickup delivery response proof', async () => {

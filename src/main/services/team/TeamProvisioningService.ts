@@ -7732,6 +7732,7 @@ export class TeamProvisioningService {
     ledgerRecord?: OpenCodePromptDeliveryLedgerRecord | null;
     readAllowed: boolean;
     pendingReason: string;
+    controlUrl?: string | null;
   }): string | null {
     const record = input.ledgerRecord;
     if (!record) {
@@ -7758,6 +7759,7 @@ export class TeamProvisioningService {
       toolCallNames: record.observedToolCallNames,
       acceptanceUnknown: record.acceptanceUnknown,
       hardFailureKind: this.getOpenCodeDeliveryHardFailureKind(record),
+      controlUrl: input.controlUrl,
     }).controlText;
   }
 
@@ -9743,6 +9745,10 @@ export class TeamProvisioningService {
     }
 
     if (!this.isOpenCodePromptDeliveryWatchdogEnabled()) {
+      const controlUrl =
+        input.messageKind === 'member_work_sync_nudge'
+          ? await this.resolveControlApiBaseUrl()
+          : null;
       const result = await adapter.sendMessageToMember({
         ...(runtimeRunId ? { runId: runtimeRunId } : {}),
         teamName,
@@ -9757,6 +9763,7 @@ export class TeamProvisioningService {
         messageKind: input.messageKind,
         workSyncIntent: input.workSyncIntent,
         workSyncReviewRequestEventIds: input.workSyncReviewRequestEventIds,
+        controlUrl: controlUrl ?? undefined,
         taskRefs: input.taskRefs,
       });
       await this.rememberOpenCodeRuntimePidFromBridge({
@@ -10154,12 +10161,15 @@ export class TeamProvisioningService {
           ledgerRecord,
         })
       : 'opencode_delivery_response_pending';
+    const controlUrl =
+      input.messageKind === 'member_work_sync_nudge' ? await this.resolveControlApiBaseUrl() : null;
     const deliveryText = this.buildOpenCodePromptDeliveryAttemptText({
       text: input.text,
       controlText: this.buildOpenCodePromptDeliveryRepairControlText({
         ledgerRecord,
         readAllowed: retryReadAllowed,
         pendingReason: retryPendingReason,
+        controlUrl,
       }),
     });
     let result: OpenCodeTeamRuntimeMessageResult;
@@ -10179,6 +10189,7 @@ export class TeamProvisioningService {
         messageKind: input.messageKind,
         workSyncIntent: input.workSyncIntent,
         workSyncReviewRequestEventIds: input.workSyncReviewRequestEventIds,
+        controlUrl: controlUrl ?? undefined,
         taskRefs: input.taskRefs,
       });
     } catch (error) {
