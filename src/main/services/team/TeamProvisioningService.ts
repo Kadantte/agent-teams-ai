@@ -36,9 +36,9 @@ import {
   buildWorkspaceTrustPathCandidates,
   buildWorkspaceTrustPreflightEnv,
   resolveWorkspaceTrustFeatureFlags,
-  type WorkspaceTrustCoordinator,
   type WorkspaceTrustArgsOnlyPlanRequest,
   type WorkspaceTrustArgsOnlyPlanResult,
+  type WorkspaceTrustCoordinator,
   type WorkspaceTrustDiagnosticsManifest,
   type WorkspaceTrustExecutionResult,
   type WorkspaceTrustFeatureFlags,
@@ -2077,6 +2077,12 @@ interface TeamRuntimeLaunchArgsPlan {
   providerArgs: string[];
   extraArgs: string[];
 }
+
+type WorkspaceTrustProviderArgsResolver = (input: {
+  providerId: TeamProviderId;
+  providerArgs: string[];
+  phase: 'default-model-resolution';
+}) => string[];
 
 interface CrossProviderMemberArgsResult {
   args: string[];
@@ -6166,6 +6172,18 @@ export class TeamProvisioningService {
       targetProvider: this.toWorkspaceTrustProvider(input.targetProvider),
       targetSurface: input.targetSurface,
     }).args;
+  }
+
+  private createDefaultModelWorkspaceTrustProviderArgsResolver(
+    plan: Pick<WorkspaceTrustArgsOnlyPlanResult, 'launchArgPatches'>
+  ): WorkspaceTrustProviderArgsResolver {
+    return (input) =>
+      this.applyWorkspaceTrustArgPatches({
+        args: input.providerArgs,
+        patches: plan.launchArgPatches,
+        targetProvider: input.providerId,
+        targetSurface: 'default_model_probe',
+      });
   }
 
   private async planWorkspaceTrustArgsOnlySafely(
@@ -19202,17 +19220,8 @@ export class TeamProvisioningService {
             featureFlags: workspaceTrustFeatureFlags,
           })
         : { launchArgPatches: [] };
-      const workspaceTrustProviderArgsResolver = (input: {
-        providerId: TeamProviderId;
-        providerArgs: string[];
-        phase: 'default-model-resolution';
-      }): string[] =>
-        this.applyWorkspaceTrustArgPatches({
-          args: input.providerArgs,
-          patches: workspaceTrustEarlyPlan.launchArgPatches,
-          targetProvider: input.providerId,
-          targetSurface: 'default_model_probe',
-        });
+      const workspaceTrustProviderArgsResolver =
+        this.createDefaultModelWorkspaceTrustProviderArgsResolver(workspaceTrustEarlyPlan);
       const materializedMemberSpecs = await this.materializeEffectiveTeamMemberSpecs({
         claudePath,
         cwd: request.cwd,
@@ -20449,17 +20458,8 @@ export class TeamProvisioningService {
             featureFlags: workspaceTrustFeatureFlags,
           })
         : { launchArgPatches: [] };
-      const workspaceTrustProviderArgsResolver = (input: {
-        providerId: TeamProviderId;
-        providerArgs: string[];
-        phase: 'default-model-resolution';
-      }): string[] =>
-        this.applyWorkspaceTrustArgPatches({
-          args: input.providerArgs,
-          patches: workspaceTrustEarlyPlan.launchArgPatches,
-          targetProvider: input.providerId,
-          targetSurface: 'default_model_probe',
-        });
+      const workspaceTrustProviderArgsResolver =
+        this.createDefaultModelWorkspaceTrustProviderArgsResolver(workspaceTrustEarlyPlan);
 
       const materializedMemberSpecs = await this.materializeEffectiveTeamMemberSpecs({
         claudePath,
