@@ -175,6 +175,7 @@ interface CreateTaskDialogState {
 }
 
 const TEAM_PENDING_REPLY_REFRESH_DELAY_MS = 10_000;
+const MEMBER_ROSTER_HYDRATION_RETRY_DELAY_MS = 1_200;
 
 function getSummaryKnownTeammateCount(summary: TeamSummary | undefined): number {
   if (!summary) {
@@ -1720,6 +1721,7 @@ export const TeamDetailView = memo(function TeamDetailView({
   const tabId = useTabIdOptional();
   const isThisTabActive = isActive;
   const wasInteractiveRef = useRef(false);
+  const memberRosterHydrationRetryRef = useRef<string | null>(null);
   const loadingHeaderColorSet = useMemo(
     () =>
       teamSummaryColor
@@ -2081,13 +2083,77 @@ export const TeamDetailView = memo(function TeamDetailView({
     return filterKanbanTasks(filteredTasks, kanbanSearchQuery);
   }, [filteredTasks, kanbanSearchQuery]);
 
+  const resolvedActiveTeammateCount = useMemo(
+    () => activeMembers.filter((m) => !isLeadMember(m)).length,
+    [activeMembers]
+  );
   const activeTeammateCount = useMemo(() => {
-    const resolvedCount = activeMembers.filter((m) => !isLeadMember(m)).length;
     if (membersWithLiveBranches.some((m) => m.removedAt)) {
-      return resolvedCount;
+      return resolvedActiveTeammateCount;
     }
-    return resolvedCount > 0 ? resolvedCount : summaryKnownTeammateCount;
-  }, [activeMembers, membersWithLiveBranches, summaryKnownTeammateCount]);
+    return resolvedActiveTeammateCount > 0
+      ? resolvedActiveTeammateCount
+      : summaryKnownTeammateCount;
+  }, [membersWithLiveBranches, resolvedActiveTeammateCount, summaryKnownTeammateCount]);
+
+  const memberRosterHydrationRetryKey = useMemo(() => {
+    if (
+      !isThisTabActive ||
+      !teamName ||
+      !data ||
+      summaryKnownTeammateCount <= 0 ||
+      resolvedActiveTeammateCount > 0
+    ) {
+      return null;
+    }
+
+    return [
+      teamName,
+      data.teamName,
+      data.members.length,
+      data.config.members?.length ?? 0,
+      data.config.sessionHistory?.join(',') ?? '',
+      summaryKnownTeammateCount,
+      loading ? 'loading' : 'settled',
+      isTeamProvisioning ? 'provisioning' : 'ready',
+    ].join('|');
+  }, [
+    data,
+    isTeamProvisioning,
+    isThisTabActive,
+    loading,
+    resolvedActiveTeammateCount,
+    summaryKnownTeammateCount,
+    teamName,
+  ]);
+
+  useEffect(() => {
+    if (!memberRosterHydrationRetryKey) {
+      return;
+    }
+    if (memberRosterHydrationRetryRef.current === memberRosterHydrationRetryKey) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const state = useStore.getState();
+      if (state.selectedTeamName !== teamName) {
+        return;
+      }
+
+      const currentMembers = selectResolvedMembersForTeamName(state, teamName);
+      const hasResolvedTeammate = currentMembers.some(
+        (member) => !member.removedAt && !isLeadMember(member)
+      );
+      const expectedTeammateCount = getSummaryKnownTeammateCount(state.teamByName[teamName]);
+      if (!hasResolvedTeammate && expectedTeammateCount > 0) {
+        memberRosterHydrationRetryRef.current = memberRosterHydrationRetryKey;
+        void refreshTeamData(teamName, { withDedup: false });
+      }
+    }, MEMBER_ROSTER_HYDRATION_RETRY_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [memberRosterHydrationRetryKey, refreshTeamData, teamName]);
   const leadProviderId = useMemo<TeamProviderId | undefined>(() => {
     const activeLeadProviderId = activeMembers.find(isLeadMember)?.providerId;
     if (activeLeadProviderId) return activeLeadProviderId;

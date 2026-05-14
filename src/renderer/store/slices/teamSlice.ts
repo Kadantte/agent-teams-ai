@@ -4327,10 +4327,20 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       }
       queuedFullTeamDataRefreshesAfterThin.delete(teamName);
       const isProvisioning = isTeamProvisioningActive(currentState, teamName);
+      const existingSelectedTeamData =
+        currentState.selectedTeamData?.teamName === teamName ? currentState.selectedTeamData : null;
 
       const msg = error instanceof Error ? error.message : String(error);
       // IPC can report provisioning state explicitly.
       if (msg === 'TEAM_PROVISIONING' || (msg.includes('TEAM_PROVISIONING') && isProvisioning)) {
+        if (existingSelectedTeamData) {
+          set({
+            selectedTeamLoading: false,
+            selectedTeamData: existingSelectedTeamData,
+            selectedTeamError: null,
+          });
+          return;
+        }
         set({
           selectedTeamLoading: true,
           selectedTeamData: null,
@@ -4355,6 +4365,14 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
           : error instanceof Error
             ? error.message
             : 'Failed to fetch team data';
+      if (existingSelectedTeamData) {
+        set({
+          selectedTeamLoading: false,
+          selectedTeamData: existingSelectedTeamData,
+          selectedTeamError: null,
+        });
+        return;
+      }
       set({
         selectedTeamLoading: false,
         selectedTeamData: null,

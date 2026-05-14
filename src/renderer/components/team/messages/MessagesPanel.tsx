@@ -243,6 +243,7 @@ const MessagesTimelineSection = memo(function MessagesTimelineSection({
   expandedItemKey,
   onExpandDialogChange,
   messages,
+  loading,
   teamName,
   members,
   readState,
@@ -270,6 +271,7 @@ const MessagesTimelineSection = memo(function MessagesTimelineSection({
     <>
       <ActivityTimeline
         messages={messages}
+        loading={loading}
         teamName={teamName}
         members={members}
         readState={readState}
@@ -399,6 +401,8 @@ export const MessagesPanel = memo(function MessagesPanel({
   const loadingOlderMessages = messagesState?.loadingOlder ?? false;
   const hasMore = messagesState?.hasMore ?? false;
   const effectiveMessages = messages;
+  const loadingInitialMessages =
+    effectiveMessages.length === 0 && (messagesState === undefined || messagesState.loadingHead);
 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null);
@@ -906,6 +910,7 @@ export const MessagesPanel = memo(function MessagesPanel({
   const timelineSection = (
     <MessagesTimelineSection
       messages={activityTimelineMessages}
+      loading={loadingInitialMessages}
       teamName={teamName}
       members={members}
       readState={readState}

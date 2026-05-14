@@ -11956,6 +11956,130 @@ describe('Team agent launch matrix safe e2e', () => {
     ]);
   });
 
+  it('recovers a missing mixed OpenCode lane index from committed session evidence before watchdog scans unread inbox', async () => {
+    const teamName = 'mixed-opencode-watchdog-recovers-session-evidence-safe-e2e';
+    const laneId = 'secondary:opencode:bob';
+    const runId = 'session-evidence-opencode-run';
+    await writeMixedTeamConfig({ teamName, projectPath });
+    await writeTeamMeta(teamName, projectPath);
+    await writeMembersMeta(teamName);
+    await writeOpenCodeBootstrapSessionEvidenceForTest({
+      teamName,
+      laneId,
+      runId,
+      memberName: 'bob',
+      sessionId: 'ses_bob_committed_session_only',
+    });
+    const inboxDir = path.join(getTeamsBasePath(), teamName, 'inboxes');
+    await fs.mkdir(inboxDir, { recursive: true });
+    await fs.writeFile(
+      path.join(inboxDir, 'bob.json'),
+      `${JSON.stringify(
+        [
+          {
+            from: 'user',
+            to: 'bob',
+            text: 'recover this unread OpenCode message from committed session evidence',
+            timestamp: '2026-04-23T10:01:00.000Z',
+            read: false,
+            messageId: 'msg-watchdog-recovers-session-evidence-bob',
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      'utf8'
+    );
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', { bob: 'confirmed' });
+    const restartedService = new TeamProvisioningService();
+    restartedService.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const scheduledWatchdogJobs: unknown[] = [];
+    (restartedService as any).scheduleOpenCodePromptDeliveryWatchdog = (input: unknown): void => {
+      scheduledWatchdogJobs.push(input);
+    };
+
+    await expect(
+      readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName)
+    ).resolves.toMatchObject({ lanes: {} });
+
+    await expect(restartedService.scanOpenCodePromptDeliveryWatchdog(teamName)).resolves.toBe(1);
+
+    expect(adapter.reconcileInputs).toHaveLength(1);
+    expect(adapter.reconcileInputs[0]).toMatchObject({
+      teamName,
+      laneId,
+      reason: 'startup_recovery',
+    });
+    await expect(readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName)).resolves.toMatchObject(
+      {
+        lanes: {
+          [laneId]: {
+            state: 'active',
+            diagnostics: expect.arrayContaining([
+              'Recovered missing OpenCode runtime lane index from committed session evidence.',
+            ]),
+          },
+        },
+      }
+    );
+    expect(scheduledWatchdogJobs).toEqual([
+      expect.objectContaining({
+        teamName,
+        memberName: 'bob',
+        messageId: 'msg-watchdog-recovers-session-evidence-bob',
+        delayMs: 500,
+      }),
+    ]);
+  });
+
+  it('does not recover committed OpenCode session evidence when the parent process registry is explicitly stopped', async () => {
+    const teamName = 'mixed-opencode-watchdog-stopped-session-evidence-safe-e2e';
+    const laneId = 'secondary:opencode:bob';
+    const runId = 'stopped-session-evidence-opencode-run';
+    await writeMixedTeamConfig({ teamName, projectPath });
+    await writeTeamMeta(teamName, projectPath);
+    await writeMembersMeta(teamName);
+    await writeOpenCodeBootstrapSessionEvidenceForTest({
+      teamName,
+      laneId,
+      runId,
+      memberName: 'bob',
+      sessionId: 'ses_bob_stopped_committed_session',
+    });
+    await writeStoppedProcessRegistry(teamName);
+    const inboxDir = path.join(getTeamsBasePath(), teamName, 'inboxes');
+    await fs.mkdir(inboxDir, { recursive: true });
+    await fs.writeFile(
+      path.join(inboxDir, 'bob.json'),
+      `${JSON.stringify(
+        [
+          {
+            from: 'user',
+            to: 'bob',
+            text: 'must not recover this stopped OpenCode message',
+            timestamp: '2026-04-23T10:01:00.000Z',
+            read: false,
+            messageId: 'msg-watchdog-stopped-session-evidence-bob',
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      'utf8'
+    );
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', { bob: 'confirmed' });
+    const restartedService = new TeamProvisioningService();
+    restartedService.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+
+    await expect(restartedService.scanOpenCodePromptDeliveryWatchdog(teamName)).resolves.toBe(0);
+    expect(adapter.reconcileInputs).toEqual([]);
+    await expect(readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName)).resolves.toMatchObject(
+      {
+        lanes: {},
+      }
+    );
+  });
+
   it('recovers one missing mixed OpenCode lane before watchdog scans while sibling lane is active', async () => {
     const teamName = 'mixed-opencode-watchdog-recovers-one-missing-lane-safe-e2e';
     await writeMixedTeamConfig({ teamName, projectPath });
@@ -12626,6 +12750,53 @@ describe('Team agent launch matrix safe e2e', () => {
       messageId: 'msg-recovered-mixed-opencode',
     });
     expect(adapter.messageInputs[0]?.runId).toBeUndefined();
+  });
+
+  it('delivers direct OpenCode member messages after recovering a missing mixed lane from committed session evidence', async () => {
+    const teamName = 'mixed-opencode-direct-message-committed-session-recovery-safe-e2e';
+    const laneId = 'secondary:opencode:bob';
+    const runId = 'committed-session-direct-opencode-run';
+    await writeMixedTeamConfig({ teamName, projectPath });
+    await writeTeamMeta(teamName, projectPath);
+    await writeMembersMeta(teamName);
+    await writeOpenCodeBootstrapSessionEvidenceForTest({
+      teamName,
+      laneId,
+      runId,
+      memberName: 'bob',
+      sessionId: 'ses_bob_direct_committed_session',
+    });
+    const adapter = new FakeOpenCodeRuntimeAdapter('clean_success', { bob: 'confirmed' });
+    const restartedService = new TeamProvisioningService();
+    restartedService.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+
+    await expect(
+      restartedService.deliverOpenCodeMemberMessage(teamName, {
+        memberName: 'bob',
+        text: 'message recovered from committed session evidence',
+        messageId: 'msg-recovered-committed-session-mixed-opencode',
+      })
+    ).resolves.toEqual({
+      delivered: true,
+      diagnostics: [],
+    });
+    expect(adapter.reconcileInputs).toHaveLength(1);
+    expect(adapter.reconcileInputs[0]).toMatchObject({
+      teamName,
+      laneId,
+      reason: 'startup_recovery',
+    });
+    expect(adapter.reconcileInputs[0]?.runId).toEqual(expect.any(String));
+    expect(adapter.messageInputs).toHaveLength(1);
+    expect(adapter.messageInputs[0]).toMatchObject({
+      runId,
+      teamName,
+      laneId,
+      memberName: 'bob',
+      cwd: projectPath,
+      text: 'message recovered from committed session evidence',
+      messageId: 'msg-recovered-committed-session-mixed-opencode',
+    });
   });
 
   it('does not deliver direct OpenCode member messages to a removed mixed teammate despite stale active lane index after service restart', async () => {
@@ -17327,6 +17498,9 @@ class FakeOpenCodeRuntimeAdapter implements TeamLaunchRuntimeAdapter {
       providerId: 'opencode',
       memberName: input.memberName,
       sessionId: `session-${input.memberName}`,
+      runtimePromptMessageId: input.messageId
+        ? `prompt-${input.messageId}`
+        : `prompt-${input.memberName}-${this.messageInputs.length}`,
       runtimePid: 12_000 + this.messageInputs.length,
       diagnostics: [],
     };
@@ -18023,6 +18197,28 @@ async function writeAliveProcessRegistry(teamName: string): Promise<void> {
           label: 'Team Lead',
           pid: process.pid,
           registeredAt: '2026-04-23T10:00:00.000Z',
+        },
+      ],
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
+}
+
+async function writeStoppedProcessRegistry(teamName: string): Promise<void> {
+  const teamDir = path.join(getTeamsBasePath(), teamName);
+  await fs.mkdir(teamDir, { recursive: true });
+  await fs.writeFile(
+    path.join(teamDir, 'processes.json'),
+    `${JSON.stringify(
+      [
+        {
+          id: 'lead-process',
+          label: 'Team Lead',
+          pid: 987_654,
+          registeredAt: '2026-04-23T10:00:00.000Z',
+          stoppedAt: '2026-04-23T10:05:00.000Z',
         },
       ],
       null,

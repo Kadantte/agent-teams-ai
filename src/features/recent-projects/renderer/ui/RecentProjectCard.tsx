@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import { ActivePulseIndicator } from '@renderer/components/ui/ActivePulseIndicator';
@@ -20,18 +20,11 @@ export const RecentProjectCard = ({
   onOpenPath,
 }: Readonly<RecentProjectCardProps>): React.JSX.Element => {
   const color = useMemo(() => projectColor(card.name), [card.name]);
-  const [isHovered, setIsHovered] = useState(false);
 
   return (
     <button
       onClick={onClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className="bg-surface/50 group relative flex min-h-[120px] flex-col overflow-hidden rounded-lg border border-border p-4 text-left transition-all duration-300 hover:border-border-emphasis hover:bg-surface-raised"
-      style={{
-        borderLeftColor: color.border,
-        boxShadow: isHovered ? `inset 3px 0 12px -4px ${color.glow}` : undefined,
-      }}
+      className="project-row-zebra-card group relative flex min-h-[120px] flex-col overflow-hidden rounded-lg border border-border p-4 text-left transition-all duration-300 hover:border-border-emphasis"
     >
       {card.activeTeams && card.activeTeams.length > 0 && (
         <ActivePulseIndicator className="absolute right-3 top-3" />
