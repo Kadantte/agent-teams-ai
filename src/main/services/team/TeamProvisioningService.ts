@@ -36,9 +36,9 @@ import {
   buildWorkspaceTrustPathCandidates,
   buildWorkspaceTrustPreflightEnv,
   resolveWorkspaceTrustFeatureFlags,
-  type WorkspaceTrustCoordinator,
   type WorkspaceTrustArgsOnlyPlanRequest,
   type WorkspaceTrustArgsOnlyPlanResult,
+  type WorkspaceTrustCoordinator,
   type WorkspaceTrustDiagnosticsManifest,
   type WorkspaceTrustExecutionResult,
   type WorkspaceTrustFeatureFlags,
@@ -2074,11 +2074,11 @@ type ProvisioningAuthSource =
   | 'none';
 
 function isAnthropicApiKeyBackedAuthSource(authSource: unknown): boolean {
-  return (
-    authSource === 'anthropic_api_key' ||
-    authSource === 'anthropic_auth_token' ||
-    authSource === 'anthropic_api_key_helper'
-  );
+  return authSource === 'anthropic_api_key' || authSource === 'anthropic_api_key_helper';
+}
+
+function isAnthropicDirectCredentialAuthSource(authSource: unknown): boolean {
+  return isAnthropicApiKeyBackedAuthSource(authSource) || authSource === 'anthropic_auth_token';
 }
 
 function buildAnthropicCrossProviderDirectAuthEnvPatch(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -2121,6 +2121,12 @@ interface TeamRuntimeLaunchArgsPlan {
   providerArgs: string[];
   extraArgs: string[];
 }
+
+type WorkspaceTrustProviderArgsResolver = (input: {
+  providerId: TeamProviderId;
+  providerArgs: string[];
+  phase: 'default-model-resolution';
+}) => string[];
 
 interface CrossProviderMemberArgsResult {
   args: string[];
@@ -6226,6 +6232,18 @@ export class TeamProvisioningService {
       targetProvider: this.toWorkspaceTrustProvider(input.targetProvider),
       targetSurface: input.targetSurface,
     }).args;
+  }
+
+  private createDefaultModelWorkspaceTrustProviderArgsResolver(
+    plan: Pick<WorkspaceTrustArgsOnlyPlanResult, 'launchArgPatches'>
+  ): WorkspaceTrustProviderArgsResolver {
+    return (input) =>
+      this.applyWorkspaceTrustArgPatches({
+        args: input.providerArgs,
+        patches: plan.launchArgPatches,
+        targetProvider: input.providerId,
+        targetSurface: 'default_model_probe',
+      });
   }
 
   private async planWorkspaceTrustArgsOnlySafely(
@@ -12887,11 +12905,22 @@ export class TeamProvisioningService {
     const foregroundMessages = inboxMessages.filter(
       (message) => message.messageKind !== 'member_work_sync_nudge'
     );
-    const blockingForegroundMessages = foregroundMessages.filter(
-      (message) =>
+    const agendaSyncRecoveryBypassMessageIds =
+      await this.getOpenCodeAgendaSyncRecoveryBypassMessageIds({
+        teamName: input.teamName,
+        memberName: input.memberName,
+        workSyncIntent: input.workSyncIntent,
+        taskRefs: input.taskRefs,
+        foregroundMessages,
+      });
+    const blockingForegroundMessages = foregroundMessages.filter((message) => {
+      const messageId = typeof message.messageId === 'string' ? message.messageId.trim() : '';
+      return (
+        !agendaSyncRecoveryBypassMessageIds.has(messageId) &&
         !this.isCurrentReviewPickupRequestForegroundMessage(message, input) &&
         !this.isCurrentProofMissingRecoveryForegroundMessage(message, input)
-    );
+      );
+    });
     const unreadForeground = blockingForegroundMessages.find(
       (message) =>
         !message.read &&
@@ -17397,16 +17426,15 @@ export class TeamProvisioningService {
           return envResolution;
         };
 
-        let shouldRequireRuntimePingForAnthropicApiKey =
-          isAnthropicApiKeyBackedAuthSource(authSource);
+        let shouldRequireRuntimePingForAnthropicDirectCredential =
+          isAnthropicDirectCredentialAuthSource(authSource);
         if (
           resolveTeamProviderId(providerId) === 'anthropic' &&
-          !shouldRequireRuntimePingForAnthropicApiKey
+          !shouldRequireRuntimePingForAnthropicDirectCredential
         ) {
           const resolvedEnv = await ensureEnvResolution();
-          shouldRequireRuntimePingForAnthropicApiKey = isAnthropicApiKeyBackedAuthSource(
-            resolvedEnv.authSource
-          );
+          shouldRequireRuntimePingForAnthropicDirectCredential =
+            isAnthropicDirectCredentialAuthSource(resolvedEnv.authSource);
           if (resolvedEnv.authSource === 'configured_api_key_missing' && resolvedEnv.warning) {
             blockingMessages.push(
               providerIds.length > 1
@@ -17417,7 +17445,10 @@ export class TeamProvisioningService {
           }
         }
 
-        if (opts?.modelVerificationMode !== 'deep' && !shouldRequireRuntimePingForAnthropicApiKey) {
+        if (
+          opts?.modelVerificationMode !== 'deep' &&
+          !shouldRequireRuntimePingForAnthropicDirectCredential
+        ) {
           return;
         }
         const resolvedEnv = await ensureEnvResolution();
@@ -17444,7 +17475,7 @@ export class TeamProvisioningService {
           const prefixedWarning =
             providerIds.length > 1 ? `${providerLabel}: ${diagnostic.warning}` : diagnostic.warning;
           if (
-            shouldRequireRuntimePingForAnthropicApiKey &&
+            shouldRequireRuntimePingForAnthropicDirectCredential &&
             this.isAuthFailureWarning(diagnostic.warning, 'probe')
           ) {
             blockingMessages.push(prefixedWarning);
@@ -17469,7 +17500,7 @@ export class TeamProvisioningService {
         const isAuthFailure = this.isAuthFailureWarning(probeResult.warning, 'probe');
         const isBlockingPreflightWarning =
           authSource === 'configured_api_key_missing' ||
-          (isAnthropicApiKeyBackedAuthSource(authSource) && isAuthFailure) ||
+          (isAnthropicDirectCredentialAuthSource(authSource) && isAuthFailure) ||
           ((authSource === 'none' ||
             authSource === 'codex_runtime' ||
             authSource === 'gemini_runtime') &&
@@ -17484,7 +17515,7 @@ export class TeamProvisioningService {
           isAuthFailure
         ) {
           blockingMessages.push(prefixedWarning);
-        } else if (isAnthropicApiKeyBackedAuthSource(authSource) && isAuthFailure) {
+        } else if (isAnthropicDirectCredentialAuthSource(authSource) && isAuthFailure) {
           blockingMessages.push(prefixedWarning);
         } else if (isBinaryProbeWarning(probeResult.warning)) {
           blockingMessages.push(prefixedWarning);
@@ -19365,17 +19396,8 @@ export class TeamProvisioningService {
             featureFlags: workspaceTrustFeatureFlags,
           })
         : { launchArgPatches: [] };
-      const workspaceTrustProviderArgsResolver = (input: {
-        providerId: TeamProviderId;
-        providerArgs: string[];
-        phase: 'default-model-resolution';
-      }): string[] =>
-        this.applyWorkspaceTrustArgPatches({
-          args: input.providerArgs,
-          patches: workspaceTrustEarlyPlan.launchArgPatches,
-          targetProvider: input.providerId,
-          targetSurface: 'default_model_probe',
-        });
+      const workspaceTrustProviderArgsResolver =
+        this.createDefaultModelWorkspaceTrustProviderArgsResolver(workspaceTrustEarlyPlan);
       const materializedMemberSpecs = await this.materializeEffectiveTeamMemberSpecs({
         claudePath,
         cwd: request.cwd,
@@ -20612,17 +20634,8 @@ export class TeamProvisioningService {
             featureFlags: workspaceTrustFeatureFlags,
           })
         : { launchArgPatches: [] };
-      const workspaceTrustProviderArgsResolver = (input: {
-        providerId: TeamProviderId;
-        providerArgs: string[];
-        phase: 'default-model-resolution';
-      }): string[] =>
-        this.applyWorkspaceTrustArgPatches({
-          args: input.providerArgs,
-          patches: workspaceTrustEarlyPlan.launchArgPatches,
-          targetProvider: input.providerId,
-          targetSurface: 'default_model_probe',
-        });
+      const workspaceTrustProviderArgsResolver =
+        this.createDefaultModelWorkspaceTrustProviderArgsResolver(workspaceTrustEarlyPlan);
 
       const materializedMemberSpecs = await this.materializeEffectiveTeamMemberSpecs({
         claudePath,
@@ -22330,6 +22343,110 @@ export class TeamProvisioningService {
     message: InboxMessage
   ): message is InboxMessage & { messageId: string } {
     return typeof message.messageId === 'string' && message.messageId.trim().length > 0;
+  }
+
+  private async getOpenCodeAgendaSyncRecoveryBypassMessageIds(input: {
+    teamName: string;
+    memberName: string;
+    workSyncIntent?: 'agenda_sync' | 'review_pickup';
+    taskRefs?: TaskRef[];
+    foregroundMessages: InboxMessage[];
+  }): Promise<Set<string>> {
+    const bypassMessageIds = new Set<string>();
+    if (input.workSyncIntent !== 'agenda_sync') {
+      return bypassMessageIds;
+    }
+
+    const expectedRefs = this.normalizeOpenCodeTaskRefsForComparison(input.taskRefs);
+    if (expectedRefs.length === 0) {
+      return bypassMessageIds;
+    }
+
+    const candidateMessages = input.foregroundMessages.filter(
+      (message): message is InboxMessage & { messageId: string } => {
+        if (!this.hasStableMessageId(message)) {
+          return false;
+        }
+        if (typeof message.text !== 'string' || message.text.trim().length === 0) {
+          return false;
+        }
+        if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+          return false;
+        }
+        return true;
+      }
+    );
+    if (candidateMessages.length === 0) {
+      return bypassMessageIds;
+    }
+
+    const identity = await this.resolveOpenCodeMemberDeliveryIdentity(
+      input.teamName,
+      input.memberName
+    ).catch(() => null);
+    if (!identity?.ok) {
+      return bypassMessageIds;
+    }
+
+    const laneIndex = await readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), input.teamName).catch(
+      () => null
+    );
+    if (laneIndex?.lanes[identity.laneId]?.state !== 'active') {
+      return bypassMessageIds;
+    }
+
+    const records = await this.createOpenCodePromptDeliveryLedger(input.teamName, identity.laneId)
+      .list()
+      .catch(() => null);
+    const proofMissingRecords = (records ?? []).filter(
+      (record) =>
+        record.teamName.trim().toLowerCase() === input.teamName.trim().toLowerCase() &&
+        record.memberName.trim().toLowerCase() ===
+          identity.canonicalMemberName.trim().toLowerCase() &&
+        record.laneId === identity.laneId &&
+        record.status === 'failed_terminal' &&
+        !record.inboxReadCommittedAt &&
+        this.openCodeTaskRefsOverlap(record.taskRefs, expectedRefs) &&
+        this.isOpenCodeProtocolProofMissingRecord(record)
+    );
+    if (proofMissingRecords.length === 0) {
+      return bypassMessageIds;
+    }
+
+    const proofMissingMessageIds = new Set(
+      proofMissingRecords.map((record) => record.inboxMessageId.trim()).filter(Boolean)
+    );
+    for (const message of candidateMessages) {
+      const messageId = message.messageId.trim();
+      if (proofMissingMessageIds.has(messageId)) {
+        bypassMessageIds.add(messageId);
+      }
+    }
+
+    return bypassMessageIds;
+  }
+
+  private isOpenCodeProtocolProofMissingRecord(
+    record: OpenCodePromptDeliveryLedgerRecord
+  ): boolean {
+    return [record.lastReason, ...record.diagnostics].some(
+      (reason) =>
+        typeof reason === 'string' &&
+        classifyOpenCodeRuntimeDeliveryReasonCode(reason) === 'protocol_proof_missing'
+    );
+  }
+
+  private openCodeTaskRefsOverlap(
+    left: readonly TaskRef[] | undefined,
+    right: readonly TaskRef[] | undefined
+  ): boolean {
+    const leftRefs = this.normalizeOpenCodeTaskRefsForComparison(left);
+    const rightRefs = this.normalizeOpenCodeTaskRefsForComparison(right);
+    if (leftRefs.length === 0 || rightRefs.length === 0) {
+      return false;
+    }
+    const rightKeys = new Set(rightRefs.map((taskRef) => this.openCodeTaskRefKey(taskRef)));
+    return leftRefs.some((taskRef) => rightKeys.has(this.openCodeTaskRefKey(taskRef)));
   }
 
   private isCurrentReviewPickupRequestForegroundMessage(
@@ -32860,7 +32977,10 @@ export class TeamProvisioningService {
       if (env.anthropicApiKeyHelper) {
         usesAnthropicApiKeyHelper = true;
         Object.assign(envPatch, env.anthropicApiKeyHelper.envPatch);
-      } else if (providerId === 'anthropic' && isAnthropicApiKeyBackedAuthSource(env.authSource)) {
+      } else if (
+        providerId === 'anthropic' &&
+        isAnthropicDirectCredentialAuthSource(env.authSource)
+      ) {
         Object.assign(envPatch, buildAnthropicCrossProviderDirectAuthEnvPatch(env.env));
       }
       const flattenedArgs =
