@@ -8827,6 +8827,30 @@ export class TeamProvisioningService {
     }
   }
 
+  private emitOpenCodePromptDeliveryTaskLogChange(
+    record: OpenCodePromptDeliveryLedgerRecord,
+    detail: string
+  ): void {
+    if (!record.runtimeSessionId?.trim() || record.taskRefs.length === 0) {
+      return;
+    }
+    const taskIds = new Set(
+      record.taskRefs
+        .map((taskRef) => taskRef.taskId?.trim() || taskRef.displayId?.trim())
+        .filter((taskId): taskId is string => Boolean(taskId))
+    );
+    for (const taskId of taskIds) {
+      this.teamChangeEmitter?.({
+        type: 'task-log-change',
+        teamName: record.teamName,
+        ...(record.runId ? { runId: record.runId } : {}),
+        taskId,
+        detail,
+        taskSignalKind: 'log',
+      });
+    }
+  }
+
   private async handleOpenCodeRuntimeDeliveryUserFacingSideEffects(
     record: OpenCodePromptDeliveryLedgerRecord
   ): Promise<void> {
@@ -9964,6 +9988,10 @@ export class TeamProvisioningService {
         reason: promptAccepted ? responseObservation?.reason : result.diagnostics[0],
         now: nowIso(),
       });
+      this.emitOpenCodePromptDeliveryTaskLogChange(
+        ledgerRecord,
+        'opencode-prompt-delivery-session-evidence'
+      );
       let proof = await this.applyOpenCodeVisibleDestinationProof({
         ledger,
         ledgerRecord,
