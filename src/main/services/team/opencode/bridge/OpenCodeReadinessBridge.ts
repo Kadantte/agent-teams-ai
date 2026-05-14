@@ -81,7 +81,7 @@ const DEFAULT_BACKFILL_TIMEOUT_MS = 45_000;
 const DEFAULT_COMMAND_STATUS_TIMEOUT_MS = 5_000;
 
 function buildSendPayloadHash(input: OpenCodeSendMessageCommandBody): string {
-  const { payloadHash: _payloadHash, ...hashable } = input;
+  const { payloadHash: _payloadHash, settlementMode: _settlementMode, ...hashable } = input;
   return stableHash(hashable);
 }
 
@@ -334,6 +334,7 @@ export class OpenCodeReadinessBridge implements OpenCodeTeamRuntimeBridgePort {
       memberName: input.body.memberName,
       sessionId: status.sessionId,
       runtimePid: status.runtimePid,
+      runtimePromptMessageId: status.runtimePromptMessageId,
       prePromptCursor: status.prePromptCursor,
       diagnostics,
     };

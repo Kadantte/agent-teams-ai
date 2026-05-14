@@ -6161,6 +6161,7 @@ describe('TeamProvisioningService', () => {
         providerId: 'opencode',
         memberName: String(input.memberName),
         sessionId: 'oc-session-bob',
+        runtimePromptMessageId: `msg_prompt_${sendMessageToMember.mock.calls.length}`,
         prePromptCursor: `cursor-${sendMessageToMember.mock.calls.length}`,
         responseObservation: {
           state: 'pending',
@@ -6293,6 +6294,13 @@ describe('TeamProvisioningService', () => {
       });
 
       expect(observeMessageDelivery).toHaveBeenCalledTimes(1);
+      expect(observeMessageDelivery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'oc-session-bob',
+          runtimePromptMessageId: 'msg_prompt_1',
+          prePromptCursor: 'cursor-1',
+        })
+      );
       expect(sendMessageToMember).toHaveBeenCalledTimes(2);
       expect(sendMessageToMember.mock.calls[1]?.[0]).toMatchObject({
         runId: 'opencode-run-bob',

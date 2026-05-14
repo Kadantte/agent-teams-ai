@@ -315,6 +315,8 @@ describe('OpenCodePromptDeliveryLedger', () => {
       id: unanswered.id,
       accepted: true,
       attempted: true,
+      sessionId: 'oc-session-1',
+      runtimePromptMessageId: 'msg_prompt_1',
       responseObservation: {
         state: 'empty_assistant_turn',
         deliveredUserMessageId: 'oc-user-1',
@@ -332,6 +334,8 @@ describe('OpenCodePromptDeliveryLedger', () => {
     expect(emptyResult.status).toBe('unanswered');
     expect(emptyResult.responseState).toBe('empty_assistant_turn');
     expect(emptyResult.attempts).toBe(1);
+    expect(emptyResult.runtimeSessionId).toBe('oc-session-1');
+    expect(emptyResult.runtimePromptMessageId).toBe('msg_prompt_1');
 
     const noAssistant = await store.ensurePending({
       teamName: 'team-a',

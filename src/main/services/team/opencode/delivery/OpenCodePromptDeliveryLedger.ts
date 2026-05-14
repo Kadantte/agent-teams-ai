@@ -29,6 +29,7 @@ export interface OpenCodePromptDeliveryLedgerRecord {
   laneId: string;
   runId: string | null;
   runtimeSessionId: string | null;
+  runtimePromptMessageId?: string | null;
   inboxMessageId: string;
   inboxTimestamp: string;
   source: 'watcher' | 'ui-send' | 'manual' | 'watchdog' | 'member-work-sync-review-pickup';
@@ -136,6 +137,7 @@ export interface ApplyOpenCodePromptDeliveryResultInput {
   attempted?: boolean;
   responseObservation?: OpenCodeDeliveryResponseObservation;
   sessionId?: string | null;
+  runtimePromptMessageId?: string | null;
   runtimePid?: number;
   prePromptCursor?: string | null;
   diagnostics?: string[];
@@ -210,6 +212,7 @@ export class OpenCodePromptDeliveryLedgerStore {
         laneId: input.laneId,
         runId: input.runId ?? null,
         runtimeSessionId: null,
+        runtimePromptMessageId: null,
         inboxMessageId: input.inboxMessageId,
         inboxTimestamp: input.inboxTimestamp,
         source: input.source,
@@ -315,6 +318,8 @@ export class OpenCodePromptDeliveryLedgerStore {
         attempts:
           input.accepted || input.attempted === true ? record.attempts + 1 : record.attempts,
         runtimeSessionId: input.sessionId ?? record.runtimeSessionId,
+        runtimePromptMessageId:
+          input.runtimePromptMessageId ?? record.runtimePromptMessageId ?? null,
         acceptanceUnknown: input.accepted ? false : record.acceptanceUnknown,
         lastAttemptAt: input.now,
         lastObservedAt: observation ? input.now : record.lastObservedAt,
@@ -714,6 +719,7 @@ function isOpenCodePromptDeliveryLedgerRecord(
     typeof record.laneId === 'string' &&
     isOptionalNullableString(record.runId) &&
     isOptionalNullableString(record.runtimeSessionId) &&
+    isOptionalNullableString(record.runtimePromptMessageId) &&
     typeof record.inboxMessageId === 'string' &&
     typeof record.inboxTimestamp === 'string' &&
     isOpenCodePromptDeliverySource(record.source) &&

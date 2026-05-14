@@ -83,6 +83,7 @@ export interface OpenCodeTeamRuntimeMessageResult {
   sessionId?: string;
   runtimePid?: number;
   prePromptCursor?: string | null;
+  runtimePromptMessageId?: string;
   responseObservation?: OpenCodeSendMessageCommandData['responseObservation'];
   diagnostics: string[];
 }
@@ -333,6 +334,7 @@ export class OpenCodeTeamRuntimeAdapter implements TeamLaunchRuntimeAdapter {
       text: buildOpenCodeRuntimeMessageText(input),
       messageId: input.messageId,
       ...(input.deliveryAttemptId ? { deliveryAttemptId: input.deliveryAttemptId } : {}),
+      settlementMode: 'acceptance',
       fileParts: input.fileParts,
       actionMode: input.actionMode,
       messageKind: input.messageKind,
@@ -347,13 +349,18 @@ export class OpenCodeTeamRuntimeAdapter implements TeamLaunchRuntimeAdapter {
       sessionId: data.sessionId,
       runtimePid: data.runtimePid,
       prePromptCursor: data.prePromptCursor,
+      runtimePromptMessageId: data.runtimePromptMessageId,
       responseObservation: data.responseObservation,
       diagnostics: data.diagnostics.map((diagnostic) => diagnostic.message),
     };
   }
 
   async observeMessageDelivery(
-    input: OpenCodeTeamRuntimeMessageInput & { prePromptCursor?: string | null }
+    input: OpenCodeTeamRuntimeMessageInput & {
+      prePromptCursor?: string | null;
+      sessionId?: string;
+      runtimePromptMessageId?: string;
+    }
   ): Promise<OpenCodeTeamRuntimeMessageResult> {
     if (!this.bridge.observeOpenCodeTeamMessageDelivery) {
       return {
@@ -380,6 +387,8 @@ export class OpenCodeTeamRuntimeAdapter implements TeamLaunchRuntimeAdapter {
       projectPath: input.cwd,
       memberName: input.memberName,
       messageId: input.messageId,
+      sessionId: input.sessionId,
+      runtimePromptMessageId: input.runtimePromptMessageId,
       prePromptCursor: input.prePromptCursor ?? null,
     });
 
@@ -389,6 +398,7 @@ export class OpenCodeTeamRuntimeAdapter implements TeamLaunchRuntimeAdapter {
       memberName: input.memberName,
       sessionId: data.sessionId,
       runtimePid: data.runtimePid,
+      runtimePromptMessageId: data.runtimePromptMessageId,
       responseObservation: data.responseObservation,
       diagnostics: data.diagnostics.map((diagnostic) => diagnostic.message),
     };

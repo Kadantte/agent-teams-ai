@@ -9,6 +9,7 @@ import type {
 export const OPEN_CODE_BRIDGE_SCHEMA_VERSION = 1 as const;
 export const OPEN_CODE_TASK_LEDGER_EVIDENCE_CONTRACT_VERSION = 1 as const;
 export const OPEN_CODE_APP_MANAGED_BOOTSTRAP_CONTRACT_VERSION = 1 as const;
+export const OPEN_CODE_DELIVERY_ACCEPTANCE_CONTRACT_VERSION = 1 as const;
 
 export type OpenCodeBridgeCommandName =
   | 'opencode.handshake'
@@ -172,6 +173,7 @@ export interface OpenCodeSendMessageCommandBody {
   messageId?: string;
   deliveryAttemptId?: string;
   payloadHash?: string;
+  settlementMode?: 'observed' | 'acceptance';
   fileParts?: {
     type: 'file';
     mime: 'image/png' | 'image/jpeg' | 'image/webp';
@@ -233,6 +235,7 @@ export interface OpenCodeSendMessageCommandData {
   memberName: string;
   runtimePid?: number;
   prePromptCursor?: string | null;
+  runtimePromptMessageId?: string;
   responseObservation?: OpenCodeDeliveryResponseObservation;
   diagnostics: OpenCodeTeamBridgeDiagnostic[];
 }
@@ -284,6 +287,8 @@ export interface OpenCodeObserveMessageDeliveryCommandBody {
   projectPath: string;
   memberName: string;
   messageId: string;
+  sessionId?: string;
+  runtimePromptMessageId?: string;
   prePromptCursor?: string | null;
 }
 
@@ -292,6 +297,7 @@ export interface OpenCodeObserveMessageDeliveryCommandData {
   sessionId?: string;
   memberName: string;
   runtimePid?: number;
+  runtimePromptMessageId?: string;
   responseObservation: OpenCodeDeliveryResponseObservation;
   diagnostics: OpenCodeTeamBridgeDiagnostic[];
 }

@@ -368,7 +368,11 @@ type OpenCodeRuntimeMessageAdapter = TeamLaunchRuntimeAdapter & {
     input: OpenCodeTeamRuntimeMessageInput
   ): Promise<OpenCodeTeamRuntimeMessageResult>;
   observeMessageDelivery?(
-    input: OpenCodeTeamRuntimeMessageInput & { prePromptCursor?: string | null }
+    input: OpenCodeTeamRuntimeMessageInput & {
+      prePromptCursor?: string | null;
+      sessionId?: string;
+      runtimePromptMessageId?: string;
+    }
   ): Promise<OpenCodeTeamRuntimeMessageResult>;
 };
 
@@ -8358,6 +8362,8 @@ export class TeamProvisioningService {
           workSyncReviewRequestEventIds: input.workSyncReviewRequestEventIds,
           taskRefs: input.taskRefs,
           prePromptCursor: ledgerRecord.prePromptCursor,
+          sessionId: ledgerRecord.runtimeSessionId ?? undefined,
+          runtimePromptMessageId: ledgerRecord.runtimePromptMessageId ?? undefined,
         });
       } catch (error) {
         const reason = `opencode_direct_user_delivery_inline_observe_failed: ${getErrorMessage(
@@ -9808,6 +9814,8 @@ export class TeamProvisioningService {
           workSyncReviewRequestEventIds: input.workSyncReviewRequestEventIds,
           taskRefs: input.taskRefs,
           prePromptCursor: ledgerRecord.prePromptCursor,
+          sessionId: ledgerRecord.runtimeSessionId ?? undefined,
+          runtimePromptMessageId: ledgerRecord.runtimePromptMessageId ?? undefined,
         });
         await this.rememberOpenCodeRuntimePidFromBridge({
           teamName,
@@ -9983,6 +9991,7 @@ export class TeamProvisioningService {
         attempted: true,
         responseObservation,
         sessionId: result.sessionId,
+        runtimePromptMessageId: result.runtimePromptMessageId,
         prePromptCursor: result.prePromptCursor,
         diagnostics: result.diagnostics,
         reason: promptAccepted ? responseObservation?.reason : result.diagnostics[0],
