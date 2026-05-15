@@ -1062,6 +1062,15 @@ function getRunRuntimeFailureLabel(run: ProvisioningRun): string {
   return getCliFlavorUiOptions(getConfiguredCliFlavor()).displayName;
 }
 
+function buildMissingCliError(): Error {
+  if (getConfiguredCliFlavor() === 'agent_teams_orchestrator') {
+    return new Error(
+      'Multimodel runtime not found. The packaged app must include resources/runtime/claude-multimodel, or development must provide CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH.'
+    );
+  }
+  return new Error('Claude CLI not found; install it or provide a valid path');
+}
+
 function buildProviderCliCommandArgs(providerArgs: string[], args: string[]): string[] {
   return mergeJsonSettingsArgs([...providerArgs, ...args]);
 }
@@ -1861,6 +1870,9 @@ interface ProvisioningRun {
   fsPhase: 'waiting_config' | 'waiting_members' | 'waiting_tasks' | 'all_files_found';
   waitingTasksSince: number | null;
   provisioningComplete: boolean;
+  processClosed: boolean;
+  requiresFirstRealTurnSuccess: boolean;
+  firstRealTurnSucceeded: boolean;
   /** Path to the generated MCP config file for later cleanup. */
   mcpConfigPath: string | null;
   /** Path to the deterministic bootstrap spec file for later cleanup. */
@@ -15344,7 +15356,7 @@ export class TeamProvisioningService {
     const providerId = resolveTeamProviderId(input.configuredMember.providerId);
     const claudePath = await ClaudeBinaryResolver.resolve();
     if (!claudePath) {
-      throw new Error('Claude CLI not found; install it or provide a valid path');
+      throw buildMissingCliError();
     }
 
     const cwd = this.resolveDirectRestartRuntimeCwd({
@@ -15486,7 +15498,7 @@ export class TeamProvisioningService {
     const providerId = resolveTeamProviderId(input.configuredMember.providerId);
     const claudePath = input.run.spawnContext?.claudePath ?? (await ClaudeBinaryResolver.resolve());
     if (!claudePath) {
-      throw new Error('Claude CLI not found; install it or provide a valid path');
+      throw buildMissingCliError();
     }
 
     const cwd = this.resolveDirectRestartRuntimeCwd({
@@ -17895,7 +17907,7 @@ export class TeamProvisioningService {
       const cached = this.getFreshCachedProbeResult(targetCwdForValidation, providerId);
       const probeResult = cached ?? (await this.getCachedOrProbeResult(targetCwd, providerId));
       if (!probeResult?.claudePath) {
-        throw new Error('Claude CLI not found; install it or provide a valid path');
+        throw buildMissingCliError();
       }
 
       const providerLabel = getTeamProviderLabel(providerId);
@@ -19594,6 +19606,7 @@ export class TeamProvisioningService {
       `[${run.teamName}] Respawned CLI process after auth failure (pid=${child.pid ?? '?'})`
     );
     run.child = child;
+    run.processClosed = false;
     run.authRetryInProgress = false;
 
     updateProgress(run, 'spawning', 'CLI respawned — sending prompt', {
@@ -19897,7 +19910,7 @@ export class TeamProvisioningService {
 
       const claudePath = await ClaudeBinaryResolver.resolve();
       if (!claudePath) {
-        throw new Error('Claude CLI not found; install it or provide a valid path');
+        throw buildMissingCliError();
       }
 
       const runtimeAuthMaterialId = randomUUID();
@@ -20087,6 +20100,9 @@ export class TeamProvisioningService {
         apiErrorWarningEmitted: false,
         waitingTasksSince: null,
         provisioningComplete: false,
+        processClosed: false,
+        requiresFirstRealTurnSuccess: false,
+        firstRealTurnSucceeded: false,
         mcpConfigPath: null,
         bootstrapSpecPath: null,
         bootstrapUserPromptPath: null,
@@ -20250,6 +20266,7 @@ export class TeamProvisioningService {
           bootstrapUserPromptPath =
             await writeDeterministicBootstrapUserPromptFile(initialUserPrompt);
           run.bootstrapUserPromptPath = bootstrapUserPromptPath;
+          run.requiresFirstRealTurnSuccess = true;
         }
         emitProvisioningCheckpoint(run, 'Writing MCP config file');
         mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
@@ -20397,6 +20414,7 @@ export class TeamProvisioningService {
       });
       run.onProgress(run.progress);
       run.child = child;
+      run.processClosed = false;
       run.spawnContext = {
         claudePath,
         args: spawnArgs,
@@ -21127,7 +21145,7 @@ export class TeamProvisioningService {
 
         claudePath = await ClaudeBinaryResolver.resolve();
         if (!claudePath) {
-          throw new Error('Claude CLI not found; install it or provide a valid path');
+          throw buildMissingCliError();
         }
       } catch (error) {
         // Restore pre-launch backup so config.json is not left in normalized (lead-only) state
@@ -21352,6 +21370,9 @@ export class TeamProvisioningService {
         apiErrorWarningEmitted: false,
         waitingTasksSince: null,
         provisioningComplete: false,
+        processClosed: false,
+        requiresFirstRealTurnSuccess: false,
+        firstRealTurnSucceeded: false,
         mcpConfigPath: null,
         bootstrapSpecPath: null,
         bootstrapUserPromptPath: null,
@@ -21510,6 +21531,7 @@ export class TeamProvisioningService {
         );
         bootstrapUserPromptPath = await writeDeterministicBootstrapUserPromptFile(prompt);
         run.bootstrapUserPromptPath = bootstrapUserPromptPath;
+        run.requiresFirstRealTurnSuccess = true;
         emitProvisioningCheckpoint(run, 'Writing MCP config file');
         mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
         run.mcpConfigPath = mcpConfigPath;
@@ -21688,6 +21710,7 @@ export class TeamProvisioningService {
       });
       run.onProgress(run.progress);
       run.child = child;
+      run.processClosed = false;
       run.spawnContext = {
         claudePath,
         args: finalLaunchArgs,
@@ -26200,6 +26223,8 @@ export class TeamProvisioningService {
       run.processKilled ||
       isTerminalFailureProvisioningState(run.progress.state) ||
       this.isProvisioningRunPromotedToAlive(run) ||
+      this.hasPendingDeterministicFirstRealTurn(run) ||
+      !this.isProvisioningRunStillPromotable(run) ||
       this.provisioningRunByTeam.get(run.teamName) !== run.runId
     ) {
       return;
@@ -26210,6 +26235,9 @@ export class TeamProvisioningService {
     }
 
     const snapshot = await readBootstrapLaunchSnapshot(run.teamName).catch(() => null);
+    if (!this.isProvisioningRunStillPromotable(run)) {
+      return;
+    }
     if (
       !snapshot ||
       (snapshot.launchPhase !== 'finished' && snapshot.launchPhase !== 'reconciled')
@@ -26240,6 +26268,9 @@ export class TeamProvisioningService {
         )}`
       );
     });
+    if (!this.isProvisioningRunStillPromotable(run)) {
+      return;
+    }
 
     const failedSpawnMembers = memberNames
       .filter((memberName) => snapshot.members[memberName]?.launchState === 'failed_to_start')
@@ -26298,6 +26329,46 @@ export class TeamProvisioningService {
       this.aliveRunByTeam.get(run.teamName) === run.runId &&
       this.provisioningRunByTeam.get(run.teamName) !== run.runId
     );
+  }
+
+  private hasPendingDeterministicFirstRealTurn(run: ProvisioningRun): boolean {
+    return (
+      run.deterministicBootstrap && run.requiresFirstRealTurnSuccess && !run.firstRealTurnSucceeded
+    );
+  }
+
+  private isProvisioningRunStillPromotable(run: ProvisioningRun): boolean {
+    if (this.runs.get(run.runId) !== run) return false;
+    if (this.provisioningRunByTeam.get(run.teamName) !== run.runId) return false;
+    if (
+      run.cancelRequested ||
+      run.processKilled ||
+      run.processClosed ||
+      run.finalizingByTimeout ||
+      run.authRetryInProgress
+    ) {
+      return false;
+    }
+    if (
+      run.progress.state === 'ready' ||
+      run.progress.state === 'disconnected' ||
+      run.progress.state === 'cancelled' ||
+      isTerminalFailureProvisioningState(run.progress.state)
+    ) {
+      return false;
+    }
+    if (!run.child || run.child.killed) return false;
+    const stdin = run.child.stdin as
+      | (NodeJS.WritableStream & {
+          destroyed?: boolean;
+          writableEnded?: boolean;
+          writable?: boolean;
+        })
+      | null
+      | undefined;
+    if (!stdin) return false;
+    if (stdin.destroyed || stdin.writableEnded || stdin.writable === false) return false;
+    return true;
   }
 
   private syncRunMemberSpawnStatusesFromSnapshot(
@@ -30027,7 +30098,7 @@ export class TeamProvisioningService {
           );
         }
       }
-      if (!run.provisioningComplete && !run.cancelRequested) {
+      if (!run.requiresFirstRealTurnSuccess && !run.provisioningComplete && !run.cancelRequested) {
         void this.handleProvisioningTurnComplete(run).catch((error: unknown) => {
           logger.error(
             `[${run.teamName}] deterministic bootstrap completion handler failed: ${
@@ -30305,6 +30376,9 @@ export class TeamProvisioningService {
             })();
       if (subtype === 'success') {
         logger.info(`[${run.teamName}] stream-json result: success — turn complete, process alive`);
+        if (!run.provisioningComplete) {
+          run.firstRealTurnSucceeded = true;
+        }
 
         // Extract contextWindow from modelUsage if available (SDKResultSuccess.modelUsage)
         const modelUsageObj = (msg.modelUsage ??
@@ -31741,8 +31815,8 @@ export class TeamProvisioningService {
   }
 
   /**
-   * Called when the first stream-json turn completes successfully.
-   * Verifies provisioning files exist and marks as ready.
+   * Called once provisioning has a promotable readiness signal.
+   * For deterministic runs with a deferred first task, that signal must be result.success.
    * Process stays alive for subsequent tasks.
    */
   private async handleProvisioningTurnComplete(run: ProvisioningRun): Promise<void> {
@@ -31755,6 +31829,12 @@ export class TeamProvisioningService {
       run.progress.state === 'failed'
     )
       return;
+    if (
+      this.hasPendingDeterministicFirstRealTurn(run) ||
+      !this.isProvisioningRunStillPromotable(run)
+    ) {
+      return;
+    }
 
     // Prevent false "ready" when auth failure was printed in CLI output but the filesystem monitor
     // already observed files on disk. We only re-check stderr plus a trailing non-JSON stdout
@@ -31856,7 +31936,10 @@ export class TeamProvisioningService {
       const hasPendingBootstrap =
         !hasSpawnFailures &&
         this.hasPendingLaunchMembers(run, launchSummary, persistedLaunchSnapshot);
-      if (this.isProvisioningRunPromotedToAlive(run)) {
+      if (
+        this.isProvisioningRunPromotedToAlive(run) ||
+        !this.isProvisioningRunStillPromotable(run)
+      ) {
         return;
       }
       const readyMessage = hasSpawnFailures
@@ -32039,7 +32122,7 @@ export class TeamProvisioningService {
     const hasPendingBootstrap =
       !hasSpawnFailures &&
       this.hasPendingLaunchMembers(run, launchSummary, persistedLaunchSnapshot);
-    if (this.isProvisioningRunPromotedToAlive(run)) {
+    if (this.isProvisioningRunPromotedToAlive(run) || !this.isProvisioningRunStillPromotable(run)) {
       return;
     }
     const progress = updateProgress(
@@ -32894,9 +32977,6 @@ export class TeamProvisioningService {
 
             if (registeredMembers >= primaryProvisioningMemberCount) {
               run.fsPhase = 'all_files_found';
-              if (!run.provisioningComplete) {
-                void this.handleProvisioningTurnComplete(run);
-              }
               return;
             }
           }
@@ -32904,9 +32984,6 @@ export class TeamProvisioningService {
           if (primaryProvisioningMemberCount === 0) {
             if (run.deterministicBootstrap) {
               run.fsPhase = 'all_files_found';
-              if (!run.provisioningComplete) {
-                void this.handleProvisioningTurnComplete(run);
-              }
             } else {
               run.fsPhase = 'waiting_tasks';
               const progress = updateProgress(run, 'finalizing', 'Solo team, preparing workspace');
@@ -32946,10 +33023,9 @@ export class TeamProvisioningService {
 
           if (taskFound || taskFallbackExpired) {
             run.fsPhase = 'all_files_found';
-            // Mark provisioning complete early — files are on disk,
-            // no need to wait for stream-json result.success.
+            // Legacy filesystem fallback - deterministic bootstrap waits for stream-json success.
             // The process stays alive for subsequent tasks.
-            if (!run.provisioningComplete) {
+            if (!run.deterministicBootstrap && !run.provisioningComplete) {
               void this.handleProvisioningTurnComplete(run);
             }
           }
@@ -32996,7 +33072,6 @@ export class TeamProvisioningService {
       );
       return;
     }
-
     if (
       (typeof run.stdoutParserCarry === 'string' ? run.stdoutParserCarry.trim() : '') &&
       !run.stdoutParserCarryIsCompleteJson &&
@@ -33008,6 +33083,7 @@ export class TeamProvisioningService {
       );
     }
     this.flushStdoutParserCarry(run);
+    run.processClosed = true;
     if (
       this.isProvisioningRunFailed(run) ||
       run.cancelRequested ||
@@ -33571,14 +33647,17 @@ export class TeamProvisioningService {
     }
 
     try {
-      return await this.controlApiBaseUrlResolver();
+      const baseUrl = await this.controlApiBaseUrlResolver();
+      if (!baseUrl) {
+        throw new Error('Team control API resolver returned no base URL after startup.');
+      }
+      return baseUrl;
     } catch (error) {
-      logger.warn(
-        `Failed to resolve team control API base URL: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to resolve team control API base URL: ${message}`);
+      throw new Error(
+        `Team control API failed to start or publish its base URL. Team runtime commands require the desktop Control API. ${message}`
       );
-      return null;
     }
   }
 

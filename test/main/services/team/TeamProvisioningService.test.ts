@@ -5336,9 +5336,9 @@ describe('TeamProvisioningService', () => {
       ];
 
       await (svc as any).launchMixedSecondaryLaneIfNeeded(run);
-      await vi.waitFor(() => {
-        expect(adapterLaunch).toHaveBeenCalledTimes(1);
-      });
+      await run.mixedSecondaryLaneLaunchQueue;
+
+      expect(adapterLaunch).toHaveBeenCalledTimes(1);
       expect(adapterLaunch).toHaveBeenCalledWith(
         expect.objectContaining({
           laneId: 'secondary:opencode:bob',
@@ -12798,7 +12798,7 @@ describe('TeamProvisioningService', () => {
   });
 
   describe('safe app launch matrix', () => {
-    it('does not wait for OpenCode secondary inboxes before completing primary filesystem readiness', async () => {
+    it('does not wait for OpenCode secondary inboxes before marking primary filesystem readiness', async () => {
       const teamName = 'mixed-secondary-fs-readiness';
       const teamDir = path.join(tempTeamsBase, teamName);
       fs.mkdirSync(path.join(teamDir, 'inboxes'), { recursive: true });
@@ -12848,8 +12848,8 @@ describe('TeamProvisioningService', () => {
         ],
       });
 
-      await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
-      expect(run.fsPhase).toBe('all_files_found');
+      await vi.waitFor(() => expect(run.fsPhase).toBe('all_files_found'));
+      expect(complete).not.toHaveBeenCalled();
       expect(run.onProgress).not.toHaveBeenCalledWith(
         expect.objectContaining({
           message: 'Prepared communication channels for 1/2 members',
@@ -14802,7 +14802,7 @@ describe('TeamProvisioningService', () => {
     await svc.cancelProvisioning(runId);
   });
 
-  it('flushes a final newline-less bootstrap completion event before handling launch close', async () => {
+  it('flushes a final newline-less bootstrap completion event without promoting launch ready', async () => {
     allowConsoleLogs();
     const teamName = 'launch-close-flushes-final-json-team';
     const leadSessionId = 'lead-session-final-json-flush';
@@ -14837,11 +14837,11 @@ describe('TeamProvisioningService', () => {
     );
     const complete = vi
       .spyOn(svc as any, 'handleProvisioningTurnComplete')
-      .mockImplementation(async (run: any) => {
-        run.provisioningComplete = true;
-      });
+      .mockResolvedValue(undefined);
 
     const { runId } = await svc.launchTeam({ teamName, cwd: tempClaudeRoot }, () => {});
+    const run = (svc as any).runs.get(runId);
+    expect(run).toBeTruthy();
 
     child.stdout.emit(
       'data',
@@ -14861,14 +14861,236 @@ describe('TeamProvisioningService', () => {
     await Promise.resolve();
     expect(complete).not.toHaveBeenCalled();
 
+    (svc as any).flushStdoutParserCarry(run);
+
+    expect(complete).not.toHaveBeenCalled();
+    expect(run.lastDeterministicBootstrapSeq).toBe(1);
+    await svc.cancelProvisioning(runId);
+  });
+
+  it('flushes a final newline-less success result and completes deterministic launch', async () => {
+    allowConsoleLogs();
+    const teamName = 'launch-close-flushes-final-success-team';
+    const leadSessionId = 'lead-session-final-success-flush';
+    writeLaunchConfig(teamName, tempClaudeRoot, leadSessionId, ['alice']);
+
+    vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+    const child = createRunningChild();
+    vi.mocked(spawnCli).mockReturnValue(child as any);
+
+    const svc = new TeamProvisioningService(undefined, undefined, undefined, undefined, {
+      writeConfigFile: vi.fn(async () => '/mock/mcp-config-launch.json'),
+      removeConfigFile: vi.fn(async () => {}),
+    } as any);
+    (svc as any).buildProvisioningEnv = vi.fn(async () => ({
+      env: { ANTHROPIC_API_KEY: 'test' },
+      authSource: 'anthropic_api_key',
+    }));
+    (svc as any).resolveLaunchExpectedMembers = vi.fn(async () => ({
+      members: [{ name: 'alice' }],
+      source: 'members-meta',
+      warning: undefined,
+    }));
+    (svc as any).normalizeTeamConfigForLaunch = vi.fn(async () => {});
+    (svc as any).assertConfigLeadOnlyForLaunch = vi.fn(async () => {});
+    (svc as any).updateConfigProjectPath = vi.fn(async () => {});
+    (svc as any).restorePrelaunchConfig = vi.fn(async () => {});
+    (svc as any).validateAgentTeamsMcpRuntime = vi.fn(async () => {});
+    (svc as any).persistLaunchStateSnapshot = vi.fn(async () => {});
+    (svc as any).startFilesystemMonitor = vi.fn();
+    (svc as any).pathExists = vi.fn(async (targetPath: string) =>
+      targetPath.endsWith(`${leadSessionId}.jsonl`)
+    );
+    const complete = vi
+      .spyOn(svc as any, 'handleProvisioningTurnComplete')
+      .mockImplementation(async (run: any) => {
+        expect(run.processClosed).toBe(false);
+        expect(run.firstRealTurnSucceeded).toBe(true);
+        run.provisioningComplete = true;
+      });
+
+    const { runId } = await svc.launchTeam({ teamName, cwd: tempClaudeRoot }, () => {});
+
+    child.stdout.emit(
+      'data',
+      Buffer.from(
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+        }),
+        'utf8'
+      )
+    );
+    await Promise.resolve();
+    expect(complete).not.toHaveBeenCalled();
+
     child.emit('close', 0);
 
     await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
   });
 
-  it('recovers ready progress when deterministic create finalization stalls after completed bootstrap-state', async () => {
+  it('does not promote deterministic launch from bootstrap completed before first real turn succeeds', async () => {
     allowConsoleLogs();
-    vi.useFakeTimers();
+    const teamName = 'bootstrap-completed-before-first-turn-team';
+    const leadSessionId = 'lead-session-bootstrap-only';
+    writeLaunchConfig(teamName, tempClaudeRoot, leadSessionId, ['alice']);
+
+    vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+    const child = createRunningChild();
+    vi.mocked(spawnCli).mockReturnValue(child as any);
+
+    const svc = new TeamProvisioningService(undefined, undefined, undefined, undefined, {
+      writeConfigFile: vi.fn(async () => '/mock/mcp-config-launch.json'),
+      removeConfigFile: vi.fn(async () => {}),
+    } as any);
+    (svc as any).buildProvisioningEnv = vi.fn(async () => ({
+      env: { ANTHROPIC_API_KEY: 'test' },
+      authSource: 'anthropic_api_key',
+    }));
+    (svc as any).resolveLaunchExpectedMembers = vi.fn(async () => ({
+      members: [{ name: 'alice' }],
+      source: 'members-meta',
+      warning: undefined,
+    }));
+    (svc as any).normalizeTeamConfigForLaunch = vi.fn(async () => {});
+    (svc as any).assertConfigLeadOnlyForLaunch = vi.fn(async () => {});
+    (svc as any).updateConfigProjectPath = vi.fn(async () => {});
+    (svc as any).restorePrelaunchConfig = vi.fn(async () => {});
+    (svc as any).validateAgentTeamsMcpRuntime = vi.fn(async () => {});
+    (svc as any).persistLaunchStateSnapshot = vi.fn(async () => {});
+    (svc as any).startFilesystemMonitor = vi.fn();
+    (svc as any).pathExists = vi.fn(async (targetPath: string) =>
+      targetPath.endsWith(`${leadSessionId}.jsonl`)
+    );
+    const complete = vi
+      .spyOn(svc as any, 'handleProvisioningTurnComplete')
+      .mockResolvedValue(undefined);
+
+    let runId = '';
+    try {
+      const launch = await svc.launchTeam({ teamName, cwd: tempClaudeRoot }, () => {});
+      runId = launch.runId;
+
+      child.stdout.emit(
+        'data',
+        Buffer.from(
+          `${JSON.stringify({
+            type: 'system',
+            subtype: 'team_bootstrap',
+            event: 'completed',
+            run_id: runId,
+            team_name: teamName,
+            seq: 1,
+            failed_members: [],
+          })}\n`,
+          'utf8'
+        )
+      );
+
+      await Promise.resolve();
+      expect(complete).not.toHaveBeenCalled();
+    } finally {
+      if (runId) {
+        await svc.cancelProvisioning(runId).catch(() => undefined);
+      }
+    }
+  });
+
+  it('promotes deterministic create bootstrap completion when no first turn was enqueued', async () => {
+    allowConsoleLogs();
+    const teamName = 'bootstrap-completed-no-first-turn-team';
+    const child = createRunningChild();
+    vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+    vi.mocked(spawnCli).mockReturnValue(child as any);
+
+    const mcpConfigBuilder = {
+      writeConfigFile: vi.fn(async () => '/mock/mcp-config-create.json'),
+      removeConfigFile: vi.fn(async () => {}),
+    };
+    const membersMetaStore = {
+      writeMembers: vi.fn(async () => {}),
+      getMembers: vi.fn(async () => []),
+    };
+    const teamMetaStore = {
+      writeMeta: vi.fn(async () => {}),
+      deleteMeta: vi.fn(async () => {}),
+      getMeta: vi.fn(async () => null),
+    };
+
+    const svc = new TeamProvisioningService(
+      undefined,
+      undefined,
+      membersMetaStore as any,
+      undefined,
+      mcpConfigBuilder as any,
+      teamMetaStore as any
+    );
+    (svc as any).buildProvisioningEnv = vi.fn(async () => ({
+      env: { CODEX_API_KEY: 'test' },
+      authSource: 'codex_runtime',
+    }));
+    (svc as any).validateAgentTeamsMcpRuntime = vi.fn(async () => {});
+    (svc as any).pathExists = vi.fn(async () => false);
+    (svc as any).startFilesystemMonitor = vi.fn();
+    (svc as any).startStallWatchdog = vi.fn();
+    (svc as any).stopStallWatchdog = vi.fn();
+    (svc as any).resolveAndValidateLaunchIdentity = vi.fn(async () => ({
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
+      selectedModel: 'gpt-5.5',
+      selectedModelKind: 'explicit',
+      resolvedLaunchModel: 'gpt-5.5',
+      catalogId: 'gpt-5.5',
+      catalogSource: 'test',
+      catalogFetchedAt: '2026-05-07T00:00:00.000Z',
+      selectedEffort: 'medium',
+      resolvedEffort: 'medium',
+      selectedFastMode: null,
+      resolvedFastMode: null,
+      fastResolutionReason: null,
+    }));
+    const complete = vi
+      .spyOn(svc as any, 'handleProvisioningTurnComplete')
+      .mockResolvedValue(undefined);
+
+    const { runId } = await svc.createTeam(
+      {
+        teamName,
+        cwd: tempClaudeRoot,
+        providerId: 'codex',
+        providerBackendId: 'codex-native',
+        model: 'gpt-5.5',
+        members: [{ name: 'alice' }],
+      },
+      () => {}
+    );
+    const run = (svc as any).runs.get(runId);
+    expect(run).toBeTruthy();
+    expect(run.requiresFirstRealTurnSuccess).toBe(false);
+
+    child.stdout.emit(
+      'data',
+      Buffer.from(
+        `${JSON.stringify({
+          type: 'system',
+          subtype: 'team_bootstrap',
+          event: 'completed',
+          run_id: runId,
+          team_name: teamName,
+          seq: 1,
+          failed_members: [],
+        })}\n`,
+        'utf8'
+      )
+    );
+
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+    expect(complete).toHaveBeenCalledWith(run);
+    await svc.cancelProvisioning(runId);
+  });
+
+  it('recovers ready progress when deterministic finalization stalls after first real turn success', async () => {
+    allowConsoleLogs();
     const teamName = 'create-completed-bootstrap-finalization-stall';
     const child = createRunningChild();
     vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
@@ -14920,9 +15142,6 @@ describe('TeamProvisioningService', () => {
       resolvedFastMode: null,
       fastResolutionReason: null,
     }));
-    const waitForValidConfig = vi.fn(() => new Promise(() => {}));
-    (svc as any).waitForValidConfig = waitForValidConfig;
-
     const progressStates: string[] = [];
     const { runId } = await svc.createTeam(
       {
@@ -14940,10 +15159,9 @@ describe('TeamProvisioningService', () => {
     const run = (svc as any).runs.get(runId);
     expect(run).toBeTruthy();
     run.deterministicBootstrap = true;
-    const scheduleRecovery = vi.spyOn(
-      svc as any,
-      'scheduleDeterministicBootstrapCompletionRecovery'
-    );
+    run.requiresFirstRealTurnSuccess = true;
+    run.firstRealTurnSucceeded = true;
+    run.provisioningComplete = true;
 
     writeBootstrapState(
       teamName,
@@ -14954,32 +15172,98 @@ describe('TeamProvisioningService', () => {
       new Date(Date.now() + 1_000).toISOString()
     );
 
-    child.stdout.emit(
-      'data',
-      Buffer.from(
-        `${JSON.stringify({
-          type: 'system',
-          subtype: 'team_bootstrap',
-          event: 'completed',
-          run_id: runId,
-          team_name: teamName,
-          seq: 1,
-          failed_members: [],
-        })}\n`,
-        'utf8'
-      )
-    );
-
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(waitForValidConfig).toHaveBeenCalledTimes(1);
-    expect(scheduleRecovery).toHaveBeenCalledWith(run);
     expect(progressStates.at(-1)).not.toBe('ready');
 
     await (svc as any).recoverDeterministicBootstrapCompletion(run);
     expect(progressStates.at(-1)).toBe('ready');
     expect((svc as any).provisioningRunByTeam.has(teamName)).toBe(false);
     expect((svc as any).aliveRunByTeam.get(teamName)).toBe(runId);
+  });
+
+  it('does not recover ready progress from completed bootstrap-state when the lead child is gone', async () => {
+    allowConsoleLogs();
+    const teamName = 'create-completed-bootstrap-dead-lead';
+    const child = createRunningChild();
+    vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+    vi.mocked(spawnCli).mockReturnValue(child as any);
+
+    const mcpConfigBuilder = {
+      writeConfigFile: vi.fn(async () => '/mock/mcp-config-create.json'),
+      removeConfigFile: vi.fn(async () => {}),
+    };
+    const membersMetaStore = {
+      writeMembers: vi.fn(async () => {}),
+      getMembers: vi.fn(async () => []),
+    };
+    const teamMetaStore = {
+      writeMeta: vi.fn(async () => {}),
+      deleteMeta: vi.fn(async () => {}),
+      getMeta: vi.fn(async () => null),
+    };
+
+    const svc = new TeamProvisioningService(
+      undefined,
+      undefined,
+      membersMetaStore as any,
+      undefined,
+      mcpConfigBuilder as any,
+      teamMetaStore as any
+    );
+    (svc as any).buildProvisioningEnv = vi.fn(async () => ({
+      env: { CODEX_API_KEY: 'test' },
+      authSource: 'codex_runtime',
+    }));
+    (svc as any).validateAgentTeamsMcpRuntime = vi.fn(async () => {});
+    (svc as any).pathExists = vi.fn(async () => false);
+    (svc as any).startFilesystemMonitor = vi.fn();
+    (svc as any).startStallWatchdog = vi.fn();
+    (svc as any).stopStallWatchdog = vi.fn();
+    (svc as any).resolveAndValidateLaunchIdentity = vi.fn(async () => ({
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
+      selectedModel: 'gpt-5.5',
+      selectedModelKind: 'explicit',
+      resolvedLaunchModel: 'gpt-5.5',
+      catalogId: 'gpt-5.5',
+      catalogSource: 'test',
+      catalogFetchedAt: '2026-05-07T00:00:00.000Z',
+      selectedEffort: 'medium',
+      resolvedEffort: 'medium',
+      selectedFastMode: null,
+      resolvedFastMode: null,
+      fastResolutionReason: null,
+    }));
+
+    const progressStates: string[] = [];
+    const { runId } = await svc.createTeam(
+      {
+        teamName,
+        cwd: tempClaudeRoot,
+        providerId: 'codex',
+        providerBackendId: 'codex-native',
+        model: 'gpt-5.5',
+        members: [{ name: 'alice' }],
+      },
+      (progress) => {
+        progressStates.push(progress.state);
+      }
+    );
+    const run = (svc as any).runs.get(runId);
+    expect(run).toBeTruthy();
+    run.deterministicBootstrap = true;
+    run.provisioningComplete = true;
+    run.child = null;
+
+    writeBootstrapState(
+      teamName,
+      [{ name: 'alice', status: 'bootstrap_confirmed' }],
+      new Date(Date.now() + 1_000).toISOString()
+    );
+
+    await (svc as any).recoverDeterministicBootstrapCompletion(run);
+
+    expect(progressStates).not.toContain('ready');
+    expect((svc as any).aliveRunByTeam.get(teamName)).toBeUndefined();
   });
 
   it('does not verify provisioning again after flushing a final newline-less error result', async () => {
