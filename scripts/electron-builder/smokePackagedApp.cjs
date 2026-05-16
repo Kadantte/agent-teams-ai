@@ -16,6 +16,68 @@ const FAILURE_PATTERNS = [
   /DeprecationWarning: fs\.Stats constructor is deprecated/i,
 ];
 
+function isMacBundle(candidatePath) {
+  return (
+    candidatePath.endsWith('.app') &&
+    fs.existsSync(path.join(candidatePath, 'Contents', 'MacOS')) &&
+    fs.statSync(path.join(candidatePath, 'Contents', 'MacOS')).isDirectory()
+  );
+}
+
+function findMacBundles(searchRoot, maxDepth = 3) {
+  if (!fs.existsSync(searchRoot) || maxDepth < 0) {
+    return [];
+  }
+
+  const stat = fs.statSync(searchRoot);
+  if (stat.isDirectory() && isMacBundle(searchRoot)) {
+    return [searchRoot];
+  }
+  if (!stat.isDirectory()) {
+    return [];
+  }
+
+  const bundles = [];
+  for (const entry of fs.readdirSync(searchRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const fullPath = path.join(searchRoot, entry.name);
+    if (isMacBundle(fullPath)) {
+      bundles.push(fullPath);
+      continue;
+    }
+    bundles.push(...findMacBundles(fullPath, maxDepth - 1));
+  }
+  return bundles;
+}
+
+function resolveBundlePath(bundlePath, platform) {
+  if (platform !== 'darwin' || isMacBundle(bundlePath)) {
+    return bundlePath;
+  }
+
+  const searchRoots = [
+    path.dirname(bundlePath),
+    path.dirname(path.dirname(bundlePath)),
+    path.resolve(process.cwd(), 'release'),
+  ];
+  const bundles = [...new Set(searchRoots.flatMap((searchRoot) => findMacBundles(searchRoot)))];
+  if (bundles.length === 1) {
+    return bundles[0];
+  }
+  if (bundles.length > 1) {
+    const expectedName = path.basename(bundlePath);
+    const nameMatch = bundles.find((candidate) => path.basename(candidate) === expectedName);
+    if (nameMatch) {
+      return nameMatch;
+    }
+  }
+
+  return bundlePath;
+}
+
 function fail(message, log = '') {
   console.error(`[smokePackagedApp] ${message}`);
   if (log.trim()) {
@@ -105,7 +167,11 @@ async function terminateChild(child, exitPromise, platform) {
 
   const closed = await waitForProcessClose(child, exitPromise, SHUTDOWN_TIMEOUT_MS);
   if (!closed && child.exitCode === null && child.signalCode === null) {
-    throw new Error(`Timed out after ${SHUTDOWN_TIMEOUT_MS}ms waiting for packaged app to exit`);
+    child.kill('SIGKILL');
+    const killed = await waitForProcessClose(child, exitPromise, SHUTDOWN_TIMEOUT_MS);
+    if (!killed && child.exitCode === null && child.signalCode === null) {
+      throw new Error(`Timed out after ${SHUTDOWN_TIMEOUT_MS}ms waiting for packaged app to exit`);
+    }
   }
 }
 
@@ -115,10 +181,13 @@ async function main() {
     fail('Usage: node ./scripts/electron-builder/smokePackagedApp.cjs <bundlePath> <platform>');
   }
 
-  const bundlePath = path.resolve(bundlePathArg);
+  const bundlePath = resolveBundlePath(path.resolve(bundlePathArg), platform);
   const executable = findExecutable(bundlePath, platform);
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-teams-smoke-'));
   const args = [`--user-data-dir=${userDataDir}`];
+  if (platform === 'linux') {
+    args.push('--no-sandbox');
+  }
   const child = spawn(executable, args, {
     env: {
       ...process.env,
