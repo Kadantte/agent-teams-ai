@@ -353,7 +353,8 @@
       "cpu-features"
     ],
     "patchedDependencies": {
-      "@radix-ui/react-presence@1.1.5": "patches/@radix-ui__react-presence@1.1.5.patch"
+      "@radix-ui/react-presence@1.1.5": "patches/@radix-ui__react-presence@1.1.5.patch",
+      "@radix-ui/react-focus-scope@1.1.7": "patches/@radix-ui__react-focus-scope@1.1.7.patch"
     }
   },
   "knip": {
