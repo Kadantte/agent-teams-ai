@@ -13,7 +13,7 @@ export interface ProjectPathProject extends Project {
   filesystemState?: DashboardRecentProjectFilesystemState;
 }
 
-export interface ProjectPathOptionMeta {
+export interface ProjectPathOptionMeta extends Record<string, unknown> {
   discoverySource?: DashboardRecentProjectSource;
   filesystemState?: DashboardRecentProjectFilesystemState;
 }
