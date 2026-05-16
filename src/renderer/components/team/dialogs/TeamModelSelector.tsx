@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
 import { Checkbox } from '@renderer/components/ui/checkbox';
+import { HoverTooltip } from '@renderer/components/ui/hover-tooltip';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover';
@@ -47,6 +48,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Filter,
+  Info,
   Search,
   Star,
 } from 'lucide-react';
@@ -819,6 +821,18 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
               <span>{modelRecommendation.label}</span>
             </span>
           ) : null}
+          {opt.value === '' ? (
+            <span className="flex items-center justify-center gap-1">
+              <HoverTooltip
+                content={defaultModelTooltip}
+                title={defaultModelTooltip}
+                stopClickPropagation
+                contentClassName="max-w-[240px]"
+              >
+                <Info className="size-3 shrink-0 opacity-45 transition-opacity hover:opacity-75" />
+              </HoverTooltip>
+            </span>
+          ) : null}
           {hasModelIssue && (
             <span
               className="flex items-center justify-center gap-1 text-[10px] font-normal text-red-300"
@@ -826,6 +840,16 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
             >
               <AlertTriangle className="size-3 shrink-0" />
               <span>{modelUnavailableReason ? 'Unavailable' : 'Issue'}</span>
+              {modelStatusMessage ? (
+                <HoverTooltip
+                  content={modelStatusMessage}
+                  title={modelStatusMessage}
+                  stopClickPropagation
+                  contentClassName="max-w-[240px]"
+                >
+                  <Info className="size-3 shrink-0 opacity-55 transition-opacity hover:opacity-85" />
+                </HoverTooltip>
+              ) : null}
             </span>
           )}
           {!hasModelIssue && modelDisabledReason && (
@@ -834,6 +858,14 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
               title={modelDisabledReason}
             >
               <span>{TEAM_MODEL_UI_DISABLED_BADGE_LABEL}</span>
+              <HoverTooltip
+                content={modelDisabledReason}
+                title={modelDisabledReason}
+                stopClickPropagation
+                contentClassName="max-w-[240px]"
+              >
+                <Info className="size-3 shrink-0 opacity-45 transition-opacity hover:opacity-75" />
+              </HoverTooltip>
             </span>
           )}
         </span>

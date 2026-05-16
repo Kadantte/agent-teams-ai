@@ -12,6 +12,7 @@ import {
 import { RoleSelect } from '@renderer/components/team/RoleSelect';
 import { Button } from '@renderer/components/ui/button';
 import { Checkbox } from '@renderer/components/ui/checkbox';
+import { HoverTooltip } from '@renderer/components/ui/hover-tooltip';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
@@ -262,6 +263,21 @@ export const MemberDraftRow = ({
   const modelHelpDescriptionId = modelTooltipText ? `member-${member.id}-model-help` : undefined;
   const modelButtonDescribedBy =
     [modelIssueDescriptionId, modelHelpDescriptionId].filter(Boolean).join(' ') || undefined;
+  const modelButtonTooltipContent =
+    currentModelIssueText || modelTooltipText ? (
+      <>
+        {currentModelIssueText ? (
+          <span className="block text-red-300">{currentModelIssueText}</span>
+        ) : null}
+        {modelTooltipText ? (
+          <span
+            className={cn('block', currentModelIssueText && 'mt-1 border-t border-white/10 pt-1')}
+          >
+            {modelTooltipText}
+          </span>
+        ) : null}
+      </>
+    ) : null;
   const hasCustomProviderOrModel =
     !forceInheritedModelSettings && Boolean(member.providerId || member.model?.trim());
   const showSonnetExtraUsageWarning =
@@ -357,7 +373,13 @@ export const MemberDraftRow = ({
             </Button>
           ) : null}
           <div className="w-full min-w-0 space-y-1 sm:w-[150px] sm:min-w-[150px]">
-            <span className="inline-flex w-full" title={modelButtonTitle}>
+            <HoverTooltip
+              content={modelButtonTooltipContent}
+              title={modelButtonTitle}
+              disabled={!modelButtonTooltipContent}
+              className="w-full"
+              contentClassName="max-w-64"
+            >
               <Button
                 variant="outline"
                 size="sm"
@@ -382,7 +404,7 @@ export const MemberDraftRow = ({
                   <AlertTriangle className="size-3.5 shrink-0 text-red-300" />
                 ) : null}
               </Button>
-            </span>
+            </HoverTooltip>
             {modelTooltipText ? (
               <span id={modelHelpDescriptionId} className="sr-only">
                 {modelTooltipText}
@@ -400,34 +422,41 @@ export const MemberDraftRow = ({
           </div>
           {showWorktreeIsolationControls ? (
             <div className="space-y-0.5">
-              <div
-                className={cn(
-                  'flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 text-xs text-[var(--color-text-secondary)]',
-                  worktreeIsolationDisabled && 'cursor-not-allowed opacity-50'
-                )}
+              <HoverTooltip
+                as="div"
+                content={worktreeIsolationDescription}
                 title={worktreeIsolationDescription}
-                aria-describedby={worktreeIsolationDescriptionId}
+                className="shrink-0"
+                contentClassName="max-w-64"
               >
-                <Checkbox
-                  id={`member-${member.id}-worktree-isolation`}
-                  checked={member.isolation === 'worktree'}
-                  disabled={worktreeIsolationDisabled}
-                  aria-describedby={worktreeIsolationDescriptionId}
-                  onCheckedChange={(checked) =>
-                    onWorktreeIsolationChange?.(member.id, checked === true)
-                  }
-                />
-                <Label
-                  htmlFor={`member-${member.id}-worktree-isolation`}
+                <div
                   className={cn(
-                    'flex cursor-pointer items-center gap-1.5 text-xs font-normal',
-                    worktreeIsolationDisabled && 'cursor-not-allowed'
+                    'flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 text-xs text-[var(--color-text-secondary)]',
+                    worktreeIsolationDisabled && 'cursor-not-allowed opacity-50'
                   )}
+                  aria-describedby={worktreeIsolationDescriptionId}
                 >
-                  <GitBranch className="size-3.5 shrink-0" />
-                  <span>Worktree</span>
-                </Label>
-              </div>
+                  <Checkbox
+                    id={`member-${member.id}-worktree-isolation`}
+                    checked={member.isolation === 'worktree'}
+                    disabled={worktreeIsolationDisabled}
+                    aria-describedby={worktreeIsolationDescriptionId}
+                    onCheckedChange={(checked) =>
+                      onWorktreeIsolationChange?.(member.id, checked === true)
+                    }
+                  />
+                  <Label
+                    htmlFor={`member-${member.id}-worktree-isolation`}
+                    className={cn(
+                      'flex cursor-pointer items-center gap-1.5 text-xs font-normal',
+                      worktreeIsolationDisabled && 'cursor-not-allowed'
+                    )}
+                  >
+                    <GitBranch className="size-3.5 shrink-0" />
+                    <span>Worktree</span>
+                  </Label>
+                </div>
+              </HoverTooltip>
               <span id={worktreeIsolationDescriptionId} className="sr-only">
                 {worktreeIsolationDescription}
               </span>
