@@ -572,6 +572,11 @@ import type {
   ToolCallMeta,
 } from '@shared/types';
 
+// pidusage's Windows wmic/gwmi fallback needs a non-zero cache window to finish
+// its initial two-sample pass. Keep this above slow PowerShell startup time, or
+// the first sample can expire before the recursive second read and loop again.
+const RUNTIME_PIDUSAGE_OPTIONS = process.platform === 'win32' ? { maxage: 10_000 } : { maxage: 0 };
+
 const logger = createLogger('Service:TeamProvisioning');
 const PREFLIGHT_DEBUG_LOG_PATH = path.join(os.tmpdir(), 'claude-team-preflight-debug.log');
 
@@ -15298,7 +15303,7 @@ export class TeamProvisioningService {
       let rssBytes = rssPid ? rssBytesByPid.get(rssPid) : undefined;
       if (rssBytes == null && isSharedOpenCodeHost && typeof rssPid === 'number' && rssPid > 0) {
         try {
-          const refreshedStat = await pidusage(rssPid, { maxage: 0 });
+          const refreshedStat = await pidusage(rssPid, RUNTIME_PIDUSAGE_OPTIONS);
           if (Number.isFinite(refreshedStat.memory) && refreshedStat.memory >= 0) {
             rssBytesByPid.set(rssPid, refreshedStat.memory);
             rssBytes = refreshedStat.memory;
@@ -25558,7 +25563,7 @@ export class TeamProvisioningService {
     }
 
     const rssBytesByPid = new Map<number, number>();
-    const options = { maxage: 0 };
+    const options = RUNTIME_PIDUSAGE_OPTIONS;
     try {
       const statsByPid = await pidusage(uniquePids, options);
       for (const [rawPid, stat] of Object.entries(statsByPid)) {
