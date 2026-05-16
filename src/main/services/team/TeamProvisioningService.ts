@@ -31999,103 +31999,100 @@ export class TeamProvisioningService {
       });
     };
 
-    // Apply permission_suggestions: add tool rules to project settings file
+    // Apply permission_suggestions: add tool rules to project settings file.
     if (suggestions.length === 0) {
-      sendSuccessResponse();
       logger.info(
-        `[${run.teamName}] No permission_suggestions for ${requestId}; inbox response sent`
+        `[${run.teamName}] No permission_suggestions for ${requestId}; sending allow responses only`
       );
-      return;
-    }
+    } else {
+      // Resolve project cwd from team config
+      let projectCwd: string | undefined;
+      try {
+        const config = await this.readConfigForStrictDecision(run.teamName);
+        projectCwd = config?.projectPath ?? config?.members?.[0]?.cwd;
+      } catch {
+        // best-effort
+      }
 
-    // Resolve project cwd from team config
-    let projectCwd: string | undefined;
-    try {
-      const config = await this.readConfigForStrictDecision(run.teamName);
-      projectCwd = config?.projectPath ?? config?.members?.[0]?.cwd;
-    } catch {
-      // best-effort
-    }
-    if (!projectCwd) {
-      logger.warn(
-        `[${run.teamName}] Cannot resolve project cwd for permission rule; sending inbox response only`
-      );
-      sendSuccessResponse();
-      return;
-    }
+      if (!projectCwd) {
+        logger.warn(
+          `[${run.teamName}] Cannot resolve project cwd for permission rule; sending allow responses only`
+        );
+      } else {
+        for (const suggestion of suggestions) {
+          // Handle "setMode" suggestions (e.g. Write/Edit tools suggest acceptEdits mode)
+          // FACT: Write/Edit permission_requests have permission_suggestions:
+          //   { type: "setMode", mode: "acceptEdits", destination: "session" }
+          // Since we can't change session mode of a subprocess, we translate to addRules.
+          if (suggestion.type === 'setMode') {
+            const mode = typeof suggestion.mode === 'string' ? suggestion.mode : '';
+            let toolNames: string[] = [];
+            if (mode === 'acceptEdits') {
+              toolNames = ['Edit', 'Write', 'NotebookEdit'];
+            } else if (mode === 'bypassPermissions') {
+              // Broad approval - add common tools
+              toolNames = ['Edit', 'Write', 'NotebookEdit', 'Bash', 'Read', 'Grep', 'Glob'];
+            }
+            if (toolNames.length > 0) {
+              const settingsPath = path.join(projectCwd, '.claude', 'settings.local.json');
+              try {
+                await this.addPermissionRulesToSettings(settingsPath, toolNames, 'allow');
+                logger.info(
+                  `[${run.teamName}] Applied setMode "${mode}" for ${agentId}: ${toolNames.join(', ')} in ${settingsPath}`
+                );
+              } catch (error) {
+                logger.error(
+                  `[${run.teamName}] Failed to apply setMode: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`
+                );
+              }
+            }
+            continue;
+          }
 
-    for (const suggestion of suggestions) {
-      // Handle "setMode" suggestions (e.g. Write/Edit tools suggest acceptEdits mode)
-      // FACT: Write/Edit permission_requests have permission_suggestions:
-      //   { type: "setMode", mode: "acceptEdits", destination: "session" }
-      // Since we can't change session mode of a subprocess, we translate to addRules.
-      if (suggestion.type === 'setMode') {
-        const mode = typeof suggestion.mode === 'string' ? suggestion.mode : '';
-        let toolNames: string[] = [];
-        if (mode === 'acceptEdits') {
-          toolNames = ['Edit', 'Write', 'NotebookEdit'];
-        } else if (mode === 'bypassPermissions') {
-          // Broad approval - add common tools
-          toolNames = ['Edit', 'Write', 'NotebookEdit', 'Bash', 'Read', 'Grep', 'Glob'];
-        }
-        if (toolNames.length > 0) {
-          const settingsPath = path.join(projectCwd, '.claude', 'settings.local.json');
+          if (suggestion.type !== 'addRules' || !Array.isArray(suggestion.rules)) continue;
+
+          let toolNames = suggestion.rules
+            .map((r) => r.toolName)
+            .filter((name): name is string => typeof name === 'string' && name.length > 0);
+          if (toolNames.length === 0) continue;
+
+          // Expand teammate-safe operational tools only.
+          // This removes the bootstrap/task workflow race without accidentally granting
+          // admin/runtime tools like team_stop or kanban_clear.
+          if (
+            toolNames.some((name) =>
+              AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES.includes(name)
+            )
+          ) {
+            const merged = new Set([
+              ...toolNames,
+              ...AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
+            ]);
+            toolNames = Array.from(merged);
+          }
+
+          const behavior = suggestion.behavior ?? 'allow';
+          // FACT: observed destinations are "localSettings" (project-level .claude/settings.local.json)
+          const settingsPath =
+            suggestion.destination === 'localSettings'
+              ? path.join(projectCwd, '.claude', 'settings.local.json')
+              : path.join(projectCwd, '.claude', 'settings.local.json'); // default to local
+
           try {
-            await this.addPermissionRulesToSettings(settingsPath, toolNames, 'allow');
+            await this.addPermissionRulesToSettings(settingsPath, toolNames, behavior);
             logger.info(
-              `[${run.teamName}] Applied setMode "${mode}" for ${agentId}: ${toolNames.join(', ')} in ${settingsPath}`
+              `[${run.teamName}] Added permission rules for ${agentId}: ${toolNames.join(', ')} -> ${behavior} in ${settingsPath}`
             );
           } catch (error) {
             logger.error(
-              `[${run.teamName}] Failed to apply setMode: ${
+              `[${run.teamName}] Failed to add permission rules: ${
                 error instanceof Error ? error.message : String(error)
               }`
             );
           }
         }
-        continue;
-      }
-
-      if (suggestion.type !== 'addRules' || !Array.isArray(suggestion.rules)) continue;
-
-      let toolNames = suggestion.rules
-        .map((r) => r.toolName)
-        .filter((name): name is string => typeof name === 'string' && name.length > 0);
-      if (toolNames.length === 0) continue;
-
-      // Expand teammate-safe operational tools only.
-      // This removes the bootstrap/task workflow race without accidentally granting
-      // admin/runtime tools like team_stop or kanban_clear.
-      if (
-        toolNames.some((name) =>
-          AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES.includes(name)
-        )
-      ) {
-        const merged = new Set([
-          ...toolNames,
-          ...AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
-        ]);
-        toolNames = Array.from(merged);
-      }
-
-      const behavior = suggestion.behavior ?? 'allow';
-      // FACT: observed destinations are "localSettings" (project-level .claude/settings.local.json)
-      const settingsPath =
-        suggestion.destination === 'localSettings'
-          ? path.join(projectCwd, '.claude', 'settings.local.json')
-          : path.join(projectCwd, '.claude', 'settings.local.json'); // default to local
-
-      try {
-        await this.addPermissionRulesToSettings(settingsPath, toolNames, behavior);
-        logger.info(
-          `[${run.teamName}] Added permission rules for ${agentId}: ${toolNames.join(', ')} -> ${behavior} in ${settingsPath}`
-        );
-      } catch (error) {
-        logger.error(
-          `[${run.teamName}] Failed to add permission rules: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
       }
     }
 
@@ -32186,7 +32183,7 @@ export class TeamProvisioningService {
     message: string | undefined
   ): Record<string, unknown> | undefined {
     if (!toolInput) return undefined;
-    if (toolName !== 'AskUserQuestion' || !message) return toolInput;
+    if (toolName !== 'AskUserQuestion' || message === undefined) return toolInput;
 
     const answers = this.parseAskUserQuestionAnswers(message, toolInput);
     return Object.keys(answers).length > 0 ? { ...toolInput, answers } : toolInput;

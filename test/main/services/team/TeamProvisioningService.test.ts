@@ -14454,6 +14454,26 @@ describe('TeamProvisioningService', () => {
     });
   });
 
+  it('preserves blank teammate AskUserQuestion answers', () => {
+    const svc = new TeamProvisioningService();
+    const toolInput = {
+      questions: [
+        {
+          question: 'Anything else?',
+          options: [{ label: 'Skip', description: 'No extra details' }],
+        },
+      ],
+    };
+
+    expect((svc as any).buildTeammatePermissionUpdatedInput('AskUserQuestion', toolInput, ''))
+      .toEqual({
+        ...toolInput,
+        answers: {
+          'Anything else?': '',
+        },
+      });
+  });
+
   it('sends teammate AskUserQuestion permission responses to the teammate inbox', async () => {
     const svc = new TeamProvisioningService();
     const persistInboxMessage = vi.fn();
@@ -14567,6 +14587,45 @@ describe('TeamProvisioningService', () => {
     expect(payload.response.response.updatedInput).toEqual({
       ...toolInput,
       answers: { 'What features do you need?': 'Basic' },
+    });
+  });
+
+  it('sends teammate fallback control responses without permission suggestions', async () => {
+    const write = vi.fn((_line: string, cb?: (error?: Error | null) => void) => {
+      cb?.();
+      return true;
+    });
+    const svc = new TeamProvisioningService();
+    (svc as any).persistInboxMessage = vi.fn();
+    const toolInput = {
+      questions: [
+        {
+          question: 'Anything else?',
+          options: [{ label: 'Skip', description: 'No extra details' }],
+        },
+      ],
+    };
+
+    await (svc as any).respondToTeammatePermission(
+      {
+        teamName: 'ops-team',
+        runId: 'run-1',
+        child: { stdin: { writable: true, write } },
+      },
+      'bob',
+      'perm-3',
+      true,
+      '',
+      [],
+      'AskUserQuestion',
+      toolInput
+    );
+
+    expect(write).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(write.mock.calls[0][0]);
+    expect(payload.response.response.updatedInput).toEqual({
+      ...toolInput,
+      answers: { 'Anything else?': '' },
     });
   });
 
