@@ -4,6 +4,10 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
+const CHILD_CLOSE_GRACE_MS = 3_000;
+const CHILD_FORCE_CLOSE_GRACE_MS = 1_000;
+const TASKKILL_TIMEOUT_MS = 5_000;
+
 export async function preflightOpenCodeLiveEnvironment(input) {
   const repoRoot = input.repoRoot;
   const opencodeBin = process.env.OPENCODE_BIN?.trim() || '/opt/homebrew/bin/opencode';
@@ -139,44 +143,54 @@ async function canStartOpenCodeHost(opencodeBin, cwd, env) {
   }
 }
 
-async function stopChild(child) {
-  if (child.exitCode != null || child.killed) {
+async function stopChild(child, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const killProcessTree = options.killProcessTree ?? taskkillProcessTree;
+  const closeGraceMs = options.closeGraceMs ?? CHILD_CLOSE_GRACE_MS;
+  const forceCloseGraceMs = options.forceCloseGraceMs ?? CHILD_FORCE_CLOSE_GRACE_MS;
+
+  if (hasChildExited(child)) {
     return;
   }
 
-  if (process.platform === 'win32' && child.pid) {
-    await taskkillProcessTree(child.pid);
+  if (platform === 'win32' && child.pid) {
+    await killProcessTree(child.pid);
+  } else if (!child.killed) {
+    sendChildSignal(child, 'SIGTERM');
+  }
+
+  if (await waitForChildClose(child, closeGraceMs)) {
     return;
   }
 
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      if (child.exitCode == null) {
-        child.kill('SIGKILL');
-      }
-      resolve();
-    }, 3_000);
-    child.once('close', () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-    child.kill('SIGTERM');
-  });
+  if (!hasChildExited(child)) {
+    sendChildSignal(child, 'SIGKILL');
+    if (!(await waitForChildClose(child, forceCloseGraceMs))) {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref?.();
+    }
+  }
 }
 
 function taskkillProcessTree(pid) {
   return new Promise((resolve) => {
     let done = false;
+    let taskkill = null;
     const finish = () => {
       if (done) return;
       done = true;
       clearTimeout(timeout);
       resolve();
     };
-    const timeout = setTimeout(finish, 5_000);
-    timeout.unref?.();
+    const timeout = setTimeout(() => {
+      if (taskkill) {
+        sendChildSignal(taskkill, 'SIGTERM');
+      }
+      finish();
+    }, TASKKILL_TIMEOUT_MS);
     try {
-      const taskkill = spawn(
+      taskkill = spawn(
         path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'),
         ['/T', '/F', '/PID', String(pid)],
         {
@@ -184,12 +198,43 @@ function taskkillProcessTree(pid) {
           windowsHide: true,
         }
       );
+      taskkill.unref?.();
       taskkill.once('error', finish);
       taskkill.once('close', finish);
     } catch {
       finish();
     }
   });
+}
+
+function waitForChildClose(child, timeoutMs) {
+  if (hasChildExited(child)) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (closed) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+      resolve(closed);
+    };
+    const timeout = setTimeout(() => finish(false), timeoutMs);
+    child.once('close', () => finish(true));
+  });
+}
+
+function hasChildExited(child) {
+  return child.exitCode != null || child.signalCode != null;
+}
+
+function sendChildSignal(child, signal) {
+  try {
+    child.kill(signal);
+  } catch {
+    // Process may already be gone between liveness checks and the kill call.
+  }
 }
 
 function allocateLoopbackPort() {
@@ -224,3 +269,8 @@ function skip(reason) {
 function compactOutput(value) {
   return value.replace(/\s+/g, ' ').trim().slice(0, 1_200);
 }
+
+export const __opencodeLivePreflightTestHooks = {
+  stopChild,
+  taskkillProcessTree,
+};

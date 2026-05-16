@@ -15453,9 +15453,9 @@ describe('TeamProvisioningService', () => {
     });
 
     expect(spawnCli).toHaveBeenCalled();
-    expect(progressUpdates[0]?.warnings).toEqual(expect.arrayContaining([
-      expect.stringContaining('9 primary teammates'),
-    ]));
+    expect(progressUpdates[0]?.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining('9 primary teammates')])
+    );
     expect(progressUpdates[0]?.warnings?.join('\n')).toContain('Launches above 8 teammates');
   });
 

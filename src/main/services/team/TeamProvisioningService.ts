@@ -152,10 +152,6 @@ import * as path from 'path';
 import pidusage from 'pidusage';
 import * as readline from 'readline';
 
-// pidusage's Windows gwmi fallback needs a non-zero cache window to finish its
-// initial two-sample pass. maxage: 0 can recurse forever on Windows.
-const RUNTIME_PIDUSAGE_OPTIONS = process.platform === 'win32' ? { maxage: 1_000 } : { maxage: 0 };
-
 import {
   ANTHROPIC_HELPER_MODE_COMPETING_AUTH_ENV_KEYS,
   type AnthropicTeamApiKeyHelperMaterial,
@@ -575,6 +571,10 @@ import type {
   ToolApprovalSettings,
   ToolCallMeta,
 } from '@shared/types';
+
+// pidusage's Windows gwmi fallback needs a non-zero cache window to finish its
+// initial two-sample pass. maxage: 0 can recurse forever on Windows.
+const RUNTIME_PIDUSAGE_OPTIONS = process.platform === 'win32' ? { maxage: 1_000 } : { maxage: 0 };
 
 const logger = createLogger('Service:TeamProvisioning');
 const PREFLIGHT_DEBUG_LOG_PATH = path.join(os.tmpdir(), 'claude-team-preflight-debug.log');
