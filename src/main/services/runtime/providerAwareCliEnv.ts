@@ -3,6 +3,7 @@ import { getCachedShellEnv } from '@main/utils/shellEnv';
 
 import { resolveVerifiedAppManagedOpenCodeRuntimeBinaryPath } from '../infrastructure/OpenCodeRuntimeInstallerService';
 
+import { ensureAgentTeamsMcpLocalLaunchEnv } from './agentTeamsMcpLaunchEnv';
 import { buildRuntimeBaseEnv } from './buildRuntimeBaseEnv';
 import { providerConnectionService } from './ProviderConnectionService';
 
@@ -57,6 +58,9 @@ export async function buildProviderAwareCliEnv(
     (!resolvedProviderId || resolvedProviderId === 'codex')
   ) {
     env.CODEX_CLI_PATH = appManagedCodexBinary;
+  }
+  if (!resolvedProviderId || resolvedProviderId === 'opencode') {
+    await ensureAgentTeamsMcpLocalLaunchEnv(env);
   }
 
   if (options.providerId) {

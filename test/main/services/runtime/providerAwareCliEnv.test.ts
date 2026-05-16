@@ -12,6 +12,7 @@ const getConfiguredConnectionIssuesMock = vi.fn();
 const getConfiguredConnectionLaunchArgsMock = vi.fn();
 const resolveVerifiedAppManagedOpenCodeRuntimeBinaryPathMock = vi.fn();
 const resolveVerifiedAppManagedCodexRuntimeBinaryPathMock = vi.fn();
+const resolveAgentTeamsMcpLaunchSpecMock = vi.fn();
 
 vi.mock('@main/utils/cliEnv', () => ({
   buildEnrichedEnv: (...args: Parameters<typeof buildEnrichedEnvMock>) =>
@@ -68,6 +69,10 @@ vi.mock('@features/codex-runtime-installer/main', () => ({
     resolveVerifiedAppManagedCodexRuntimeBinaryPathMock(),
 }));
 
+vi.mock('@main/services/team/TeamMcpConfigBuilder', () => ({
+  resolveAgentTeamsMcpLaunchSpec: () => resolveAgentTeamsMcpLaunchSpecMock(),
+}));
+
 describe('buildProviderAwareCliEnv', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -95,6 +100,10 @@ describe('buildProviderAwareCliEnv', () => {
     getConfiguredConnectionIssuesMock.mockResolvedValue({});
     resolveVerifiedAppManagedOpenCodeRuntimeBinaryPathMock.mockResolvedValue(null);
     resolveVerifiedAppManagedCodexRuntimeBinaryPathMock.mockResolvedValue(null);
+    resolveAgentTeamsMcpLaunchSpecMock.mockResolvedValue({
+      command: 'node',
+      args: ['/app/mcp-server/index.js'],
+    });
   });
 
   it('builds provider-pinned CLI env and returns provider-specific issues', async () => {
@@ -168,6 +177,44 @@ describe('buildProviderAwareCliEnv', () => {
     expect(result.connectionIssues).toEqual({});
     expect(result.providerArgs).toEqual([]);
     expect(result.env.OPENCODE_DISABLE_AUTOUPDATE).toBe('1');
+    expect(result.env.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND).toBe('node');
+    expect(result.env.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY).toBe('/app/mcp-server/index.js');
+    expect(result.env.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON).toBe(
+      '["/app/mcp-server/index.js"]'
+    );
+  });
+
+  it('adds local Agent Teams MCP launch env for OpenCode provider runtime commands', async () => {
+    const { buildProviderAwareCliEnv } =
+      await import('../../../../src/main/services/runtime/providerAwareCliEnv');
+    const result = await buildProviderAwareCliEnv({
+      providerId: 'opencode',
+    });
+
+    expect(resolveAgentTeamsMcpLaunchSpecMock).toHaveBeenCalledTimes(1);
+    expect(result.env.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND).toBe('node');
+    expect(result.env.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY).toBe('/app/mcp-server/index.js');
+    expect(result.env.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON).toBe(
+      '["/app/mcp-server/index.js"]'
+    );
+  });
+
+  it('preserves explicit local Agent Teams MCP launch env for OpenCode provider commands', async () => {
+    const { buildProviderAwareCliEnv } =
+      await import('../../../../src/main/services/runtime/providerAwareCliEnv');
+    const result = await buildProviderAwareCliEnv({
+      providerId: 'opencode',
+      env: {
+        CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND: 'custom-node',
+        CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY: '/custom/mcp.js',
+        CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON: '["/custom/mcp.js"]',
+      },
+    });
+
+    expect(resolveAgentTeamsMcpLaunchSpecMock).not.toHaveBeenCalled();
+    expect(result.env.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND).toBe('custom-node');
+    expect(result.env.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY).toBe('/custom/mcp.js');
+    expect(result.env.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON).toBe('["/custom/mcp.js"]');
   });
 
   it('allows OpenCode auto-update only behind an explicit app override', async () => {
