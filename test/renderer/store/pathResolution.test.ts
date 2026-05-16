@@ -41,6 +41,14 @@ describe('resolveFilePath', () => {
     expect(resolveFilePath('/repo', '@~/some/file.ts')).toBe('~/some/file.ts');
   });
 
+  it('passes through @-prefixed absolute paths after stripping the mention marker', () => {
+    expect(resolveFilePath('/repo', '@/outside/file.ts')).toBe('/outside/file.ts');
+    expect(resolveFilePath('C:\\repo', '@C:\\outside\\file.ts')).toBe('C:\\outside\\file.ts');
+    expect(resolveFilePath('C:\\repo', '@\\\\server\\share\\file.ts')).toBe(
+      '\\\\server\\share\\file.ts'
+    );
+  });
+
   it('passes through bare tilde as-is', () => {
     expect(resolveFilePath('/repo', '~')).toBe('~');
   });

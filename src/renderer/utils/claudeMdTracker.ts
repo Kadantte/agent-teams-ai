@@ -99,6 +99,9 @@ function joinPaths(base: string, relative: string): string {
   if (cleanRelative.startsWith('@')) {
     cleanRelative = cleanRelative.slice(1);
   }
+  if (isAbsolutePath(cleanRelative)) {
+    return cleanRelative;
+  }
 
   // Handle ./ prefix (current directory)
   if (cleanRelative.startsWith('./') || cleanRelative.startsWith('.\\')) {

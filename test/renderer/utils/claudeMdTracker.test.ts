@@ -195,4 +195,13 @@ describe('extractUserMentionPaths Windows paths', () => {
       ['~\\.claude\\CLAUDE.md']
     );
   });
+
+  it('strips mention markers before preserving absolute mention paths', () => {
+    expect(extractUserMentionPaths(userGroupWithPath('@C:\\Other\\file.ts'), 'C:\\Repo')).toEqual([
+      'C:\\Other\\file.ts',
+    ]);
+    expect(
+      extractUserMentionPaths(userGroupWithPath('@\\\\server\\share\\file.ts'), 'C:\\Repo')
+    ).toEqual(['\\\\server\\share\\file.ts']);
+  });
 });

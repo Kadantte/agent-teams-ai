@@ -27,6 +27,10 @@ export function resolveFilePath(base: string, relativePath: string): string {
     cleanRelative = cleanRelative.slice(1);
   }
 
+  if (isAbsolutePath(cleanRelative)) {
+    return cleanRelative;
+  }
+
   // Tilde paths (~/) are home-relative absolute paths - pass through as-is
   // The main process will expand ~ to the actual home directory
   if (cleanRelative.startsWith('~/') || cleanRelative.startsWith('~\\') || cleanRelative === '~') {
