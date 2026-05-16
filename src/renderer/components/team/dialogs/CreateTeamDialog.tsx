@@ -361,6 +361,10 @@ function cancelScheduledIdle(handle: ScheduledIdleHandle | null): void {
   window.clearTimeout(handle.id);
 }
 
+function isCurrentPrepareGeneration(ref: { current: number }, generation: number): boolean {
+  return ref.current === generation;
+}
+
 export const CreateTeamDialog = ({
   open,
   canCreate,
@@ -445,6 +449,7 @@ export const CreateTeamDialog = ({
   const [prepareChecks, setPrepareChecks] = useState<ProvisioningProviderCheck[]>([]);
   const prepareRequestSeqRef = useRef(0);
   const prepareIdleHandleRef = useRef<ScheduledIdleHandle | null>(null);
+  const prepareUnmountGenerationRef = useRef(0);
   const appliedDefaultProjectPathRef = useRef<string | null>(null);
   const lastAutoDescriptionRef = useRef<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{
@@ -691,6 +696,23 @@ export const CreateTeamDialog = ({
     }
   }, [open]);
 
+  useEffect(() => {
+    const generation = ++prepareUnmountGenerationRef.current;
+    return () => {
+      // React StrictMode replays effect cleanup/setup in development; defer
+      // invalidation so the replay does not cancel the live prepare request.
+      queueMicrotask(() => {
+        if (!isCurrentPrepareGeneration(prepareUnmountGenerationRef, generation)) {
+          return;
+        }
+        cancelScheduledIdle(prepareIdleHandleRef.current);
+        prepareIdleHandleRef.current = null;
+        prepareRequestSeqRef.current += 1;
+        lastPrepareRequestSignatureRef.current = null;
+      });
+    };
+  }, []);
+
   const prepareRuntimeStatusSignature = useMemo(
     () =>
       buildProviderPrepareRuntimeStatusSignature(
@@ -800,12 +822,16 @@ export const CreateTeamDialog = ({
 
   useEffect(() => {
     if (!open || !canCreate || !launchTeam) {
+      cancelScheduledIdle(prepareIdleHandleRef.current);
+      prepareIdleHandleRef.current = null;
       prepareRequestSeqRef.current += 1;
       lastPrepareRequestSignatureRef.current = null;
       return;
     }
 
     if (typeof api.teams.prepareProvisioning !== 'function') {
+      cancelScheduledIdle(prepareIdleHandleRef.current);
+      prepareIdleHandleRef.current = null;
       prepareRequestSeqRef.current += 1;
       lastPrepareRequestSignatureRef.current = null;
       setPrepareState('failed');
@@ -818,6 +844,8 @@ export const CreateTeamDialog = ({
     }
 
     if (!effectiveCwd) {
+      cancelScheduledIdle(prepareIdleHandleRef.current);
+      prepareIdleHandleRef.current = null;
       prepareRequestSeqRef.current += 1;
       lastPrepareRequestSignatureRef.current = null;
       setPrepareState('idle');
@@ -1023,16 +1051,6 @@ export const CreateTeamDialog = ({
         }
       })();
     });
-
-    return () => {
-      cancelScheduledIdle(prepareIdleHandleRef.current);
-      prepareIdleHandleRef.current = null;
-      // Bump the request sequence so any callback that already woke up but
-      // hasn't checked yet treats itself as superseded.
-      if (prepareRequestSeqRef.current === requestSeq) {
-        prepareRequestSeqRef.current += 1;
-      }
-    };
   }, [
     open,
     canCreate,
@@ -1041,6 +1059,7 @@ export const CreateTeamDialog = ({
     effectiveMemberDrafts,
     effectiveAnthropicRuntimeLimitContext,
     prepareRequestSignature,
+    prepareRuntimeStatusSignature,
     runtimeProviderStatusById,
     selectedModel,
     selectedProviderId,

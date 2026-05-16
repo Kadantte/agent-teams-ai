@@ -133,6 +133,7 @@ import {
 import { startEventLoopLagMonitor } from './services/infrastructure/EventLoopLagMonitor';
 import { HttpServer } from './services/infrastructure/HttpServer';
 import { clearAutoResumeService } from './services/team/AutoResumeService';
+import { agentTeamsMcpHttpServer } from './services/team/AgentTeamsMcpHttpServer';
 import { LaunchIoGovernor } from './services/team/LaunchIoGovernor';
 import { OpenCodeBridgeCommandClient } from './services/team/opencode/bridge/OpenCodeBridgeCommandClient';
 import {
@@ -352,6 +353,33 @@ async function createOpenCodeRuntimeAdapterRegistry(
   const bridgeEnv = applyOpenCodeAutoUpdatePolicy({ ...process.env });
   bridgeEnv.CLAUDE_TEAM_APP_INSTANCE_ID = openCodeManagedHostInstanceId;
   bridgeEnv.AGENT_TEAMS_MCP_CLAUDE_DIR = getClaudeBasePath();
+  const applyMcpLaunchSpecEnv = async (
+    targetEnv: NodeJS.ProcessEnv,
+    options: { emitProgress?: boolean } = {}
+  ): Promise<void> => {
+    try {
+      if (options.emitProgress) {
+        reportProgress('runtime-mcp', 'Resolving Agent Teams MCP server...');
+      }
+      const mcpLaunchSpec = await resolveAgentTeamsMcpLaunchSpec({
+        onProgress: options.emitProgress
+          ? ({ phase, message }) => reportProgress(`mcp-${phase}`, message)
+          : undefined,
+      });
+      const mcpEntry = mcpLaunchSpec.args[0];
+      if (mcpEntry) {
+        targetEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND = mcpLaunchSpec.command;
+        targetEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY = mcpEntry;
+        targetEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON = JSON.stringify(mcpLaunchSpec.args);
+      }
+    } catch (error) {
+      logger.warn(
+        `[OpenCode] Runtime adapter bridge MCP entrypoint unresolved: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  };
   try {
     const appManagedOpenCodeBinary = await resolveVerifiedAppManagedOpenCodeRuntimeBinaryPath();
     if (appManagedOpenCodeBinary && !bridgeEnv.CLAUDE_MULTIMODEL_OPENCODE_BIN_PATH) {
@@ -381,29 +409,69 @@ async function createOpenCodeRuntimeAdapterRegistry(
     );
   }
   try {
-    reportProgress('runtime-mcp', 'Resolving Agent Teams MCP server...');
-    const mcpLaunchSpec = await resolveAgentTeamsMcpLaunchSpec({
-      onProgress: ({ phase, message }) => reportProgress(`mcp-${phase}`, message),
-    });
-    const mcpEntry = mcpLaunchSpec.args[0];
-    if (mcpEntry) {
-      bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND = mcpLaunchSpec.command;
-      bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY = mcpEntry;
-      bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON = JSON.stringify(mcpLaunchSpec.args);
-    }
+    reportProgress('runtime-mcp-http', 'Starting Agent Teams MCP server...');
+    const mcpHttpServer = await agentTeamsMcpHttpServer.ensureStarted();
+    bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_URL = mcpHttpServer.url;
+    reportProgress('runtime-mcp-http-ready', 'Agent Teams MCP server is ready...');
   } catch (error) {
     logger.warn(
-      `[OpenCode] Runtime adapter bridge MCP entrypoint unresolved: ${
+      `[OpenCode] Runtime adapter bridge MCP HTTP server unavailable: ${
         error instanceof Error ? error.message : String(error)
       }`
     );
   }
+  if (!bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_URL) {
+    await applyMcpLaunchSpecEnv(bridgeEnv, { emitProgress: true });
+  }
 
   reportProgress('runtime-bridge', 'Preparing OpenCode bridge...');
+  const resolveBridgeCommandEnv = async (): Promise<NodeJS.ProcessEnv> => {
+    const nextEnv = { ...bridgeEnv };
+    if (!bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_URL) {
+      return nextEnv;
+    }
+    try {
+      const mcpHttpServer = await agentTeamsMcpHttpServer.ensureStarted();
+      bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_URL = mcpHttpServer.url;
+      nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_URL = mcpHttpServer.url;
+      delete nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND;
+      delete nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY;
+      delete nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON;
+    } catch (error) {
+      delete nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_URL;
+      if (
+        bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND &&
+        bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY &&
+        bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON
+      ) {
+        nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND =
+          bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND;
+        nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY =
+          bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY;
+        nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON =
+          bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON;
+      } else {
+        await applyMcpLaunchSpecEnv(nextEnv);
+        bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND =
+          nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_COMMAND;
+        bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY =
+          nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ENTRY;
+        bridgeEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON =
+          nextEnv.CLAUDE_MULTIMODEL_AGENT_TEAMS_MCP_ARGS_JSON;
+      }
+      logger.warn(
+        `[OpenCode] Runtime adapter bridge MCP HTTP server refresh failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+    return nextEnv;
+  };
   const bridgeClient = new OpenCodeBridgeCommandClient({
     binaryPath,
     tempDirectory: join(app.getPath('temp'), 'claude-team-opencode-bridge'),
     env: bridgeEnv,
+    envProvider: resolveBridgeCommandEnv,
   });
   const bridgeControlDir = join(app.getPath('userData'), 'opencode-bridge');
   const clientIdentity = createOpenCodeBridgeClientIdentity({
@@ -2080,6 +2148,9 @@ async function shutdownServices(): Promise<void> {
       'OpenCode host registry cleanup',
       () => cleanupOpenCodeHostsForLifecycle('shutdown'),
       10_000
+    );
+    await runShutdownStep('Agent Teams MCP HTTP server cleanup', () =>
+      agentTeamsMcpHttpServer.stop()
     );
     await runShutdownStep('tracked CLI subprocess cleanup', () =>
       killTrackedCliProcesses('SIGKILL')

@@ -51,6 +51,7 @@ export interface OpenCodeBridgeCommandClientOptions {
   diagnosticIdFactory?: () => string;
   clock?: () => Date;
   env?: NodeJS.ProcessEnv;
+  envProvider?: () => NodeJS.ProcessEnv | Promise<NodeJS.ProcessEnv>;
   keepInputFile?: boolean;
 }
 
@@ -102,6 +103,7 @@ export class OpenCodeBridgeCommandClient {
   private readonly diagnosticIdFactory: () => string;
   private readonly clock: () => Date;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly envProvider: (() => NodeJS.ProcessEnv | Promise<NodeJS.ProcessEnv>) | null;
   private readonly keepInputFile: boolean;
 
   constructor(options: OpenCodeBridgeCommandClientOptions) {
@@ -114,6 +116,7 @@ export class OpenCodeBridgeCommandClient {
       options.diagnosticIdFactory ?? (() => `opencode-bridge-diagnostic-${randomUUID()}`);
     this.clock = options.clock ?? (() => new Date());
     this.env = applyOpenCodeAutoUpdatePolicy(options.env ?? process.env);
+    this.envProvider = options.envProvider ?? null;
     this.keepInputFile = options.keepInputFile ?? false;
   }
 
@@ -147,7 +150,7 @@ export class OpenCodeBridgeCommandClient {
         timeoutMs: options.timeoutMs,
         stdoutLimitBytes: options.stdoutLimitBytes ?? DEFAULT_STDOUT_LIMIT_BYTES,
         stderrLimitBytes: options.stderrLimitBytes ?? DEFAULT_STDERR_LIMIT_BYTES,
-        env: this.env,
+        env: await this.resolveEnv(),
       });
 
       if (processResult.timedOut) {
@@ -193,6 +196,13 @@ export class OpenCodeBridgeCommandClient {
         await fs.unlink(inputPath).catch(() => undefined);
       }
     }
+  }
+
+  private async resolveEnv(): Promise<NodeJS.ProcessEnv> {
+    if (!this.envProvider) {
+      return this.env;
+    }
+    return applyOpenCodeAutoUpdatePolicy(await this.envProvider());
   }
 
   private async writeInputFile<TBody>(
