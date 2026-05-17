@@ -17,6 +17,8 @@ const rootStyle = computed(() => ({
   "--agent-y": String(props.agent.desktop.y),
   "--agent-scale": String(props.agent.desktop.scale),
   "--agent-depth": String(props.agent.desktop.depth),
+  "--agent-face": String(props.agent.facing ?? 1),
+  "--agent-lean": `${props.agent.lean ?? 0}deg`,
   "--agent-tablet-x": String(props.agent.tablet.x),
   "--agent-tablet-y": String(props.agent.tablet.y),
   "--agent-tablet-scale": String(props.agent.tablet.scale),

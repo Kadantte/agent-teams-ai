@@ -64,6 +64,7 @@
     "sectionTitle": "Сравнение с конкурентами",
     "sectionSubtitle": "Подробное сравнение возможностей с другими AI-инструментами для разработки.",
     "feature": "Возможность",
+    "robotBubble": "Суди сам",
     "features": {
       "crossTeam": "Межкомандная коммуникация",
       "agentMessaging": "Обмен сообщениями между агентами",
@@ -98,6 +99,7 @@
   "footer": {
     "copyright": "© {year} Agent Teams",
     "tagline": "Оркестрация ИИ-агентов для разработчиков",
+    "robotBubble": "Я жду",
     "links": {
       "github": "GitHub",
       "docs": "Документация"

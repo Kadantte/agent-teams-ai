@@ -64,6 +64,7 @@
     "sectionTitle": "Wie wir im Vergleich abschneiden",
     "sectionSubtitle": "Funktionsvergleich mit anderen KI-Coding-Tools.",
     "feature": "Funktion",
+    "robotBubble": "Urteile selbst",
     "features": {
       "crossTeam": "Teamübergreifende Kommunikation",
       "agentMessaging": "Agent-zu-Agent-Messaging",
@@ -98,6 +99,7 @@
   "footer": {
     "copyright": "© {year} Agent Teams",
     "tagline": "KI-Agenten-Orchestrierung für Entwickler",
+    "robotBubble": "Ich warte",
     "links": {
       "github": "GitHub",
       "docs": "Dokumentation"

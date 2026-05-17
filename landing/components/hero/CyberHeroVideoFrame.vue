@@ -11,17 +11,7 @@
       <span>Live demo</span>
     </div>
     <div class="cyber-video-frame__content">
-      <ClientOnly>
-        <Suspense>
-          <LazyHeroDemoVideo />
-          <template #fallback>
-            <div class="cyber-video-frame__fallback" />
-          </template>
-        </Suspense>
-        <template #fallback>
-          <div class="cyber-video-frame__fallback" />
-        </template>
-      </ClientOnly>
+      <HeroDemoVideo />
     </div>
     <div class="cyber-video-frame__corner cyber-video-frame__corner--tl" aria-hidden="true" />
     <div class="cyber-video-frame__corner cyber-video-frame__corner--tr" aria-hidden="true" />

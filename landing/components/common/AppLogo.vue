@@ -3,7 +3,7 @@ const { baseURL } = useRuntimeConfig().app;
 </script>
 
 <template>
-  <NuxtLink to="/" class="app-logo">
+  <NuxtLink to="/" class="app-logo" :prefetch="false">
     <img
       :src="`${baseURL}logo-192.png`"
       alt="Agent Teams"

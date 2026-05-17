@@ -399,7 +399,10 @@ function slideNext() {
 }
 
 .screenshots-lightbox__nav {
-  flex-shrink: 0;
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -417,12 +420,20 @@ function slideNext() {
   background: rgba(255, 255, 255, 0.15);
 }
 
+.screenshots-lightbox__nav--prev {
+  left: clamp(16px, 4vw, 48px);
+}
+
+.screenshots-lightbox__nav--next {
+  right: clamp(16px, 4vw, 48px);
+}
+
 .screenshots-lightbox__content {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  max-width: 90vw;
+  max-width: min(90vw, calc(100vw - 160px));
   max-height: 85vh;
 }
 
@@ -515,6 +526,10 @@ function slideNext() {
 
   .screenshots-lightbox__nav {
     display: none;
+  }
+
+  .screenshots-lightbox__content {
+    max-width: 96vw;
   }
 
   .screenshots-lightbox {

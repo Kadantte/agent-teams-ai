@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { nextTick, ref, onMounted, onUnmounted } from 'vue';
 import { mdiPlay, mdiPause, mdiVolumeHigh, mdiVolumeOff, mdiFullscreen } from '@mdi/js';
 
 const { t } = useI18n();
@@ -9,20 +9,51 @@ const containerRef = ref<HTMLElement | null>(null);
 const isPlaying = ref(false);
 const isMuted = ref(true);
 const showControls = ref(true);
-const isLoaded = ref(false);
+const isLoaded = ref(true);
 const hasError = ref(false);
 const progress = ref(0);
 const loadProgress = ref(0);
 const hideTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 
 let intObserver: IntersectionObserver | null = null;
+let loadFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearLoadFallback() {
+  if (!loadFallbackTimer) return;
+  clearTimeout(loadFallbackTimer);
+  loadFallbackTimer = null;
+}
+
+function markLoaded() {
+  if (hasError.value) return;
+  isLoaded.value = true;
+  clearLoadFallback();
+  updateLoadProgress();
+}
+
+function markError() {
+  hasError.value = true;
+  clearLoadFallback();
+}
+
+function onVideoEnded() {
+  const video = videoRef.value;
+  isPlaying.value = false;
+  showControls.value = true;
+  progress.value = 0;
+  if (video) video.currentTime = 0;
+}
 
 function togglePlay() {
   const video = videoRef.value;
   if (!video) return;
   if (video.paused) {
-    video.play();
-    isPlaying.value = true;
+    markLoaded();
+    video.play()
+      .then(() => {
+        isPlaying.value = true;
+      })
+      .catch(markError);
   } else {
     video.pause();
     isPlaying.value = false;
@@ -93,19 +124,25 @@ function onMouseLeave() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await nextTick();
   const video = videoRef.value;
   if (video) {
-    // canplay fires earlier than loadeddata — enough to show first frame
-    video.addEventListener('canplay', () => { isLoaded.value = true; }, { once: true });
-    video.addEventListener('error', () => { hasError.value = true; });
+    isMuted.value = video.muted;
+    video.addEventListener('loadedmetadata', markLoaded, { once: true });
+    video.addEventListener('loadeddata', markLoaded, { once: true });
+    video.addEventListener('canplay', markLoaded, { once: true });
+    video.addEventListener('canplaythrough', markLoaded, { once: true });
+    video.addEventListener('error', markError);
     video.addEventListener('progress', updateLoadProgress);
-    video.addEventListener('ended', () => {
-      isPlaying.value = false;
-      showControls.value = true;
-      progress.value = 0;
-      video.currentTime = 0;
-    });
+    video.addEventListener('ended', onVideoEnded);
+
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      markLoaded();
+    } else {
+      video.load();
+      loadFallbackTimer = setTimeout(markLoaded, 1800);
+    }
   }
 
   intObserver = new IntersectionObserver(
@@ -122,8 +159,15 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (hideTimer.value) clearTimeout(hideTimer.value);
+  clearLoadFallback();
   if (intObserver) { intObserver.disconnect(); intObserver = null; }
+  videoRef.value?.removeEventListener('loadedmetadata', markLoaded);
+  videoRef.value?.removeEventListener('loadeddata', markLoaded);
+  videoRef.value?.removeEventListener('canplay', markLoaded);
+  videoRef.value?.removeEventListener('canplaythrough', markLoaded);
+  videoRef.value?.removeEventListener('error', markError);
   videoRef.value?.removeEventListener('progress', updateLoadProgress);
+  videoRef.value?.removeEventListener('ended', onVideoEnded);
 });
 </script>
 
@@ -163,7 +207,7 @@ onUnmounted(() => {
       ref="videoRef"
       class="hero-video__player"
       :class="{ 'hero-video__player--loaded': isLoaded }"
-      preload="auto"
+      preload="metadata"
       poster="/screenshots/2.jpg"
       muted
       playsinline

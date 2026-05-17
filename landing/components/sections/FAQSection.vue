@@ -66,7 +66,7 @@ const faqIcons = [
         </div>
 
         <div class="faq-section__decoration">
-          <div class="faq-section__deco-circle">
+          <div class="faq-section__deco-circle" data-faq-landing-target>
             <v-icon size="40" class="faq-section__deco-icon" :icon="mdiFrequentlyAskedQuestions" />
           </div>
           <div class="faq-section__deco-ring faq-section__deco-ring--1" />

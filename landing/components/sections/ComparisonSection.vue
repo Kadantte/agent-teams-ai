@@ -1,5 +1,10 @@
 <script setup lang="ts">
+import robotAvatarCyan from "~/assets/images/hero/robots/robot-avatar-cyan-v1.webp";
+
 const { t } = useI18n()
+const comparisonRobotRef = ref<HTMLElement | null>(null)
+const showComparisonRobotBubble = ref(false)
+let comparisonRobotObserver: IntersectionObserver | null = null
 
 interface CellValue {
   status: string
@@ -175,7 +180,7 @@ const rows = computed<ComparisonRow[]>(() => [
     gastown: { status: 'partial', note: 'Cost tiers + digest, no hard caps' },
     paperclip: { status: 'yes', note: 'Per-agent budgets + hard stops' },
     cursor: { status: 'partial', note: 'Usage + BG spend limits' },
-    claudeCli: { status: 'partial', note: '/cost + workspace limits' },
+    claudeCli: { status: 'partial', note: '/usage + workspace limits' },
   },
   {
     feature: t('comparison.features.price'),
@@ -194,6 +199,78 @@ const competitors = [
   { key: 'cursor', name: 'Cursor' },
   { key: 'claudeCli', name: 'Claude Code CLI' },
 ]
+
+const sourceLinks = [
+  {
+    label: 'detailed research notes',
+    href: 'https://github.com/777genius/agent-teams-ai/blob/main/docs/research/gastown-paperclip-comparison-2026-05-16.md',
+  },
+  { label: 'Gastown README', href: 'https://github.com/gastownhall/gastown' },
+  {
+    label: 'Gastown provider guide',
+    href: 'https://github.com/gastownhall/gastown/blob/main/docs/agent-provider-integration.md',
+  },
+  {
+    label: 'Gastown scheduler',
+    href: 'https://github.com/gastownhall/gastown/blob/main/docs/design/scheduler.md',
+  },
+  { label: 'Gastown release', href: 'https://github.com/gastownhall/gastown/releases/tag/v1.1.0' },
+  { label: 'Paperclip README', href: 'https://github.com/paperclipai/paperclip' },
+  {
+    label: 'Paperclip adapters',
+    href: 'https://github.com/paperclipai/paperclip/blob/master/docs/adapters/overview.md',
+  },
+  {
+    label: 'Paperclip budgets',
+    href: 'https://github.com/paperclipai/paperclip/blob/master/docs/guides/board-operator/costs-and-budgets.md',
+  },
+  {
+    label: 'Paperclip runtime services',
+    href: 'https://github.com/paperclipai/paperclip/blob/master/docs/guides/board-operator/execution-workspaces-and-runtime-services.md',
+  },
+  {
+    label: 'Paperclip Kanban source',
+    href: 'https://github.com/paperclipai/paperclip/blob/master/ui/src/components/KanbanBoard.tsx',
+  },
+  {
+    label: 'Paperclip work products',
+    href: 'https://github.com/paperclipai/paperclip/blob/master/packages/shared/src/validators/work-product.ts',
+  },
+  { label: 'Paperclip release', href: 'https://github.com/paperclipai/paperclip/releases/tag/v2026.513.0' },
+  { label: 'Cursor Background Agents', href: 'https://docs.cursor.com/en/background-agents' },
+  { label: 'Cursor Diffs & Review', href: 'https://docs.cursor.com/en/agent/review' },
+  { label: 'Cursor Bugbot', href: 'https://docs.cursor.com/en/bugbot' },
+  { label: 'Cursor pricing', href: 'https://docs.cursor.com/en/account/usage' },
+  { label: 'Claude Code agent teams', href: 'https://code.claude.com/docs/en/agent-teams' },
+  { label: 'Claude Code subagents', href: 'https://code.claude.com/docs/en/sub-agents' },
+  { label: 'Claude Code workflows', href: 'https://code.claude.com/docs/en/common-workflows' },
+  { label: 'Claude Code costs', href: 'https://code.claude.com/docs/en/costs' },
+  { label: 'Claude pricing', href: 'https://claude.com/pricing' },
+]
+
+onMounted(() => {
+  if (!comparisonRobotRef.value) return
+
+  comparisonRobotObserver = new IntersectionObserver(
+    ([entry]) => {
+      if (!entry?.isIntersecting) return
+      showComparisonRobotBubble.value = true
+      comparisonRobotObserver?.disconnect()
+      comparisonRobotObserver = null
+    },
+    {
+      rootMargin: '0px 0px -12% 0px',
+      threshold: 0.35,
+    },
+  )
+
+  comparisonRobotObserver.observe(comparisonRobotRef.value)
+})
+
+onUnmounted(() => {
+  comparisonRobotObserver?.disconnect()
+  comparisonRobotObserver = null
+})
 
 function getCellClass(cell: CellValue): string {
   switch (cell.status) {
@@ -234,6 +311,28 @@ function getStatusIcon(status: string): string {
       </div>
 
       <div class="comparison-table__wrap">
+        <span
+          ref="comparisonRobotRef"
+          class="comparison-table__robot"
+          aria-hidden="true"
+        >
+          <Transition name="comparison-robot-bubble">
+            <span
+              v-if="showComparisonRobotBubble"
+              class="comparison-table__robot-bubble"
+            >
+              {{ t("comparison.robotBubble") }}
+            </span>
+          </Transition>
+          <img
+            class="comparison-table__robot-image"
+            :src="robotAvatarCyan"
+            alt=""
+            loading="lazy"
+            decoding="async"
+            draggable="false"
+          >
+        </span>
         <table class="comparison-table">
           <thead>
             <tr>
@@ -298,6 +397,15 @@ function getStatusIcon(status: string): string {
           </tbody>
         </table>
       </div>
+
+      <p class="comparison-section__sources">
+        Fact sources checked on May 16, 2026:
+        <template v-for="(source, index) in sourceLinks" :key="source.href">
+          <a :href="source.href" target="_blank" rel="noopener noreferrer">
+            {{ source.label }}
+          </a><span v-if="index < sourceLinks.length - 1">, </span>
+        </template>.
+      </p>
     </v-container>
   </section>
 </template>
@@ -344,6 +452,168 @@ function getStatusIcon(status: string): string {
   backdrop-filter: blur(12px);
   position: relative;
   z-index: 1;
+}
+
+.comparison-table__robot {
+  position: absolute;
+  right: clamp(28px, 7vw, 96px);
+  bottom: calc(100% - 5px);
+  z-index: 4;
+  width: clamp(82px, 7.2vw, 124px);
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+  transform: translateY(4px) rotate(-0.5deg);
+  transform-origin: center bottom;
+  animation: comparisonRobotIdle 5.2s ease-in-out infinite;
+  filter:
+    drop-shadow(0 18px 22px rgba(0, 0, 0, 0.5))
+    drop-shadow(0 0 18px rgba(0, 234, 255, 0.26));
+}
+
+.comparison-table__robot-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  transform:
+    scaleX(-1)
+    rotate(2deg);
+  transform-origin: center bottom;
+  user-select: none;
+}
+
+.comparison-table__robot::selection {
+  background: transparent;
+}
+
+.comparison-table__robot-bubble {
+  position: absolute;
+  top: 10px;
+  right: calc(100% + 12px);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 10px;
+  color: #07111d;
+  font-family: var(--at-font-mono);
+  font-size: 0.66rem;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  background:
+    radial-gradient(circle at 26% 22%, rgba(255, 255, 255, 0.88), rgba(255, 244, 168, 0.86) 66%, rgba(255, 215, 0, 0.84) 100%);
+  border: 2px solid #050816;
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 1px rgba(255, 215, 0, 0.28),
+    0 5px 0 rgba(0, 0, 0, 0.2),
+    0 0 12px rgba(255, 215, 0, 0.14);
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.62);
+  transform: rotate(-5deg);
+  transform-origin: right bottom;
+  animation: comparisonRobotBubbleFloat 2.6s ease-in-out 0.42s infinite;
+}
+
+.comparison-table__robot-bubble::before {
+  position: absolute;
+  top: 52%;
+  right: -30px;
+  width: 32px;
+  height: 18px;
+  content: "";
+  background: #050816;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+  transform: translateY(-50%);
+}
+
+.comparison-table__robot-bubble::after {
+  position: absolute;
+  top: 52%;
+  right: -24px;
+  width: 26px;
+  height: 12px;
+  content: "";
+  background: rgba(255, 226, 78, 0.96);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+  transform: translateY(-50%);
+}
+
+.comparison-robot-bubble-enter-active,
+.comparison-robot-bubble-leave-active {
+  transition:
+    opacity 0.26s ease,
+    filter 0.26s ease;
+}
+
+.comparison-robot-bubble-enter-active {
+  animation: comparisonRobotBubblePop 0.52s cubic-bezier(0.18, 0.9, 0.2, 1.24);
+}
+
+.comparison-robot-bubble-enter-from,
+.comparison-robot-bubble-leave-to {
+  opacity: 0;
+  filter: blur(2px);
+}
+
+@keyframes comparisonRobotIdle {
+  0%,
+  100% {
+    transform: translate3d(0, 4px, 0) rotate(-0.55deg);
+  }
+
+  50% {
+    transform: translate3d(1px, 3px, 0) rotate(0.75deg);
+  }
+}
+
+@keyframes comparisonRobotBubblePop {
+  0% {
+    opacity: 0;
+    transform: translate3d(14px, 18px, 0) scale(0.48) rotate(-13deg);
+  }
+
+  58% {
+    opacity: 1;
+    transform: translate3d(-3px, -4px, 0) scale(1.1) rotate(-4deg);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1) rotate(-5deg);
+  }
+}
+
+@keyframes comparisonRobotBubbleFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(-5deg);
+  }
+
+  50% {
+    transform: translate3d(0, -2px, 0) rotate(-4deg);
+  }
+}
+
+.comparison-section__sources {
+  max-width: 1040px;
+  margin: 18px auto 0;
+  color: rgba(136, 146, 176, 0.82);
+  font-size: 0.78rem;
+  line-height: 1.65;
+  position: relative;
+  z-index: 1;
+}
+
+.comparison-section__sources a {
+  color: #00d4e6;
+  text-decoration: none;
+}
+
+.comparison-section__sources a:hover {
+  color: #00f0ff;
+  text-decoration: underline;
 }
 
 .comparison-table {
@@ -545,6 +815,18 @@ function getStatusIcon(status: string): string {
 .v-theme--light .comparison-table__wrap {
   background: rgba(255, 255, 255, 0.8);
   border-color: rgba(0, 180, 200, 0.2);
+}
+
+.v-theme--light .comparison-section__sources {
+  color: rgba(71, 85, 105, 0.82);
+}
+
+.v-theme--light .comparison-section__sources a {
+  color: #0891b2;
+}
+
+.v-theme--light .comparison-section__sources a:hover {
+  color: #0e7490;
 }
 
 .v-theme--light .comparison-table__th {

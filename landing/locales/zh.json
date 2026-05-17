@@ -64,6 +64,7 @@
     "sectionTitle": "功能对比",
     "sectionSubtitle": "与其他 AI 编程工具的逐项功能对比。",
     "feature": "功能",
+    "robotBubble": "你来判断",
     "features": {
       "crossTeam": "跨团队通信",
       "agentMessaging": "智能体间消息",
@@ -98,6 +99,7 @@
   "footer": {
     "copyright": "© {year} Agent Teams",
     "tagline": "面向开发者的 AI 智能体编排",
+    "robotBubble": "我在等你",
     "links": {
       "github": "GitHub",
       "docs": "文档"

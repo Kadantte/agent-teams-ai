@@ -2,6 +2,8 @@ import "vuetify/styles";
 import { createVuetify } from "vuetify";
 import { aliases, mdi } from "vuetify/iconsets/mdi-svg";
 
+type ThemeName = "light" | "dark";
+
 const brand = {
   cyan: "#00f0ff",
   magenta: "#ff00ff",
@@ -11,9 +13,28 @@ const brand = {
   darkSurface: "#12121a"
 };
 
+function isThemeName(value: string | null | undefined): value is ThemeName {
+  return value === "dark" || value === "light";
+}
+
+function resolveInitialTheme(cookieTheme: ThemeName | null): ThemeName {
+  if (import.meta.client) {
+    const saved = localStorage.getItem("theme");
+    if (isThemeName(saved)) return saved;
+    if (cookieTheme) return cookieTheme;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+
+  return cookieTheme ?? "light";
+}
+
 export default defineNuxtPlugin({
   name: "vuetify",
   setup(nuxtApp) {
+    const themeCookie = useCookie<ThemeName | null>("theme");
+    const cookieTheme = isThemeName(themeCookie.value) ? themeCookie.value : null;
+    const defaultTheme = resolveInitialTheme(cookieTheme);
+
     const vuetify = createVuetify({
       icons: {
         defaultSet: "mdi",
@@ -21,7 +42,7 @@ export default defineNuxtPlugin({
         sets: { mdi }
       },
       theme: {
-        defaultTheme: "dark",
+        defaultTheme,
         themes: {
           light: {
             colors: {

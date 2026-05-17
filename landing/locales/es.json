@@ -64,6 +64,7 @@
     "sectionTitle": "Cómo nos comparamos",
     "sectionSubtitle": "Comparación detallada de funciones con otras herramientas de programación con IA.",
     "feature": "Función",
+    "robotBubble": "Juzga tú",
     "features": {
       "crossTeam": "Comunicación entre equipos",
       "agentMessaging": "Mensajería entre agentes",
@@ -98,6 +99,7 @@
   "footer": {
     "copyright": "© {year} Agent Teams",
     "tagline": "Orquestación de agentes IA para desarrolladores",
+    "robotBubble": "Estoy esperando",
     "links": {
       "github": "GitHub",
       "docs": "Documentación"

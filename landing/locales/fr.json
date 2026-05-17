@@ -64,6 +64,7 @@
     "sectionTitle": "Comment nous nous comparons",
     "sectionSubtitle": "Comparaison fonctionnalité par fonctionnalité avec d'autres outils IA.",
     "feature": "Fonctionnalité",
+    "robotBubble": "Juge par toi-même",
     "features": {
       "crossTeam": "Communication inter-équipes",
       "agentMessaging": "Messagerie entre agents",
@@ -98,6 +99,7 @@
   "footer": {
     "copyright": "© {year} Agent Teams",
     "tagline": "Orchestration d'agents IA pour développeurs",
+    "robotBubble": "J'attends",
     "links": {
       "github": "GitHub",
       "docs": "Documentation"

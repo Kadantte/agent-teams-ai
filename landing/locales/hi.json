@@ -64,6 +64,7 @@
     "sectionTitle": "तुलना करें",
     "sectionSubtitle": "अन्य AI कोडिंग टूल्स के साथ सुविधा-दर-सुविधा तुलना।",
     "feature": "सुविधा",
+    "robotBubble": "खुद फैसला करें",
     "features": {
       "crossTeam": "क्रॉस-टीम संचार",
       "agentMessaging": "एजेंट-टू-एजेंट मैसेजिंग",
@@ -98,6 +99,7 @@
   "footer": {
     "copyright": "© {year} Agent Teams",
     "tagline": "डेवलपर्स के लिए AI एजेंट ऑर्केस्ट्रेशन",
+    "robotBubble": "मैं इंतज़ार कर रहा हूँ",
     "links": {
       "github": "GitHub",
       "docs": "दस्तावेज़"

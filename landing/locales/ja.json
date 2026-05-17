@@ -64,6 +64,7 @@
     "sectionTitle": "他ツールとの比較",
     "sectionSubtitle": "他のAIコーディングツールとの機能比較。",
     "feature": "機能",
+    "robotBubble": "自分で判断して",
     "features": {
       "crossTeam": "チーム間コミュニケーション",
       "agentMessaging": "エージェント間メッセージング",
@@ -98,6 +99,7 @@
   "footer": {
     "copyright": "© {year} Agent Teams",
     "tagline": "開発者向けAIエージェントオーケストレーション",
+    "robotBubble": "待ってるよ",
     "links": {
       "github": "GitHub",
       "docs": "ドキュメント"

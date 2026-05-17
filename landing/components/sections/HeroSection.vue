@@ -2,33 +2,38 @@
 import {
   mdiBookOpenPageVariantOutline,
   mdiDownload,
-  mdiPlayCircleOutline,
 } from "@mdi/js";
+import { heroMessages, type HeroMessagePhase } from "~/data/heroScene";
 
 const { content } = useLandingContent();
 const { t, locale } = useI18n();
 const { baseURL } = useRuntimeConfig().app;
 const heroRef = ref<HTMLElement | null>(null);
+const activeHeroMessageIndex = ref(0);
+const heroMessagePhase = ref<HeroMessagePhase>("cooldown");
+const isHeroVisible = ref(false);
+const heroReducedMotion = ref(false);
+let heroMessageTimers: number[] = [];
+let heroMessageObserver: IntersectionObserver | null = null;
+let heroMotionQuery: MediaQueryList | null = null;
 
 const downloadStore = useDownloadStore();
 const { resolve, data: releaseData } = useReleaseDownloads();
-const { repoUrl, latestReleaseUrl, releaseDownloadUrl } = useGithubRepo();
+const { latestReleaseUrl, releaseDownloadUrl } = useGithubRepo();
 const withBase = (path: string) => `${baseURL.replace(/\/?$/, "/")}${path.replace(/^\/+/, "")}`;
 
 useCyberHeroParallax(heroRef);
 
 const releaseVersion = computed(() => releaseData.value?.version || null);
 const releaseDate = computed(() => {
-  const raw = releaseData.value?.pubDate;
-  if (!raw) return null;
-  return new Date(raw).toLocaleDateString("en-US", {
+  if (!releaseData.value?.pubDate) return "";
+  return new Date(releaseData.value.pubDate).toLocaleDateString(locale.value, {
     year: "numeric",
     month: "short",
     day: "numeric",
   });
 });
-
-onMounted(() => downloadStore.init());
+const activeHeroMessage = computed(() => heroMessages[activeHeroMessageIndex.value] ?? null);
 
 const heroDownloadUrl = computed(() => {
   const asset = downloadStore.selectedAsset;
@@ -37,17 +42,87 @@ const heroDownloadUrl = computed(() => {
   return resolve(asset.os, arch)?.url || releaseDownloadUrl(asset.fileName);
 });
 
-const devBranchUrl = computed(() => `${repoUrl.value}/tree/dev`);
 const docsHref = computed(() => withBase(locale.value === "ru" ? "docs/ru/" : "docs/"));
-const devBranchNote = computed(() =>
-  locale.value === "ru"
-    ? "Самая свежая версия в ветке dev - можно развернуть локально."
-    : "Freshest version is on the dev branch - clone and run it locally.",
-);
+
+function clearHeroMessageTimers() {
+  heroMessageTimers.forEach(window.clearTimeout);
+  heroMessageTimers = [];
+}
+
+function setHeroMessageTimer(callback: () => void, delay: number) {
+  const id = window.setTimeout(callback, delay);
+  heroMessageTimers.push(id);
+}
+
+function runHeroMessageCycle() {
+  clearHeroMessageTimers();
+
+  if (!isHeroVisible.value || heroReducedMotion.value || heroMessages.length === 0) {
+    heroMessagePhase.value = "cooldown";
+    return;
+  }
+
+  heroMessagePhase.value = "sender";
+  setHeroMessageTimer(() => {
+    heroMessagePhase.value = "packet";
+  }, 900);
+  setHeroMessageTimer(() => {
+    heroMessagePhase.value = "receiver";
+  }, 2200);
+  setHeroMessageTimer(() => {
+    heroMessagePhase.value = "cooldown";
+  }, 3900);
+  setHeroMessageTimer(() => {
+    activeHeroMessageIndex.value = (activeHeroMessageIndex.value + 1) % heroMessages.length;
+    runHeroMessageCycle();
+  }, 4700);
+}
+
+function syncHeroMotion() {
+  heroReducedMotion.value = Boolean(heroMotionQuery?.matches);
+  runHeroMessageCycle();
+}
+
+function onHeroVisibilityChange() {
+  if (document.hidden) {
+    clearHeroMessageTimers();
+    heroMessagePhase.value = "cooldown";
+    return;
+  }
+
+  runHeroMessageCycle();
+}
+
+onMounted(() => {
+  downloadStore.init();
+
+  heroMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  heroReducedMotion.value = heroMotionQuery.matches;
+  heroMotionQuery.addEventListener("change", syncHeroMotion);
+  document.addEventListener("visibilitychange", onHeroVisibilityChange);
+
+  heroMessageObserver = new IntersectionObserver(
+    ([entry]) => {
+      isHeroVisible.value = Boolean(entry?.isIntersecting);
+      runHeroMessageCycle();
+    },
+    { threshold: 0.15 },
+  );
+
+  if (heroRef.value) heroMessageObserver.observe(heroRef.value);
+});
+
+onUnmounted(() => {
+  clearHeroMessageTimers();
+  heroMessageObserver?.disconnect();
+  heroMotionQuery?.removeEventListener("change", syncHeroMotion);
+  document.removeEventListener("visibilitychange", onHeroVisibilityChange);
+});
 </script>
 
 <template>
   <section id="hero" ref="heroRef" class="hero-section cyber-hero section anchor-offset" data-cyber-hero>
+    <CyberHeroMontereyBackground />
     <div class="cyber-hero__background" aria-hidden="true" />
     <div class="cyber-hero__wash" aria-hidden="true" />
     <div class="cyber-hero__gridlines" aria-hidden="true" />
@@ -56,13 +131,13 @@ const devBranchNote = computed(() =>
     <v-container class="cyber-hero__container">
       <div class="cyber-hero__layout">
         <div class="cyber-hero__copy">
-          <h1 class="cyber-hero__title">
-            <span>Agent{{ " " }}</span>
+          <h1 class="cyber-hero__title" aria-label="Agent Teams">
+            <span>Agent</span>
             <span class="cyber-hero__title-accent">Teams</span>
           </h1>
 
           <p class="cyber-hero__slogan cyber-panel">
-            YOU'RE THE CTO, AGENTS ARE YOUR TEAM.
+            Get a lot done by doing very little
           </p>
 
           <p class="cyber-hero__description">
@@ -83,15 +158,6 @@ const devBranchNote = computed(() =>
             <v-btn
               variant="outlined"
               size="large"
-              href="#hero-demo"
-              class="cyber-hero__action cyber-hero__action--watch"
-              :prepend-icon="mdiPlayCircleOutline"
-            >
-              {{ t("hero.watchDemo") }}
-            </v-btn>
-            <v-btn
-              variant="outlined"
-              size="large"
               :href="docsHref"
               class="cyber-hero__action cyber-hero__action--docs"
               :prepend-icon="mdiBookOpenPageVariantOutline"
@@ -100,26 +166,33 @@ const devBranchNote = computed(() =>
             </v-btn>
           </div>
 
-          <a
+          <p
+            v-if="releaseVersion"
             class="cyber-hero__terminal-note cyber-panel"
-            :href="devBranchUrl"
-            target="_blank"
-            rel="noopener"
           >
-            <span class="cyber-hero__terminal-lines">
-              <span>&gt; {{ devBranchNote }}</span>
-              <span>&gt; Team ready. What shall we build today?</span>
+            <span class="cyber-hero__release">
+              v{{ releaseVersion }}
+              <span v-if="releaseDate" class="cyber-hero__release-date">
+                · {{ releaseDate }}
+              </span>
             </span>
-            <span v-if="releaseVersion" class="cyber-hero__release">
-              v{{ releaseVersion }}<template v-if="releaseDate"> - {{ releaseDate }}</template>
-            </span>
-          </a>
+          </p>
         </div>
 
-        <CyberHeroScene class="cyber-hero__scene" />
+        <CyberHeroScene
+          class="cyber-hero__scene"
+          :message="activeHeroMessage"
+          :phase="heroMessagePhase"
+          :reduced-motion="heroReducedMotion"
+        />
       </div>
 
-      <CyberHeroFeatureStrip class="cyber-hero__feature-strip" />
+      <CyberHeroFeatureStrip
+        class="cyber-hero__feature-strip"
+        :active-message="activeHeroMessage"
+        :phase="heroMessagePhase"
+        :reduced-motion="heroReducedMotion"
+      />
     </v-container>
   </section>
 </template>
