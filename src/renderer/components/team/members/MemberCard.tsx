@@ -122,6 +122,17 @@ function notifyRuntimeTelemetryTooltipOpen(id: string): void {
   );
 }
 
+function isRuntimeTelemetryTooltipBlockedTarget(
+  currentTarget: EventTarget,
+  target: EventTarget | null
+): boolean {
+  if (!(currentTarget instanceof Element) || !(target instanceof Element)) {
+    return false;
+  }
+  const blockedTarget = target.closest('button,a,[title],[data-runtime-telemetry-exempt="true"]');
+  return Boolean(blockedTarget && blockedTarget !== currentTarget);
+}
+
 function splitRuntimeSummaryMemory(runtimeSummary: string | undefined): {
   summary: string | undefined;
   memory: string | undefined;
@@ -716,6 +727,7 @@ export const MemberCard = memo(function MemberCard({
     runtimeTelemetryTooltipIdRef.current = createRuntimeTelemetryTooltipId();
   }
   const runtimeTelemetryTooltipId = runtimeTelemetryTooltipIdRef.current;
+  const runtimeTelemetryPointerBlockedRef = useRef(false);
   const runtimeTelemetryTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [runtimeTelemetryTooltipOpen, setRuntimeTelemetryTooltipOpen] = useState(false);
   const clearRuntimeTelemetryTooltipTimer = useCallback(() => {
@@ -736,7 +748,7 @@ export const MemberCard = memo(function MemberCard({
         closeRuntimeTelemetryTooltip();
         return;
       }
-      if (runtimeTelemetryTooltipOpen) {
+      if (runtimeTelemetryPointerBlockedRef.current || runtimeTelemetryTooltipOpen) {
         return;
       }
       runtimeTelemetryTooltipTimerRef.current = setTimeout(() => {
@@ -787,10 +799,24 @@ export const MemberCard = memo(function MemberCard({
     };
   }, [closeRuntimeTelemetryTooltip, runtimeTelemetryTooltipId, showRuntimeTelemetryTooltip]);
   const handleRuntimeTelemetryPointerLeave = useCallback(() => {
+    runtimeTelemetryPointerBlockedRef.current = false;
     if (showRuntimeTelemetryTooltip) {
       closeRuntimeTelemetryTooltip();
     }
   }, [closeRuntimeTelemetryTooltip, showRuntimeTelemetryTooltip]);
+  const handleRuntimeTelemetryPointerBlockCapture = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!showRuntimeTelemetryTooltip) {
+        return;
+      }
+      const blocked = isRuntimeTelemetryTooltipBlockedTarget(event.currentTarget, event.target);
+      runtimeTelemetryPointerBlockedRef.current = blocked;
+      if (blocked) {
+        closeRuntimeTelemetryTooltip();
+      }
+    },
+    [closeRuntimeTelemetryTooltip, showRuntimeTelemetryTooltip]
+  );
   const showStartingSkeleton =
     !isRemoved &&
     presenceLabel === 'starting' &&
@@ -956,6 +982,8 @@ export const MemberCard = memo(function MemberCard({
         isRemoved && 'opacity-50',
         spawnCardClass
       )}
+      onPointerOverCapture={handleRuntimeTelemetryPointerBlockCapture}
+      onPointerMoveCapture={handleRuntimeTelemetryPointerBlockCapture}
       onPointerLeave={handleRuntimeTelemetryPointerLeave}
     >
       <div
@@ -1011,7 +1039,10 @@ export const MemberCard = memo(function MemberCard({
               {showWorkspaceBadge ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="shrink-0 rounded border border-emerald-400/35 bg-emerald-400/10 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-emerald-300">
+                    <span
+                      className="shrink-0 rounded border border-emerald-400/35 bg-emerald-400/10 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-emerald-300"
+                      data-runtime-telemetry-exempt="true"
+                    >
                       worktree
                     </span>
                   </TooltipTrigger>
