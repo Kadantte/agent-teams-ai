@@ -317,12 +317,13 @@ function getStatusIcon(status: string): string {
           aria-hidden="true"
         >
           <Transition name="comparison-robot-bubble">
-            <span
+            <RobotSpeechBubble
               v-if="showComparisonRobotBubble"
               class="comparison-table__robot-bubble"
+              tail="right"
             >
               {{ t("comparison.robotBubble") }}
-            </span>
+            </RobotSpeechBubble>
           </Transition>
           <img
             class="comparison-table__robot-image"
@@ -487,57 +488,18 @@ function getStatusIcon(status: string): string {
 }
 
 .comparison-table__robot-bubble {
-  position: absolute;
+  --robot-bubble-position: absolute;
+  --robot-bubble-min-width: 96px;
+  --robot-bubble-max-width: 190px;
+  --robot-bubble-min-height: 42px;
+  --robot-bubble-font-size: 0.66rem;
+  --robot-bubble-padding: 8px 26px 8px 13px;
+
   top: 10px;
   right: calc(100% + 12px);
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 6px 10px;
-  color: #07111d;
-  font-family: var(--at-font-mono);
-  font-size: 0.66rem;
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: 0;
-  white-space: nowrap;
-  background:
-    radial-gradient(circle at 26% 22%, rgba(255, 255, 255, 0.88), rgba(255, 244, 168, 0.86) 66%, rgba(255, 215, 0, 0.84) 100%);
-  border: 2px solid #050816;
-  border-radius: 999px;
-  box-shadow:
-    0 0 0 1px rgba(255, 215, 0, 0.28),
-    0 5px 0 rgba(0, 0, 0, 0.2),
-    0 0 12px rgba(255, 215, 0, 0.14);
-  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.62);
   transform: rotate(-5deg);
   transform-origin: right bottom;
   animation: comparisonRobotBubbleFloat 2.6s ease-in-out 0.42s infinite;
-}
-
-.comparison-table__robot-bubble::before {
-  position: absolute;
-  top: 52%;
-  right: -30px;
-  width: 32px;
-  height: 18px;
-  content: "";
-  background: #050816;
-  clip-path: polygon(0 0, 100% 50%, 0 100%);
-  transform: translateY(-50%);
-}
-
-.comparison-table__robot-bubble::after {
-  position: absolute;
-  top: 52%;
-  right: -24px;
-  width: 26px;
-  height: 12px;
-  content: "";
-  background: rgba(255, 226, 78, 0.96);
-  clip-path: polygon(0 0, 100% 50%, 0 100%);
-  transform: translateY(-50%);
 }
 
 .comparison-robot-bubble-enter-active,

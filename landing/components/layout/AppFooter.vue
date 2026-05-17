@@ -14,20 +14,9 @@ const docsHref = computed(() => {
 <template>
   <footer class="app-footer">
     <div class="app-footer__robot-stage">
-      <span class="app-footer__robot-bubble">
-        <svg
-          class="app-footer__robot-bubble-shape"
-          viewBox="0 0 92 62"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <path
-            class="app-footer__robot-bubble-fill"
-            d="M18 5H58C73 5 84 14 84 27C84 40 73 47 59 47H52L61 58L39 47H18C9 47 4 38 4 26C4 14 9 5 18 5Z"
-          />
-        </svg>
-        <span class="app-footer__robot-bubble-text">{{ t('footer.robotBubble') }}</span>
-      </span>
+      <RobotSpeechBubble class="app-footer__robot-bubble" tail="down">
+        {{ t('footer.robotBubble') }}
+      </RobotSpeechBubble>
       <img
         class="app-footer__robot"
         :src="robotLeadLounge"
@@ -82,51 +71,17 @@ const docsHref = computed(() => {
 }
 
 .app-footer__robot-bubble {
-  position: absolute;
+  --robot-bubble-position: absolute;
+  --robot-bubble-min-width: 82px;
+  --robot-bubble-max-width: 116px;
+  --robot-bubble-min-height: 50px;
+  --robot-bubble-font-size: 0.62rem;
+  --robot-bubble-padding: 9px 13px 16px;
+
   top: -28px;
   left: -18px;
-  z-index: 3;
-  display: block;
-  width: 72px;
-  height: 49px;
-  color: #07111d;
-  font-family: var(--at-font-mono);
-  font-size: 0.62rem;
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: 0;
-  white-space: nowrap;
-  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.62);
   transform: rotate(-2deg);
   transform-origin: 72% 74%;
-  filter:
-    drop-shadow(0 3px 0 rgba(0, 0, 0, 0.18))
-    drop-shadow(0 0 9px rgba(255, 215, 0, 0.14));
-}
-
-.app-footer__robot-bubble-shape {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.app-footer__robot-bubble-fill {
-  fill: #fff09a;
-  stroke: #050816;
-  stroke-width: 4.6;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-
-.app-footer__robot-bubble-text {
-  position: absolute;
-  top: 11px;
-  left: 0;
-  z-index: 3;
-  width: 54px;
-  text-align: center;
 }
 
 .app-footer__inner {

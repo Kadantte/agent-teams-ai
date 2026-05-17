@@ -304,8 +304,62 @@ function formatRetryCountdown(ms: number): string {
     return `${totalSeconds}s`;
   }
   const minutes = Math.floor(totalSeconds / 60);
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  }
   const seconds = totalSeconds % 60;
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function getRuntimeAdvisoryRetryRemainingMs(
+  advisory: MemberRuntimeAdvisory,
+  nowMs: number
+): number | null {
+  const retryUntilMs = advisory.retryUntil ? Date.parse(advisory.retryUntil) : Number.NaN;
+  if (!Number.isFinite(retryUntilMs)) {
+    return null;
+  }
+  const remainingMs = retryUntilMs - nowMs;
+  return remainingMs > 0 ? remainingMs : null;
+}
+
+function isRetryTimedApiAdvisory(
+  advisory: MemberRuntimeAdvisory,
+  providerId: TeamProviderId | undefined
+): boolean {
+  return (
+    advisory.kind === 'api_error' &&
+    providerId === 'opencode' &&
+    (advisory.reasonCode === 'quota_exhausted' || advisory.reasonCode === 'rate_limited')
+  );
+}
+
+function formatRetryUntilUtc(value: string | undefined): string | null {
+  const retryUntilMs = value ? Date.parse(value) : Number.NaN;
+  if (!Number.isFinite(retryUntilMs)) {
+    return null;
+  }
+  const date = new Date(retryUntilMs);
+  const hours = String(date.getUTCHours()).padStart(2, '0');
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${hours}:${minutes} UTC`;
+}
+
+function appendRuntimeAdvisoryRetryHint(
+  base: string,
+  advisory: MemberRuntimeAdvisory,
+  providerId: TeamProviderId | undefined
+): string {
+  if (!isRetryTimedApiAdvisory(advisory, providerId)) {
+    return base;
+  }
+  const retryAt = formatRetryUntilUtc(advisory.retryUntil);
+  if (!retryAt) {
+    return base;
+  }
+  return `${base} Waiting for OpenCode retry or quota reset around ${retryAt}.`;
 }
 
 function getRuntimeAdvisoryProviderLabel(providerId: TeamProviderId | undefined): string | null {
@@ -461,12 +515,20 @@ function formatRuntimeAdvisoryTitle(
     switch (advisory.reasonCode) {
       case 'quota_exhausted':
         return appendRuntimeAdvisoryRawMessage(
-          `${providerLabel ?? 'Provider'} quota exhausted.`,
+          appendRuntimeAdvisoryRetryHint(
+            `${providerLabel ?? 'Provider'} quota exhausted.`,
+            advisory,
+            providerId
+          ),
           advisory.message
         );
       case 'rate_limited':
         return appendRuntimeAdvisoryRawMessage(
-          `${providerLabel ?? 'Provider'} rate limited the request.`,
+          appendRuntimeAdvisoryRetryHint(
+            `${providerLabel ?? 'Provider'} rate limited the request.`,
+            advisory,
+            providerId
+          ),
           advisory.message
         );
       case 'auth_error':
@@ -584,18 +646,17 @@ export function getMemberRuntimeAdvisoryLabel(
     return null;
   }
   const baseLabel = formatRuntimeAdvisoryBaseLabel(advisory, providerId);
+  const remainingMs = getRuntimeAdvisoryRetryRemainingMs(advisory, nowMs);
   if (advisory.kind === 'api_error') {
+    if (remainingMs && isRetryTimedApiAdvisory(advisory, providerId)) {
+      return `${baseLabel} · retry ${formatRetryCountdown(remainingMs)}`;
+    }
     return baseLabel;
   }
   if (advisory.kind !== 'sdk_retrying') {
     return null;
   }
-  const retryUntilMs = advisory.retryUntil ? Date.parse(advisory.retryUntil) : Number.NaN;
-  if (!Number.isFinite(retryUntilMs)) {
-    return baseLabel;
-  }
-  const remainingMs = retryUntilMs - nowMs;
-  if (remainingMs <= 0) {
+  if (!remainingMs) {
     return baseLabel;
   }
   return `${baseLabel} · ${formatRetryCountdown(remainingMs)}`;

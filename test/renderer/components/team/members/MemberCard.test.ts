@@ -27,12 +27,51 @@ vi.mock('@renderer/components/ui/badge', () => ({
 }));
 
 vi.mock('@renderer/components/ui/tooltip', () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) =>
-    React.createElement(React.Fragment, null, children),
+  TooltipProvider: ({
+    children,
+    delayDuration,
+    skipDelayDuration,
+  }: {
+    children: React.ReactNode;
+    delayDuration?: number;
+    skipDelayDuration?: number;
+  }) =>
+    React.createElement(
+      'div',
+      {
+        'data-testid': 'tooltip-provider',
+        'data-delay-duration': delayDuration,
+        'data-skip-delay-duration': skipDelayDuration,
+      },
+      children
+    ),
+  Tooltip: ({
+    children,
+    delayDuration,
+    open,
+  }: {
+    children: React.ReactNode;
+    delayDuration?: number;
+    open?: boolean;
+  }) =>
+    React.createElement(
+      'div',
+      {
+        'data-testid': 'tooltip-root',
+        'data-delay-duration': delayDuration,
+        'data-open': open,
+      },
+      children
+    ),
   TooltipTrigger: ({ children }: { children: React.ReactNode }) =>
     React.createElement(React.Fragment, null, children),
-  TooltipContent: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('div', null, children),
+  TooltipContent: ({
+    children,
+    className,
+  }: {
+    children: React.ReactNode;
+    className?: string;
+  }) => React.createElement('div', { className, 'data-testid': 'tooltip-content' }, children),
 }));
 
 vi.mock('@renderer/hooks/useTheme', () => ({
@@ -233,6 +272,156 @@ describe('MemberCard starting-state visuals', () => {
     });
 
     expect(host.textContent).toContain('Gemini quota retry');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('shows timed OpenCode quota advisory with a relaunch action', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const onRestartMember = vi.fn();
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberCard, {
+          member: {
+            ...member,
+            providerId: 'opencode',
+            runtimeAdvisory: {
+              kind: 'api_error',
+              observedAt: '2026-05-17T21:44:34.000Z',
+              retryUntil: '2099-05-18T00:00:00.000Z',
+              retryDelayMs: 8_000,
+              reasonCode: 'quota_exhausted',
+              message: 'Free usage exceeded, subscribe to Go https://opencode.ai/go',
+            },
+          },
+          memberColor: 'blue',
+          currentTask,
+          isTeamAlive: true,
+          isTeamProvisioning: false,
+          spawnStatus: 'online',
+          spawnLaunchState: 'confirmed_alive',
+          spawnRuntimeAlive: true,
+          onRestartMember,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('OpenCode quota error · retry');
+    const relaunchButton = host.querySelector('button[aria-label="Relaunch OpenCode"]');
+    expect(relaunchButton).not.toBeNull();
+    expect(host.querySelector('button[aria-label="Copy diagnostics"]')).not.toBeNull();
+
+    await act(async () => {
+      (relaunchButton as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+
+    expect(onRestartMember).toHaveBeenCalledWith('alice');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('shows the OpenCode advisory relaunch action in awaiting-reply rows', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const onRestartMember = vi.fn();
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberCard, {
+          member: {
+            ...member,
+            providerId: 'opencode',
+            runtimeAdvisory: {
+              kind: 'api_error',
+              observedAt: '2026-05-17T21:44:34.000Z',
+              retryUntil: '2099-05-18T00:00:00.000Z',
+              retryDelayMs: 8_000,
+              reasonCode: 'quota_exhausted',
+              message: 'Free usage exceeded, subscribe to Go https://opencode.ai/go',
+            },
+          },
+          memberColor: 'blue',
+          isAwaitingReply: true,
+          isTeamAlive: true,
+          isTeamProvisioning: false,
+          spawnStatus: 'online',
+          spawnLaunchState: 'confirmed_alive',
+          spawnRuntimeAlive: true,
+          onRestartMember,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('OpenCode quota error · retry');
+    const relaunchButton = host.querySelector('button[aria-label="Relaunch OpenCode"]');
+    expect(relaunchButton).not.toBeNull();
+    expect(host.querySelector('button[aria-label="Copy diagnostics"]')).not.toBeNull();
+
+    await act(async () => {
+      (relaunchButton as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+
+    expect(onRestartMember).toHaveBeenCalledWith('alice');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('does not show the OpenCode advisory relaunch action for protocol-proof warnings', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const onRestartMember = vi.fn();
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberCard, {
+          member: {
+            ...member,
+            providerId: 'opencode',
+            runtimeAdvisory: {
+              kind: 'api_error',
+              observedAt: '2026-05-17T21:44:34.000Z',
+              reasonCode: 'protocol_proof_missing',
+              message: 'non_visible_tool_without_task_progress',
+            },
+          },
+          memberColor: 'blue',
+          currentTask,
+          isTeamAlive: true,
+          isTeamProvisioning: false,
+          spawnStatus: 'online',
+          spawnLaunchState: 'confirmed_alive',
+          spawnRuntimeAlive: true,
+          onRestartMember,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('OpenCode proof missing');
+    expect(host.querySelector('button[aria-label="Relaunch OpenCode"]')).toBeNull();
+    expect(host.querySelector('button[aria-label="Copy diagnostics"]')).toBeNull();
+    expect(onRestartMember).not.toHaveBeenCalled();
 
     await act(async () => {
       root.unmount();
@@ -535,7 +724,7 @@ describe('MemberCard starting-state visuals', () => {
             restartable: false,
             providerId: 'opencode',
             pid: 333,
-            pidSource: 'opencode_bridge',
+            runtimeLoadScope: 'shared-host',
             rssBytes: 183.9 * 1024 * 1024,
             updatedAt: '2026-04-24T12:00:00.000Z',
           },
@@ -575,11 +764,23 @@ describe('MemberCard starting-state visuals', () => {
             pidSource: 'tmux_child',
             rssBytes: 238.3 * 1024 * 1024,
             cpuPercent: 14,
+            primaryCpuPercent: 4,
+            primaryRssBytes: 210 * 1024 * 1024,
+            childCpuPercent: 10,
+            childRssBytes: 28.3 * 1024 * 1024,
+            processCount: 3,
+            runtimeLoadScope: 'process-tree',
             resourceHistory: [
               {
                 timestamp: '2026-04-24T12:00:00.000Z',
                 rssBytes: 220 * 1024 * 1024,
-                cpuPercent: 4,
+                cpuPercent: 0,
+                primaryCpuPercent: 0,
+                primaryRssBytes: 210 * 1024 * 1024,
+                childCpuPercent: 0,
+                childRssBytes: 10 * 1024 * 1024,
+                processCount: 2,
+                runtimeLoadScope: 'process-tree',
                 pidSource: 'tmux_child',
                 pid: 222,
               },
@@ -587,11 +788,22 @@ describe('MemberCard starting-state visuals', () => {
                 timestamp: '2026-04-24T12:00:05.000Z',
                 rssBytes: 238.3 * 1024 * 1024,
                 cpuPercent: 14,
+                primaryCpuPercent: 4,
+                primaryRssBytes: 210 * 1024 * 1024,
+                childCpuPercent: 10,
+                childRssBytes: 28.3 * 1024 * 1024,
+                processCount: 3,
+                runtimeLoadScope: 'process-tree',
                 pidSource: 'tmux_child',
                 pid: 222,
               },
             ],
             updatedAt: '2026-04-24T12:00:05.000Z',
+          },
+          runtimeTelemetryVisible: true,
+          runtimeTelemetryScale: {
+            cpuCapPercent: 100,
+            memoryCapBytes: 512 * 1024 * 1024,
           },
           isTeamAlive: true,
           isTeamProvisioning: false,
@@ -603,6 +815,112 @@ describe('MemberCard starting-state visuals', () => {
     const strip = host.querySelector('[data-testid="member-runtime-telemetry-strip"]');
     expect(strip).not.toBeNull();
     expect(strip?.querySelector('path[fill="#22c55e"]')).not.toBeNull();
+    const cpuPath = strip?.querySelector('path[stroke="#3b82f6"]');
+    expect(cpuPath).not.toBeNull();
+    expect(cpuPath?.getAttribute('d')).toContain('M0 16.10');
+    expect(strip?.getAttribute('title')).toBeNull();
+    expect(
+      host.querySelector('[data-testid="tooltip-root"][data-delay-duration="0"]')
+    ).not.toBeNull();
+    expect(host.querySelector('[data-testid="tooltip-root"]')?.getAttribute('data-open')).toBe(
+      'false'
+    );
+    expect(host.textContent).toContain('Local runtime load');
+    expect(host.textContent).toContain('Parent and child processes only.');
+    expect(host.textContent).toContain('root PID 222');
+    expect(host.textContent).toContain('3 processes');
+    expect(host.textContent).toContain('CPU');
+    expect(host.textContent).toContain('14%');
+    expect(host.textContent).toContain('Memory');
+    expect(host.textContent).toContain('238 MB');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('ignores malformed runtime telemetry history without crashing', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberCard, {
+          member,
+          memberColor: 'blue',
+          runtimeSummary: 'gpt-5.4-mini · Codex · 238.3 MB',
+          runtimeEntry: {
+            memberName: 'alice',
+            alive: true,
+            restartable: true,
+            providerId: 'codex',
+            pid: 222,
+            resourceHistory: 'not-an-array',
+            updatedAt: '2026-04-24T12:00:05.000Z',
+          } as any,
+          runtimeTelemetryVisible: true,
+          isTeamAlive: true,
+          isTeamProvisioning: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[data-testid="member-runtime-telemetry-strip"]')).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('ignores malformed runtime telemetry samples while rendering valid samples', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberCard, {
+          member,
+          memberColor: 'blue',
+          runtimeSummary: 'gpt-5.4-mini · Codex · 238.3 MB',
+          runtimeEntry: {
+            memberName: 'alice',
+            alive: true,
+            restartable: true,
+            providerId: 'codex',
+            pid: 222,
+            resourceHistory: [
+              null,
+              {
+                timestamp: '2026-04-24T12:00:00.000Z',
+                rssBytes: 220 * 1024 * 1024,
+                cpuPercent: 0,
+              },
+              'bad-sample',
+              {
+                timestamp: '2026-04-24T12:00:05.000Z',
+                rssBytes: 238 * 1024 * 1024,
+                cpuPercent: 12,
+              },
+            ],
+            updatedAt: '2026-04-24T12:00:05.000Z',
+          } as any,
+          runtimeTelemetryVisible: true,
+          isTeamAlive: true,
+          isTeamProvisioning: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const strip = host.querySelector('[data-testid="member-runtime-telemetry-strip"]');
+    expect(strip).not.toBeNull();
     expect(strip?.querySelector('path[stroke="#3b82f6"]')).not.toBeNull();
 
     await act(async () => {

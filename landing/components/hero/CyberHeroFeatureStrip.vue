@@ -67,13 +67,13 @@ const reviewerBubbleText = computed(() => {
       aria-hidden="true"
     >
       <Transition name="cyber-feature-bubble">
-        <CyberHeroSpeechBubble
+        <RobotSpeechBubble
           v-if="reviewerBubbleText"
           class="cyber-feature-rail__reviewer-bubble"
-          role="reviewer"
+          tail="down"
         >
           {{ reviewerBubbleText }}
-        </CyberHeroSpeechBubble>
+        </RobotSpeechBubble>
       </Transition>
       <div class="cyber-feature-rail__reviewer-card cyber-panel">
         <div class="cyber-feature-rail__reviewer-label">{{ heroReviewerFeatureCard.label }}</div>

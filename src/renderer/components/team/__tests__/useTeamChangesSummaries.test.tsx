@@ -234,6 +234,40 @@ function lowConfidenceFileResponse(): TeamTaskChangeSummariesResponse {
   });
 }
 
+function intervalScopedFileResponse(): TeamTaskChangeSummariesResponse {
+  return response({
+    ...changeSet(),
+    confidence: 'medium',
+    files: [
+      fileChange({
+        filePath: '/repo/791/calculator.js',
+        relativePath: '791/calculator.js',
+      }),
+    ],
+    totalFiles: 1,
+    totalLinesAdded: 162,
+    scope: {
+      ...changeSet().scope,
+      confidence: {
+        tier: 2,
+        label: 'medium',
+        reason: 'Scoped by persisted task workIntervals (timestamp-based)',
+      },
+    },
+    warnings: ['Task start boundary missing - scoped by persisted workIntervals timestamps.'],
+  });
+}
+
+function warningFileResponse(): TeamTaskChangeSummariesResponse {
+  return response({
+    ...changeSet(),
+    files: [fileChange()],
+    totalFiles: 1,
+    totalLinesAdded: 1,
+    warnings: ['Unexpected ledger warning.'],
+  });
+}
+
 function invalidFileSummaryResponse(): TeamTaskChangeSummariesResponse {
   return response({
     ...changeSet(),
@@ -742,6 +776,114 @@ describe('useTeamChangesSummaries', () => {
         'task-1',
         'unknown'
       );
+    } finally {
+      if (scrollIntoViewDescriptor) {
+        Object.defineProperty(Element.prototype, 'scrollIntoView', scrollIntoViewDescriptor);
+      } else {
+        delete (Element.prototype as { scrollIntoView?: Element['scrollIntoView'] }).scrollIntoView;
+      }
+    }
+  });
+
+  it('hides work-interval scoping advisories in the compact Changes list when files are present', async () => {
+    hoisted.getTeamTaskChangeSummaries.mockResolvedValue(intervalScopedFileResponse());
+
+    const scrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      'scrollIntoView'
+    );
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    try {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+
+      await act(async () => {
+        root?.render(
+          React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(TeamChangesSection, {
+              teamName: 'team-a',
+              tasks: [task({ status: 'completed', owner: 'jack' })],
+              onOpenTask: vi.fn(),
+              onViewChanges: vi.fn(),
+            })
+          )
+        );
+      });
+
+      const expandButton = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Expand section"]'
+      );
+      expect(expandButton).not.toBeNull();
+
+      await act(async () => {
+        expandButton?.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('791/calculator.js');
+      expect(container.textContent).not.toContain(
+        'Task start boundary missing - scoped by persisted workIntervals timestamps.'
+      );
+    } finally {
+      if (scrollIntoViewDescriptor) {
+        Object.defineProperty(Element.prototype, 'scrollIntoView', scrollIntoViewDescriptor);
+      } else {
+        delete (Element.prototype as { scrollIntoView?: Element['scrollIntoView'] }).scrollIntoView;
+      }
+    }
+  });
+
+  it('keeps unrelated file warnings visible in the compact Changes list', async () => {
+    hoisted.getTeamTaskChangeSummaries.mockResolvedValue(warningFileResponse());
+
+    const scrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      'scrollIntoView'
+    );
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    try {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+
+      await act(async () => {
+        root?.render(
+          React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(TeamChangesSection, {
+              teamName: 'team-a',
+              tasks: [task({ status: 'completed' })],
+              onOpenTask: vi.fn(),
+              onViewChanges: vi.fn(),
+            })
+          )
+        );
+      });
+
+      const expandButton = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Expand section"]'
+      );
+      expect(expandButton).not.toBeNull();
+
+      await act(async () => {
+        expandButton?.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('src/app.ts');
+      expect(container.textContent).toContain('Unexpected ledger warning.');
     } finally {
       if (scrollIntoViewDescriptor) {
         Object.defineProperty(Element.prototype, 'scrollIntoView', scrollIntoViewDescriptor);

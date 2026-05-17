@@ -65,6 +65,8 @@ interface SidebarTaskItemProps {
   hideTeamName?: boolean;
   hideProjectName?: boolean;
   showTeamName?: boolean;
+  /** Pauses the in-progress spinner when the parent team is offline. */
+  teamOffline?: boolean;
   /** The composite key "teamName:taskId" of the task being renamed, or null */
   renamingKey?: string | null;
   /** Called when rename is completed with Enter or blur */
@@ -80,6 +82,7 @@ export const SidebarTaskItem = memo(function SidebarTaskItem({
   hideTeamName,
   hideProjectName,
   showTeamName,
+  teamOffline = false,
   renamingKey,
   onRenameComplete,
   onRenameCancel,
@@ -120,10 +123,11 @@ export const SidebarTaskItem = memo(function SidebarTaskItem({
         ? ({ icon: Eye, color: 'text-orange-400', label: 'in review' } as const)
         : (statusConfig[task.status] ?? statusConfig.pending);
   const StatusIcon = cfg.icon;
+  const shouldAnimateStatusIcon = cfg.label === 'in progress' && !teamOffline;
   const statusIconClassName = cn(
     'size-3 shrink-0',
     cfg.color,
-    cfg.label === 'in progress' && 'animate-spin'
+    shouldAnimateStatusIcon && 'animate-spin'
   );
   const updatedLabel = formatUpdatedLabel(task);
   const dateLabel = updatedLabel ?? formatTaskDate(task.createdAt);

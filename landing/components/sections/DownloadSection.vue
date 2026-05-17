@@ -314,12 +314,13 @@ const releaseDate = computed(() => {
             aria-hidden="true"
           >
             <Transition name="download-robot-bubble">
-              <span
+              <RobotSpeechBubble
                 v-if="showLinuxRobotMessage"
                 class="download-section__card-robot-bubble"
+                tail="right"
               >
                 Готов начать!
-              </span>
+              </RobotSpeechBubble>
             </Transition>
             <img
               class="download-section__card-robot"
@@ -617,58 +618,18 @@ const releaseDate = computed(() => {
 }
 
 .download-section__card-robot-bubble {
-  position: absolute;
+  --robot-bubble-position: absolute;
+  --robot-bubble-min-width: 98px;
+  --robot-bubble-max-width: 170px;
+  --robot-bubble-min-height: 42px;
+  --robot-bubble-font-size: 0.66rem;
+  --robot-bubble-padding: 8px 26px 8px 13px;
+
   top: 12px;
   right: calc(100% - 18px);
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 6px 10px;
-  color: #0b1020;
-  font-family: var(--at-font-mono);
-  font-size: 0.66rem;
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: 0;
-  white-space: nowrap;
-  background:
-    radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.84), rgba(255, 244, 168, 0.84) 66%, rgba(255, 215, 0, 0.82) 100%);
-  border: 2px solid #050816;
-  border-radius: 999px;
-  box-shadow:
-    0 0 0 1px rgba(255, 215, 0, 0.28),
-    0 5px 0 rgba(0, 0, 0, 0.2),
-    0 0 12px rgba(255, 215, 0, 0.14);
-  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.62);
-  pointer-events: none;
   transform: rotate(-5deg);
   transform-origin: right bottom;
   animation: downloadRobotBubbleFloat 2.6s ease-in-out 0.42s infinite;
-}
-
-.download-section__card-robot-bubble::after {
-  position: absolute;
-  top: 52%;
-  right: -28px;
-  width: 30px;
-  height: 12px;
-  content: "";
-  background: rgba(255, 226, 78, 0.96);
-  clip-path: polygon(0 0, 100% 50%, 0 100%);
-  transform: translateY(-50%);
-}
-
-.download-section__card-robot-bubble::before {
-  position: absolute;
-  top: 52%;
-  right: -34px;
-  width: 36px;
-  height: 18px;
-  content: "";
-  background: #050816;
-  clip-path: polygon(0 0, 100% 50%, 0 100%);
-  transform: translateY(-50%);
 }
 
 .download-robot-bubble-enter-active,
@@ -970,9 +931,9 @@ const releaseDate = computed(() => {
   .download-section__card-robot-bubble {
     top: 8px;
     right: calc(100% - 14px);
-    min-height: 28px;
-    padding: 6px 9px;
-    font-size: 0.6rem;
+    --robot-bubble-min-width: 88px;
+    --robot-bubble-font-size: 0.6rem;
+    --robot-bubble-padding: 7px 23px 7px 11px;
   }
 
   .download-section__card-robot {

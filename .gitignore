@@ -65,3 +65,4 @@ remotion/*
 
 # Local reference captures
 /agent-teams-reference-fix-*.png
+/.tmp-*

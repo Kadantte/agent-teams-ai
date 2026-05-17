@@ -487,6 +487,61 @@ describe('runProviderPrepareDiagnostics', () => {
     });
   });
 
+  it('treats OpenCode busy model verification as deferred notes', async () => {
+    const prepareProvisioning = vi.fn<
+      (
+        cwd?: string,
+        providerId?: TeamProviderId,
+        providerIds?: TeamProviderId[],
+        selectedModels?: string[],
+        limitContext?: boolean,
+        modelVerificationMode?: 'compatibility' | 'deep'
+      ) => Promise<TeamProvisioningPrepareResult>
+    >((_cwd, _providerId, _providerIds, _selectedModels, _limitContext, modelVerificationMode) =>
+      Promise.resolve(
+        modelVerificationMode === 'compatibility'
+          ? {
+              ready: true,
+              message: 'CLI is ready to launch',
+              details: [
+                'Selected model opencode/big-pickle is compatible. Deep verification pending.',
+              ],
+              warnings: [],
+            }
+          : {
+              ready: true,
+              message: 'CLI is ready to launch',
+              warnings: [
+                'Selected model opencode/big-pickle verification deferred. OpenCode session is busy; retry when idle.',
+              ],
+            }
+      )
+    );
+
+    const result = await runProviderPrepareDiagnostics({
+      cwd: '/tmp/project',
+      providerId: 'opencode',
+      selectedModelIds: ['opencode/big-pickle'],
+      prepareProvisioning,
+    });
+
+    expect(result.status).toBe('notes');
+    expect(result.details).toEqual([
+      'big-pickle - verification deferred - OpenCode session is busy; retry when idle.',
+    ]);
+    expect(result.warnings).toEqual([
+      'big-pickle - verification deferred - OpenCode session is busy; retry when idle.',
+    ]);
+    expect(result.modelResultsById).toEqual({
+      'opencode/big-pickle': {
+        status: 'notes',
+        line: 'big-pickle - verification deferred - OpenCode session is busy; retry when idle.',
+        warningLine:
+          'big-pickle - verification deferred - OpenCode session is busy; retry when idle.',
+      },
+    });
+  });
+
   it('keeps stale OpenCode model-scoped runtime failures provider-scoped', async () => {
     const runtimeFailure =
       'OpenCode /experimental/tool/ids unavailable - Unable to connect. Is the computer able to access the url?';

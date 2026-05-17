@@ -513,6 +513,48 @@ const OpenCodeVirtualizedModelGrid = ({
   );
 };
 
+const OpenCodeModelCatalogLoadingSkeleton = (): React.JSX.Element => (
+  <div
+    data-testid="team-model-selector-opencode-loading-skeleton"
+    role="status"
+    aria-live="polite"
+    className="rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface)] p-3"
+  >
+    <div className="mb-3 flex items-center gap-2">
+      <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-blue-400" />
+      <span className="text-[11px] font-medium text-[var(--color-text-secondary)]">
+        Loading OpenCode models...
+      </span>
+    </div>
+    <div
+      className="grid gap-1.5"
+      style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}
+    >
+      {[0, 1, 2].map((index) => (
+        <div
+          key={index}
+          className="min-h-[44px] rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2"
+        >
+          <div
+            className="skeleton-shimmer mx-auto mb-1.5 h-3 rounded-sm"
+            style={{
+              width: index === 1 ? '64%' : '76%',
+              backgroundColor: 'var(--skeleton-base)',
+            }}
+          />
+          <div
+            className="skeleton-shimmer mx-auto h-2 rounded-sm"
+            style={{
+              width: index === 2 ? '44%' : '52%',
+              backgroundColor: 'var(--skeleton-base-dim)',
+            }}
+          />
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
 export interface TeamModelSelectorProps {
   providerId: TeamProviderId;
   onProviderChange: (providerId: TeamProviderId) => void;
@@ -957,11 +999,18 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
   const visibleConcreteModelOptionCount =
     visibleModelOptions.length - visibleDefaultModelOptions.length;
   const concreteModelOptionCount = modelOptions.filter((option) => option.value.trim()).length;
-  const shouldShowModelSearch = concreteModelOptionCount > 8;
+  const shouldShowOpenCodeCatalogLoading =
+    effectiveProviderId === 'opencode' &&
+    runtimeProviderStatus?.modelCatalogRefreshState === 'loading' &&
+    runtimeProviderStatus.modelCatalog?.providerId !== 'opencode' &&
+    (runtimeProviderStatus.models.length === 0 ||
+      runtimeProviderStatus.models.every((model) => model.trim() === 'opencode/big-pickle'));
+  const shouldShowModelSearch = !shouldShowOpenCodeCatalogLoading && concreteModelOptionCount > 8;
   const trimmedModelQuery = modelQuery.trim();
   const shouldConstrainModelListHeight = visibleModelOptions.length > 8;
   const shouldVirtualizeOpenCodeModels =
     effectiveProviderId === 'opencode' &&
+    !shouldShowOpenCodeCatalogLoading &&
     visibleConcreteModelOptionCount > OPENCODE_MODEL_VIRTUALIZATION_THRESHOLD;
   const getModelAdvisoryBadgeLabel = (reason: string | null): string =>
     reason?.toLowerCase().includes('ping not confirmed') ? 'Ping not confirmed' : 'Note';
@@ -1270,8 +1319,9 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
                   />
                 </div>
               ) : null}
-              {(effectiveProviderId === 'opencode' && openCodeSourceOptions.length > 1) ||
-              hasRecommendedOpenCodeModels ? (
+              {!shouldShowOpenCodeCatalogLoading &&
+              ((effectiveProviderId === 'opencode' && openCodeSourceOptions.length > 1) ||
+                hasRecommendedOpenCodeModels) ? (
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   {effectiveProviderId === 'opencode' && openCodeSourceOptions.length > 1 ? (
                     <Popover
@@ -1370,7 +1420,22 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
                 </div>
               ) : null}
               {effectiveProviderId === 'opencode' ? (
-                shouldVirtualizeOpenCodeModels ? (
+                shouldShowOpenCodeCatalogLoading ? (
+                  <div
+                    data-testid="team-model-selector-model-grid"
+                    className="space-y-3 rounded-md bg-[var(--color-surface)]"
+                  >
+                    {visibleDefaultModelOptions.length > 0 ? (
+                      <div
+                        className="grid gap-1.5"
+                        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}
+                      >
+                        {visibleDefaultModelOptions.map(renderModelOption)}
+                      </div>
+                    ) : null}
+                    <OpenCodeModelCatalogLoadingSkeleton />
+                  </div>
+                ) : shouldVirtualizeOpenCodeModels ? (
                   <OpenCodeVirtualizedModelGrid
                     defaultOptions={visibleDefaultModelOptions}
                     groups={visibleOpenCodeModelGroups}
@@ -1437,7 +1502,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
                   {visibleModelOptions.map(renderModelOption)}
                 </div>
               )}
-              {visibleModelOptions.length === 0 ? (
+              {visibleModelOptions.length === 0 && !shouldShowOpenCodeCatalogLoading ? (
                 <div className="rounded-md border border-white/10 px-3 py-2 text-xs text-[var(--color-text-muted)]">
                   {trimmedModelQuery
                     ? 'No models match this search.'

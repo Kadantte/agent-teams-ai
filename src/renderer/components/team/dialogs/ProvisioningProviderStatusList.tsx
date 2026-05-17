@@ -147,6 +147,7 @@ type ProvisioningDetailSummary =
   | 'Selected model unavailable'
   | 'Selected model verification timed out'
   | 'Selected model check failed'
+  | 'Selected model verification deferred'
   | 'Selected model ping not confirmed'
   | 'Ready with notes'
   | 'Needs attention';
@@ -163,6 +164,7 @@ function isFormattedModelDetail(lower: string): boolean {
     lower.includes(' - compatible, deep verification pending') ||
     lower.includes(' - unavailable') ||
     lower.includes(' - check failed') ||
+    lower.includes(' - verification deferred') ||
     lower.includes(' - ping not confirmed')
   );
 }
@@ -244,6 +246,9 @@ function summarizeDetail(
   if (isSelectedModelDetail(lower) && lower.includes('could not be verified')) {
     return 'Selected model check failed';
   }
+  if (isSelectedModelDetail(lower) && lower.includes('verification deferred')) {
+    return 'Selected model verification deferred';
+  }
   if (lower.includes(' - verified')) {
     return 'Selected model verified';
   }
@@ -258,6 +263,9 @@ function summarizeDetail(
   }
   if (lower.includes(' - check failed -')) {
     return 'Selected model check failed';
+  }
+  if (lower.includes(' - verification deferred')) {
+    return 'Selected model verification deferred';
   }
   if (lower.includes(' - ping not confirmed')) {
     return 'Selected model ping not confirmed';
@@ -279,6 +287,7 @@ function getModelDetailSummary(details: string[]): string | null {
   let unavailableCount = 0;
   let timedOutCount = 0;
   let checkFailedCount = 0;
+  let deferredCount = 0;
   let pingNotConfirmedCount = 0;
   let checkingCount = 0;
 
@@ -327,6 +336,13 @@ function getModelDetailSummary(details: string[]): string | null {
       checkFailedCount += 1;
       continue;
     }
+    if (
+      lower.includes(' - verification deferred') ||
+      (isSelectedModelDetail(lower) && lower.includes('verification deferred'))
+    ) {
+      deferredCount += 1;
+      continue;
+    }
     if (lower.includes(' - ping not confirmed')) {
       pingNotConfirmedCount += 1;
       continue;
@@ -345,6 +361,9 @@ function getModelDetailSummary(details: string[]): string | null {
   }
   if (timedOutCount > 0) {
     parts.push(`${timedOutCount} model${timedOutCount === 1 ? '' : 's'} timed out`);
+  }
+  if (deferredCount > 0) {
+    parts.push(`${deferredCount} verification deferred`);
   }
   if (pingNotConfirmedCount > 0) {
     parts.push(`${pingNotConfirmedCount} ping not confirmed`);

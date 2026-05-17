@@ -32,6 +32,10 @@ interface RenderedTeamChangeSummary {
 }
 
 const EMPTY_MEMBER_COLOR_MAP = new Map<string, string>();
+const COMPACT_HIDDEN_INTERVAL_SCOPE_WARNINGS = new Set([
+  'Task boundaries missing - scoped by workIntervals timestamps.',
+  'Task start boundary missing - scoped by persisted workIntervals timestamps.',
+]);
 
 function getChangeSetFiles(changeSet: TaskChangeSetV2 | null): FileChangeSummary[] {
   if (!Array.isArray(changeSet?.files)) {
@@ -111,6 +115,23 @@ function getTaskSummaryBadge(changeSet: TaskChangeSetV2 | null): string | undefi
   return undefined;
 }
 
+function isWorkIntervalScopedFileChange(changeSet: TaskChangeSetV2): boolean {
+  const reason = changeSet.scope?.confidence?.reason;
+  return (
+    getChangeSetFiles(changeSet).length > 0 &&
+    changeSet.confidence === 'medium' &&
+    typeof reason === 'string' &&
+    reason.toLowerCase().includes('workinterval')
+  );
+}
+
+function shouldHideCompactDiagnostic(changeSet: TaskChangeSetV2, message: string): boolean {
+  return (
+    isWorkIntervalScopedFileChange(changeSet) &&
+    COMPACT_HIDDEN_INTERVAL_SCOPE_WARNINGS.has(message.trim())
+  );
+}
+
 function getTaskChangeDiagnosticMessages(changeSet: TaskChangeSetV2): string[] {
   const status = classifyTaskChangeReviewability(changeSet);
   if (status.reviewability === 'unknown' || status.reviewability === 'none') {
@@ -120,7 +141,13 @@ function getTaskChangeDiagnosticMessages(changeSet: TaskChangeSetV2): string[] {
     status.diagnostics.length > 0
       ? status.diagnostics.map((diagnostic) => diagnostic.message)
       : getChangeSetWarnings(changeSet);
-  return [...new Set(messages.filter((message) => message.trim().length > 0))];
+  return [
+    ...new Set(
+      messages.filter(
+        (message) => message.trim().length > 0 && !shouldHideCompactDiagnostic(changeSet, message)
+      )
+    ),
+  ];
 }
 
 export const TeamChangesSection = memo(function TeamChangesSection({

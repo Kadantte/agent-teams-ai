@@ -36,6 +36,21 @@ let statusInFlight: Promise<CliInstallationStatus> | null = null;
 const providerStatusInFlight = new Map<CliProviderId, Promise<CliProviderStatus | null>>();
 let cachedStatus: { value: CliInstallationStatus; at: number } | null = null;
 const STATUS_CACHE_TTL_MS = 5_000;
+const FRONTEND_MULTIMODEL_PROVIDER_IDS = new Set<CliProviderId>(['anthropic', 'codex', 'opencode']);
+
+function isFrontendMultimodelProviderId(providerId: CliProviderId): boolean {
+  return FRONTEND_MULTIMODEL_PROVIDER_IDS.has(providerId);
+}
+
+function getCachedStatusAuthenticatedProvider(
+  providers: CliProviderStatus[]
+): CliProviderStatus | null {
+  return (
+    providers.find(
+      (provider) => isFrontendMultimodelProviderId(provider.providerId) && provider.authenticated
+    ) ?? null
+  );
+}
 
 /**
  * Initializes CLI installer handlers with the service instance.
@@ -122,6 +137,13 @@ function patchCachedProviderStatus(providerStatus: CliProviderStatus | null): vo
     return;
   }
 
+  if (
+    cachedStatus.value.flavor === 'agent_teams_orchestrator' &&
+    !isFrontendMultimodelProviderId(providerStatus.providerId)
+  ) {
+    return;
+  }
+
   const hasProvider = cachedStatus.value.providers.some(
     (provider) => provider.providerId === providerStatus.providerId
   );
@@ -130,13 +152,19 @@ function patchCachedProviderStatus(providerStatus: CliProviderStatus | null): vo
         provider.providerId === providerStatus.providerId ? providerStatus : provider
       )
     : [...cachedStatus.value.providers, providerStatus];
-  const authenticatedProvider = nextProviders.find((provider) => provider.authenticated) ?? null;
+  const authenticatedProvider =
+    cachedStatus.value.flavor === 'agent_teams_orchestrator'
+      ? getCachedStatusAuthenticatedProvider(nextProviders)
+      : (nextProviders.find((provider) => provider.authenticated) ?? null);
 
   cachedStatus = {
     value: {
       ...cachedStatus.value,
       providers: nextProviders,
-      authLoggedIn: nextProviders.some((provider) => provider.authenticated),
+      authLoggedIn:
+        cachedStatus.value.flavor === 'agent_teams_orchestrator'
+          ? authenticatedProvider !== null
+          : nextProviders.some((provider) => provider.authenticated),
       authMethod: authenticatedProvider?.authMethod ?? null,
     },
     at: Date.now(),

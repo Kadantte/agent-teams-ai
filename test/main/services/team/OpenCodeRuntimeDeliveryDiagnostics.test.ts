@@ -32,6 +32,40 @@ describe('OpenCodeRuntimeDeliveryDiagnostics', () => {
     expect(selectOpenCodeRuntimeDeliveryReason(record)).toContain('Key limit exceeded');
   });
 
+  it('selects OpenCode free usage exhaustion before empty assistant fallback text', () => {
+    const record = {
+      diagnostics: [
+        'OpenCode session status retry - attempt=1 - Free usage exceeded, subscribe to Go https://opencode.ai/go - next=2026-05-18T00:00:00.267Z',
+        'empty_assistant_turn',
+      ],
+      lastReason: 'empty_assistant_turn',
+      responseState: 'empty_assistant_turn',
+      status: 'failed_terminal',
+    } as Parameters<typeof selectOpenCodeRuntimeDeliveryReason>[0];
+
+    expect(selectOpenCodeRuntimeDeliveryReason(record)).toContain('Free usage exceeded');
+    expect(
+      isActionRequiredOpenCodeRuntimeDeliveryReason(selectOpenCodeRuntimeDeliveryReason(record))
+    ).toBe(true);
+  });
+
+  it('ignores positive OpenCode delivery breadcrumbs before fallback text', () => {
+    const record = {
+      diagnostics: [
+        'OpenCode app MCP is connected for message delivery.',
+        'OpenCode prompt_async accepted; response observation will continue through durable app-side ledger reconciliation.',
+        'prompt_delivered_no_assistant_message',
+      ],
+      lastReason: 'prompt_delivered_no_assistant_message',
+      responseState: 'prompt_delivered_no_assistant_message',
+      status: 'failed_terminal',
+    } as Parameters<typeof selectOpenCodeRuntimeDeliveryReason>[0];
+
+    expect(selectOpenCodeRuntimeDeliveryReason(record)).toBe(
+      'OpenCode accepted the prompt, but no assistant turn was recorded.'
+    );
+  });
+
   it('prioritizes local disk-full diagnostics over secondary aborted assistant errors', () => {
     const record = {
       diagnostics: [

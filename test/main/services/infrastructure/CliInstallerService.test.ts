@@ -128,7 +128,7 @@ describe('CliInstallerService', () => {
       expect(status.updateAvailable).toBe(false);
     });
 
-    it('includes OpenCode in unavailable multimodel bootstrap status', async () => {
+    it('includes frontend-visible providers in unavailable multimodel bootstrap status', async () => {
       allowConsoleLogs();
       vi.mocked(getConfiguredCliFlavor).mockReturnValue('agent_teams_orchestrator');
       vi.mocked(getCliFlavorUiOptions).mockReturnValue({
@@ -147,7 +147,6 @@ describe('CliInstallerService', () => {
       expect(status.providers.map((provider) => provider.providerId)).toEqual([
         'anthropic',
         'codex',
-        'gemini',
         'opencode',
       ]);
       expect(openCodeStatus).toMatchObject({
@@ -156,6 +155,104 @@ describe('CliInstallerService', () => {
         statusMessage: 'Runtime not found.',
         canLoginFromUi: false,
       });
+    });
+
+    it('does not expose hidden Gemini in frontend multimodel authentication snapshots', async () => {
+      allowConsoleLogs();
+      vi.mocked(getConfiguredCliFlavor).mockReturnValue('agent_teams_orchestrator');
+      vi.mocked(getCliFlavorUiOptions).mockReturnValue({
+        displayName: 'agent_teams_orchestrator',
+        supportsSelfUpdate: false,
+        showVersionDetails: false,
+        showBinaryPath: false,
+      });
+      vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/usr/local/bin/claude');
+      vi.mocked(execCli).mockResolvedValueOnce({ stdout: '2.3.4', stderr: '' });
+
+      const providers = [
+        {
+          providerId: 'anthropic',
+          displayName: 'Anthropic',
+          supported: true,
+          authenticated: false,
+          authMethod: null,
+          verificationState: 'unknown',
+          modelVerificationState: 'idle',
+          statusMessage: null,
+          models: [],
+          modelAvailability: [],
+          canLoginFromUi: true,
+          capabilities: { teamLaunch: true, oneShot: true, extensions: undefined as never },
+          backend: null,
+        },
+        {
+          providerId: 'codex',
+          displayName: 'Codex',
+          supported: true,
+          authenticated: false,
+          authMethod: null,
+          verificationState: 'unknown',
+          modelVerificationState: 'idle',
+          statusMessage: null,
+          models: [],
+          modelAvailability: [],
+          canLoginFromUi: true,
+          capabilities: { teamLaunch: true, oneShot: true, extensions: undefined as never },
+          backend: null,
+        },
+        {
+          providerId: 'gemini',
+          displayName: 'Gemini',
+          supported: true,
+          authenticated: true,
+          authMethod: 'gemini_api_key',
+          verificationState: 'verified',
+          modelVerificationState: 'idle',
+          statusMessage: null,
+          models: ['gemini-2.5-pro'],
+          modelAvailability: [],
+          canLoginFromUi: true,
+          capabilities: { teamLaunch: true, oneShot: true, extensions: undefined as never },
+          backend: { kind: 'api', label: 'Gemini API' },
+        },
+        {
+          providerId: 'opencode',
+          displayName: 'OpenCode',
+          supported: true,
+          authenticated: false,
+          authMethod: null,
+          verificationState: 'unknown',
+          modelVerificationState: 'idle',
+          statusMessage: null,
+          models: [],
+          modelAvailability: [],
+          canLoginFromUi: false,
+          capabilities: { teamLaunch: true, oneShot: false, extensions: undefined as never },
+          backend: null,
+        },
+      ];
+      vi.spyOn(ClaudeMultimodelBridgeService.prototype, 'getProviderStatuses').mockImplementation(
+        async (_binaryPath, onUpdate) => {
+          onUpdate?.(providers as never);
+          return providers as never;
+        }
+      );
+
+      const status = await service.getStatus();
+
+      expect(status.providers.map((provider) => provider.providerId)).toEqual([
+        'anthropic',
+        'codex',
+        'opencode',
+      ]);
+      expect(status.authLoggedIn).toBe(false);
+      expect(status.authMethod).toBeNull();
+      expect(
+        service
+          .getLatestStatusSnapshot()
+          ?.providers.some((provider) => provider.providerId === 'gemini')
+      ).toBe(false);
+      expect(service.getLatestStatusSnapshot()?.authLoggedIn).toBe(false);
     });
 
     it('does not mark the CLI installed when the version probe cannot confirm the binary', async () => {

@@ -90,6 +90,15 @@ export function isTerminalSuccessfulOpenCodeDeliveryRecord(
 export function isPotentialOpenCodeRuntimeDeliveryError(
   record: OpenCodePromptDeliveryLedgerRecord
 ): boolean {
+  const terminalSuccess =
+    record.status === 'responded' &&
+    Boolean(record.inboxReadCommittedAt || record.visibleReplyMessageId);
+  if (
+    !terminalSuccess &&
+    isActionRequiredOpenCodeRuntimeDeliveryReason(selectOpenCodeRuntimeDeliveryReason(record))
+  ) {
+    return true;
+  }
   if (record.status === 'failed_terminal') {
     return true;
   }

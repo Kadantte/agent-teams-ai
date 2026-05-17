@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { api, isElectronMode } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { useCollapsedGroups } from '@renderer/hooks/useCollapsedGroups';
@@ -7,6 +8,7 @@ import { useTaskLocalState } from '@renderer/hooks/useTaskLocalState';
 import { cn } from '@renderer/lib/utils';
 import { markTaskUnread } from '@renderer/services/commentReadStorage';
 import { useStore } from '@renderer/store';
+import { getCurrentProvisioningProgressForTeam } from '@renderer/store/slices/teamSlice';
 import { normalizePath } from '@renderer/utils/pathNormalize';
 import { projectColor } from '@renderer/utils/projectColor';
 import {
@@ -16,6 +18,7 @@ import {
   NO_PROJECT_KEY,
   sortTasksByFreshness,
 } from '@renderer/utils/taskGrouping';
+import { resolveTeamStatus } from '@renderer/utils/teamListStatus';
 import { deriveTaskDisplayId } from '@shared/utils/taskIdentity';
 import {
   Archive,
@@ -191,6 +194,9 @@ export const GlobalTaskList = memo(function GlobalTaskList({
     viewMode,
     repositoryGroups,
     teams,
+    provisioningRuns,
+    currentProvisioningRunIdByTeam,
+    leadActivityByTeam,
   } = useStore(
     useShallow((s) => ({
       globalTasks: s.globalTasks,
@@ -202,6 +208,9 @@ export const GlobalTaskList = memo(function GlobalTaskList({
       viewMode: s.viewMode,
       repositoryGroups: s.repositoryGroups,
       teams: s.teams,
+      provisioningRuns: s.provisioningRuns,
+      currentProvisioningRunIdByTeam: s.currentProvisioningRunIdByTeam,
+      leadActivityByTeam: s.leadActivityByTeam,
     }))
   );
 
@@ -217,6 +226,8 @@ export const GlobalTaskList = memo(function GlobalTaskList({
   const [sortPopoverOpen, setSortPopoverOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [renamingTaskKey, setRenamingTaskKey] = useState<string | null>(null);
+  const [aliveTeams, setAliveTeams] = useState<string[]>([]);
+  const [aliveTeamsInitialized, setAliveTeamsInitialized] = useState(false);
   const [projectRequestedVisibleCountByKey, setProjectRequestedVisibleCountByKey] = useState<
     Record<string, number>
   >({});
@@ -224,6 +235,21 @@ export const GlobalTaskList = memo(function GlobalTaskList({
   const hasFetchedRef = useRef(false);
   const readState = useReadStateSnapshot();
   const taskLocalState = useTaskLocalState();
+  const electronMode = isElectronMode();
+
+  const provisioningState = useMemo(
+    () => ({ currentProvisioningRunIdByTeam, provisioningRuns }),
+    [currentProvisioningRunIdByTeam, provisioningRuns]
+  );
+
+  const fetchAliveTeams = useCallback(async (): Promise<string[] | null> => {
+    if (!electronMode || !api.teams?.aliveList) return null;
+    try {
+      return await api.teams.aliveList();
+    } catch {
+      return null;
+    }
+  }, [electronMode]);
 
   // --- New-task animation tracking (same pattern as ChatHistory) ---
   const knownTaskIdsRef = useRef<Set<string>>(new Set());
@@ -261,6 +287,70 @@ export const GlobalTaskList = memo(function GlobalTaskList({
     (task: GlobalTask): boolean => newTaskIds.has(`${task.teamName}:${task.id}`),
     [newTaskIds]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAliveTeams().then((list) => {
+      if (!cancelled && list) {
+        setAliveTeams(list);
+        setAliveTeamsInitialized(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchAliveTeams, teams]);
+
+  const readyProgressRefreshKey = useMemo(() => {
+    return Object.entries(currentProvisioningRunIdByTeam)
+      .map(([teamName, runId]) => {
+        if (!runId) return null;
+        const progress = provisioningRuns[runId];
+        return progress?.state === 'ready'
+          ? `${teamName}:${progress.runId}:${progress.updatedAt}`
+          : null;
+      })
+      .filter((item): item is string => Boolean(item))
+      .join('|');
+  }, [currentProvisioningRunIdByTeam, provisioningRuns]);
+
+  useEffect(() => {
+    if (!readyProgressRefreshKey) return;
+    let cancelled = false;
+    void fetchAliveTeams().then((list) => {
+      if (!cancelled && list) {
+        setAliveTeams(list);
+        setAliveTeamsInitialized(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchAliveTeams, readyProgressRefreshKey]);
+
+  const offlineTeamNames = useMemo(() => {
+    const result = new Set<string>();
+    if (aliveTeamsInitialized) {
+      for (const team of teams) {
+        const status = resolveTeamStatus(
+          team,
+          team.teamName,
+          aliveTeams,
+          getCurrentProvisioningProgressForTeam(provisioningState, team.teamName),
+          leadActivityByTeam
+        );
+        if (status === 'offline') {
+          result.add(team.teamName);
+        }
+      }
+    }
+    for (const [teamName, activity] of Object.entries(leadActivityByTeam)) {
+      if (activity === 'offline') {
+        result.add(teamName);
+      }
+    }
+    return result;
+  }, [aliveTeams, aliveTeamsInitialized, leadActivityByTeam, provisioningState, teams]);
 
   const setGroupingMode = (mode: TaskGroupingMode): void => {
     setGroupingModeState(mode);
@@ -561,6 +651,7 @@ export const GlobalTaskList = memo(function GlobalTaskList({
                 <SidebarTaskItem
                   task={task}
                   showTeamName
+                  teamOffline={offlineTeamNames.has(task.teamName)}
                   renamingKey={renamingTaskKey}
                   onRenameComplete={handleRenameComplete}
                   onRenameCancel={handleRenameCancel}
@@ -655,6 +746,7 @@ export const GlobalTaskList = memo(function GlobalTaskList({
                 <SidebarTaskItem
                   task={task}
                   showTeamName
+                  teamOffline={offlineTeamNames.has(task.teamName)}
                   renamingKey={renamingTaskKey}
                   onRenameComplete={handleRenameComplete}
                   onRenameCancel={handleRenameCancel}
@@ -742,6 +834,7 @@ export const GlobalTaskList = memo(function GlobalTaskList({
                               task={task}
                               hideTeamName
                               hideProjectName
+                              teamOffline={offlineTeamNames.has(task.teamName)}
                               renamingKey={renamingTaskKey}
                               onRenameComplete={handleRenameComplete}
                               onRenameCancel={handleRenameCancel}
@@ -848,6 +941,7 @@ export const GlobalTaskList = memo(function GlobalTaskList({
                           <AnimatedHeightReveal animate={isNewTask(task)}>
                             <SidebarTaskItem
                               task={task}
+                              teamOffline={offlineTeamNames.has(task.teamName)}
                               renamingKey={renamingTaskKey}
                               onRenameComplete={handleRenameComplete}
                               onRenameCancel={handleRenameCancel}

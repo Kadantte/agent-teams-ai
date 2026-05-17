@@ -62,6 +62,7 @@ import type {
   TaskChangePresenceState,
   TaskComment,
   TeamAgentRuntimeEntry,
+  TeamAgentRuntimeResourceSample,
   TeamAgentRuntimeSnapshot,
   TeamCreateRequest,
   TeamGetDataOptions,
@@ -978,16 +979,44 @@ function maybeLogMemberSpawnUiEqualSuppressed(
   );
 }
 
+function isTeamAgentRuntimeResourceSampleLike(
+  value: unknown
+): value is TeamAgentRuntimeResourceSample {
+  return Boolean(value) && typeof value === 'object';
+}
+
+function areTeamAgentRuntimeResourceSamplesEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (!isTeamAgentRuntimeResourceSampleLike(left) || !isTeamAgentRuntimeResourceSampleLike(right)) {
+    return false;
+  }
+  return (
+    left.timestamp === right.timestamp &&
+    left.cpuPercent === right.cpuPercent &&
+    left.rssBytes === right.rssBytes &&
+    left.primaryCpuPercent === right.primaryCpuPercent &&
+    left.primaryRssBytes === right.primaryRssBytes &&
+    left.childCpuPercent === right.childCpuPercent &&
+    left.childRssBytes === right.childRssBytes &&
+    left.processCount === right.processCount &&
+    left.runtimeLoadScope === right.runtimeLoadScope &&
+    left.runtimeLoadTruncated === right.runtimeLoadTruncated &&
+    left.pidSource === right.pidSource &&
+    left.pid === right.pid &&
+    left.runtimePid === right.runtimePid
+  );
+}
+
 function areTeamAgentRuntimeEntriesEqual(
   left: TeamAgentRuntimeEntry | undefined,
   right: TeamAgentRuntimeEntry | undefined
 ): boolean {
   if (left === right) return true;
   if (!left || !right) return left === right;
-  const leftDiagnostics = left.diagnostics ?? [];
-  const rightDiagnostics = right.diagnostics ?? [];
-  const leftResourceHistory = left.resourceHistory ?? [];
-  const rightResourceHistory = right.resourceHistory ?? [];
+  const leftDiagnostics = Array.isArray(left.diagnostics) ? left.diagnostics : [];
+  const rightDiagnostics = Array.isArray(right.diagnostics) ? right.diagnostics : [];
+  const leftResourceHistory = Array.isArray(left.resourceHistory) ? left.resourceHistory : [];
+  const rightResourceHistory = Array.isArray(right.resourceHistory) ? right.resourceHistory : [];
   return (
     left.memberName === right.memberName &&
     left.alive === right.alive &&
@@ -1001,6 +1030,13 @@ function areTeamAgentRuntimeEntriesEqual(
     left.runtimeModel === right.runtimeModel &&
     left.rssBytes === right.rssBytes &&
     left.cpuPercent === right.cpuPercent &&
+    left.primaryCpuPercent === right.primaryCpuPercent &&
+    left.primaryRssBytes === right.primaryRssBytes &&
+    left.childCpuPercent === right.childCpuPercent &&
+    left.childRssBytes === right.childRssBytes &&
+    left.processCount === right.processCount &&
+    left.runtimeLoadScope === right.runtimeLoadScope &&
+    left.runtimeLoadTruncated === right.runtimeLoadTruncated &&
     left.livenessKind === right.livenessKind &&
     left.pidSource === right.pidSource &&
     left.processCommand === right.processCommand &&
@@ -1016,17 +1052,9 @@ function areTeamAgentRuntimeEntriesEqual(
     leftDiagnostics.length === rightDiagnostics.length &&
     leftDiagnostics.every((value, index) => value === rightDiagnostics[index]) &&
     leftResourceHistory.length === rightResourceHistory.length &&
-    leftResourceHistory.every((value, index) => {
-      const other = rightResourceHistory[index];
-      return (
-        value.timestamp === other?.timestamp &&
-        value.cpuPercent === other?.cpuPercent &&
-        value.rssBytes === other?.rssBytes &&
-        value.pidSource === other?.pidSource &&
-        value.pid === other?.pid &&
-        value.runtimePid === other?.runtimePid
-      );
-    })
+    leftResourceHistory.every((value, index) =>
+      areTeamAgentRuntimeResourceSamplesEqual(value, rightResourceHistory[index])
+    )
   );
 }
 

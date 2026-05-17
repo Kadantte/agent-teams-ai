@@ -90,4 +90,28 @@ describe('member launch diagnostics', () => {
     );
     expect(formatMemberLaunchDiagnosticsPayload(payload)).toContain('"memberCardError"');
   });
+
+  it('includes runtime advisory evidence in copy diagnostics', () => {
+    const payload = buildMemberLaunchDiagnosticsPayload({
+      memberName: 'alice',
+      runtimeAdvisoryLabel: 'OpenCode delivery error',
+      runtimeAdvisoryTitle: 'OpenCode accepted the prompt, but no assistant turn was recorded.',
+      runtimeAdvisory: {
+        kind: 'api_error',
+        observedAt: '2026-05-17T22:11:38.239Z',
+        reasonCode: 'backend_error',
+        message: 'OpenCode accepted the prompt, but no assistant turn was recorded.',
+      },
+    });
+
+    expect(payload.memberCardError).toBe(
+      'OpenCode accepted the prompt, but no assistant turn was recorded.'
+    );
+    expect(payload.runtimeAdvisoryKind).toBe('api_error');
+    expect(payload.runtimeAdvisoryReasonCode).toBe('backend_error');
+    expect(payload.diagnostics).toContain(
+      'OpenCode accepted the prompt, but no assistant turn was recorded.'
+    );
+    expect(hasMemberLaunchDiagnosticsDetails(payload)).toBe(true);
+  });
 });

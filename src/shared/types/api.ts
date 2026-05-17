@@ -791,6 +791,19 @@ export interface ReviewAPI {
 }
 
 // =============================================================================
+// Telemetry API
+// =============================================================================
+
+export interface SentryTelemetryContext {
+  userId: string;
+  tags: Record<string, string>;
+}
+
+export interface TelemetryAPI {
+  getSentryContext: () => Promise<SentryTelemetryContext | null>;
+}
+
+// =============================================================================
 // Main Electron API
 // =============================================================================
 
@@ -799,6 +812,7 @@ export interface ReviewAPI {
  */
 export interface ElectronAPI extends RecentProjectsElectronApi, CodexAccountElectronApi {
   startup?: AppStartupAPI;
+  telemetry: TelemetryAPI;
   getAppVersion: () => Promise<string>;
   getProjects: () => Promise<Project[]>;
   getSessions: (projectId: string) => Promise<Session[]>;

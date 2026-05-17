@@ -363,6 +363,107 @@ describe('TeamMemberRuntimeAdvisoryService', () => {
     expect(advisory?.message).not.toContain('Latest assistant message');
   });
 
+  it('keeps pending OpenCode free usage exhaustion visible while delivery is unresolved', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-17T21:44:45.000Z'));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-team-advisory-'));
+    setClaudeBasePathOverride(tmpDir);
+
+    const teamName = 'forge-labs';
+    const laneId = 'secondary:opencode:tom';
+    const oldIso = '2026-05-17T21:44:34.000Z';
+    const laneDir = path.join(
+      tmpDir,
+      'teams',
+      teamName,
+      '.opencode-runtime',
+      'lanes',
+      encodeURIComponent(laneId)
+    );
+    await fs.mkdir(laneDir, { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, 'teams', teamName, '.opencode-runtime', 'lanes.json'),
+      JSON.stringify({
+        version: 1,
+        updatedAt: oldIso,
+        lanes: {
+          [laneId]: { laneId, state: 'active', updatedAt: oldIso },
+        },
+      }),
+      'utf8'
+    );
+    await fs.writeFile(
+      path.join(laneDir, 'opencode-prompt-delivery-ledger.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: oldIso,
+        data: [
+          {
+            id: 'opencode-prompt:free-usage-pending',
+            teamName,
+            memberName: 'tom',
+            laneId,
+            runId: 'run-1',
+            runtimeSessionId: 'ses-1',
+            inboxMessageId: 'msg-1',
+            inboxTimestamp: oldIso,
+            source: 'watcher',
+            messageKind: null,
+            replyRecipient: 'team-lead',
+            actionMode: null,
+            taskRefs: [],
+            payloadHash: 'sha256:test',
+            status: 'accepted',
+            responseState: 'pending',
+            attempts: 2,
+            maxAttempts: 3,
+            acceptanceUnknown: false,
+            nextAttemptAt: '2026-05-17T21:44:37.000Z',
+            lastAttemptAt: oldIso,
+            lastObservedAt: oldIso,
+            acceptedAt: '2026-05-17T21:40:21.000Z',
+            respondedAt: null,
+            failedAt: null,
+            inboxReadCommittedAt: null,
+            inboxReadCommitError: null,
+            prePromptCursor: null,
+            postPromptCursor: null,
+            deliveredUserMessageId: 'msg-opencode-user',
+            observedAssistantMessageId: 'msg-opencode-assistant',
+            observedAssistantPreview: null,
+            observedToolCallNames: [],
+            observedVisibleMessageId: null,
+            visibleReplyMessageId: null,
+            visibleReplyInbox: null,
+            visibleReplyCorrelation: null,
+            lastReason: 'assistant_response_pending',
+            diagnostics: [
+              'OpenCode app MCP is connected for message delivery.',
+              'OpenCode prompt_async accepted; response observation will continue through durable app-side ledger reconciliation.',
+              'OpenCode session status retry - attempt=1 - Free usage exceeded, subscribe to Go https://opencode.ai/go - next=2026-05-18T00:00:00.502Z)',
+            ],
+            createdAt: oldIso,
+            updatedAt: oldIso,
+          },
+        ],
+      }),
+      'utf8'
+    );
+
+    const service = new TeamMemberRuntimeAdvisoryService({
+      findMemberLogs: vi.fn(async () => []),
+    });
+    const advisory = await service.getMemberAdvisory(teamName, 'tom');
+
+    expect(advisory).toMatchObject({
+      kind: 'api_error',
+      reasonCode: 'quota_exhausted',
+      retryUntil: '2026-05-18T00:00:00.502Z',
+    });
+    expect(advisory?.retryDelayMs).toBeGreaterThan(0);
+    expect(advisory?.message).toContain('Free usage exceeded');
+  });
+
   it('classifies terminal OpenCode protocol proof failures as warnings, not provider errors', async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-team-advisory-'));
     setClaudeBasePathOverride(tmpDir);

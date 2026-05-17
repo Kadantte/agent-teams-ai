@@ -24,9 +24,10 @@ import {
 import { createTeamRuntimeLaneCoordinator } from '@features/team-runtime-lanes/main';
 import {
   killTmuxPaneForCurrentPlatformSync,
-  listRuntimeProcessesForCurrentTmuxPlatform,
+  listRuntimeProcessTableForCurrentPlatform,
   listTmuxPanePidsForCurrentPlatform,
   listTmuxPaneRuntimeInfoForCurrentPlatform,
+  type RuntimeProcessTableRow,
   sendKeysToTmuxPaneForCurrentPlatform,
   type TmuxPaneRuntimeInfo,
 } from '@features/tmux-installer/main';
@@ -342,6 +343,7 @@ import { TeamMemberWorktreeManager } from './TeamMemberWorktreeManager';
 import { TeamMetaStore } from './TeamMetaStore';
 import {
   commandArgEquals,
+  extractCliArgValues,
   isStrongRuntimeEvidence,
   resolveTeamMemberRuntimeLiveness,
   sanitizeProcessCommandForDiagnostics,
@@ -543,6 +545,7 @@ import type {
   TeamAgentRuntimeDiagnosticSeverity,
   TeamAgentRuntimeEntry,
   TeamAgentRuntimeLivenessKind,
+  TeamAgentRuntimeLoadScope,
   TeamAgentRuntimePidSource,
   TeamAgentRuntimeResourceSample,
   TeamAgentRuntimeSnapshot,
@@ -581,6 +584,44 @@ const RUNTIME_PIDUSAGE_OPTIONS = process.platform === 'win32' ? { maxage: 10_000
 interface RuntimeProcessUsageStats {
   rssBytes?: number;
   cpuPercent?: number;
+}
+
+interface RuntimeProcessLoadStats extends RuntimeProcessUsageStats {
+  primaryCpuPercent?: number;
+  primaryRssBytes?: number;
+  childCpuPercent?: number;
+  childRssBytes?: number;
+  processCount?: number;
+  runtimeLoadScope?: TeamAgentRuntimeLoadScope;
+  runtimeLoadTruncated?: boolean;
+}
+
+type RuntimeTelemetryProcessSource = 'native' | 'wsl' | 'windows-host';
+
+interface RuntimeTelemetryProcessTableRow extends RuntimeProcessTableRow {
+  runtimeTelemetrySource?: RuntimeTelemetryProcessSource;
+}
+
+class RuntimeTelemetryTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RuntimeTelemetryTimeoutError';
+  }
+}
+
+function normalizeRuntimeTelemetryNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 const logger = createLogger('Service:TeamProvisioning');
@@ -858,7 +899,13 @@ const PROBE_CACHE_TTL_MS = 36 * 60 * 60 * 1000;
 const PREFLIGHT_BINARY_TIMEOUT_MS = 8000;
 const PREFLIGHT_AUTH_RETRY_DELAY_MS = 2000;
 const PREFLIGHT_AUTH_MAX_RETRIES = 2;
-const OPENCODE_PREFLIGHT_MODEL_PROBE_CONCURRENCY = 2;
+// Facts:
+// - Deep OpenCode preflight below calls adapter.prepare({ runtimeOnly: false }).
+// - OpenCodeTeamRuntimeAdapter maps runtimeOnly:false to requireExecutionProbe:true.
+// - The readiness bridge then runs modelExecution.verify against the OpenCode host.
+// - The host reports "session status busy" when another foreground probe/request is active.
+// Keep probes serial so preflight does not create its own busy failures.
+const OPENCODE_PREFLIGHT_MODEL_PROBE_CONCURRENCY = 1;
 const OPENCODE_PROVIDER_SCOPED_PREPARE_FAILURE_REASONS = new Set([
   'not_installed',
   'not_authenticated',
@@ -886,6 +933,28 @@ function looksLikeOpenCodeProviderPrepareDiagnostic(value: string): boolean {
     lower.includes('opencode cli') ||
     lower.includes('unable to connect')
   );
+}
+
+function isRetryableOpenCodePreflightBusyDiagnostic(value: string | null | undefined): boolean {
+  const lower = value?.trim().toLowerCase() ?? '';
+  if (!lower) {
+    return false;
+  }
+  // Fact: these diagnostics report OpenCode host/session occupancy, not that
+  // the selected model is unavailable or rejected by the provider.
+  return (
+    lower.includes('opencode session status busy') ||
+    lower.includes('session status busy') ||
+    lower === 'provider busy' ||
+    lower.includes('provider busy')
+  );
+}
+
+function buildOpenCodeModelVerificationDeferredLine(modelId: string, reason: string): string {
+  const normalizedReason = isRetryableOpenCodePreflightBusyDiagnostic(reason)
+    ? 'OpenCode session is busy; retry when idle.'
+    : reason;
+  return `Selected model ${modelId} verification deferred. ${normalizedReason}`;
 }
 
 function applyDistinctProvisioningMemberColors<
@@ -2407,6 +2476,8 @@ function isDefinitiveOpenCodePreLaunchFailure(
 
 const OPENCODE_BOOTSTRAP_PENDING_DIAGNOSTIC =
   'opencode_bootstrap_pending_after_materialized_session';
+const OPENCODE_APP_MANAGED_BOOTSTRAP_PENDING_DIAGNOSTIC =
+  'OpenCode app-managed bootstrap evidence is pending after materialized session.';
 
 function isMaterializedOpenCodeSessionId(sessionId: unknown): boolean {
   if (typeof sessionId !== 'string') {
@@ -2485,7 +2556,9 @@ function normalizeRecoverableOpenCodeBootstrapPendingLaunchResult(
     new Set([
       ...(member.diagnostics ?? []),
       OPENCODE_BOOTSTRAP_PENDING_DIAGNOSTIC,
-      'OpenCode runtime session materialized; waiting for runtime_bootstrap_checkin.',
+      isExplicitLegacyOpenCodeBootstrap(member)
+        ? 'OpenCode runtime session materialized; waiting for runtime_bootstrap_checkin.'
+        : OPENCODE_APP_MANAGED_BOOTSTRAP_PENDING_DIAGNOSTIC,
       ...diagnostics,
     ])
   );
@@ -2689,9 +2762,37 @@ function isPersistedOpenCodeSecondaryLaneMember(
 }
 
 const OPENCODE_BOOTSTRAP_CHECKIN_RETRY_SENT_PREFIX = 'opencode_bootstrap_checkin_retry_prompt_sent';
+const OPENCODE_APP_MANAGED_BOOTSTRAP_STALLED_DIAGNOSTIC =
+  'OpenCode app-managed bootstrap evidence did not commit within 5 min.';
 
 function getOpenCodeBootstrapCheckinRetryMarker(runId: string, runtimeSessionId: string): string {
   return `${OPENCODE_BOOTSTRAP_CHECKIN_RETRY_SENT_PREFIX}:${runId}:${runtimeSessionId}`;
+}
+
+function isExplicitLegacyOpenCodeBootstrap(
+  value:
+    | {
+        bootstrapMode?: 'model_tool_checkin' | 'app_managed_context';
+      }
+    | undefined
+    | null
+): boolean {
+  return value?.bootstrapMode === 'model_tool_checkin';
+}
+
+function resolveOpenCodeSecondaryLaneMemberEvidence(
+  lane: MixedSecondaryRuntimeLaneState | undefined,
+  memberName: string
+): TeamRuntimeMemberLaunchEvidence | undefined {
+  if (!lane?.result) {
+    return undefined;
+  }
+  return (
+    lane.result.members[memberName] ??
+    Object.values(lane.result.members).find((member) =>
+      matchesTeamMemberIdentity(member.memberName ?? '', memberName)
+    )
+  );
 }
 
 const OPENCODE_MEMBER_SESSION_RECORDED_AT_PATTERN =
@@ -2783,6 +2884,10 @@ function selectOpenCodeSecondaryBootstrapStallDiagnostic(
 function getOpenCodeSecondaryBootstrapStallDiagnosticFromPersisted(
   member: PersistedTeamLaunchMemberState
 ): string {
+  if (!isExplicitLegacyOpenCodeBootstrap(member)) {
+    return OPENCODE_APP_MANAGED_BOOTSTRAP_STALLED_DIAGNOSTIC;
+  }
+
   const selected = selectOpenCodeSecondaryBootstrapStallDiagnostic([
     member.runtimeDiagnostic,
     ...(member.diagnostics ?? []),
@@ -5858,6 +5963,13 @@ export class TeamProvisioningService {
   private static readonly SAME_TEAM_PERSIST_RETRY_MS = 2_000;
   private static readonly AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS = 2_000;
   private static readonly AGENT_RUNTIME_RESOURCE_HISTORY_LIMIT = 60;
+  private static readonly MAX_RUNTIME_TREE_PIDS_PER_ROOT = 64;
+  private static readonly MAX_RUNTIME_USAGE_PIDS_PER_SNAPSHOT = 512;
+  private static readonly RUNTIME_PROCESS_TABLE_TIMEOUT_MS = 1_500;
+  private static readonly RUNTIME_WINDOWS_PROCESS_TABLE_TIMEOUT_MS = 1_500;
+  private static readonly RUNTIME_PIDUSAGE_BATCH_TIMEOUT_MS = 2_000;
+  private static readonly RUNTIME_PIDUSAGE_SINGLE_TIMEOUT_MS = 750;
+  private static readonly RUNTIME_PIDUSAGE_FALLBACK_CONCURRENCY = 16;
   private static readonly MEMBER_SPAWN_STATUS_SNAPSHOT_CACHE_TTL_MS = 500;
   private static readonly LAUNCH_STATE_NOOP_REFRESH_MS = 15_000;
   private static readonly RETAINED_PROVISIONING_PROGRESS_TTL_MS = 5 * 60_000;
@@ -5936,6 +6048,16 @@ export class TeamProvisioningService {
   private readonly agentRuntimeResourceHistoryByTeam = new Map<
     string,
     Map<string, TeamAgentRuntimeResourceSample[]>
+  >();
+  private readonly runtimeProcessRowsForUsageSnapshotByTeam = new Map<
+    string,
+    {
+      expiresAtMs: number;
+      generation: number;
+      runId: string | null;
+      rows: RuntimeTelemetryProcessTableRow[] | null;
+      includesWindowsHostRows: boolean;
+    }
   >();
   private readonly agentRuntimeSnapshotInFlightByTeam = new Map<
     string,
@@ -6227,6 +6349,7 @@ export class TeamProvisioningService {
     this.agentRuntimeSnapshotInFlightByTeam.delete(teamName);
     this.liveTeamAgentRuntimeMetadataCache.delete(teamName);
     this.liveTeamAgentRuntimeMetadataInFlightByTeam.delete(teamName);
+    this.runtimeProcessRowsForUsageSnapshotByTeam.delete(teamName);
   }
 
   private cloneMemberSpawnStatusesSnapshot(
@@ -9824,7 +9947,6 @@ export class TeamProvisioningService {
     let liveSecondaryLaneRunId: string | null = null;
     let trackedSecondaryLanePresent = false;
     let trackedSecondaryLaneSnapshotKnown = false;
-    let trackedSecondaryLaneBootstrapConfirmed: boolean | null = null;
     if (
       trackedRun &&
       laneIdentity.laneKind === 'secondary' &&
@@ -9839,15 +9961,6 @@ export class TeamProvisioningService {
       );
       trackedSecondaryLanePresent = liveLane != null;
       liveSecondaryLaneRunId = liveLane?.runId?.trim() || null;
-      const liveLaneMember = liveLane
-        ? (liveLane.result?.members?.[canonicalMemberName] ??
-          liveLane.result?.members?.[liveLane.member.name])
-        : null;
-      if (liveLaneMember) {
-        trackedSecondaryLaneBootstrapConfirmed =
-          liveLaneMember.bootstrapConfirmed === true ||
-          liveLaneMember.launchState === 'confirmed_alive';
-      }
       if (!liveLane && trackedSecondaryLaneSnapshotKnown) {
         return { delivered: false, reason: 'opencode_runtime_not_active' };
       }
@@ -9961,14 +10074,12 @@ export class TeamProvisioningService {
     }
 
     if (laneIdentity.laneKind === 'secondary' && laneIdentity.laneOwnerProviderId === 'opencode') {
-      const bootstrapReady =
-        trackedSecondaryLaneBootstrapConfirmed === true ||
-        (await this.hasDeliverableOpenCodeRuntimeBootstrapSessionEvidence({
-          teamName,
-          runId: runtimeRunId,
-          laneId: laneIdentity.laneId,
-          memberName: canonicalMemberName,
-        }));
+      const bootstrapReady = await this.hasDeliverableOpenCodeRuntimeBootstrapSessionEvidence({
+        teamName,
+        runId: runtimeRunId,
+        laneId: laneIdentity.laneId,
+        memberName: canonicalMemberName,
+      });
       if (!bootstrapReady) {
         return {
           delivered: false,
@@ -15127,18 +15238,83 @@ export class TeamProvisioningService {
       spawnStatusSnapshot?.source === 'live' &&
       activeRuntimeRunId.length > 0 &&
       spawnStatusRunId === activeRuntimeRunId;
-    const runtimePids = new Set<number>();
+    const runtimeRootOwnersByPid = new Map<number, Set<string>>();
+    const runtimeUsageRootPids = new Set<number>();
+    const addRuntimeRootPid = (
+      pid: unknown,
+      ownerKey: string,
+      options: { sampleUsage?: boolean } = {}
+    ): void => {
+      if (typeof pid !== 'number' || !Number.isFinite(pid) || pid <= 0) {
+        return;
+      }
+      const owners = runtimeRootOwnersByPid.get(pid) ?? new Set<string>();
+      owners.add(ownerKey);
+      runtimeRootOwnersByPid.set(pid, owners);
+      if (options.sampleUsage !== false) {
+        runtimeUsageRootPids.add(pid);
+      }
+    };
+    const canSampleRuntimeMetadataPid = (
+      metadata: LiveTeamAgentRuntimeMetadata,
+      pid: unknown
+    ): boolean => {
+      if (typeof pid !== 'number' || !Number.isFinite(pid) || pid <= 0) {
+        return false;
+      }
+      if (process.platform !== 'win32') {
+        return true;
+      }
+      const paneId = metadata.tmuxPaneId?.trim() ?? '';
+      if (metadata.backendType === 'tmux' || (paneId && !paneId.startsWith('process:'))) {
+        return false;
+      }
+      return (
+        metadata.pidSource !== 'tmux_child' &&
+        metadata.pidSource !== 'tmux_pane' &&
+        metadata.pidSource !== 'persisted_metadata'
+      );
+    };
     const leadPid = run?.child?.pid;
-    if (typeof leadPid === 'number' && Number.isFinite(leadPid) && leadPid > 0) {
-      runtimePids.add(leadPid);
-    }
-    for (const metadata of liveRuntimeByMember.values()) {
-      const memberPid = metadata.pid ?? metadata.metricsPid;
-      if (typeof memberPid === 'number' && Number.isFinite(memberPid) && memberPid > 0) {
-        runtimePids.add(memberPid);
+    addRuntimeRootPid(leadPid, '__lead__');
+    for (const [memberName, metadata] of liveRuntimeByMember.entries()) {
+      const memberPids = [metadata.pid, metadata.metricsPid];
+      for (const memberPid of memberPids) {
+        addRuntimeRootPid(memberPid, memberName, {
+          sampleUsage: canSampleRuntimeMetadataPid(metadata, memberPid),
+        });
       }
     }
-    const usageStatsByPid = await this.readProcessUsageStatsByPid([...runtimePids]);
+    let runtimeUsageTreesByRootPid = new Map<number, { pids: number[]; truncated: boolean }>();
+    let usageStatsByPid = new Map<number, RuntimeProcessUsageStats>();
+    try {
+      const runtimeProcessRows =
+        runtimeRootOwnersByPid.size > 0
+          ? await this.readRuntimeProcessRowsForUsageSnapshot(teamName, {
+              includeWindowsHostRows: process.platform === 'win32',
+            })
+          : null;
+      this.addRuntimeRootOwnersFromProcessRows(
+        teamName,
+        runtimeProcessRows,
+        runtimeRootOwnersByPid
+      );
+      runtimeUsageTreesByRootPid = this.buildRuntimeUsageProcessTrees(
+        [...runtimeUsageRootPids],
+        runtimeProcessRows,
+        runtimeRootOwnersByPid
+      );
+      const runtimeUsagePids = [
+        ...new Set([...runtimeUsageTreesByRootPid.values()].flatMap((tree) => tree.pids)),
+      ];
+      usageStatsByPid = await this.readProcessUsageStatsByPid(runtimeUsagePids);
+    } catch (error) {
+      logger.debug(
+        `[${teamName}] Runtime telemetry sampling failed; continuing without resource metrics: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
     const persistedRuntimeMembers = this.readPersistedRuntimeMembers(teamName);
     const snapshotMembers: Record<string, TeamAgentRuntimeEntry> = {};
     const activeResourceHistoryKeys = new Set<string>();
@@ -15233,7 +15409,13 @@ export class TeamProvisioningService {
       const isLead = isLeadMember({ name: memberName, agentType: member.agentType });
       if (isLead) {
         const pid = run?.child?.pid;
-        const usageStats = pid ? usageStatsByPid.get(pid) : undefined;
+        const usageStats = pid
+          ? this.buildRuntimeProcessLoadStatsSafely(teamName, memberName, {
+              rootPid: pid,
+              usageStatsByPid,
+              processTree: runtimeUsageTreesByRootPid.get(pid),
+            })
+          : undefined;
         const runtimeModel =
           run?.request.model?.trim() ||
           (run?.spawnContext
@@ -15242,12 +15424,19 @@ export class TeamProvisioningService {
           member.model?.trim() ||
           undefined;
         const resourceHistory = pid
-          ? this.recordAgentRuntimeResourceSample({
+          ? this.recordAgentRuntimeResourceSampleSafely({
               teamName,
               memberName,
               timestamp: updatedAt,
               cpuPercent: usageStats?.cpuPercent,
               rssBytes: usageStats?.rssBytes,
+              primaryCpuPercent: usageStats?.primaryCpuPercent,
+              primaryRssBytes: usageStats?.primaryRssBytes,
+              childCpuPercent: usageStats?.childCpuPercent,
+              childRssBytes: usageStats?.childRssBytes,
+              processCount: usageStats?.processCount,
+              runtimeLoadScope: usageStats?.runtimeLoadScope,
+              runtimeLoadTruncated: usageStats?.runtimeLoadTruncated,
               pidSource: 'lead_process',
               pid,
               activeKeys: activeResourceHistoryKeys,
@@ -15262,6 +15451,21 @@ export class TeamProvisioningService {
           ...(runtimeModel ? { runtimeModel } : {}),
           ...(usageStats?.rssBytes != null ? { rssBytes: usageStats.rssBytes } : {}),
           ...(usageStats?.cpuPercent != null ? { cpuPercent: usageStats.cpuPercent } : {}),
+          ...(usageStats?.primaryRssBytes != null
+            ? { primaryRssBytes: usageStats.primaryRssBytes }
+            : {}),
+          ...(usageStats?.primaryCpuPercent != null
+            ? { primaryCpuPercent: usageStats.primaryCpuPercent }
+            : {}),
+          ...(usageStats?.childRssBytes != null ? { childRssBytes: usageStats.childRssBytes } : {}),
+          ...(usageStats?.childCpuPercent != null
+            ? { childCpuPercent: usageStats.childCpuPercent }
+            : {}),
+          ...(usageStats?.processCount != null ? { processCount: usageStats.processCount } : {}),
+          ...(usageStats?.runtimeLoadScope
+            ? { runtimeLoadScope: usageStats.runtimeLoadScope }
+            : {}),
+          ...(usageStats?.runtimeLoadTruncated ? { runtimeLoadTruncated: true } : {}),
           ...(pid ? { pidSource: 'lead_process' as const } : {}),
           ...(resourceHistory && resourceHistory.length > 0 ? { resourceHistory } : {}),
           updatedAt,
@@ -15369,26 +15573,49 @@ export class TeamProvisioningService {
         liveRuntimeMember?.livenessKind === 'runtime_process_candidate'
           ? 'info'
           : liveRuntimeMember?.runtimeDiagnosticSeverity;
-      let usageStats = rssPid ? usageStatsByPid.get(rssPid) : undefined;
-      if (!usageStats && isSharedOpenCodeHost && typeof rssPid === 'number' && rssPid > 0) {
+      if (
+        rssPid &&
+        !usageStatsByPid.has(rssPid) &&
+        isSharedOpenCodeHost &&
+        typeof rssPid === 'number' &&
+        rssPid > 0
+      ) {
         try {
-          const refreshedStat = await pidusage(rssPid, RUNTIME_PIDUSAGE_OPTIONS);
-          const refreshedUsageStats = this.normalizeRuntimeProcessUsageStats(refreshedStat);
+          const refreshedUsageStats = (await this.readProcessUsageStatsByPid([rssPid])).get(rssPid);
           if (refreshedUsageStats) {
             usageStatsByPid.set(rssPid, refreshedUsageStats);
-            usageStats = refreshedUsageStats;
           }
-        } catch {
+        } catch (error) {
+          logger.debug(
+            `[${teamName}] Shared OpenCode host runtime usage refresh failed for pid ${rssPid}; continuing without refreshed metrics: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
           // Shared OpenCode host can exit between discovery and the targeted RSS refresh.
         }
       }
+      const usageStats = rssPid
+        ? this.buildRuntimeProcessLoadStatsSafely(teamName, memberName, {
+            rootPid: rssPid,
+            usageStatsByPid,
+            processTree: runtimeUsageTreesByRootPid.get(rssPid),
+            scope: isSharedOpenCodeHost ? 'shared-host' : undefined,
+          })
+        : undefined;
       const resourceHistory = rssPid
-        ? this.recordAgentRuntimeResourceSample({
+        ? this.recordAgentRuntimeResourceSampleSafely({
             teamName,
             memberName,
             timestamp: updatedAt,
             cpuPercent: usageStats?.cpuPercent,
             rssBytes: usageStats?.rssBytes,
+            primaryCpuPercent: usageStats?.primaryCpuPercent,
+            primaryRssBytes: usageStats?.primaryRssBytes,
+            childCpuPercent: usageStats?.childCpuPercent,
+            childRssBytes: usageStats?.childRssBytes,
+            processCount: usageStats?.processCount,
+            runtimeLoadScope: usageStats?.runtimeLoadScope,
+            runtimeLoadTruncated: usageStats?.runtimeLoadTruncated,
             pidSource: liveRuntimeMember?.pidSource,
             pid: rssPid,
             runtimePid: liveRuntimeMember?.metricsPid,
@@ -15410,6 +15637,19 @@ export class TeamProvisioningService {
         ...(runtimeCwd ? { cwd: runtimeCwd } : {}),
         ...(usageStats?.rssBytes != null ? { rssBytes: usageStats.rssBytes } : {}),
         ...(usageStats?.cpuPercent != null ? { cpuPercent: usageStats.cpuPercent } : {}),
+        ...(usageStats?.primaryRssBytes != null
+          ? { primaryRssBytes: usageStats.primaryRssBytes }
+          : {}),
+        ...(usageStats?.primaryCpuPercent != null
+          ? { primaryCpuPercent: usageStats.primaryCpuPercent }
+          : {}),
+        ...(usageStats?.childRssBytes != null ? { childRssBytes: usageStats.childRssBytes } : {}),
+        ...(usageStats?.childCpuPercent != null
+          ? { childCpuPercent: usageStats.childCpuPercent }
+          : {}),
+        ...(usageStats?.processCount != null ? { processCount: usageStats.processCount } : {}),
+        ...(usageStats?.runtimeLoadScope ? { runtimeLoadScope: usageStats.runtimeLoadScope } : {}),
+        ...(usageStats?.runtimeLoadTruncated ? { runtimeLoadTruncated: true } : {}),
         ...(resourceHistory && resourceHistory.length > 0 ? { resourceHistory } : {}),
         ...(effectiveLivenessKind ? { livenessKind: effectiveLivenessKind } : {}),
         ...(liveRuntimeMember?.pidSource ? { pidSource: liveRuntimeMember.pidSource } : {}),
@@ -15437,7 +15677,15 @@ export class TeamProvisioningService {
         updatedAt,
       };
     }
-    this.pruneAgentRuntimeResourceHistory(teamName, activeResourceHistoryKeys);
+    try {
+      this.pruneAgentRuntimeResourceHistory(teamName, activeResourceHistoryKeys);
+    } catch (error) {
+      logger.debug(
+        `[${teamName}] Failed to prune runtime telemetry history; continuing with snapshot: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
 
     const persistedLaunchIdentity = persistedTeamMeta?.launchIdentity;
     const snapshotProviderId =
@@ -17798,6 +18046,13 @@ export class TeamProvisioningService {
         candidate.providerId === 'opencode' &&
         matchesTeamMemberIdentity(candidate.member.name, memberName)
     );
+    if (
+      !isExplicitLegacyOpenCodeBootstrap(
+        resolveOpenCodeSecondaryLaneMemberEvidence(lane, memberName)
+      )
+    ) {
+      return OPENCODE_APP_MANAGED_BOOTSTRAP_STALLED_DIAGNOSTIC;
+    }
     const selectedDiagnostic = selectOpenCodeSecondaryBootstrapStallDiagnostic([
       current.runtimeDiagnostic,
       ...(lane?.diagnostics ?? []),
@@ -17912,6 +18167,13 @@ export class TeamProvisioningService {
         ?.sessionId?.trim() ||
       '';
     if (!lane || !laneRunId || !isMaterializedOpenCodeSessionId(runtimeSessionId)) {
+      return;
+    }
+    if (
+      !isExplicitLegacyOpenCodeBootstrap(
+        resolveOpenCodeSecondaryLaneMemberEvidence(lane, memberName)
+      )
+    ) {
       return;
     }
 
@@ -18626,6 +18888,24 @@ export class TeamProvisioningService {
 
       const primaryReason =
         prepare.diagnostics.find((entry) => entry.trim().length > 0) ?? prepare.reason;
+      if (
+        prepare.retryable &&
+        [primaryReason, prepare.reason, ...prepare.diagnostics].some(
+          isRetryableOpenCodePreflightBusyDiagnostic
+        )
+      ) {
+        const deferredLine = buildOpenCodeModelVerificationDeferredLine(modelId, primaryReason);
+        warnings.push(deferredLine);
+        issues.push({
+          providerId: 'opencode',
+          modelId,
+          scope: 'model',
+          severity: 'warning',
+          code: prepare.reason,
+          message: primaryReason,
+        });
+        continue;
+      }
       if (this.isProviderScopedOpenCodePrepareFailure(prepare, primaryReason)) {
         pushUniqueLine(details, primaryReason);
         pushUniqueLine(blockingMessages, primaryReason);
@@ -24721,8 +25001,9 @@ export class TeamProvisioningService {
         nextEntry.livenessSource = undefined;
         nextEntry.bootstrapStalled = openCodeBootstrapStalled ? true : undefined;
         if (openCodeBootstrapStalled) {
-          nextEntry.runtimeDiagnostic =
-            'Runtime process is alive, but no bootstrap check-in after 5 min.';
+          nextEntry.runtimeDiagnostic = isExplicitLegacyOpenCodeBootstrap(current)
+            ? 'Runtime process is alive, but no bootstrap check-in after 5 min.'
+            : OPENCODE_APP_MANAGED_BOOTSTRAP_STALLED_DIAGNOSTIC;
           nextEntry.runtimeDiagnosticSeverity = 'warning';
         }
         nextEntry.launchState = deriveMemberLaunchState(nextEntry);
@@ -24778,9 +25059,11 @@ export class TeamProvisioningService {
       }
       const runtimeProcessAlive =
         current.runtimeAlive === true && current.livenessKind === 'runtime_process';
-      const runtimeDiagnostic = runtimeProcessAlive
-        ? 'Runtime process is alive, but no bootstrap check-in after 5 min.'
-        : 'OpenCode bootstrap did not complete runtime_bootstrap_checkin after 5 min.';
+      const runtimeDiagnostic = isExplicitLegacyOpenCodeBootstrap(current)
+        ? runtimeProcessAlive
+          ? 'Runtime process is alive, but no bootstrap check-in after 5 min.'
+          : 'OpenCode bootstrap did not complete runtime_bootstrap_checkin after 5 min.'
+        : OPENCODE_APP_MANAGED_BOOTSTRAP_STALLED_DIAGNOSTIC;
       const nextEntry: MemberSpawnStatusEntry = {
         ...current,
         status: 'waiting',
@@ -25503,10 +25786,18 @@ export class TeamProvisioningService {
       }
     }
 
-    let processRows: Awaited<ReturnType<typeof listRuntimeProcessesForCurrentTmuxPlatform>> = [];
+    let processRows: RuntimeTelemetryProcessTableRow[] = [];
     let processTableAvailable = true;
     try {
-      processRows = await listRuntimeProcessesForCurrentTmuxPlatform();
+      processRows =
+        this.normalizeRuntimeProcessRowsForTelemetry(
+          await this.withRuntimeTelemetryTimeout(
+            listRuntimeProcessTableForCurrentPlatform(),
+            TeamProvisioningService.RUNTIME_PROCESS_TABLE_TIMEOUT_MS,
+            'process table runtime snapshot'
+          ),
+          process.platform === 'win32' ? 'wsl' : 'native'
+        ) ?? [];
     } catch (error) {
       processTableAvailable = false;
       logger.debug(
@@ -25515,14 +25806,31 @@ export class TeamProvisioningService {
         }`
       );
     }
-    let windowsHostProcessRows: typeof processRows | null = null;
+    this.runtimeProcessRowsForUsageSnapshotByTeam.set(teamName, {
+      expiresAtMs: Date.now() + TeamProvisioningService.AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS,
+      generation: generationAtStart,
+      runId,
+      rows: processTableAvailable ? processRows : null,
+      includesWindowsHostRows: false,
+    });
+    let windowsHostProcessRows: RuntimeTelemetryProcessTableRow[] | null = null;
     let windowsHostProcessTableAvailable = false;
-    const getWindowsHostProcessRows = async (): Promise<typeof processRows> => {
+    const getWindowsHostProcessRows = async (): Promise<RuntimeTelemetryProcessTableRow[]> => {
       if (windowsHostProcessRows) {
         return windowsHostProcessRows;
       }
       try {
-        windowsHostProcessRows = await listWindowsProcessTable();
+        windowsHostProcessRows =
+          this.normalizeRuntimeProcessRowsForTelemetry(
+            await this.withRuntimeTelemetryTimeout(
+              listWindowsProcessTable(
+                TeamProvisioningService.RUNTIME_WINDOWS_PROCESS_TABLE_TIMEOUT_MS
+              ),
+              TeamProvisioningService.RUNTIME_WINDOWS_PROCESS_TABLE_TIMEOUT_MS,
+              'Windows process table runtime snapshot'
+            ),
+            'windows-host'
+          ) ?? [];
         windowsHostProcessTableAvailable = true;
       } catch (error) {
         windowsHostProcessRows = [];
@@ -25695,6 +26003,13 @@ export class TeamProvisioningService {
     timestamp: string;
     cpuPercent?: number;
     rssBytes?: number;
+    primaryCpuPercent?: number;
+    primaryRssBytes?: number;
+    childCpuPercent?: number;
+    childRssBytes?: number;
+    processCount?: number;
+    runtimeLoadScope?: TeamAgentRuntimeLoadScope;
+    runtimeLoadTruncated?: boolean;
     pidSource?: TeamAgentRuntimePidSource;
     pid?: number;
     runtimePid?: number;
@@ -25718,6 +26033,36 @@ export class TeamProvisioningService {
       params.rssBytes >= 0
         ? params.rssBytes
         : undefined;
+    const primaryCpuPercent =
+      typeof params.primaryCpuPercent === 'number' &&
+      Number.isFinite(params.primaryCpuPercent) &&
+      params.primaryCpuPercent >= 0
+        ? params.primaryCpuPercent
+        : undefined;
+    const primaryRssBytes =
+      typeof params.primaryRssBytes === 'number' &&
+      Number.isFinite(params.primaryRssBytes) &&
+      params.primaryRssBytes >= 0
+        ? params.primaryRssBytes
+        : undefined;
+    const childCpuPercent =
+      typeof params.childCpuPercent === 'number' &&
+      Number.isFinite(params.childCpuPercent) &&
+      params.childCpuPercent >= 0
+        ? params.childCpuPercent
+        : undefined;
+    const childRssBytes =
+      typeof params.childRssBytes === 'number' &&
+      Number.isFinite(params.childRssBytes) &&
+      params.childRssBytes >= 0
+        ? params.childRssBytes
+        : undefined;
+    const processCount =
+      typeof params.processCount === 'number' &&
+      Number.isFinite(params.processCount) &&
+      params.processCount > 0
+        ? Math.floor(params.processCount)
+        : undefined;
     let historyByKey = this.agentRuntimeResourceHistoryByTeam.get(params.teamName);
     if (!historyByKey) {
       historyByKey = new Map<string, TeamAgentRuntimeResourceSample[]>();
@@ -25734,6 +26079,13 @@ export class TeamProvisioningService {
       timestamp: params.timestamp,
       ...(cpuPercent != null ? { cpuPercent } : {}),
       ...(rssBytes != null ? { rssBytes } : {}),
+      ...(primaryCpuPercent != null ? { primaryCpuPercent } : {}),
+      ...(primaryRssBytes != null ? { primaryRssBytes } : {}),
+      ...(childCpuPercent != null ? { childCpuPercent } : {}),
+      ...(childRssBytes != null ? { childRssBytes } : {}),
+      ...(processCount != null ? { processCount } : {}),
+      ...(params.runtimeLoadScope ? { runtimeLoadScope: params.runtimeLoadScope } : {}),
+      ...(params.runtimeLoadTruncated ? { runtimeLoadTruncated: true } : {}),
       ...(params.pidSource ? { pidSource: params.pidSource } : {}),
       ...(params.pid ? { pid: params.pid } : {}),
       ...(params.runtimePid ? { runtimePid: params.runtimePid } : {}),
@@ -25743,6 +26095,36 @@ export class TeamProvisioningService {
     );
     historyByKey.set(key, nextHistory);
     return nextHistory.map((entry) => ({ ...entry }));
+  }
+
+  private recordAgentRuntimeResourceSampleSafely(params: {
+    teamName: string;
+    memberName: string;
+    timestamp: string;
+    cpuPercent?: number;
+    rssBytes?: number;
+    primaryCpuPercent?: number;
+    primaryRssBytes?: number;
+    childCpuPercent?: number;
+    childRssBytes?: number;
+    processCount?: number;
+    runtimeLoadScope?: TeamAgentRuntimeLoadScope;
+    runtimeLoadTruncated?: boolean;
+    pidSource?: TeamAgentRuntimePidSource;
+    pid?: number;
+    runtimePid?: number;
+    activeKeys?: Set<string>;
+  }): TeamAgentRuntimeResourceSample[] | undefined {
+    try {
+      return this.recordAgentRuntimeResourceSample(params);
+    } catch (error) {
+      logger.debug(
+        `[${params.teamName}] Failed to record runtime telemetry sample for ${
+          params.memberName
+        }; continuing without history: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return undefined;
+    }
   }
 
   private pruneAgentRuntimeResourceHistory(
@@ -25763,26 +26145,420 @@ export class TeamProvisioningService {
     }
   }
 
-  private normalizeRuntimeProcessUsageStats(
-    stat: { memory?: number; cpu?: number } | undefined
-  ): RuntimeProcessUsageStats | undefined {
-    const rssBytes = stat?.memory;
-    const cpuPercent = stat?.cpu;
+  private normalizeRuntimeProcessUsageStats(stat: unknown): RuntimeProcessUsageStats | undefined {
+    if (!stat || typeof stat !== 'object') {
+      return undefined;
+    }
+    const candidate = stat as { memory?: unknown; cpu?: unknown };
+    const rssBytes = normalizeRuntimeTelemetryNumber(candidate.memory);
+    const cpuPercent = normalizeRuntimeTelemetryNumber(candidate.cpu);
     const normalized: RuntimeProcessUsageStats = {
-      ...(typeof rssBytes === 'number' && Number.isFinite(rssBytes) && rssBytes >= 0
-        ? { rssBytes }
-        : {}),
-      ...(typeof cpuPercent === 'number' && Number.isFinite(cpuPercent) && cpuPercent >= 0
-        ? { cpuPercent }
-        : {}),
+      ...(rssBytes != null && rssBytes >= 0 ? { rssBytes } : {}),
+      ...(cpuPercent != null && cpuPercent >= 0 ? { cpuPercent } : {}),
     };
     return normalized.rssBytes != null || normalized.cpuPercent != null ? normalized : undefined;
+  }
+
+  private normalizeRuntimeProcessRowsForTelemetry(
+    rows: unknown,
+    source?: RuntimeTelemetryProcessSource
+  ): RuntimeTelemetryProcessTableRow[] | null {
+    if (!Array.isArray(rows)) {
+      return null;
+    }
+    const normalizedRows: RuntimeTelemetryProcessTableRow[] = [];
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') {
+        continue;
+      }
+      const candidate = row as Partial<RuntimeTelemetryProcessTableRow>;
+      const pid = normalizeRuntimeTelemetryNumber(candidate.pid);
+      const ppid = normalizeRuntimeTelemetryNumber(candidate.ppid);
+      const command = typeof candidate.command === 'string' ? candidate.command.trim() : '';
+      if (pid != null && pid > 0 && ppid != null && ppid >= 0 && command.length > 0) {
+        const runtimeTelemetrySource =
+          source ??
+          (candidate.runtimeTelemetrySource === 'native' ||
+          candidate.runtimeTelemetrySource === 'wsl' ||
+          candidate.runtimeTelemetrySource === 'windows-host'
+            ? candidate.runtimeTelemetrySource
+            : undefined);
+        normalizedRows.push({
+          pid: Math.floor(pid),
+          ppid: Math.floor(ppid),
+          command,
+          ...(runtimeTelemetrySource ? { runtimeTelemetrySource } : {}),
+        });
+      }
+    }
+    return normalizedRows;
+  }
+
+  private async readRuntimeProcessRowsForUsageSnapshot(
+    teamName: string,
+    options: { includeWindowsHostRows?: boolean } = {}
+  ): Promise<RuntimeTelemetryProcessTableRow[] | null> {
+    const includeWindowsHostRows =
+      process.platform === 'win32' && options.includeWindowsHostRows === true;
+    const cached = this.runtimeProcessRowsForUsageSnapshotByTeam.get(teamName);
+    const canUseCached =
+      cached &&
+      cached.expiresAtMs > Date.now() &&
+      cached.generation === this.getRuntimeSnapshotCacheGeneration(teamName) &&
+      cached.runId === this.getTrackedRunId(teamName);
+    if (canUseCached && (!includeWindowsHostRows || cached.includesWindowsHostRows)) {
+      return cached.rows;
+    }
+
+    let rows =
+      canUseCached && cached.rows
+        ? this.normalizeRuntimeProcessRowsForTelemetry(cached.rows)
+        : null;
+    let runtimeProcessTableAvailable = rows != null;
+    try {
+      if (!rows) {
+        rows =
+          this.normalizeRuntimeProcessRowsForTelemetry(
+            await this.withRuntimeTelemetryTimeout(
+              listRuntimeProcessTableForCurrentPlatform(),
+              TeamProvisioningService.RUNTIME_PROCESS_TABLE_TIMEOUT_MS,
+              'process table runtime telemetry'
+            ),
+            process.platform === 'win32' ? 'wsl' : 'native'
+          ) ?? [];
+        runtimeProcessTableAvailable = true;
+      }
+    } catch (error) {
+      logger.debug(
+        `[${teamName}] Failed to read process table for runtime usage snapshot: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      rows = null;
+      runtimeProcessTableAvailable = false;
+    }
+
+    let includesWindowsHostRows = false;
+    if (includeWindowsHostRows) {
+      try {
+        const windowsHostRows = await this.withRuntimeTelemetryTimeout(
+          listWindowsProcessTable(TeamProvisioningService.RUNTIME_WINDOWS_PROCESS_TABLE_TIMEOUT_MS),
+          TeamProvisioningService.RUNTIME_WINDOWS_PROCESS_TABLE_TIMEOUT_MS,
+          'Windows process table runtime telemetry'
+        );
+        rows = [
+          ...(rows ?? []),
+          ...(this.normalizeRuntimeProcessRowsForTelemetry(windowsHostRows, 'windows-host') ?? []),
+        ];
+        includesWindowsHostRows = true;
+      } catch (error) {
+        logger.debug(
+          `[${teamName}] Failed to read Windows host process table for runtime usage snapshot: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
+
+    const resultRows = rows && rows.length > 0 ? rows : runtimeProcessTableAvailable ? [] : null;
+    this.runtimeProcessRowsForUsageSnapshotByTeam.set(teamName, {
+      expiresAtMs: Date.now() + TeamProvisioningService.AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS,
+      generation: this.getRuntimeSnapshotCacheGeneration(teamName),
+      runId: this.getTrackedRunId(teamName),
+      rows: resultRows,
+      includesWindowsHostRows,
+    });
+    return resultRows;
+  }
+
+  private buildRuntimeProcessChildrenByParent(
+    processRows: readonly RuntimeTelemetryProcessTableRow[]
+  ): Map<number, RuntimeTelemetryProcessTableRow[]> {
+    const childrenByParent = new Map<number, RuntimeTelemetryProcessTableRow[]>();
+    for (const row of this.normalizeRuntimeProcessRowsForTelemetry(processRows) ?? []) {
+      const current = childrenByParent.get(row.ppid) ?? [];
+      current.push(row);
+      childrenByParent.set(row.ppid, current);
+    }
+    return childrenByParent;
+  }
+
+  private addRuntimeRootOwnersFromProcessRows(
+    teamName: string,
+    processRows: readonly RuntimeTelemetryProcessTableRow[] | null,
+    rootOwnersByPid: Map<number, Set<string>>
+  ): void {
+    const normalizedRows = this.normalizeRuntimeProcessRowsForTelemetry(processRows);
+    if (!normalizedRows || normalizedRows.length === 0) {
+      return;
+    }
+
+    for (const row of normalizedRows) {
+      if (process.platform === 'win32' && row.runtimeTelemetrySource === 'wsl') {
+        continue;
+      }
+      if (!commandArgEquals(row.command, '--team-name', teamName)) {
+        continue;
+      }
+      const agentNames = extractCliArgValues(row.command, '--agent-name');
+      const agentIds = extractCliArgValues(row.command, '--agent-id');
+      const ownerKey =
+        agentNames.find((value) => value.trim().length > 0)?.trim() ??
+        agentIds
+          .map((value) => value.split('@', 1)[0]?.trim() ?? '')
+          .find((value) => value.length > 0);
+      if (!ownerKey) {
+        continue;
+      }
+      const owners = rootOwnersByPid.get(row.pid) ?? new Set<string>();
+      owners.add(ownerKey);
+      rootOwnersByPid.set(row.pid, owners);
+    }
+  }
+
+  private buildRuntimeUsageProcessTrees(
+    rootPids: readonly number[],
+    processRows: readonly RuntimeTelemetryProcessTableRow[] | null,
+    rootOwnersByPid?: ReadonlyMap<number, ReadonlySet<string>>
+  ): Map<number, { pids: number[]; truncated: boolean }> {
+    const uniqueRoots = [...new Set(rootPids.filter((pid) => Number.isFinite(pid) && pid > 0))];
+    const rootOwnerKeysByPid = new Map<number, ReadonlySet<string>>();
+    for (const [pid, owners] of rootOwnersByPid ?? []) {
+      if (Number.isFinite(pid) && pid > 0 && owners.size > 0) {
+        rootOwnerKeysByPid.set(pid, owners);
+      }
+    }
+    for (const rootPid of uniqueRoots) {
+      if (!rootOwnerKeysByPid.has(rootPid)) {
+        rootOwnerKeysByPid.set(rootPid, new Set([String(rootPid)]));
+      }
+    }
+    const haveSameRootOwners = (
+      left: ReadonlySet<string> | undefined,
+      right: ReadonlySet<string> | undefined
+    ): boolean => {
+      if (!left || left.size !== right?.size) {
+        return false;
+      }
+      for (const value of left) {
+        if (!right.has(value)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    const usageTreesByRootPid = new Map<number, { pids: number[]; truncated: boolean }>();
+    const scheduledPids = new Set<number>();
+    const normalizedProcessRows = this.normalizeRuntimeProcessRowsForTelemetry(processRows);
+
+    if (!normalizedProcessRows || normalizedProcessRows.length === 0) {
+      for (const rootPid of uniqueRoots) {
+        if (scheduledPids.size >= TeamProvisioningService.MAX_RUNTIME_USAGE_PIDS_PER_SNAPSHOT) {
+          usageTreesByRootPid.set(rootPid, { pids: [], truncated: true });
+          continue;
+        }
+        scheduledPids.add(rootPid);
+        usageTreesByRootPid.set(rootPid, { pids: [rootPid], truncated: false });
+      }
+      return usageTreesByRootPid;
+    }
+
+    const childrenByParent = this.buildRuntimeProcessChildrenByParent(normalizedProcessRows);
+    const rowByPid = new Map(normalizedProcessRows.map((row) => [row.pid, row]));
+    for (const rootPid of uniqueRoots) {
+      const pids: number[] = [];
+      let truncated = false;
+      const rootProcessRow = rowByPid.get(rootPid);
+      if (process.platform === 'win32' && rootProcessRow?.runtimeTelemetrySource === 'wsl') {
+        usageTreesByRootPid.set(rootPid, { pids: [], truncated: false });
+        continue;
+      }
+      const rootProcessSource = rootProcessRow?.runtimeTelemetrySource;
+      const addPid = (pid: number): boolean => {
+        if (pids.includes(pid)) {
+          return true;
+        }
+        if (
+          pids.length >= TeamProvisioningService.MAX_RUNTIME_TREE_PIDS_PER_ROOT ||
+          (!scheduledPids.has(pid) &&
+            scheduledPids.size >= TeamProvisioningService.MAX_RUNTIME_USAGE_PIDS_PER_SNAPSHOT)
+        ) {
+          truncated = true;
+          return false;
+        }
+        pids.push(pid);
+        scheduledPids.add(pid);
+        return true;
+      };
+
+      if (!addPid(rootPid)) {
+        usageTreesByRootPid.set(rootPid, { pids, truncated });
+        continue;
+      }
+
+      const queue = [...(childrenByParent.get(rootPid) ?? [])];
+      const seen = new Set<number>();
+      const rootOwners = rootOwnerKeysByPid.get(rootPid);
+      while (queue.length > 0) {
+        const row = queue.shift();
+        if (!row || seen.has(row.pid)) {
+          continue;
+        }
+        seen.add(row.pid);
+        if (
+          rootProcessSource &&
+          row.runtimeTelemetrySource &&
+          row.runtimeTelemetrySource !== rootProcessSource
+        ) {
+          continue;
+        }
+        const candidateRootOwners = rootOwnerKeysByPid.get(row.pid);
+        if (
+          row.pid !== rootPid &&
+          candidateRootOwners &&
+          !haveSameRootOwners(rootOwners, candidateRootOwners)
+        ) {
+          continue;
+        }
+        if (!addPid(row.pid)) {
+          break;
+        }
+        queue.push(...(childrenByParent.get(row.pid) ?? []));
+      }
+      if (queue.length > 0) {
+        truncated = true;
+      }
+      usageTreesByRootPid.set(rootPid, { pids, truncated });
+    }
+
+    return usageTreesByRootPid;
+  }
+
+  private buildRuntimeProcessLoadStats(params: {
+    rootPid: number | undefined;
+    usageStatsByPid: ReadonlyMap<number, RuntimeProcessUsageStats>;
+    processTree?: { pids: number[]; truncated: boolean };
+    scope?: TeamAgentRuntimeLoadScope;
+  }): RuntimeProcessLoadStats | undefined {
+    const rootPid =
+      typeof params.rootPid === 'number' && Number.isFinite(params.rootPid) && params.rootPid > 0
+        ? params.rootPid
+        : undefined;
+    if (!rootPid) {
+      return undefined;
+    }
+
+    if (params.processTree && params.processTree.pids.length === 0) {
+      return undefined;
+    }
+
+    const processPids = params.processTree ? params.processTree.pids : [rootPid];
+    const primaryStats = params.usageStatsByPid.get(rootPid);
+    let childCpuPercent = 0;
+    let childRssBytes = 0;
+    let hasChildCpu = false;
+    let hasChildRss = false;
+    let sampledProcessCount = primaryStats ? 1 : 0;
+
+    for (const pid of processPids) {
+      if (pid === rootPid) {
+        continue;
+      }
+      const childStats = params.usageStatsByPid.get(pid);
+      if (!childStats) {
+        continue;
+      }
+      sampledProcessCount += 1;
+      if (typeof childStats.cpuPercent === 'number') {
+        childCpuPercent += childStats.cpuPercent;
+        hasChildCpu = true;
+      }
+      if (typeof childStats.rssBytes === 'number') {
+        childRssBytes += childStats.rssBytes;
+        hasChildRss = true;
+      }
+    }
+
+    if (!primaryStats && sampledProcessCount === 0) {
+      return undefined;
+    }
+
+    const primaryCpuPercent = primaryStats?.cpuPercent;
+    const primaryRssBytes = primaryStats?.rssBytes;
+    const cpuPercent =
+      primaryCpuPercent != null || hasChildCpu
+        ? (primaryCpuPercent ?? 0) + childCpuPercent
+        : undefined;
+    const rssBytes =
+      primaryRssBytes != null || hasChildRss ? (primaryRssBytes ?? 0) + childRssBytes : undefined;
+    const hasSampledChildren = hasChildCpu || hasChildRss;
+    const hasProcessTree = processPids.length > 1 && hasSampledChildren;
+    const runtimeLoadScope =
+      params.scope ?? (hasProcessTree ? 'process-tree' : ('single-process' as const));
+
+    return {
+      ...(rssBytes != null ? { rssBytes } : {}),
+      ...(cpuPercent != null ? { cpuPercent } : {}),
+      ...(primaryCpuPercent != null ? { primaryCpuPercent } : {}),
+      ...(primaryRssBytes != null ? { primaryRssBytes } : {}),
+      ...(hasChildCpu ? { childCpuPercent } : {}),
+      ...(hasChildRss ? { childRssBytes } : {}),
+      ...(sampledProcessCount > 0 ? { processCount: sampledProcessCount } : {}),
+      runtimeLoadScope,
+      ...(params.processTree?.truncated ? { runtimeLoadTruncated: true } : {}),
+    };
+  }
+
+  private buildRuntimeProcessLoadStatsSafely(
+    teamName: string,
+    memberName: string,
+    params: {
+      rootPid: number | undefined;
+      usageStatsByPid: ReadonlyMap<number, RuntimeProcessUsageStats>;
+      processTree?: { pids: number[]; truncated: boolean };
+      scope?: TeamAgentRuntimeLoadScope;
+    }
+  ): RuntimeProcessLoadStats | undefined {
+    try {
+      return this.buildRuntimeProcessLoadStats(params);
+    } catch (error) {
+      logger.debug(
+        `[${teamName}] Failed to build runtime telemetry stats for ${memberName}; continuing without metrics: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return undefined;
+    }
+  }
+
+  private async withRuntimeTelemetryTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    label: string
+  ): Promise<T> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_resolve, reject) => {
+          timeout = setTimeout(() => {
+            reject(new RuntimeTelemetryTimeoutError(`${label} timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+          timeout.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
   }
 
   private async readProcessUsageStatsByPid(
     pids: readonly number[]
   ): Promise<Map<number, RuntimeProcessUsageStats>> {
-    const uniquePids = [...new Set(pids.filter((pid) => Number.isFinite(pid) && pid > 0))];
+    const pidCandidates = Array.isArray(pids) ? pids : [];
+    const uniquePids = [...new Set(pidCandidates.filter((pid) => Number.isFinite(pid) && pid > 0))];
     if (uniquePids.length === 0) {
       return new Map();
     }
@@ -25790,8 +26566,14 @@ export class TeamProvisioningService {
     const usageStatsByPid = new Map<number, RuntimeProcessUsageStats>();
     const options = RUNTIME_PIDUSAGE_OPTIONS;
     try {
-      const statsByPid = await pidusage(uniquePids, options);
-      for (const [rawPid, stat] of Object.entries(statsByPid)) {
+      const statsByPid = await this.withRuntimeTelemetryTimeout(
+        pidusage(uniquePids, options),
+        TeamProvisioningService.RUNTIME_PIDUSAGE_BATCH_TIMEOUT_MS,
+        'pidusage batch runtime telemetry'
+      );
+      for (const [rawPid, stat] of Object.entries(
+        statsByPid && typeof statsByPid === 'object' ? statsByPid : {}
+      )) {
         const pid = Number.parseInt(rawPid, 10);
         const usageStats = this.normalizeRuntimeProcessUsageStats(stat);
         if (Number.isFinite(pid) && pid > 0 && usageStats) {
@@ -25800,6 +26582,10 @@ export class TeamProvisioningService {
       }
       return usageStatsByPid;
     } catch (error) {
+      if (error instanceof RuntimeTelemetryTimeoutError) {
+        logger.debug(`${error.message}; continuing without runtime resource metrics`);
+        return usageStatsByPid;
+      }
       logger.debug(
         `pidusage batch runtime snapshot failed; falling back to per-pid reads: ${
           error instanceof Error ? error.message : String(error)
@@ -25807,19 +26593,36 @@ export class TeamProvisioningService {
       );
     }
 
-    await Promise.all(
-      uniquePids.map(async (pid) => {
-        try {
-          const stat = await pidusage(pid, options);
-          const usageStats = this.normalizeRuntimeProcessUsageStats(stat);
-          if (usageStats) {
-            usageStatsByPid.set(pid, usageStats);
+    for (
+      let offset = 0;
+      offset < uniquePids.length;
+      offset += TeamProvisioningService.RUNTIME_PIDUSAGE_FALLBACK_CONCURRENCY
+    ) {
+      const chunk = uniquePids.slice(
+        offset,
+        offset + TeamProvisioningService.RUNTIME_PIDUSAGE_FALLBACK_CONCURRENCY
+      );
+      await Promise.all(
+        chunk.map(async (pid) => {
+          try {
+            const stat = await this.withRuntimeTelemetryTimeout(
+              pidusage(pid, options),
+              TeamProvisioningService.RUNTIME_PIDUSAGE_SINGLE_TIMEOUT_MS,
+              `pidusage runtime telemetry pid=${pid}`
+            );
+            const usageStats = this.normalizeRuntimeProcessUsageStats(stat);
+            if (usageStats) {
+              usageStatsByPid.set(pid, usageStats);
+            }
+          } catch (error) {
+            if (error instanceof RuntimeTelemetryTimeoutError) {
+              logger.debug(error.message);
+            }
+            // Process likely exited between discovery and sampling.
           }
-        } catch {
-          // Process likely exited between discovery and sampling.
-        }
-      })
-    );
+        })
+      );
+    }
     return usageStatsByPid;
   }
 

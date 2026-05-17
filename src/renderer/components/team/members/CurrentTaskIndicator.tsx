@@ -105,7 +105,11 @@ export const CurrentTaskIndicator = memo(
 
     return (
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <SyncedLoader2 className="size-3 shrink-0" style={{ color: borderColor }} />
+        <SyncedLoader2
+          className="size-3 shrink-0"
+          spinning={isTimerRunning}
+          style={{ color: borderColor }}
+        />
         <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">{activityLabel}</span>
         <button
           type="button"

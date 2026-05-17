@@ -855,6 +855,9 @@ const InstalledBanner = ({
               isProviderCardLoading(provider, providerLoading) ||
               isCodexSnapshotPending(provider, codexSnapshotPending) ||
               maskNegativeBootstrapState;
+            const anthropicRateLimitsLoading =
+              provider.providerId === 'anthropic' &&
+              (anthropicRateLimitsRefreshing || provider.modelCatalogRefreshState === 'loading');
             const showRateLimitSkeleton =
               (showSkeleton &&
                 shouldShowDashboardRateLimitSkeleton({
@@ -865,8 +868,9 @@ const InstalledBanner = ({
               (isSubscriptionRateLimitMode &&
                 !hasDashboardRateLimits &&
                 ((provider.providerId === 'codex' && codexRateLimitsLoading) ||
-                  (provider.providerId === 'anthropic' && anthropicRateLimitsRefreshing)));
+                  anthropicRateLimitsLoading));
             const statusText = showSkeleton ? 'Checking...' : formatProviderStatusText(provider);
+            const modelCatalogLoading = provider.modelCatalogRefreshState === 'loading';
             const hasDetailContent = Boolean(
               (provider.backend?.label && !runtimeSummary) ||
               runtimeSummary ||
@@ -934,7 +938,10 @@ const InstalledBanner = ({
                         ) : null}
                         {connectionModeSummary ? <span>{connectionModeSummary}</span> : null}
                         {credentialSummary ? <span>{credentialSummary}</span> : null}
-                        {provider.models.length === 0 && (
+                        {provider.models.length === 0 && modelCatalogLoading ? (
+                          <span>Loading models...</span>
+                        ) : null}
+                        {provider.models.length === 0 && !modelCatalogLoading && (
                           <span>Models unavailable for this runtime build</span>
                         )}
                       </div>

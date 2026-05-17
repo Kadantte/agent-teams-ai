@@ -24,6 +24,13 @@ export const APP_STARTUP_GET_STATUS = 'appStartup:getStatus';
 export const APP_STARTUP_PROGRESS = 'appStartup:progress';
 
 // =============================================================================
+// Telemetry Channels
+// =============================================================================
+
+/** Get Sentry-safe anonymous telemetry context */
+export const TELEMETRY_GET_SENTRY_CONTEXT = 'telemetry:getSentryContext';
+
+// =============================================================================
 // Config API Channels
 // =============================================================================
 

@@ -18,7 +18,9 @@ export function isGenericOpenCodeRuntimeDeliveryDiagnostic(message: string): boo
 export function selectOpenCodeRuntimeDeliveryReason(
   record: OpenCodePromptDeliveryLedgerRecord
 ): string | null {
-  const candidates = [...record.diagnostics.slice().reverse(), record.lastReason];
+  const candidates = [...record.diagnostics.slice().reverse(), record.lastReason].filter(
+    (diagnostic) => !isInformationalOpenCodeRuntimeDeliveryDiagnostic(diagnostic)
+  );
   const selected = selectRuntimeDiagnosticClassification(candidates);
 
   if (selected && !selected.generic && selected.normalizedMessage) {
@@ -31,6 +33,19 @@ export function selectOpenCodeRuntimeDeliveryReason(
   }
 
   return selected ? 'OpenCode runtime delivery did not complete.' : null;
+}
+
+function isInformationalOpenCodeRuntimeDeliveryDiagnostic(
+  message: string | null | undefined
+): boolean {
+  const normalized = message?.trim().toLowerCase();
+  return (
+    normalized === 'opencode app mcp is connected for message delivery.' ||
+    normalized ===
+      'opencode prompt_async accepted; response observation will continue through durable app-side ledger reconciliation.' ||
+    normalized === 'opencode session status busy' ||
+    normalized === 'opencode_delivery_response_pending'
+  );
 }
 
 export function isActionRequiredOpenCodeRuntimeDeliveryReason(

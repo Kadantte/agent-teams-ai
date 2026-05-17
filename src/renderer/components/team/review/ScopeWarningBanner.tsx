@@ -109,7 +109,21 @@ export const ScopeWarningBanner = ({
                 : 'Needs review',
         }
       : null;
-  const config = ledgerConfig ?? TIER_CONFIGS[confidence.tier] ?? TIER_CONFIGS[4];
+  const workIntervalConfig: TierConfig | null =
+    sourceKind !== 'ledger' && confidence.reason.toLowerCase().includes('workinterval')
+      ? {
+          Icon: Info,
+          border: 'border-blue-500/15',
+          bg: 'bg-blue-500/5',
+          accentColor: 'text-blue-400',
+          title: 'Scoped by persisted work interval',
+          detail:
+            'The task start marker was not available in the session log, so the diff is scoped by the task work interval stored on the board.',
+          badgeLabel: 'Interval scoped',
+        }
+      : null;
+  const config =
+    ledgerConfig ?? workIntervalConfig ?? TIER_CONFIGS[confidence.tier] ?? TIER_CONFIGS[4];
   const { Icon } = config;
 
   return (

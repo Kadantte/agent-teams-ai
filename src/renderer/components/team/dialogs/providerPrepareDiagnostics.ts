@@ -169,6 +169,7 @@ function stripSelectedModelPrefix(modelId: string, message: string): string {
   const patterns = [
     new RegExp(`^Selected model ${escapeRegExp(modelId)} is unavailable\\.\\s*`, 'i'),
     new RegExp(`^Selected model ${escapeRegExp(modelId)} could not be verified\\.\\s*`, 'i'),
+    new RegExp(`^Selected model ${escapeRegExp(modelId)} verification deferred\\.\\s*`, 'i'),
     new RegExp(`^Selected model ${escapeRegExp(modelId)} verified for launch\\.\\s*`, 'i'),
     new RegExp(`^Selected model ${escapeRegExp(modelId)} is available for launch\\.\\s*`, 'i'),
     new RegExp(
@@ -420,6 +421,17 @@ function buildModelFailureLine(
   return reason ? `${label} - ${kind} - ${reason}` : `${label} - ${kind}`;
 }
 
+function buildModelVerificationDeferredLine(
+  providerId: TeamProviderId,
+  modelId: string,
+  reason: string | null
+): string {
+  const label = getModelLabel(providerId, modelId);
+  return reason
+    ? `${label} - verification deferred - ${reason}`
+    : `${label} - verification deferred`;
+}
+
 function createRuntimeDetailLines(result: TeamProvisioningPrepareResult): string[] {
   return uniquePrepareLines([...(result.details ?? []), ...(result.warnings ?? [])]);
 }
@@ -571,6 +583,18 @@ function resolveModelResultFromBatch(
       status: 'notes',
       line: buildModelCompatibilityPendingLine(providerId, modelId),
       warningLine: null,
+    };
+  }
+
+  const hasVerificationDeferredLine = modelScopedEntries.some((entry) =>
+    /selected model .* verification deferred\./i.test(entry)
+  );
+  if (hasVerificationDeferredLine) {
+    const line = buildModelVerificationDeferredLine(providerId, modelId, scopedReason);
+    return {
+      status: 'notes',
+      line,
+      warningLine: line,
     };
   }
 

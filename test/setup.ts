@@ -9,7 +9,7 @@ import * as path from 'path';
 
 import { afterEach, beforeEach, expect, vi } from 'vitest';
 
-// Mock Sentry Electron SDK — it requires the real `electron` package at import
+// Mock Sentry Electron SDK - it requires the real `electron` package at import
 // time which is unavailable in the vitest/happy-dom environment.
 const sentryNoOp = {
   init: vi.fn(),
@@ -17,6 +17,7 @@ const sentryNoOp = {
   captureException: vi.fn(),
   setUser: vi.fn(),
   setTags: vi.fn(),
+  close: vi.fn(() => Promise.resolve(true)),
   startSpan: vi.fn((_opts: unknown, fn: () => unknown) => fn()),
   withScope: vi.fn((fn: (scope: unknown) => void) => fn({ setContext: vi.fn() })),
   browserTracingIntegration: vi.fn(() => ({

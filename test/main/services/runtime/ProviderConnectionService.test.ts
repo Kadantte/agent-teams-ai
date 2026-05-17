@@ -1577,6 +1577,72 @@ describe('ProviderConnectionService', () => {
     });
   });
 
+  it('skips Codex catalog hydration when summary enrichment disables catalog loading', async () => {
+    const { ProviderConnectionService } =
+      await import('@main/services/runtime/ProviderConnectionService');
+    const directCatalog = vi.fn().mockResolvedValue({
+      schemaVersion: 1,
+      providerId: 'codex',
+      source: 'app-server',
+      status: 'ready',
+      fetchedAt: '2026-04-28T00:00:00.000Z',
+      staleAt: '2026-04-28T00:10:00.000Z',
+      defaultModelId: 'gpt-5.4',
+      defaultLaunchModel: 'gpt-5.4',
+      models: [],
+      diagnostics: {
+        configReadState: 'ready',
+        appServerState: 'healthy',
+      },
+    });
+
+    const service = new ProviderConnectionService(
+      {
+        lookupPreferred: vi.fn().mockResolvedValue(null),
+      } as never,
+      {
+        getConfig: () => createConfig('auto'),
+      } as never
+    );
+    service.setCodexModelCatalogFeature({ getCatalog: directCatalog } as never);
+
+    const enriched = await service.enrichProviderStatus(
+      {
+        providerId: 'codex',
+        displayName: 'Codex',
+        supported: true,
+        authenticated: true,
+        authMethod: 'chatgpt',
+        verificationState: 'verified',
+        models: ['gpt-5.4'],
+        modelCatalog: null,
+        runtimeCapabilities: {
+          modelCatalog: { dynamic: true, source: 'app-server' },
+        },
+        canLoginFromUi: false,
+        capabilities: {
+          teamLaunch: true,
+          oneShot: true,
+          extensions: {
+            plugins: { status: 'unsupported', ownership: 'shared' },
+            mcp: { status: 'supported', ownership: 'shared' },
+            skills: { status: 'supported', ownership: 'shared' },
+            apiKeys: { status: 'supported', ownership: 'shared' },
+          },
+        },
+      },
+      { hydrateModelCatalog: false }
+    );
+
+    expect(directCatalog).not.toHaveBeenCalled();
+    expect(enriched.models).toEqual(['gpt-5.4']);
+    expect(enriched.modelCatalog).toBeNull();
+    expect(enriched.runtimeCapabilities?.modelCatalog).toEqual({
+      dynamic: true,
+      source: 'app-server',
+    });
+  });
+
   it('returns the stored Anthropic API key for team helper mode only in api_key auth mode', async () => {
     const lookupPreferred = vi.fn().mockResolvedValue({
       envVarName: 'ANTHROPIC_API_KEY',

@@ -349,6 +349,63 @@ describe('TeamModelSelector disabled Codex models', () => {
     });
   });
 
+  it('shows an OpenCode catalog loading skeleton instead of the transient big-pickle placeholder', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.cliStatus = {
+      flavor: 'agent_teams_orchestrator',
+      providers: [
+        {
+          providerId: 'opencode',
+          authMethod: 'opencode_managed',
+          backend: {
+            kind: 'opencode-cli',
+            label: 'OpenCode CLI',
+            endpointLabel: 'opencode',
+          },
+          authenticated: true,
+          supported: true,
+          capabilities: {
+            teamLaunch: true,
+          },
+          models: ['opencode/big-pickle'],
+          modelCatalog: null,
+          modelCatalogRefreshState: 'loading',
+          modelVerificationState: 'idle',
+          modelAvailability: [],
+        },
+      ],
+    };
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(TeamModelSelector, {
+          providerId: 'opencode',
+          onProviderChange: () => undefined,
+          value: '',
+          onValueChange: () => undefined,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(
+      host.querySelector('[data-testid="team-model-selector-opencode-loading-skeleton"]')
+    ).not.toBeNull();
+    expect(host.textContent).toContain('Default');
+    expect(host.textContent).toContain('Loading OpenCode models...');
+    expect(host.textContent).not.toContain('big-pickle');
+    expect(host.textContent).not.toContain('Recommended only');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('virtualizes large OpenCode model lists instead of rendering every model tile', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const models = Array.from(

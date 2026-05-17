@@ -214,6 +214,7 @@ export interface CliProviderStatus {
   detailMessage?: string | null;
   models: string[];
   modelCatalog?: CliProviderModelCatalog | null;
+  modelCatalogRefreshState?: 'idle' | 'loading' | 'ready' | 'error';
   modelAvailability?: CliProviderModelAvailability[];
   runtimeCapabilities?: CliProviderRuntimeCapabilities | null;
   subscriptionRateLimits?: CliProviderSubscriptionRateLimitSnapshot | null;

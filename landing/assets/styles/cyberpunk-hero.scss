@@ -1259,17 +1259,17 @@
 
 .cyber-feature-rail__reviewer-bubble {
   --reviewer-bubble-center-shift: 3px;
+  --robot-bubble-position: absolute;
+  --robot-bubble-min-width: 112px;
+  --robot-bubble-max-width: 184px;
+  --robot-bubble-min-height: 46px;
+  --robot-bubble-font-size: 0.64rem;
+  --robot-bubble-padding: 8px 14px 16px;
 
   left: auto;
   top: auto;
   right: calc(var(--reviewer-robot-width) / 2);
   bottom: calc(100% + 10px);
-  z-index: 6;
-  width: max-content;
-  max-width: 158px;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  text-wrap: balance;
   transform: translateX(calc(50% + var(--reviewer-bubble-center-shift))) translate3d(0, 0, 0) rotate(-4deg);
   transform-origin: center bottom;
   animation: cyberFeatureReviewerSpeechFloat 2.8s ease-in-out 0.45s infinite;

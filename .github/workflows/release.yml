@@ -42,14 +42,32 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/v}"
           pnpm pkg set version="$VERSION"
 
+      - name: Verify Sentry release env
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: node ./scripts/ci/verify-sentry-release.cjs prebuild
+
       - name: Build app
         env:
           NODE_OPTIONS: '--max-old-space-size=8192'
+          SENTRY_DSN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_DSN || '' }}
+          SENTRY_AUTH_TOKEN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_AUTH_TOKEN || '' }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: pnpm build
+
+      - name: Verify Sentry source map upload
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: quant-jump-pro
-          SENTRY_PROJECT: electron
-        run: pnpm build
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: node ./scripts/ci/verify-sentry-release.cjs postbuild
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -282,14 +300,32 @@ jobs:
             node ./scripts/stage-runtime.mjs --platform "darwin-${{ matrix.arch }}"
           fi
 
+      - name: Verify Sentry release env (macOS ${{ matrix.arch }})
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: node ./scripts/ci/verify-sentry-release.cjs prebuild
+
       - name: Build app (macOS ${{ matrix.arch }})
         env:
           NODE_OPTIONS: '--max-old-space-size=8192'
+          SENTRY_DSN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_DSN || '' }}
+          SENTRY_AUTH_TOKEN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_AUTH_TOKEN || '' }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: pnpm build
+
+      - name: Verify Sentry source map upload (macOS ${{ matrix.arch }})
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: quant-jump-pro
-          SENTRY_PROJECT: electron
-        run: pnpm build
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: node ./scripts/ci/verify-sentry-release.cjs postbuild
 
       - name: Verify packaged inputs (macOS ${{ matrix.arch }})
         run: |
@@ -381,14 +417,32 @@ jobs:
             node ./scripts/stage-runtime.mjs --platform win32-x64
           }
 
+      - name: Verify Sentry release env (Windows)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: node ./scripts/ci/verify-sentry-release.cjs prebuild
+
       - name: Build app (Windows)
         env:
           NODE_OPTIONS: '--max-old-space-size=8192'
+          SENTRY_DSN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_DSN || '' }}
+          SENTRY_AUTH_TOKEN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_AUTH_TOKEN || '' }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: pnpm build
+
+      - name: Verify Sentry source map upload (Windows)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: quant-jump-pro
-          SENTRY_PROJECT: electron
-        run: pnpm build
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: node ./scripts/ci/verify-sentry-release.cjs postbuild
 
       - name: Verify packaged inputs (Windows)
         shell: bash
@@ -483,14 +537,32 @@ jobs:
             node ./scripts/stage-runtime.mjs --platform linux-x64
           fi
 
+      - name: Verify Sentry release env (Linux)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: node ./scripts/ci/verify-sentry-release.cjs prebuild
+
       - name: Build app (Linux)
         env:
           NODE_OPTIONS: '--max-old-space-size=8192'
+          SENTRY_DSN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_DSN || '' }}
+          SENTRY_AUTH_TOKEN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_AUTH_TOKEN || '' }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: pnpm build
+
+      - name: Verify Sentry source map upload (Linux)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: quant-jump-pro
-          SENTRY_PROJECT: electron
-        run: pnpm build
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: node ./scripts/ci/verify-sentry-release.cjs postbuild
 
       - name: Verify packaged inputs (Linux)
         run: |

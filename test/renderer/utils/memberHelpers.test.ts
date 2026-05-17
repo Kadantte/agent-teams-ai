@@ -806,6 +806,31 @@ describe('memberHelpers spawn-aware presence', () => {
     ).toContain('Anthropic authentication error');
   });
 
+  it('renders timed OpenCode quota errors with retry/reset context', () => {
+    const advisory = {
+      kind: 'api_error' as const,
+      observedAt: '2026-05-17T21:44:34.000Z',
+      retryUntil: '2026-05-18T00:00:00.502Z',
+      retryDelayMs: 8_126_502,
+      reasonCode: 'quota_exhausted' as const,
+      message:
+        'OpenCode session status retry - attempt=1 - Free usage exceeded, subscribe to Go https://opencode.ai/go - next=2026-05-18T00:00:00.502Z',
+    };
+
+    expect(
+      getMemberRuntimeAdvisoryLabel(
+        advisory,
+        'opencode',
+        Date.parse('2026-05-17T21:45:00.000Z')
+      )
+    ).toBe('OpenCode quota error · retry 2h 15m');
+
+    const title = getMemberRuntimeAdvisoryTitle(advisory, 'opencode');
+    expect(title).toContain('OpenCode quota exhausted.');
+    expect(title).toContain('Waiting for OpenCode retry or quota reset around 00:00 UTC.');
+    expect(title).toContain('Free usage exceeded');
+  });
+
   it('formats raw OpenCode protocol advisory reasons before showing them in titles', () => {
     const advisory = {
       kind: 'api_error' as const,

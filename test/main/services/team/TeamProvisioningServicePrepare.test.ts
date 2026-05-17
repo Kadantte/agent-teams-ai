@@ -994,7 +994,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     );
   });
 
-  it('runs OpenCode model verification with bounded concurrency and preserves model order', async () => {
+  it('serializes OpenCode model verification and preserves model order', async () => {
     const started: string[] = [];
     let activeCount = 0;
     let maxActiveCount = 0;
@@ -1052,11 +1052,16 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
       ],
     });
 
+    await vi.waitFor(() => expect(started).toEqual(['opencode/minimax-m2.5-free']));
+    expect(maxActiveCount).toBe(1);
+    expect(releases.has('opencode/nemotron-3-super-free')).toBe(false);
+    expect(releases.has('opencode/big-pickle')).toBe(false);
+
+    releases.get('opencode/minimax-m2.5-free')?.();
     await vi.waitFor(() =>
       expect(started).toEqual(['opencode/minimax-m2.5-free', 'opencode/nemotron-3-super-free'])
     );
-    expect(maxActiveCount).toBe(2);
-    expect(releases.has('opencode/big-pickle')).toBe(false);
+    expect(maxActiveCount).toBe(1);
 
     releases.get('opencode/nemotron-3-super-free')?.();
     await vi.waitFor(() =>
@@ -1066,10 +1071,9 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
         'opencode/big-pickle',
       ])
     );
-    expect(maxActiveCount).toBe(2);
+    expect(maxActiveCount).toBe(1);
 
     releases.get('opencode/big-pickle')?.();
-    releases.get('opencode/minimax-m2.5-free')?.();
 
     const result = await resultPromise;
 
@@ -1079,7 +1083,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
       'Selected model opencode/nemotron-3-super-free verified for launch.',
     ]);
     expect(result.warnings).toEqual([
-      'Selected model opencode/big-pickle could not be verified. provider busy',
+      'Selected model opencode/big-pickle verification deferred. OpenCode session is busy; retry when idle.',
     ]);
   });
 

@@ -178,7 +178,9 @@ export function reconcilePendingRepliesByMember(
   for (const [memberName, sentAtMs] of Object.entries(pendingRepliesByMember)) {
     const latestReplyAt = latestReplyToUserByMember.get(memberName);
     const latestDurableSendAt = latestUserSentByMember.get(memberName);
-    const threshold = latestDurableSendAt ?? sentAtMs;
+    // Do not let an older persisted send make a previous reply clear a fresh optimistic wait.
+    const threshold =
+      latestDurableSendAt == null ? sentAtMs : Math.max(latestDurableSendAt, sentAtMs);
     if (latestReplyAt != null && latestReplyAt > threshold) {
       changed = true;
       continue;

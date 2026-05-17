@@ -18,7 +18,7 @@ declare global {
   }
 }
 
-// Sentry must be initialised before React renders.
+// Prepare Sentry before React renders. Actual init waits for telemetry config.
 initSentryRenderer();
 
 let root: ReactDOM.Root | null = null;

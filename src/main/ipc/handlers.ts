@@ -84,6 +84,7 @@ import {
   registerTerminalHandlers,
   removeTerminalHandlers,
 } from './terminal';
+import { registerTelemetryHandlers, removeTelemetryHandlers } from './telemetry';
 import { registerTmuxHandlers, removeTmuxHandlers } from './tmux';
 import {
   initializeUpdaterHandlers,
@@ -268,6 +269,7 @@ export function initializeIpcHandlers(
   registerWindowHandlers(ipcMain);
   registerRendererLogHandlers(ipcMain);
   registerScheduleHandlers(ipcMain);
+  registerTelemetryHandlers(ipcMain);
   if (cliInstaller) {
     registerCliInstallerHandlers(ipcMain);
   }
@@ -315,6 +317,7 @@ export function removeIpcHandlers(): void {
   removeWindowHandlers(ipcMain);
   removeRendererLogHandlers(ipcMain);
   removeScheduleHandlers(ipcMain);
+  removeTelemetryHandlers(ipcMain);
   removeCliInstallerHandlers(ipcMain);
   removeOpenCodeRuntimeHandlers(ipcMain);
   removeCodexRuntimeHandlers(ipcMain);

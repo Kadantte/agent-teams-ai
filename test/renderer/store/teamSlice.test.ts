@@ -4323,6 +4323,102 @@ describe('teamSlice actions', () => {
     expect(store.getState().teamAgentRuntimeByTeam['my-team']).toEqual(nextSnapshot);
   });
 
+  it('does not crash when runtime resource history contains malformed samples', async () => {
+    const store = createSliceStore();
+    const validSample = {
+      timestamp: '2026-03-12T10:00:00.000Z',
+      rssBytes: 256 * 1024 * 1024,
+      cpuPercent: 4,
+      pid: 4242,
+    };
+    const snapshot = createRuntimeSnapshot({
+      members: {
+        alice: {
+          ...createRuntimeSnapshot().members.alice,
+          cpuPercent: 4,
+          resourceHistory: [null, validSample] as any,
+        },
+      },
+    });
+    hoisted.getTeamAgentRuntime.mockResolvedValue(snapshot);
+
+    await store.getState().fetchTeamAgentRuntime('my-team');
+    const firstSnapshot = store.getState().teamAgentRuntimeByTeam['my-team'];
+
+    const semanticallySameSnapshot = createRuntimeSnapshot({
+      members: {
+        alice: {
+          ...snapshot.members.alice,
+          resourceHistory: [null, { ...validSample }] as any,
+        },
+      },
+    });
+    hoisted.getTeamAgentRuntime.mockResolvedValue(semanticallySameSnapshot);
+
+    await store.getState().fetchTeamAgentRuntime('my-team');
+
+    expect(store.getState().teamAgentRuntimeByTeam['my-team']).toBe(firstSnapshot);
+  });
+
+  it('updates runtime snapshots when aggregate runtime load breakdown changes', async () => {
+    const store = createSliceStore();
+    const firstBreakdownHistorySample = {
+      timestamp: '2026-03-12T10:00:00.000Z',
+      rssBytes: 300 * 1024 * 1024,
+      cpuPercent: 12,
+      primaryCpuPercent: 12,
+      primaryRssBytes: 300 * 1024 * 1024,
+      processCount: 1,
+      runtimeLoadScope: 'single-process',
+      pid: 4242,
+    };
+    const snapshot = createRuntimeSnapshot({
+      members: {
+        alice: {
+          ...createRuntimeSnapshot().members.alice,
+          cpuPercent: 12,
+          rssBytes: 300 * 1024 * 1024,
+          primaryCpuPercent: 12,
+          primaryRssBytes: 300 * 1024 * 1024,
+          processCount: 1,
+          runtimeLoadScope: 'single-process',
+          resourceHistory: [firstBreakdownHistorySample],
+        },
+      },
+    });
+    hoisted.getTeamAgentRuntime.mockResolvedValue(snapshot);
+
+    await store.getState().fetchTeamAgentRuntime('my-team');
+    const firstSnapshot = store.getState().teamAgentRuntimeByTeam['my-team'];
+
+    const nextSnapshot = createRuntimeSnapshot({
+      members: {
+        alice: {
+          ...snapshot.members.alice,
+          childCpuPercent: 8,
+          childRssBytes: 80 * 1024 * 1024,
+          processCount: 3,
+          runtimeLoadScope: 'process-tree',
+          resourceHistory: [
+            {
+              ...firstBreakdownHistorySample,
+              childCpuPercent: 8,
+              childRssBytes: 80 * 1024 * 1024,
+              processCount: 3,
+              runtimeLoadScope: 'process-tree',
+            },
+          ],
+        },
+      },
+    });
+    hoisted.getTeamAgentRuntime.mockResolvedValue(nextSnapshot);
+
+    await store.getState().fetchTeamAgentRuntime('my-team');
+
+    expect(store.getState().teamAgentRuntimeByTeam['my-team']).not.toBe(firstSnapshot);
+    expect(store.getState().teamAgentRuntimeByTeam['my-team']).toEqual(nextSnapshot);
+  });
+
   it('updates runtime snapshots when copy-diagnostics details change', async () => {
     const store = createSliceStore();
     const snapshot = createRuntimeSnapshot({

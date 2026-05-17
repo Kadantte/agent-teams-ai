@@ -202,6 +202,42 @@ describe('ProvisioningProviderStatusList', () => {
     });
   });
 
+  it('summarizes OpenCode busy model checks as deferred notes', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(ProvisioningProviderStatusList, {
+          checks: [
+            {
+              providerId: 'opencode',
+              status: 'notes',
+              backendSummary: 'OpenCode CLI',
+              details: [
+                'qwen/qwen3-235b-a22b-thinking-2507 - verification deferred - OpenCode session is busy; retry when idle.',
+              ],
+            },
+          ],
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain(
+      'OpenCode (OpenCode CLI): Selected model checks - 1 verification deferred'
+    );
+    expect(host.textContent).not.toContain('model check failed');
+    expect(host.textContent).not.toContain('Needs attention');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('does not count generic one-shot diagnostic timeouts as model timeouts', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const host = document.createElement('div');

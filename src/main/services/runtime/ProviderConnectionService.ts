@@ -107,6 +107,10 @@ type AnthropicApiKeyVerifier = (
   baseUrl?: string | null
 ) => Promise<AnthropicApiKeyVerificationResult>;
 
+interface ProviderStatusEnrichmentOptions {
+  hydrateModelCatalog?: boolean;
+}
+
 function hashCredentialForCache(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -698,7 +702,10 @@ export class ProviderConnectionService {
     return [];
   }
 
-  async enrichProviderStatus(provider: CliProviderStatus): Promise<CliProviderStatus> {
+  async enrichProviderStatus(
+    provider: CliProviderStatus,
+    options: ProviderStatusEnrichmentOptions = {}
+  ): Promise<CliProviderStatus> {
     const withConnection = {
       ...provider,
       connection: await this.getConnectionInfo(provider.providerId),
@@ -713,6 +720,13 @@ export class ProviderConnectionService {
     }
 
     try {
+      if (
+        options.hydrateModelCatalog === false &&
+        !isUsableCodexModelCatalog(withConnection.modelCatalog)
+      ) {
+        return withConnection;
+      }
+
       const orchestratorCatalog = isUsableCodexModelCatalog(withConnection.modelCatalog)
         ? withConnection.modelCatalog
         : null;

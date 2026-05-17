@@ -109,6 +109,9 @@ export class HttpAPIClient implements ElectronAPI {
   private eventSource: EventSource | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- event callbacks have varying signatures
   private eventListeners = new Map<string, Set<(...args: any[]) => void>>();
+  telemetry = {
+    getSentryContext: async () => null,
+  };
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;

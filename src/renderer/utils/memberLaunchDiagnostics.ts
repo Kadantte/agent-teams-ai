@@ -1,5 +1,6 @@
 import type {
   MemberLaunchState,
+  MemberRuntimeAdvisory,
   MemberSpawnLivenessSource,
   MemberSpawnStatus,
   MemberSpawnStatusEntry,
@@ -49,6 +50,11 @@ export interface MemberLaunchDiagnosticsPayload {
   rssBytes?: number;
   runtimeDiagnostic?: string;
   runtimeDiagnosticSeverity?: TeamAgentRuntimeDiagnosticSeverity;
+  runtimeAdvisoryKind?: MemberRuntimeAdvisory['kind'];
+  runtimeAdvisoryReasonCode?: MemberRuntimeAdvisory['reasonCode'];
+  runtimeAdvisoryObservedAt?: string;
+  runtimeAdvisoryRetryUntil?: string;
+  runtimeAdvisoryRetryDelayMs?: number;
   bootstrapStalled?: boolean;
   pendingPermissionRequestIds?: string[];
   firstSpawnAcceptedAt?: string;
@@ -240,25 +246,39 @@ export function buildMemberLaunchDiagnosticsPayload(params: {
   livenessSource?: MemberSpawnLivenessSource;
   spawnEntry?: MemberSpawnStatusEntry;
   runtimeEntry?: TeamAgentRuntimeEntry;
+  runtimeAdvisory?: MemberRuntimeAdvisory;
+  runtimeAdvisoryLabel?: string | null;
+  runtimeAdvisoryTitle?: string;
 }): MemberLaunchDiagnosticsPayload {
   const spawnEntry = params.spawnEntry;
   const runtimeEntry = params.runtimeEntry;
+  const runtimeAdvisory = params.runtimeAdvisory;
+  const runtimeAdvisoryTitle = boundedString(params.runtimeAdvisoryTitle);
+  const runtimeAdvisoryLabel = boundedString(params.runtimeAdvisoryLabel ?? undefined);
+  const runtimeAdvisoryMessage = boundedString(runtimeAdvisory?.message);
+  const runtimeAdvisoryCardError =
+    runtimeAdvisoryTitle ?? runtimeAdvisoryLabel ?? runtimeAdvisoryMessage;
   const runtimeDiagnostic =
     boundedString(spawnEntry?.runtimeDiagnostic) ??
     boundedString(runtimeEntry?.runtimeDiagnostic) ??
     boundedString(spawnEntry?.hardFailureReason) ??
-    boundedString(spawnEntry?.error);
-  const memberCardError = boundedString(
-    normalizeMemberLaunchFailureReason(
-      spawnEntry?.error ??
-        spawnEntry?.hardFailureReason ??
-        spawnEntry?.runtimeDiagnostic ??
-        runtimeEntry?.runtimeDiagnostic
-    ) ?? undefined
-  );
+    boundedString(spawnEntry?.error) ??
+    runtimeAdvisoryMessage;
+  const memberCardError =
+    boundedString(
+      normalizeMemberLaunchFailureReason(
+        spawnEntry?.error ??
+          spawnEntry?.hardFailureReason ??
+          spawnEntry?.runtimeDiagnostic ??
+          runtimeEntry?.runtimeDiagnostic
+      ) ?? undefined
+    ) ?? runtimeAdvisoryCardError;
   const diagnostics = uniqueDiagnostics(
     memberCardError ? [memberCardError] : undefined,
     runtimeDiagnostic ? [runtimeDiagnostic] : undefined,
+    runtimeAdvisoryTitle ? [runtimeAdvisoryTitle] : undefined,
+    runtimeAdvisoryLabel ? [runtimeAdvisoryLabel] : undefined,
+    runtimeAdvisoryMessage ? [runtimeAdvisoryMessage] : undefined,
     spawnEntry?.hardFailureReason ? [spawnEntry.hardFailureReason] : undefined,
     spawnEntry?.error ? [spawnEntry.error] : undefined,
     runtimeEntry?.diagnostics
@@ -369,6 +389,19 @@ export function buildMemberLaunchDiagnosticsPayload(params: {
           runtimeDiagnosticSeverity:
             spawnEntry?.runtimeDiagnosticSeverity ?? runtimeEntry?.runtimeDiagnosticSeverity,
         }
+      : {}),
+    ...(runtimeAdvisory?.kind ? { runtimeAdvisoryKind: runtimeAdvisory.kind } : {}),
+    ...(runtimeAdvisory?.reasonCode
+      ? { runtimeAdvisoryReasonCode: runtimeAdvisory.reasonCode }
+      : {}),
+    ...(maybeString(runtimeAdvisory?.observedAt)
+      ? { runtimeAdvisoryObservedAt: maybeString(runtimeAdvisory?.observedAt) }
+      : {}),
+    ...(maybeString(runtimeAdvisory?.retryUntil)
+      ? { runtimeAdvisoryRetryUntil: maybeString(runtimeAdvisory?.retryUntil) }
+      : {}),
+    ...(boundedNumber(runtimeAdvisory?.retryDelayMs)
+      ? { runtimeAdvisoryRetryDelayMs: boundedNumber(runtimeAdvisory?.retryDelayMs) }
       : {}),
     ...(spawnEntry?.bootstrapStalled === true ? { bootstrapStalled: true } : {}),
     ...(boundedStringArray(spawnEntry?.pendingPermissionRequestIds)

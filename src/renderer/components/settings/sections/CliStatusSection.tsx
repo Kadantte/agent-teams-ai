@@ -32,6 +32,7 @@ import { useCliInstaller } from '@renderer/hooks/useCliInstaller';
 import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import { formatBytes } from '@renderer/utils/formatters';
+import { filterMainScreenCliProviders } from '@renderer/utils/geminiUiFreeze';
 import { resolveProjectPathById } from '@renderer/utils/projectLookup';
 import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
 import { getRuntimeDisplayName } from '@renderer/utils/runtimeDisplayName';
@@ -249,10 +250,17 @@ export const CliStatusSection = (): React.JSX.Element | null => {
         : loadingCliStatus,
     [codexAccount.snapshot, loadingCliStatus]
   );
+  const visibleEffectiveProviders = useMemo(
+    () => filterMainScreenCliProviders(effectiveCliStatus?.providers ?? []),
+    [effectiveCliStatus?.providers]
+  );
   const loadingCliProviderMap = useMemo(
     () =>
       new Map(
-        (loadingCliStatus?.providers ?? []).map((provider) => [provider.providerId, provider])
+        filterMainScreenCliProviders(loadingCliStatus?.providers ?? []).map((provider) => [
+          provider.providerId,
+          provider,
+        ])
       ),
     [loadingCliStatus?.providers]
   );
@@ -485,9 +493,9 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                       </span>
                     </div>
                   )}
-                {effectiveCliStatus.providers.length > 0 && (
+                {visibleEffectiveProviders.length > 0 && (
                   <div className="ml-6 mt-3 space-y-2">
-                    {effectiveCliStatus.providers.map((provider) => (
+                    {visibleEffectiveProviders.map((provider) => (
                       <div
                         key={provider.providerId}
                         className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-md border px-3 py-2"
@@ -515,6 +523,8 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                           const statusText = effectiveShowSkeleton
                             ? 'Checking...'
                             : formatProviderStatusText(provider);
+                          const modelCatalogLoading =
+                            provider.modelCatalogRefreshState === 'loading';
                           const connectionModeSummary = getProviderConnectionModeSummary(provider);
                           const credentialSummary = getProviderCredentialSummary(provider);
                           const disconnectAction = getProviderDisconnectAction(provider);
@@ -575,7 +585,10 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                                         <span>{connectionModeSummary}</span>
                                       ) : null}
                                       {credentialSummary ? <span>{credentialSummary}</span> : null}
-                                      {provider.models.length === 0 && (
+                                      {provider.models.length === 0 && modelCatalogLoading ? (
+                                        <span>Loading models...</span>
+                                      ) : null}
+                                      {provider.models.length === 0 && !modelCatalogLoading && (
                                         <span>Models unavailable for this runtime build</span>
                                       )}
                                     </div>

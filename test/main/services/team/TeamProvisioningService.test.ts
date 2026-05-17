@@ -28,7 +28,7 @@ vi.mock('@main/services/team/ClaudeBinaryResolver', () => ({
 
 vi.mock('@features/tmux-installer/main', () => ({
   killTmuxPaneForCurrentPlatformSync: vi.fn(),
-  listRuntimeProcessesForCurrentTmuxPlatform: vi.fn(async () => []),
+  listRuntimeProcessTableForCurrentPlatform: vi.fn(async () => []),
   listTmuxPanePidsForCurrentPlatform: vi.fn(async () => new Map()),
   listTmuxPaneRuntimeInfoForCurrentPlatform: vi.fn(async () => new Map()),
   sendKeysToTmuxPaneForCurrentPlatform: vi.fn(async () => undefined),
@@ -110,6 +110,11 @@ vi.mock('@main/utils/processKill', () => ({
   killProcessByPid: vi.fn(),
 }));
 
+vi.mock('@main/utils/windowsProcessTable', () => ({
+  listWindowsProcessTable: vi.fn(async () => []),
+  listWindowsProcessTableSync: vi.fn(() => []),
+}));
+
 vi.mock('@main/utils/pathDecoder', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@main/utils/pathDecoder')>();
   return {
@@ -164,12 +169,16 @@ import { spawnCli } from '@main/utils/childProcess';
 import { killProcessByPid } from '@main/utils/processKill';
 import { encodePath } from '@main/utils/pathDecoder';
 import {
+  listWindowsProcessTable,
+  listWindowsProcessTableSync,
+} from '@main/utils/windowsProcessTable';
+import {
   AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES,
   AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
 } from 'agent-teams-controller';
 import {
   killTmuxPaneForCurrentPlatformSync,
-  listRuntimeProcessesForCurrentTmuxPlatform,
+  listRuntimeProcessTableForCurrentPlatform,
   listTmuxPanePidsForCurrentPlatform,
   listTmuxPaneRuntimeInfoForCurrentPlatform,
   sendKeysToTmuxPaneForCurrentPlatform,
@@ -683,8 +692,12 @@ describe('TeamProvisioningService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(killTmuxPaneForCurrentPlatformSync).mockReset();
-    vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockReset();
-    vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValue([]);
+    vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockReset();
+    vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([]);
+    vi.mocked(listWindowsProcessTable).mockReset();
+    vi.mocked(listWindowsProcessTable).mockResolvedValue([]);
+    vi.mocked(listWindowsProcessTableSync).mockReset();
+    vi.mocked(listWindowsProcessTableSync).mockReturnValue([]);
     vi.mocked(listTmuxPanePidsForCurrentPlatform).mockReset();
     vi.mocked(listTmuxPanePidsForCurrentPlatform).mockResolvedValue(new Map());
     vi.mocked(listTmuxPaneRuntimeInfoForCurrentPlatform).mockReset();
@@ -2336,8 +2349,8 @@ describe('TeamProvisioningService', () => {
         })),
       };
       const processRows =
-        createDeferred<Awaited<ReturnType<typeof listRuntimeProcessesForCurrentTmuxPlatform>>>();
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform)
+        createDeferred<Awaited<ReturnType<typeof listRuntimeProcessTableForCurrentPlatform>>>();
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform)
         .mockReturnValueOnce(processRows.promise)
         .mockResolvedValueOnce([]);
 
@@ -2350,7 +2363,7 @@ describe('TeamProvisioningService', () => {
 
       await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
 
-      expect(listRuntimeProcessesForCurrentTmuxPlatform).toHaveBeenCalledTimes(2);
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(2);
     });
 
     it('returns cloned live runtime metadata maps from cache', async () => {
@@ -2363,7 +2376,7 @@ describe('TeamProvisioningService', () => {
           ],
         })),
       };
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([]);
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([]);
 
       const first = (await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team')) as Map<
         string,
@@ -2378,7 +2391,7 @@ describe('TeamProvisioningService', () => {
       >;
 
       expect(second.has('alice')).toBe(true);
-      expect(listRuntimeProcessesForCurrentTmuxPlatform).toHaveBeenCalledTimes(1);
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
     });
 
     it('clears runtime probe caches when starting a new run for the team', async () => {
@@ -2391,7 +2404,7 @@ describe('TeamProvisioningService', () => {
           ],
         })),
       };
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform)
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform)
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
 
@@ -2399,7 +2412,7 @@ describe('TeamProvisioningService', () => {
       (svc as any).resetTeamScopedTransientStateForNewRun('runtime-team');
       await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
 
-      expect(listRuntimeProcessesForCurrentTmuxPlatform).toHaveBeenCalledTimes(2);
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(2);
     });
 
     it('does not cache a probe that started before runtime adapter evidence was installed', async () => {
@@ -2414,8 +2427,8 @@ describe('TeamProvisioningService', () => {
       };
       (svc as any).provisioningRunByTeam.set('runtime-team', 'run-1');
       const processRows =
-        createDeferred<Awaited<ReturnType<typeof listRuntimeProcessesForCurrentTmuxPlatform>>>();
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform)
+        createDeferred<Awaited<ReturnType<typeof listRuntimeProcessTableForCurrentPlatform>>>();
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform)
         .mockReturnValueOnce(processRows.promise)
         .mockResolvedValueOnce([]);
 
@@ -2443,7 +2456,7 @@ describe('TeamProvisioningService', () => {
 
       await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
 
-      expect(listRuntimeProcessesForCurrentTmuxPlatform).toHaveBeenCalledTimes(2);
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(2);
     });
 
     it('uses batched pidusage rss values for lead and teammates', async () => {
@@ -2533,11 +2546,19 @@ describe('TeamProvisioningService', () => {
         pidSource: 'lead_process',
         cpuPercent: 3.5,
         rssBytes: 123_000_000,
+        primaryCpuPercent: 3.5,
+        primaryRssBytes: 123_000_000,
+        processCount: 1,
+        runtimeLoadScope: 'single-process',
       });
       expect(firstSnapshot.members['team-lead']?.resourceHistory).toEqual([
         expect.objectContaining({
           cpuPercent: 3.5,
           rssBytes: 123_000_000,
+          primaryCpuPercent: 3.5,
+          primaryRssBytes: 123_000_000,
+          processCount: 1,
+          runtimeLoadScope: 'single-process',
           pidSource: 'lead_process',
           pid: 111,
         }),
@@ -2553,6 +2574,10 @@ describe('TeamProvisioningService', () => {
       expect(secondSnapshot.members['team-lead']).toMatchObject({
         cpuPercent: 18,
         rssBytes: 130_000_000,
+        primaryCpuPercent: 18,
+        primaryRssBytes: 130_000_000,
+        processCount: 1,
+        runtimeLoadScope: 'single-process',
       });
       expect(secondSnapshot.members['team-lead']?.resourceHistory).toEqual([
         expect.objectContaining({
@@ -2564,10 +2589,805 @@ describe('TeamProvisioningService', () => {
         expect.objectContaining({
           cpuPercent: 18,
           rssBytes: 130_000_000,
+          primaryCpuPercent: 18,
+          primaryRssBytes: 130_000_000,
+          processCount: 1,
+          runtimeLoadScope: 'single-process',
           pidSource: 'lead_process',
           pid: 111,
         }),
       ]);
+    });
+
+    it('aggregates CPU and memory across the runtime process tree', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+        })),
+      };
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+        { pid: 111, ppid: 1, command: 'claude' },
+        { pid: 222, ppid: 111, command: 'node tool.js' },
+        { pid: 333, ppid: 222, command: 'python worker.py' },
+      ]);
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 100_000_000, 2),
+        '222': createPidusageStat(222, 30_000_000, 5),
+        '333': createPidusageStat(333, 20_000_000, 7),
+      } as any);
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(pidusage).toHaveBeenCalledWith([111, 222, 333], EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
+      expect(snapshot.members['team-lead']).toMatchObject({
+        pid: 111,
+        cpuPercent: 14,
+        rssBytes: 150_000_000,
+        primaryCpuPercent: 2,
+        primaryRssBytes: 100_000_000,
+        childCpuPercent: 12,
+        childRssBytes: 50_000_000,
+        processCount: 3,
+        runtimeLoadScope: 'process-tree',
+      });
+      expect(snapshot.members['team-lead']?.resourceHistory).toEqual([
+        expect.objectContaining({
+          cpuPercent: 14,
+          rssBytes: 150_000_000,
+          primaryCpuPercent: 2,
+          primaryRssBytes: 100_000_000,
+          childCpuPercent: 12,
+          childRssBytes: 50_000_000,
+          processCount: 3,
+          runtimeLoadScope: 'process-tree',
+        }),
+      ]);
+    });
+
+    it('does not count another teammate root subtree inside lead runtime telemetry', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', providerId: 'codex', model: 'gpt-5.4-mini' },
+          ],
+        })),
+      };
+      (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(
+        async () =>
+          new Map([
+            [
+              'alice',
+              {
+                alive: true,
+                backendType: 'process',
+                providerId: 'codex',
+                pid: 333,
+                pidSource: 'agent_process_table',
+                model: 'gpt-5.4-mini',
+              },
+            ],
+          ])
+      );
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+        { pid: 111, ppid: 1, command: 'lead' },
+        { pid: 222, ppid: 111, command: 'lead-tool' },
+        { pid: 333, ppid: 111, command: 'alice-runtime' },
+        { pid: 444, ppid: 333, command: 'alice-tool' },
+      ]);
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 100_000_000, 2),
+        '222': createPidusageStat(222, 10_000_000, 1),
+        '333': createPidusageStat(333, 80_000_000, 3),
+        '444': createPidusageStat(444, 25_000_000, 9),
+      } as any);
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(pidusage).toHaveBeenCalledWith(
+        [111, 222, 333, 444],
+        EXPECTED_RUNTIME_PIDUSAGE_OPTIONS
+      );
+      expect(snapshot.members['team-lead']).toMatchObject({
+        pid: 111,
+        cpuPercent: 3,
+        rssBytes: 110_000_000,
+        childCpuPercent: 1,
+        childRssBytes: 10_000_000,
+        processCount: 2,
+        runtimeLoadScope: 'process-tree',
+      });
+      expect(snapshot.members.alice).toMatchObject({
+        pid: 333,
+        cpuPercent: 12,
+        rssBytes: 105_000_000,
+        childCpuPercent: 9,
+        childRssBytes: 25_000_000,
+        processCount: 2,
+        runtimeLoadScope: 'process-tree',
+      });
+    });
+
+    it('keeps command-identified teammate roots out of lead runtime telemetry before liveness catches up', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'jack', providerId: 'anthropic', model: 'haiku-4.5' },
+          ],
+        })),
+      };
+      (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(async () => new Map());
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+        { pid: 111, ppid: 1, command: 'lead' },
+        { pid: 222, ppid: 111, command: 'lead-tool' },
+        {
+          pid: 333,
+          ppid: 111,
+          command:
+            'bun cli.js --teammate-runtime headless --agent-id jack@runtime-team --agent-name jack --team-name runtime-team',
+        },
+        { pid: 444, ppid: 333, command: 'jack-tool' },
+      ]);
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 100_000_000, 2),
+        '222': createPidusageStat(222, 10_000_000, 1),
+        '333': createPidusageStat(333, 400_000_000, 40),
+        '444': createPidusageStat(444, 200_000_000, 80),
+      } as any);
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(pidusage).toHaveBeenCalledWith([111, 222], EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
+      expect(snapshot.members['team-lead']).toMatchObject({
+        pid: 111,
+        cpuPercent: 3,
+        rssBytes: 110_000_000,
+        childCpuPercent: 1,
+        childRssBytes: 10_000_000,
+        processCount: 2,
+        runtimeLoadScope: 'process-tree',
+      });
+      expect(snapshot.members.jack?.cpuPercent).toBeUndefined();
+      expect(snapshot.members.jack?.rssBytes).toBeUndefined();
+    });
+
+    it('does not cut a same-member metrics root out of that member process tree', () => {
+      const svc = new TeamProvisioningService();
+      const rows = [
+        { pid: 111, ppid: 1, command: 'alice-runtime' },
+        { pid: 222, ppid: 111, command: 'alice-metrics-runtime' },
+        { pid: 333, ppid: 222, command: 'alice-tool' },
+        { pid: 444, ppid: 111, command: 'bob-runtime' },
+        { pid: 555, ppid: 444, command: 'bob-tool' },
+      ];
+      const ownersByPid = new Map<number, ReadonlySet<string>>([
+        [111, new Set(['alice'])],
+        [222, new Set(['alice'])],
+        [444, new Set(['bob'])],
+      ]);
+
+      const trees = (svc as any).buildRuntimeUsageProcessTrees([111, 222, 444], rows, ownersByPid);
+
+      expect(trees.get(111)).toEqual({ pids: [111, 222, 333], truncated: false });
+      expect(trees.get(222)).toEqual({ pids: [222, 333], truncated: false });
+      expect(trees.get(444)).toEqual({ pids: [444, 555], truncated: false });
+    });
+
+    it('aggregates CPU and memory for non-tmux process backend members', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', providerId: 'opencode', model: 'opencode/minimax-m2.5-free' },
+          ],
+        })),
+      };
+      (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(
+        async () =>
+          new Map([
+            [
+              'alice',
+              {
+                alive: true,
+                backendType: 'process',
+                providerId: 'opencode',
+                pid: 333,
+                pidSource: 'agent_process_table',
+                model: 'opencode/minimax-m2.5-free',
+              },
+            ],
+          ])
+      );
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+        {
+          pid: 333,
+          ppid: 1,
+          command:
+            '/Users/test/.bun/bin/bun cli.js --team-name runtime-team --agent-id alice@runtime-team',
+        },
+        { pid: 444, ppid: 333, command: 'node mcp-server.js' },
+      ]);
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '333': createPidusageStat(333, 80_000_000, 3),
+        '444': createPidusageStat(444, 25_000_000, 9),
+      } as any);
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(pidusage).toHaveBeenCalledWith([333, 444], EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
+      expect(snapshot.members.alice).toMatchObject({
+        backendType: 'process',
+        providerId: 'opencode',
+        pid: 333,
+        pidSource: 'agent_process_table',
+        cpuPercent: 12,
+        rssBytes: 105_000_000,
+        primaryCpuPercent: 3,
+        primaryRssBytes: 80_000_000,
+        childCpuPercent: 9,
+        childRssBytes: 25_000_000,
+        processCount: 2,
+        runtimeLoadScope: 'process-tree',
+      });
+    });
+
+    it('marks shared OpenCode host runtime load as non-exclusive', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'bob', providerId: 'opencode', model: 'opencode/big-pickle' },
+          ],
+        })),
+      };
+      (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(
+        async () =>
+          new Map([
+            [
+              'bob',
+              {
+                alive: true,
+                backendType: 'process',
+                providerId: 'opencode',
+                metricsPid: 555,
+                model: 'opencode/big-pickle',
+              },
+            ],
+          ])
+      );
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+        { pid: 555, ppid: 1, command: 'opencode serve' },
+        { pid: 556, ppid: 555, command: 'node openrouter-worker.js' },
+      ]);
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '555': createPidusageStat(555, 90_000_000, 4),
+        '556': createPidusageStat(556, 40_000_000, 6),
+      } as any);
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(snapshot.members.bob).toMatchObject({
+        providerId: 'opencode',
+        pid: 555,
+        restartable: false,
+        cpuPercent: 10,
+        rssBytes: 130_000_000,
+        primaryCpuPercent: 4,
+        childCpuPercent: 6,
+        processCount: 2,
+        runtimeLoadScope: 'shared-host',
+      });
+      expect(snapshot.members.bob?.resourceHistory).toEqual([
+        expect.objectContaining({
+          cpuPercent: 10,
+          rssBytes: 130_000_000,
+          runtimeLoadScope: 'shared-host',
+        }),
+      ]);
+    });
+
+    it('builds aggregate runtime stats from sampled processes when a child exits mid-snapshot', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+        })),
+      };
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+        { pid: 111, ppid: 1, command: 'claude' },
+        { pid: 222, ppid: 111, command: 'node finished-tool.js' },
+      ]);
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 100_000_000, 2),
+      } as any);
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(pidusage).toHaveBeenCalledWith([111, 222], EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
+      expect(snapshot.members['team-lead']).toMatchObject({
+        cpuPercent: 2,
+        rssBytes: 100_000_000,
+        primaryCpuPercent: 2,
+        primaryRssBytes: 100_000_000,
+        processCount: 1,
+        runtimeLoadScope: 'single-process',
+      });
+      expect(snapshot.members['team-lead']?.childCpuPercent).toBeUndefined();
+      expect(snapshot.members['team-lead']?.childRssBytes).toBeUndefined();
+    });
+
+    it('continues runtime snapshot when telemetry tree building fails', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+        })),
+      };
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      (svc as any).buildRuntimeUsageProcessTrees = vi.fn(() => {
+        throw new Error('tree broke');
+      });
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(snapshot.members['team-lead']).toMatchObject({
+        alive: true,
+        pid: 111,
+        runtimeModel: 'gpt-5.4',
+      });
+      expect(snapshot.members['team-lead']?.cpuPercent).toBeUndefined();
+      expect(snapshot.members['team-lead']?.rssBytes).toBeUndefined();
+    });
+
+    it('continues runtime snapshot when aggregate load stats fail for a member', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+        })),
+      };
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 100_000_000, 2),
+      } as any);
+      (svc as any).buildRuntimeProcessLoadStats = vi.fn(() => {
+        throw new Error('aggregate broke');
+      });
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(snapshot.members['team-lead']).toMatchObject({
+        alive: true,
+        pid: 111,
+      });
+      expect(snapshot.members['team-lead']?.cpuPercent).toBeUndefined();
+      expect(snapshot.members['team-lead']?.resourceHistory).toBeUndefined();
+    });
+
+    it('keeps current runtime metrics when telemetry history recording fails', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+        })),
+      };
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 100_000_000, 2),
+      } as any);
+      (svc as any).recordAgentRuntimeResourceSample = vi.fn(() => {
+        throw new Error('history broke');
+      });
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(snapshot.members['team-lead']).toMatchObject({
+        cpuPercent: 2,
+        rssBytes: 100_000_000,
+        primaryCpuPercent: 2,
+        primaryRssBytes: 100_000_000,
+      });
+      expect(snapshot.members['team-lead']?.resourceHistory).toBeUndefined();
+    });
+
+    it('keeps runtime snapshot when telemetry history pruning fails', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+        })),
+      };
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 100_000_000, 2),
+      } as any);
+      (svc as any).pruneAgentRuntimeResourceHistory = vi.fn(() => {
+        throw new Error('prune broke');
+      });
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(snapshot.members['team-lead']).toMatchObject({
+        cpuPercent: 2,
+        rssBytes: 100_000_000,
+      });
+    });
+
+    it('caps oversized runtime process trees without blocking the snapshot', () => {
+      const svc = new TeamProvisioningService();
+      const rows = [
+        { pid: 111, ppid: 1, command: 'claude' },
+        ...Array.from({ length: 70 }, (_, index) => ({
+          pid: 200 + index,
+          ppid: index === 0 ? 111 : 199 + index,
+          command: `child-${index}`,
+        })),
+      ];
+
+      const trees = (svc as any).buildRuntimeUsageProcessTrees([111], rows);
+      const tree = trees.get(111);
+
+      expect(tree?.pids).toHaveLength(64);
+      expect(tree?.pids[0]).toBe(111);
+      expect(tree?.truncated).toBe(true);
+    });
+
+    it('combines WSL and Windows host process tables for telemetry on Windows', async () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', {
+        value: 'win32',
+        configurable: true,
+      });
+      try {
+        const svc = new TeamProvisioningService();
+        vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
+          { pid: 111, ppid: 1, command: 'wsl-runtime' },
+        ]);
+        vi.mocked(listWindowsProcessTable).mockResolvedValueOnce([
+          { pid: 333, ppid: 1, command: 'opencode.exe serve' },
+          { pid: 444, ppid: 333, command: 'node.exe tool.js' },
+        ]);
+
+        const rows = await (svc as any).readRuntimeProcessRowsForUsageSnapshot('runtime-team', {
+          includeWindowsHostRows: true,
+        });
+
+        expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
+        expect(listWindowsProcessTable).toHaveBeenCalledWith(1_500);
+        expect(rows).toEqual([
+          { pid: 111, ppid: 1, command: 'wsl-runtime', runtimeTelemetrySource: 'wsl' },
+          {
+            pid: 333,
+            ppid: 1,
+            command: 'opencode.exe serve',
+            runtimeTelemetrySource: 'windows-host',
+          },
+          {
+            pid: 444,
+            ppid: 333,
+            command: 'node.exe tool.js',
+            runtimeTelemetrySource: 'windows-host',
+          },
+        ]);
+      } finally {
+        Object.defineProperty(process, 'platform', {
+          value: originalPlatform,
+          configurable: true,
+        });
+      }
+    });
+
+    it('keeps WSL process rows when Windows host process table lookup times out', async () => {
+      const originalPlatform = process.platform;
+      const originalWindowsTimeout = (TeamProvisioningService as any)
+        .RUNTIME_WINDOWS_PROCESS_TABLE_TIMEOUT_MS;
+      Object.defineProperty(process, 'platform', {
+        value: 'win32',
+        configurable: true,
+      });
+      (TeamProvisioningService as any).RUNTIME_WINDOWS_PROCESS_TABLE_TIMEOUT_MS = 5;
+      try {
+        const svc = new TeamProvisioningService();
+        vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
+          { pid: 111, ppid: 1, command: 'wsl-runtime' },
+        ]);
+        vi.mocked(listWindowsProcessTable).mockImplementationOnce(
+          () => new Promise(() => {}) as any
+        );
+
+        const rows = await (svc as any).readRuntimeProcessRowsForUsageSnapshot('runtime-team', {
+          includeWindowsHostRows: true,
+        });
+
+        expect(rows).toEqual([
+          { pid: 111, ppid: 1, command: 'wsl-runtime', runtimeTelemetrySource: 'wsl' },
+        ]);
+        expect(listWindowsProcessTable).toHaveBeenCalledWith(5);
+      } finally {
+        (TeamProvisioningService as any).RUNTIME_WINDOWS_PROCESS_TABLE_TIMEOUT_MS =
+          originalWindowsTimeout;
+        Object.defineProperty(process, 'platform', {
+          value: originalPlatform,
+          configurable: true,
+        });
+      }
+    });
+
+    it('does not mix WSL and Windows PID namespaces when building telemetry trees on Windows', () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', {
+        value: 'win32',
+        configurable: true,
+      });
+      try {
+        const svc = new TeamProvisioningService();
+        const rows = [
+          { pid: 111, ppid: 1, command: 'lead.exe', runtimeTelemetrySource: 'windows-host' },
+          {
+            pid: 222,
+            ppid: 111,
+            command: 'node.exe tool.js',
+            runtimeTelemetrySource: 'windows-host',
+          },
+          { pid: 333, ppid: 111, command: 'wsl-child-collision', runtimeTelemetrySource: 'wsl' },
+          { pid: 444, ppid: 333, command: 'wsl-grandchild', runtimeTelemetrySource: 'wsl' },
+        ];
+
+        const trees = (svc as any).buildRuntimeUsageProcessTrees([111, 333], rows);
+
+        expect(trees.get(111)).toEqual({ pids: [111, 222], truncated: false });
+        expect(trees.get(333)).toEqual({ pids: [], truncated: false });
+      } finally {
+        Object.defineProperty(process, 'platform', {
+          value: originalPlatform,
+          configurable: true,
+        });
+      }
+    });
+
+    it('treats an empty telemetry process tree as explicitly unsampled', () => {
+      const svc = new TeamProvisioningService();
+
+      const stats = (svc as any).buildRuntimeProcessLoadStats({
+        rootPid: 333,
+        usageStatsByPid: new Map([[333, { rssBytes: 999_000_000, cpuPercent: 88 }]]),
+        processTree: { pids: [], truncated: false },
+      });
+
+      expect(stats).toBeUndefined();
+    });
+
+    it('does not sample Windows WSL tmux runtime pids when the process table is unavailable', async () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', {
+        value: 'win32',
+        configurable: true,
+      });
+      try {
+        const svc = new TeamProvisioningService();
+        (svc as any).configReader = {
+          getConfig: vi.fn(async () => ({
+            members: [
+              { name: 'team-lead', agentType: 'team-lead' },
+              { name: 'alice', model: 'gpt-5.4-mini' },
+            ],
+          })),
+        };
+        (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(
+          async () =>
+            new Map([
+              [
+                'alice',
+                {
+                  alive: false,
+                  backendType: 'tmux',
+                  pid: 222,
+                  pidSource: 'tmux_child',
+                  tmuxPaneId: '%1',
+                  model: 'gpt-5.4-mini',
+                },
+              ],
+            ])
+        );
+        (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+        (svc as any).runs.set('run-1', {
+          runId: 'run-1',
+          child: { pid: 111 },
+          request: { model: 'gpt-5.4' },
+          processKilled: false,
+          cancelRequested: false,
+          spawnContext: null,
+        });
+        vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockRejectedValueOnce(
+          new Error('wsl process table unavailable')
+        );
+        vi.mocked(pidusage).mockResolvedValueOnce({
+          '111': createPidusageStat(111, 100_000_000, 2),
+        } as any);
+
+        const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+        expect(pidusage).toHaveBeenCalledWith([111], EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
+        expect(snapshot.members['team-lead']).toMatchObject({
+          pid: 111,
+          rssBytes: 100_000_000,
+          cpuPercent: 2,
+        });
+        expect(snapshot.members.alice).toMatchObject({
+          pid: 222,
+          pidSource: 'tmux_child',
+        });
+        expect(snapshot.members.alice?.rssBytes).toBeUndefined();
+        expect(snapshot.members.alice?.cpuPercent).toBeUndefined();
+      } finally {
+        Object.defineProperty(process, 'platform', {
+          value: originalPlatform,
+          configurable: true,
+        });
+      }
+    });
+
+    it('ignores malformed process table rows before building runtime telemetry trees', async () => {
+      const svc = new TeamProvisioningService();
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
+        { pid: 111, ppid: 1, command: 'claude' },
+        null,
+        { pid: 0, ppid: 1, command: 'bad-pid' },
+        { pid: 222, ppid: 111, command: '   ' },
+        { pid: 333, ppid: 111, command: 'node tool.js' },
+        { pid: '444', ppid: '333', command: 'python worker.py' },
+      ] as any);
+
+      const rows = await (svc as any).readRuntimeProcessRowsForUsageSnapshot('runtime-team');
+      const trees = (svc as any).buildRuntimeUsageProcessTrees([111], rows);
+
+      expect(rows).toEqual([
+        { pid: 111, ppid: 1, command: 'claude', runtimeTelemetrySource: 'native' },
+        { pid: 333, ppid: 111, command: 'node tool.js', runtimeTelemetrySource: 'native' },
+        {
+          pid: 444,
+          ppid: 333,
+          command: 'python worker.py',
+          runtimeTelemetrySource: 'native',
+        },
+      ]);
+      expect(trees.get(111)).toEqual({ pids: [111, 333, 444], truncated: false });
+    });
+
+    it('fails soft when runtime process table lookup times out', async () => {
+      const svc = new TeamProvisioningService();
+      const originalProcessTableTimeout = (TeamProvisioningService as any)
+        .RUNTIME_PROCESS_TABLE_TIMEOUT_MS;
+      (TeamProvisioningService as any).RUNTIME_PROCESS_TABLE_TIMEOUT_MS = 5;
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockImplementationOnce(
+        () => new Promise(() => {}) as any
+      );
+
+      try {
+        const rows = await (svc as any).readRuntimeProcessRowsForUsageSnapshot('runtime-team');
+
+        expect(rows).toBeNull();
+        expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
+      } finally {
+        (TeamProvisioningService as any).RUNTIME_PROCESS_TABLE_TIMEOUT_MS =
+          originalProcessTableTimeout;
+      }
+    });
+
+    it('keeps runtime snapshot when live process table lookup times out', async () => {
+      const svc = new TeamProvisioningService();
+      const originalProcessTableTimeout = (TeamProvisioningService as any)
+        .RUNTIME_PROCESS_TABLE_TIMEOUT_MS;
+      (TeamProvisioningService as any).RUNTIME_PROCESS_TABLE_TIMEOUT_MS = 5;
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+        })),
+      };
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockImplementationOnce(
+        () => new Promise(() => {}) as any
+      );
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 100_000_000, 2),
+      } as any);
+
+      try {
+        const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+        expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
+        expect(snapshot.members['team-lead']).toMatchObject({
+          alive: true,
+          pid: 111,
+          cpuPercent: 2,
+          rssBytes: 100_000_000,
+        });
+      } finally {
+        (TeamProvisioningService as any).RUNTIME_PROCESS_TABLE_TIMEOUT_MS =
+          originalProcessTableTimeout;
+      }
     });
 
     it('caps runtime resource history per member and pid', () => {
@@ -2777,6 +3597,38 @@ describe('TeamProvisioningService', () => {
       expect(snapshot.members.alice?.rssBytes).toBe(456_000_000);
     });
 
+    it('fails soft when batched pidusage sampling times out', async () => {
+      const svc = new TeamProvisioningService();
+      const originalBatchTimeout = (TeamProvisioningService as any)
+        .RUNTIME_PIDUSAGE_BATCH_TIMEOUT_MS;
+      (TeamProvisioningService as any).RUNTIME_PIDUSAGE_BATCH_TIMEOUT_MS = 5;
+      vi.mocked(pidusage).mockImplementation(() => new Promise(() => {}) as any);
+
+      try {
+        const stats = await (svc as any).readProcessUsageStatsByPid([111, 222]);
+
+        expect(stats.size).toBe(0);
+        expect(pidusage).toHaveBeenCalledTimes(1);
+        expect(pidusage).toHaveBeenCalledWith([111, 222], EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
+      } finally {
+        (TeamProvisioningService as any).RUNTIME_PIDUSAGE_BATCH_TIMEOUT_MS = originalBatchTimeout;
+      }
+    });
+
+    it('ignores malformed pidusage results while keeping valid runtime stats', async () => {
+      const svc = new TeamProvisioningService();
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': null,
+        '222': { memory: 'bad', cpu: Number.NaN },
+        '333': { memory: '123000000', cpu: '7' },
+      } as any);
+
+      const stats = await (svc as any).readProcessUsageStatsByPid([111, 222, 333]);
+
+      expect(stats.size).toBe(1);
+      expect(stats.get(333)).toEqual({ rssBytes: 123_000_000, cpuPercent: 7 });
+    });
+
     it('falls back to direct agent process lookup when tmux pane pid lookup is unavailable', async () => {
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
@@ -2804,7 +3656,7 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
         {
           pid: 333,
           ppid: 1,
@@ -2869,7 +3721,7 @@ describe('TeamProvisioningService', () => {
       run.cancelRequested = false;
       (svc as any).aliveRunByTeam.set('nice-team', run.runId);
       (svc as any).runs.set(run.runId, run);
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
         {
           pid: 333,
           ppid: 1,
@@ -2922,7 +3774,7 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
         {
           pid: 222,
           ppid: 1,
@@ -3032,7 +3884,7 @@ describe('TeamProvisioningService', () => {
           runtimeSessionId: 'session-alice',
         },
       });
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
         { pid: 333, ppid: 1, command: 'node unrelated-worker.js' },
       ]);
       vi.mocked(pidusage).mockResolvedValueOnce({
@@ -3178,7 +4030,7 @@ describe('TeamProvisioningService', () => {
         ]),
       };
       (svc as any).readPersistedRuntimeMembers = vi.fn(() => []);
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
         {
           pid: 17527,
           ppid: 1,
@@ -3373,13 +4225,18 @@ describe('TeamProvisioningService', () => {
       ];
       (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
       (svc as any).runs.set('run-1', run);
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValue([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
         { pid: 333, ppid: 1, command: 'opencode runtime host' },
       ]);
       vi.mocked(pidusage).mockReset();
       vi.mocked(pidusage).mockImplementation(
         async (target: number | string | Array<number | string>) => {
           if (Array.isArray(target)) {
+            if (target.length === 1 && Number(target[0]) === 333) {
+              return {
+                '333': createPidusageStat(333, 456_000_000),
+              } as any;
+            }
             return {
               '111': createPidusageStat(111, 123_000_000),
             } as any;
@@ -3397,7 +4254,7 @@ describe('TeamProvisioningService', () => {
       const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
 
       expect(pidusage).toHaveBeenCalledWith([111, 333], EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
-      expect(pidusage).toHaveBeenCalledWith(333, EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
+      expect(pidusage).toHaveBeenCalledWith([333], EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
       expect(snapshot.members.bob).toMatchObject({
         memberName: 'bob',
         alive: false,
@@ -3453,7 +4310,7 @@ describe('TeamProvisioningService', () => {
         ),
       };
       vi.mocked(pidusage).mockReset();
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValue([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
         { pid: 333, ppid: 1, command: 'opencode runtime host' },
       ]);
       vi.mocked(pidusage).mockImplementation(
@@ -5801,7 +6658,7 @@ describe('TeamProvisioningService', () => {
           },
         ]),
       };
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValue([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
         {
           pid: 456,
           ppid: 1,
@@ -9421,6 +10278,21 @@ describe('TeamProvisioningService', () => {
           },
         ]),
       };
+      await writeCommittedOpenCodeSessionStore({
+        teamName,
+        laneId,
+        runId: 'opencode-run-live',
+        sessions: [
+          {
+            id: 'oc-session-bob',
+            teamName,
+            memberName: 'bob',
+            laneId,
+            runId: 'opencode-run-live',
+            source: 'app_managed_bootstrap',
+          },
+        ],
+      });
 
       await expect(
         svc.deliverOpenCodeMemberMessage(teamName, {
@@ -9443,6 +10315,99 @@ describe('TeamProvisioningService', () => {
       expect(sendMessageToMember).not.toHaveBeenCalledWith(
         expect.objectContaining({ runId: 'primary-run' })
       );
+    });
+
+    it('does not trust live OpenCode secondary bootstrap state without committed evidence', async () => {
+      const svc = new TeamProvisioningService();
+      const teamName = 'team-a';
+      const laneId = 'secondary:opencode:bob';
+      const sendMessageToMember = vi.fn(async () => ({
+        ok: true,
+        providerId: 'opencode',
+        memberName: 'bob',
+        sessionId: 'oc-session-bob',
+        diagnostics: [],
+      }));
+      svc.setRuntimeAdapterRegistry(
+        new TeamRuntimeAdapterRegistry([
+          {
+            providerId: 'opencode',
+            prepare: vi.fn(),
+            launch: vi.fn(),
+            reconcile: vi.fn(),
+            stop: vi.fn(),
+            sendMessageToMember,
+          } as any,
+        ])
+      );
+      (svc as any).aliveRunByTeam.set(teamName, 'primary-run');
+      (svc as any).runs.set('primary-run', {
+        runId: 'primary-run',
+        teamName,
+        processKilled: false,
+        cancelRequested: false,
+        progress: { state: 'ready' },
+        request: { providerId: 'codex', cwd: '/repo' },
+        mixedSecondaryLanes: [
+          {
+            laneId,
+            providerId: 'opencode',
+            member: { name: 'bob', providerId: 'opencode', model: 'minimax-m2.5-free' },
+            runId: 'opencode-run-live',
+            state: 'finished',
+            result: {
+              members: {
+                bob: {
+                  bootstrapConfirmed: true,
+                  launchState: 'confirmed_alive',
+                  sessionId: 'oc-session-bob',
+                },
+              },
+            },
+            warnings: [],
+            diagnostics: [],
+          },
+        ],
+      });
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          projectPath: '/repo',
+          members: [
+            { name: 'team-lead', providerId: 'codex', model: 'gpt-5.4' },
+            { name: 'bob', providerId: 'opencode', model: 'minimax-m2.5-free' },
+          ],
+        })),
+      };
+      (svc as any).teamMetaStore = {
+        getMeta: vi.fn(async () => ({
+          launchIdentity: { providerId: 'codex' },
+          providerId: 'codex',
+        })),
+      };
+      (svc as any).membersMetaStore = {
+        getMembers: vi.fn(async () => [
+          {
+            name: 'bob',
+            providerId: 'opencode',
+            model: 'opencode/minimax-m2.5-free',
+          },
+        ]),
+      };
+
+      await expect(
+        svc.deliverOpenCodeMemberMessage(teamName, {
+          memberName: 'bob',
+          text: 'must wait for committed bootstrap evidence',
+          messageId: 'msg-live-lane-without-committed-evidence',
+        })
+      ).resolves.toMatchObject({
+        delivered: false,
+        reason: 'opencode_runtime_not_active',
+        diagnostics: [
+          expect.stringContaining('OpenCode runtime bootstrap is not confirmed for bob'),
+        ],
+      });
+      expect(sendMessageToMember).not.toHaveBeenCalled();
     });
 
     it('blocks OpenCode secondary delivery when runtime session exists but bootstrap did not check in', async () => {
@@ -12398,7 +13363,7 @@ describe('TeamProvisioningService', () => {
           backendType: 'process',
         },
       ]);
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
         {
           pid: process.pid,
           ppid: 1,
@@ -12470,7 +13435,7 @@ describe('TeamProvisioningService', () => {
         ]),
       };
       (svc as any).readPersistedRuntimeMembers = vi.fn(() => []);
-      vi.mocked(listRuntimeProcessesForCurrentTmuxPlatform).mockResolvedValueOnce([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
         {
           pid: process.pid,
           ppid: 1,
@@ -12805,7 +13770,7 @@ describe('TeamProvisioningService', () => {
         bootstrapConfirmed: false,
         livenessSource: undefined,
         livenessKind: 'runtime_process',
-        runtimeDiagnostic: 'Runtime process is alive, but no bootstrap check-in after 5 min.',
+        runtimeDiagnostic: 'OpenCode app-managed bootstrap evidence did not commit within 5 min.',
         runtimeDiagnosticSeverity: 'warning',
         bootstrapStalled: true,
         hardFailure: false,
@@ -17723,8 +18688,7 @@ describe('TeamProvisioningService', () => {
       bootstrapConfirmed: false,
       hardFailure: false,
       bootstrapStalled: true,
-      runtimeDiagnostic:
-        'OpenCode member_briefing completed, but runtime_bootstrap_checkin did not complete after 5 min.',
+      runtimeDiagnostic: 'OpenCode app-managed bootstrap evidence did not commit within 5 min.',
       runtimeDiagnosticSeverity: 'warning',
     });
     expect(run.provisioningOutputParts.join('\n')).not.toContain(
@@ -17753,7 +18717,7 @@ describe('TeamProvisioningService', () => {
             livenessKind: 'registered_only',
             bootstrapStalled: true,
             runtimeDiagnostic:
-              'OpenCode member_briefing completed, but runtime_bootstrap_checkin did not complete after 5 min.',
+              'OpenCode app-managed bootstrap evidence did not commit within 5 min.',
             runtimeDiagnosticSeverity: 'warning',
           }),
         ],
@@ -19627,7 +20591,7 @@ describe('TeamProvisioningService', () => {
       livenessSource: undefined,
       livenessKind: 'runtime_process',
       bootstrapStalled: true,
-      runtimeDiagnostic: 'Runtime process is alive, but no bootstrap check-in after 5 min.',
+      runtimeDiagnostic: 'OpenCode app-managed bootstrap evidence did not commit within 5 min.',
       runtimeDiagnosticSeverity: 'warning',
     });
   });
@@ -19684,8 +20648,7 @@ describe('TeamProvisioningService', () => {
       bootstrapConfirmed: false,
       hardFailure: false,
       bootstrapStalled: true,
-      runtimeDiagnostic:
-        'OpenCode bootstrap MCP tool failed before required attach completed: runtime_bootstrap_checkin',
+      runtimeDiagnostic: 'OpenCode app-managed bootstrap evidence did not commit within 5 min.',
       runtimeDiagnosticSeverity: 'warning',
     });
     const persisted = JSON.parse(
@@ -19796,6 +20759,8 @@ describe('TeamProvisioningService', () => {
               bootstrapConfirmed: false,
               hardFailure: false,
               sessionId: 'ses_tom_partial',
+              bootstrapEvidenceSource: 'runtime_bootstrap_checkin',
+              bootstrapMode: 'model_tool_checkin',
               diagnostics: [
                 'runtime_bootstrap_checkin failed: Not connected',
                 'member_briefing at 2026-05-04T18:25:43.091Z',
@@ -19829,6 +20794,148 @@ describe('TeamProvisioningService', () => {
         },
       })
     );
+  });
+
+  it('does not send legacy OpenCode bootstrap check-in retry for app-managed bootstrap stalls', async () => {
+    const teamName = 'zz-opencode-app-managed-no-checkin-retry';
+    const acceptedAt = new Date(Date.now() - 6 * 60_000).toISOString();
+    const laneId = 'secondary:opencode:tom';
+    const runId = 'opencode-run-tom';
+    const runtimeSessionId = 'ses_tom_app_managed';
+    const appManagedBootstrapCandidate = {
+      schemaVersion: 1,
+      source: 'app_managed_bootstrap',
+      teamName,
+      memberName: 'tom',
+      runId,
+      laneId,
+      runtimeSessionId,
+      messageID: 'msg_tom_bootstrap',
+      contextHash: 'ctx_tom',
+      briefingHash: 'brief_tom',
+      injectionVerifiedAt: acceptedAt,
+      candidateAt: acceptedAt,
+    } as const;
+    const sendMessageToMember = vi.fn(async (input: Record<string, unknown>) => ({
+      ok: true,
+      providerId: 'opencode',
+      memberName: String(input.memberName),
+      diagnostics: [],
+    }));
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(
+      new TeamRuntimeAdapterRegistry([
+        {
+          providerId: 'opencode',
+          prepare: vi.fn(),
+          launch: vi.fn(),
+          reconcile: vi.fn(),
+          stop: vi.fn(),
+          sendMessageToMember,
+        } as any,
+      ])
+    );
+    vi.spyOn(svc as any, 'refreshMemberSpawnStatusesFromLeadInbox').mockResolvedValue(undefined);
+    vi.spyOn(svc as any, 'maybeAuditMemberSpawnStatuses').mockResolvedValue(undefined);
+    vi.spyOn(svc as any, 'getLiveTeamAgentRuntimeMetadata').mockResolvedValue(
+      new Map([
+        [
+          'tom',
+          {
+            alive: true,
+            providerId: 'opencode',
+            livenessKind: 'runtime_process',
+            runtimeSessionId,
+            runtimeDiagnostic: 'OpenCode runtime process detected',
+            runtimeDiagnosticSeverity: 'info',
+          },
+        ],
+      ])
+    );
+
+    const run = createMemberSpawnRun({
+      teamName,
+      runId: 'run-app-managed-no-checkin-retry',
+      expectedMembers: ['tom'],
+      memberSpawnStatuses: new Map([
+        [
+          'tom',
+          createMemberSpawnStatusEntry({
+            status: 'waiting',
+            launchState: 'runtime_pending_bootstrap',
+            agentToolAccepted: true,
+            runtimeAlive: true,
+            bootstrapConfirmed: false,
+            hardFailure: false,
+            firstSpawnAcceptedAt: acceptedAt,
+            livenessKind: 'runtime_process',
+          }),
+        ],
+      ]),
+    });
+    run.onProgress = vi.fn();
+    run.isLaunch = false;
+    run.request = {
+      teamName,
+      cwd: '/Users/test/proj',
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
+      model: 'gpt-5.4',
+      members: [],
+    };
+    run.mixedSecondaryLanes = [
+      {
+        laneId,
+        providerId: 'opencode',
+        member: {
+          name: 'tom',
+          providerId: 'opencode',
+          model: 'openrouter/minimax/minimax-m2.5',
+          cwd: '/Users/test/proj',
+        },
+        runId,
+        state: 'finished',
+        result: {
+          runId,
+          teamName,
+          launchPhase: 'active',
+          teamLaunchState: 'partial_pending',
+          members: {
+            tom: {
+              memberName: 'tom',
+              providerId: 'opencode',
+              launchState: 'runtime_pending_bootstrap',
+              agentToolAccepted: true,
+              runtimeAlive: false,
+              bootstrapConfirmed: false,
+              hardFailure: false,
+              sessionId: runtimeSessionId,
+              bootstrapEvidenceSource: 'app_managed_bootstrap',
+              bootstrapMode: 'app_managed_context',
+              appManagedBootstrapCandidate,
+              diagnostics: [
+                'OpenCode app-managed bootstrap context was injected and verified by the bridge.',
+              ],
+            },
+          },
+          warnings: [],
+          diagnostics: [],
+        },
+        warnings: [],
+        diagnostics: [],
+      },
+    ];
+    (svc as any).runs.set(run.runId, run);
+    (svc as any).aliveRunByTeam.set(teamName, run.runId);
+
+    await (svc as any).reevaluateMemberLaunchStatus(run, 'tom');
+
+    expect(sendMessageToMember).not.toHaveBeenCalled();
+    expect(run.memberSpawnStatuses.get('tom')).toMatchObject({
+      launchState: 'runtime_pending_bootstrap',
+      runtimeDiagnostic: 'OpenCode app-managed bootstrap evidence did not commit within 5 min.',
+      bootstrapStalled: true,
+    });
   });
 
   it('keeps process table diagnostics visible when live metadata has no primary diagnostic', async () => {

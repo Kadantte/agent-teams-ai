@@ -205,6 +205,7 @@ import {
   TEAM_UPDATE_TASK_OWNER,
   TEAM_UPDATE_TASK_STATUS,
   TEAM_VALIDATE_CLI_ARGS,
+  TELEMETRY_GET_SENTRY_CONTEXT,
   TERMINAL_DATA,
   TERMINAL_EXIT,
   TERMINAL_KILL,
@@ -495,6 +496,9 @@ const electronAPI: ElectronAPI = {
   runtimeProviderManagement: createRuntimeProviderManagementBridge(ipcRenderer),
   memberWorkSync: createMemberWorkSyncBridge(ipcRenderer),
   memberLogStream: createMemberLogStreamBridge(),
+  telemetry: {
+    getSentryContext: () => ipcRenderer.invoke(TELEMETRY_GET_SENTRY_CONTEXT),
+  },
   startup: {
     getStatus: () => ipcRenderer.invoke(APP_STARTUP_GET_STATUS) as Promise<AppStartupStatus>,
     onProgress: (callback: (status: AppStartupStatus) => void): (() => void) => {

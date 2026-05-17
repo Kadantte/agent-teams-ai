@@ -35,6 +35,20 @@ describe('RuntimeDiagnosticClassifier', () => {
     });
   });
 
+  it('classifies OpenCode free usage retry status as quota exhausted', () => {
+    const selected = selectRuntimeDiagnosticClassification([
+      'empty_assistant_turn',
+      'OpenCode session status retry - attempt=1 - Free usage exceeded, subscribe to Go https://opencode.ai/go - next=2026-05-18T00:00:00.267Z',
+    ]);
+
+    expect(selected).toMatchObject({
+      reasonCode: 'quota_exhausted',
+      normalizedMessage:
+        'OpenCode session status retry - attempt=1 - Free usage exceeded, subscribe to Go https://opencode.ai/go - next=2026-05-18T00:00:00.267Z',
+      actionRequired: true,
+    });
+  });
+
   it('selects auth errors over bridge timeouts', () => {
     const selected = selectRuntimeDiagnosticClassification([
       'OpenCode bridge command timed out',

@@ -84,6 +84,9 @@ function appendRuntimeSummarySuffixes(
 export function getRuntimeMemorySourceLabel(
   runtimeEntry: TeamAgentRuntimeEntry | undefined
 ): string | undefined {
+  if (runtimeEntry?.runtimeLoadScope === 'shared-host') {
+    return 'RSS source: shared OpenCode host';
+  }
   if (!runtimeEntry?.pidSource) {
     return undefined;
   }
