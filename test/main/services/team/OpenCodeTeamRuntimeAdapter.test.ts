@@ -393,6 +393,12 @@ describe('OpenCodeTeamRuntimeAdapter', () => {
     expect(launchOpenCodeTeam).toHaveBeenCalledTimes(2);
     expect(launchOpenCodeTeam.mock.calls[0]?.[0].expectedCapabilitySnapshotId).toBe('cap-old');
     expect(launchOpenCodeTeam.mock.calls[1]?.[0].expectedCapabilitySnapshotId).toBe('cap-new');
+    expect(launchOpenCodeTeam.mock.calls[0]?.[0].capabilitySnapshotRecoveryAttemptId).toBe(
+      undefined
+    );
+    expect(launchOpenCodeTeam.mock.calls[1]?.[0].capabilitySnapshotRecoveryAttemptId).toMatch(
+      /^opencode-capability-recovery-/
+    );
   });
 
   it('refreshes readiness and retries once when the launch command sees a newer capability snapshot', async () => {
@@ -406,6 +412,156 @@ describe('OpenCodeTeamRuntimeAdapter', () => {
     expect(launchOpenCodeTeam).toHaveBeenCalledTimes(2);
     expect(launchOpenCodeTeam.mock.calls[0]?.[0].expectedCapabilitySnapshotId).toBe('cap-old');
     expect(launchOpenCodeTeam.mock.calls[1]?.[0].expectedCapabilitySnapshotId).toBe('cap-new');
+    expect(launchOpenCodeTeam.mock.calls[1]?.[0].capabilitySnapshotRecoveryAttemptId).toMatch(
+      /^opencode-capability-recovery-/
+    );
+  });
+
+  it('uses a fresh recovery attempt id when capability refresh returns the same snapshot', async () => {
+    let readinessCalls = 0;
+    const checkReadiness = vi.fn<
+      OpenCodeTeamRuntimeBridgePort['checkOpenCodeTeamLaunchReadiness']
+    >(() => {
+      readinessCalls += 1;
+      return Promise.resolve(readiness({ state: 'ready', launchAllowed: true }));
+    });
+    const launchOpenCodeTeam = vi.fn<
+      NonNullable<OpenCodeTeamRuntimeBridgePort['launchOpenCodeTeam']>
+    >((input) =>
+      Promise.resolve(
+        input.capabilitySnapshotRecoveryAttemptId
+          ? successfulOpenCodeLaunchData()
+          : failedCapabilitySnapshotLaunchData(
+              'OpenCode bridge capability snapshot precondition mismatch'
+            )
+      )
+    );
+    const adapter = new OpenCodeTeamRuntimeAdapter({
+      checkOpenCodeTeamLaunchReadiness: checkReadiness,
+      getLastOpenCodeRuntimeSnapshot: vi.fn(() => runtimeSnapshot('cap-1')),
+      launchOpenCodeTeam,
+    });
+
+    const result = await adapter.launch(launchInput());
+
+    expect(result.teamLaunchState).toBe('clean_success');
+    expect(readinessCalls).toBe(2);
+    expect(launchOpenCodeTeam).toHaveBeenCalledTimes(2);
+    expect(launchOpenCodeTeam.mock.calls[0]?.[0].expectedCapabilitySnapshotId).toBe('cap-1');
+    expect(launchOpenCodeTeam.mock.calls[1]?.[0].expectedCapabilitySnapshotId).toBe('cap-1');
+    expect(launchOpenCodeTeam.mock.calls[0]?.[0].capabilitySnapshotRecoveryAttemptId).toBe(
+      undefined
+    );
+    expect(launchOpenCodeTeam.mock.calls[1]?.[0].capabilitySnapshotRecoveryAttemptId).toMatch(
+      /^opencode-capability-recovery-/
+    );
+  });
+
+  it('retries pre-launch capability mismatch reported in member diagnostics', async () => {
+    const checkReadiness = vi.fn<
+      OpenCodeTeamRuntimeBridgePort['checkOpenCodeTeamLaunchReadiness']
+    >(() => Promise.resolve(readiness({ state: 'ready', launchAllowed: true })));
+    const launchOpenCodeTeam = vi.fn<
+      NonNullable<OpenCodeTeamRuntimeBridgePort['launchOpenCodeTeam']>
+    >((input) =>
+      Promise.resolve(
+        input.capabilitySnapshotRecoveryAttemptId
+          ? successfulOpenCodeLaunchData()
+          : failedMemberCapabilitySnapshotLaunchData(
+              'OpenCode bridge capability snapshot precondition mismatch'
+            )
+      )
+    );
+    const adapter = new OpenCodeTeamRuntimeAdapter({
+      checkOpenCodeTeamLaunchReadiness: checkReadiness,
+      getLastOpenCodeRuntimeSnapshot: vi.fn(() => runtimeSnapshot('cap-1')),
+      launchOpenCodeTeam,
+    });
+
+    const result = await adapter.launch(launchInput());
+
+    expect(result.teamLaunchState).toBe('clean_success');
+    expect(checkReadiness).toHaveBeenCalledTimes(2);
+    expect(launchOpenCodeTeam).toHaveBeenCalledTimes(2);
+    expect(launchOpenCodeTeam.mock.calls[1]?.[0].capabilitySnapshotRecoveryAttemptId).toMatch(
+      /^opencode-capability-recovery-/
+    );
+  });
+
+  it('does not retry a successful launch just because stale diagnostics mention pre-launch mismatch', async () => {
+    const checkReadiness = vi.fn<
+      OpenCodeTeamRuntimeBridgePort['checkOpenCodeTeamLaunchReadiness']
+    >(() => Promise.resolve(readiness({ state: 'ready', launchAllowed: true })));
+    const launchOpenCodeTeam = vi.fn<
+      NonNullable<OpenCodeTeamRuntimeBridgePort['launchOpenCodeTeam']>
+    >(() =>
+      Promise.resolve({
+        ...successfulOpenCodeLaunchData(),
+        diagnostics: [
+          {
+            code: 'stale_note',
+            severity: 'warning',
+            message: 'OpenCode bridge capability snapshot precondition mismatch',
+          },
+        ],
+      })
+    );
+    const adapter = new OpenCodeTeamRuntimeAdapter({
+      checkOpenCodeTeamLaunchReadiness: checkReadiness,
+      getLastOpenCodeRuntimeSnapshot: vi.fn(() => runtimeSnapshot('cap-1')),
+      launchOpenCodeTeam,
+    });
+
+    const result = await adapter.launch(launchInput());
+
+    expect(result.teamLaunchState).toBe('clean_success');
+    expect(checkReadiness).toHaveBeenCalledTimes(1);
+    expect(launchOpenCodeTeam).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry post-result capability snapshot mismatch', async () => {
+    const { result, checkReadiness, launchOpenCodeTeam } =
+      await launchWithStaleCapabilitySnapshotRecovery(
+        'OpenCode bridge capability snapshot mismatch'
+      );
+
+    expect(result.teamLaunchState).toBe('partial_failure');
+    expect(checkReadiness).toHaveBeenCalledTimes(1);
+    expect(launchOpenCodeTeam).toHaveBeenCalledTimes(1);
+    expect(result.diagnostics).toContain(
+      'error:opencode_bridge: OpenCode bridge failed: OpenCode bridge capability snapshot mismatch'
+    );
+  });
+
+  it('keeps the original precondition mismatch when the recovery retry also fails', async () => {
+    const checkReadiness = vi.fn<
+      OpenCodeTeamRuntimeBridgePort['checkOpenCodeTeamLaunchReadiness']
+    >(() => Promise.resolve(readiness({ state: 'ready', launchAllowed: true })));
+    const launchOpenCodeTeam = vi.fn<
+      NonNullable<OpenCodeTeamRuntimeBridgePort['launchOpenCodeTeam']>
+    >(() =>
+      Promise.resolve(
+        failedCapabilitySnapshotLaunchData(
+          'OpenCode bridge capability snapshot precondition mismatch'
+        )
+      )
+    );
+    const adapter = new OpenCodeTeamRuntimeAdapter({
+      checkOpenCodeTeamLaunchReadiness: checkReadiness,
+      getLastOpenCodeRuntimeSnapshot: vi.fn(() => runtimeSnapshot('cap-1')),
+      launchOpenCodeTeam,
+    });
+
+    const result = await adapter.launch(launchInput());
+
+    expect(result.teamLaunchState).toBe('partial_failure');
+    expect(launchOpenCodeTeam).toHaveBeenCalledTimes(2);
+    expect(result.diagnostics).toContain(
+      'error:opencode_bridge: OpenCode bridge failed: OpenCode bridge capability snapshot precondition mismatch'
+    );
+    expect(result.diagnostics.join('\n')).not.toContain(
+      'OpenCode bridge command cannot be retried from status failed'
+    );
   });
 
   it('does not mark the lane clean_success when ready bridge data omits an expected member', async () => {
@@ -1204,6 +1360,25 @@ function failedCapabilitySnapshotLaunchData(message: string): OpenCodeLaunchTeam
         message: `OpenCode bridge failed: ${message}`,
       },
     ],
+  };
+}
+
+function failedMemberCapabilitySnapshotLaunchData(message: string): OpenCodeLaunchTeamCommandData {
+  return {
+    runId: 'run-1',
+    teamLaunchState: 'failed',
+    members: {
+      alice: {
+        sessionId: 'oc-session-1',
+        launchState: 'failed',
+        runtimePid: 123,
+        model: 'openai/gpt-5.4-mini',
+        evidence: [],
+        diagnostics: [message],
+      },
+    },
+    warnings: [],
+    diagnostics: [],
   };
 }
 

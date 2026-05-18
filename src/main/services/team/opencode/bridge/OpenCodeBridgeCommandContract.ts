@@ -68,6 +68,7 @@ export interface OpenCodeLaunchTeamCommandBody {
   leadPrompt: string;
   expectedCapabilitySnapshotId: string | null;
   manifestHighWatermark: number | null;
+  capabilitySnapshotRecoveryAttemptId?: string;
 }
 
 export interface OpenCodeTeamMemberLaunchCommandData {

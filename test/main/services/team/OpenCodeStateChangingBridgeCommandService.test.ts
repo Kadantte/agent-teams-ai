@@ -325,6 +325,62 @@ describe('OpenCodeStateChangingBridgeCommandService', () => {
     await expect(leaseStore.getActive('team-a')).resolves.toBeNull();
   });
 
+  it('treats capability recovery attempt id as a fresh state-changing command body', async () => {
+    bridge.resultFactory = ({ body, command, options }) =>
+      ({
+        ok: false,
+        schemaVersion: 1,
+        requestId: options.requestId,
+        command,
+        completedAt: '2026-04-21T12:00:10.000Z',
+        durationMs: 10_000,
+        error: {
+          kind: 'provider_error',
+          message: 'OpenCode bridge capability snapshot precondition mismatch',
+          retryable: true,
+        },
+        diagnostics: [],
+        data: body,
+      }) as OpenCodeBridgeResult<unknown>;
+    const service = createService();
+
+    const first = await service.execute(buildLaunchInput());
+    expect(first).toMatchObject({
+      ok: false,
+      error: { message: 'OpenCode bridge capability snapshot precondition mismatch' },
+    });
+    const firstIdempotencyKey = bridge.calls[0].body.preconditions.idempotencyKey;
+    await expect(ledger.getByIdempotencyKey(firstIdempotencyKey)).resolves.toMatchObject({
+      status: 'failed',
+      retryable: true,
+    });
+
+    await expect(service.execute(buildLaunchInput())).rejects.toThrow(
+      'OpenCode bridge command cannot be retried from status failed'
+    );
+    expect(bridge.calls).toHaveLength(1);
+
+    const recovery = await service.execute({
+      ...buildLaunchInput(),
+      body: {
+        prompt: 'launch',
+        capabilitySnapshotRecoveryAttemptId: 'opencode-capability-recovery-test',
+      },
+    });
+    expect(recovery).toMatchObject({
+      ok: false,
+      error: { message: 'OpenCode bridge capability snapshot precondition mismatch' },
+    });
+    expect(bridge.calls).toHaveLength(2);
+    const recoveryIdempotencyKey = bridge.calls[1].body.preconditions.idempotencyKey;
+    expect(recoveryIdempotencyKey).not.toBe(firstIdempotencyKey);
+    await expect(ledger.getByIdempotencyKey(recoveryIdempotencyKey)).resolves.toMatchObject({
+      status: 'failed',
+      retryable: true,
+    });
+    await expect(leaseStore.getActive('team-a')).resolves.toBeNull();
+  });
+
   function createService(
     overrides: {
       leaseAcquireTimeoutMs?: number;

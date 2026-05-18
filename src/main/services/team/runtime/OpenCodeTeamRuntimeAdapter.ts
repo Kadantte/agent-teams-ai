@@ -103,10 +103,9 @@ const BEARER_TOKEN_PATTERN = /\bBearer\s+\S+/gi;
 const SECRET_KEY_PATTERN = /\bsk-[A-Za-z0-9_-]{16,}\b/g;
 const OPEN_CODE_CAPABILITY_SNAPSHOT_REFRESH_RETRY_WARNING =
   'OpenCode capability snapshot changed between readiness and launch; refreshed readiness and retried once.';
-const OPEN_CODE_CAPABILITY_SNAPSHOT_MISMATCH_MARKERS = [
+const OPEN_CODE_CAPABILITY_SNAPSHOT_PRELAUNCH_MISMATCH_MARKERS = [
   'Bridge server capability snapshot mismatch',
   'OpenCode bridge capability snapshot precondition mismatch',
-  'OpenCode bridge capability snapshot mismatch',
 ];
 
 function resolveOpenCodeRuntimeSettlementMode(
@@ -207,7 +206,8 @@ export class OpenCodeTeamRuntimeAdapter implements TeamLaunchRuntimeAdapter {
     this.lastProjectPathByTeamName.set(input.teamName, input.cwd);
     const buildLaunchCommand = (
       snapshot: OpenCodeBridgeRuntimeSnapshot | null,
-      model: string
+      model: string,
+      recoveryAttemptId?: string
     ): OpenCodeLaunchTeamCommandBody => ({
       runId: input.runId,
       laneId: input.laneId?.trim() || 'primary',
@@ -223,12 +223,13 @@ export class OpenCodeTeamRuntimeAdapter implements TeamLaunchRuntimeAdapter {
       leadPrompt: input.prompt?.trim() ?? '',
       expectedCapabilitySnapshotId: snapshot?.capabilitySnapshotId ?? null,
       manifestHighWatermark: null,
+      ...(recoveryAttemptId ? { capabilitySnapshotRecoveryAttemptId: recoveryAttemptId } : {}),
     });
 
     let data = await this.bridge.launchOpenCodeTeam(
       buildLaunchCommand(runtimeSnapshot, selectedModel)
     );
-    if (!skipReadinessPreflight && isOpenCodeCapabilitySnapshotMismatchLaunchData(data)) {
+    if (!skipReadinessPreflight && isOpenCodePreLaunchCapabilitySnapshotMismatchData(data)) {
       const refreshed = await this.prepare(input);
       if (!refreshed.ok) {
         return blockedLaunchResult(
@@ -249,8 +250,16 @@ export class OpenCodeTeamRuntimeAdapter implements TeamLaunchRuntimeAdapter {
           ...refreshed.warnings,
           OPEN_CODE_CAPABILITY_SNAPSHOT_REFRESH_RETRY_WARNING,
         ]);
+        // TODO(opencode-bridge): replace marker-based capability recovery with
+        // structured bridge failure details: expectedCapabilitySnapshotId,
+        // actualCapabilitySnapshotId, preconditionStage, and safeToRetryWithFreshCommand.
+        // Keep this app-side attempt id until packaged runtimes all expose that protocol.
         data = await this.bridge.launchOpenCodeTeam(
-          buildLaunchCommand(runtimeSnapshot, selectedModel)
+          buildLaunchCommand(
+            runtimeSnapshot,
+            selectedModel,
+            `opencode-capability-recovery-${randomUUID()}`
+          )
         );
       }
     }
@@ -1097,26 +1106,29 @@ function formatOpenCodeBridgeDiagnostic(diagnostic: {
   return `${diagnostic.severity}:${diagnostic.code}: ${diagnostic.message}`;
 }
 
-function isOpenCodeCapabilitySnapshotMismatchLaunchData(
+function isOpenCodePreLaunchCapabilitySnapshotMismatchData(
   data: OpenCodeLaunchTeamCommandData
 ): boolean {
+  if (data.teamLaunchState !== 'failed') {
+    return false;
+  }
   if (
     data.diagnostics.some(
       (diagnostic) =>
-        isOpenCodeCapabilitySnapshotMismatchText(diagnostic.message) ||
-        isOpenCodeCapabilitySnapshotMismatchText(diagnostic.code)
+        isOpenCodePreLaunchCapabilitySnapshotMismatchText(diagnostic.message) ||
+        isOpenCodePreLaunchCapabilitySnapshotMismatchText(diagnostic.code)
     )
   ) {
     return true;
   }
   return Object.values(data.members).some((member) =>
-    (member.diagnostics ?? []).some(isOpenCodeCapabilitySnapshotMismatchText)
+    (member.diagnostics ?? []).some(isOpenCodePreLaunchCapabilitySnapshotMismatchText)
   );
 }
 
-function isOpenCodeCapabilitySnapshotMismatchText(value: string): boolean {
+function isOpenCodePreLaunchCapabilitySnapshotMismatchText(value: string): boolean {
   const normalized = value.toLowerCase();
-  return OPEN_CODE_CAPABILITY_SNAPSHOT_MISMATCH_MARKERS.some((marker) =>
+  return OPEN_CODE_CAPABILITY_SNAPSHOT_PRELAUNCH_MISMATCH_MARKERS.some((marker) =>
     normalized.includes(marker.toLowerCase())
   );
 }
