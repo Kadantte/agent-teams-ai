@@ -99,6 +99,21 @@ describe('member runtime presentation', () => {
     ).toBe(false);
   });
 
+  it('hides Codex native task activity for bootstrap-only runtime evidence without a verified process', () => {
+    expect(
+      shouldDisplayMemberCurrentTask({
+        member: createMember(),
+        isTeamAlive: true,
+        ...createConfirmedCodexSpawn(),
+        runtimeEntry: createLiveRuntime({
+          livenessKind: 'confirmed_bootstrap',
+          pid: undefined,
+          rssBytes: undefined,
+        }),
+      })
+    ).toBe(false);
+  });
+
   it('marks stale confirmed Codex native spawn state as non-green runtime status', () => {
     const presentation = buildMemberLaunchPresentation({
       member: createMember(),
@@ -149,6 +164,25 @@ describe('member runtime presentation', () => {
       isTeamProvisioning: false,
       isLaunchSettling: true,
       ...createConfirmedCodexSpawn(),
+    });
+
+    expect(presentation.launchVisualState).toBe('stale_runtime');
+    expect(presentation.dotClass).toContain('bg-red-400');
+  });
+
+  it('does not mark bootstrap-only Codex native runtime evidence as green', () => {
+    const presentation = buildMemberLaunchPresentation({
+      member: createMember(),
+      spawnLivenessSource: 'heartbeat',
+      runtimeAdvisory: undefined,
+      isTeamAlive: true,
+      isTeamProvisioning: false,
+      ...createConfirmedCodexSpawn(),
+      runtimeEntry: createLiveRuntime({
+        livenessKind: 'confirmed_bootstrap',
+        pid: undefined,
+        rssBytes: undefined,
+      }),
     });
 
     expect(presentation.launchVisualState).toBe('stale_runtime');

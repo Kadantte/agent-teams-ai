@@ -993,14 +993,7 @@ function isCodexNativeProcessTeammate(member: ResolvedTeamMember): boolean {
 }
 
 function hasLiveRuntimeProcessEvidence(runtimeEntry: TeamAgentRuntimeEntry | undefined): boolean {
-  if (runtimeEntry?.alive !== true) {
-    return false;
-  }
-  return (
-    runtimeEntry.livenessKind == null ||
-    runtimeEntry.livenessKind === 'runtime_process' ||
-    runtimeEntry.livenessKind === 'confirmed_bootstrap'
-  );
+  return runtimeEntry?.alive === true && runtimeEntry.livenessKind === 'runtime_process';
 }
 
 function hasSpawnRuntimeLiveClaim({
