@@ -5,6 +5,7 @@ import {
   type ExecFileOptions,
   type ExecOptions,
   spawn,
+  spawnSync,
   type SpawnOptions,
 } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
@@ -21,12 +22,25 @@ function execFileAsync(
   options: ExecFileOptions = {}
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    const { timeout, killSignal, ...execOptions } = options;
+    const timeoutMs = typeof timeout === 'number' && timeout > 0 ? timeout : 0;
+    const timeoutSignal = normalizeKillSignal(killSignal);
     let child: ChildProcess | null = null;
     let settled = false;
+    let stdoutText = '';
+    let stderrText = '';
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     const cleanup = (): void => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
       untrackCliProcess(child);
     };
-    child = execFile(cmd, args, options, (err, stdout, stderr) => {
+    child = execFile(cmd, args, execOptions, (err, stdout, stderr) => {
+      if (settled) {
+        return;
+      }
       settled = true;
       cleanup();
       if (err) {
@@ -41,6 +55,33 @@ function execFileAsync(
     });
     if (!settled) {
       trackCliProcess(child);
+      if (timeoutMs > 0) {
+        child.stdout?.on('data', (chunk: Buffer | string) => {
+          stdoutText += chunk.toString();
+        });
+        child.stderr?.on('data', (chunk: Buffer | string) => {
+          stderrText += chunk.toString();
+        });
+        timeoutHandle = setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanup();
+          killProcessTree(child, timeoutSignal);
+          const error = new Error(
+            `Command timed out after ${timeoutMs}ms: ${cmd} ${args.join(' ')}`
+          );
+          Object.assign(error, {
+            killed: true,
+            signal: timeoutSignal,
+            stdout: stdoutText,
+            stderr: stderrText,
+          });
+          reject(error);
+        }, timeoutMs);
+        timeoutHandle.unref?.();
+      }
     }
   });
 }
@@ -55,13 +96,26 @@ function execShellAsync(
   options: ExecOptions = {}
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    const { timeout, killSignal, ...execOptions } = options;
+    const timeoutMs = typeof timeout === 'number' && timeout > 0 ? timeout : 0;
+    const timeoutSignal = normalizeKillSignal(killSignal);
     let child: ChildProcess | null = null;
     let settled = false;
+    let stdoutText = '';
+    let stderrText = '';
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     const cleanup = (): void => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
       untrackCliProcess(child);
     };
     // eslint-disable-next-line sonarjs/os-command, security/detect-child-process -- cmd from known binaryPath+args, not user input (Windows EINVAL fallback)
-    child = exec(cmd, options, (err, stdout, stderr) => {
+    child = exec(cmd, execOptions, (err, stdout, stderr) => {
+      if (settled) {
+        return;
+      }
       settled = true;
       cleanup();
       if (err)
@@ -72,6 +126,31 @@ function execShellAsync(
     });
     if (!settled) {
       trackCliProcess(child);
+      if (timeoutMs > 0) {
+        child.stdout?.on('data', (chunk: Buffer | string) => {
+          stdoutText += chunk.toString();
+        });
+        child.stderr?.on('data', (chunk: Buffer | string) => {
+          stderrText += chunk.toString();
+        });
+        timeoutHandle = setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanup();
+          killProcessTree(child, timeoutSignal);
+          const error = new Error(`Command timed out after ${timeoutMs}ms: ${cmd}`);
+          Object.assign(error, {
+            killed: true,
+            signal: timeoutSignal,
+            stdout: stdoutText,
+            stderr: stderrText,
+          });
+          reject(error);
+        }, timeoutMs);
+        timeoutHandle.unref?.();
+      }
     }
   });
 }
@@ -385,5 +464,66 @@ export function killProcessTree(
     }
   }
 
-  child.kill(signal);
+  const childPid = child.pid;
+  const descendants = getDescendantProcessIds(childPid);
+  const targetSignal = signal ?? 'SIGTERM';
+  for (const pid of [childPid, ...descendants.reverse()]) {
+    try {
+      process.kill(pid, targetSignal);
+    } catch {
+      // Best-effort - process may have already exited.
+    }
+  }
+}
+
+function normalizeKillSignal(signal: ExecFileOptions['killSignal']): NodeJS.Signals {
+  return typeof signal === 'string' ? (signal as NodeJS.Signals) : 'SIGTERM';
+}
+
+function getDescendantProcessIds(parentPid: number): number[] {
+  if (process.platform === 'win32') {
+    return [];
+  }
+
+  try {
+    const result = spawnSync('ps', ['-axo', 'pid=,ppid='], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (result.error || result.status !== 0 || typeof result.stdout !== 'string') {
+      return [];
+    }
+
+    const childrenByParent = new Map<number, number[]>();
+    for (const line of result.stdout.split('\n')) {
+      const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+      if (!match) {
+        continue;
+      }
+      const pid = Number(match[1]);
+      const ppid = Number(match[2]);
+      const children = childrenByParent.get(ppid);
+      if (children) {
+        children.push(pid);
+      } else {
+        childrenByParent.set(ppid, [pid]);
+      }
+    }
+
+    const descendants: number[] = [];
+    const stack = [...(childrenByParent.get(parentPid) ?? [])];
+    const seen = new Set<number>();
+    while (stack.length > 0) {
+      const pid = stack.pop();
+      if (!pid || seen.has(pid) || pid === process.pid) {
+        continue;
+      }
+      seen.add(pid);
+      descendants.push(pid);
+      stack.push(...(childrenByParent.get(pid) ?? []));
+    }
+    return descendants;
+  } catch {
+    return [];
+  }
 }

@@ -2,6 +2,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
+import { EventEmitter } from 'events';
 
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 
@@ -12,6 +13,7 @@ vi.mock('child_process', async (importOriginal) => {
   return {
     ...actual,
     spawn: vi.fn(),
+    spawnSync: vi.fn(),
     execFile: vi.fn(),
     exec: vi.fn(),
   };
@@ -22,6 +24,7 @@ import * as child from 'child_process';
 import {
   execCli,
   killTrackedCliProcesses,
+  killProcessTree,
   quoteWindowsCmdArg,
   spawnCli,
 } from '@main/utils/childProcess';
@@ -250,6 +253,7 @@ describe('cli child process helpers', () => {
 
     it('kills tracked CLI processes on shutdown', () => {
       setPlatform('linux');
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
       const fakeChild = {
         pid: 123,
         kill: vi.fn(),
@@ -259,10 +263,14 @@ describe('cli child process helpers', () => {
       };
       (child.spawn as unknown as Mock).mockReturnValue(fakeChild);
 
-      spawnCli('/usr/bin/claude', ['--version']);
-      killTrackedCliProcesses('SIGTERM');
+      try {
+        spawnCli('/usr/bin/claude', ['--version']);
+        killTrackedCliProcesses('SIGTERM');
 
-      expect(fakeChild.kill).toHaveBeenCalledWith('SIGTERM');
+        expect(killSpy).toHaveBeenCalledWith(123, 'SIGTERM');
+      } finally {
+        killSpy.mockRestore();
+      }
     });
 
     it('untracks CLI processes after close', () => {
@@ -494,6 +502,71 @@ describe('cli child process helpers', () => {
         stdout: '{"error":"bad"}',
         stderr: 'bun: not found',
       });
+    });
+
+    it('kills the launcher process tree on manual execFile timeout', async () => {
+      setPlatform('darwin');
+      vi.useFakeTimers();
+      const execFileMock = child.execFile as unknown as Mock;
+      const spawnSyncMock = child.spawnSync as unknown as Mock;
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      const childProcess = new EventEmitter() as EventEmitter & {
+        pid: number;
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+      };
+      childProcess.pid = 100;
+      childProcess.stdout = new EventEmitter();
+      childProcess.stderr = new EventEmitter();
+      spawnSyncMock.mockReturnValue({
+        status: 0,
+        stdout: ['100 1', '101 100', '102 101', '103 100'].join('\n'),
+      });
+      execFileMock.mockImplementation(() => childProcess);
+
+      try {
+        const result = execCli('/tmp/cli-dev', ['runtime', 'status'], { timeout: 100 });
+        const expectation = expect(result).rejects.toMatchObject({
+          killed: true,
+          signal: 'SIGTERM',
+          stdout: 'partial stdout',
+          stderr: 'partial stderr',
+        });
+        childProcess.stdout.emit('data', Buffer.from('partial stdout'));
+        childProcess.stderr.emit('data', Buffer.from('partial stderr'));
+        await vi.advanceTimersByTimeAsync(100);
+
+        await expectation;
+        expect(execFileMock.mock.calls[0][2]).not.toHaveProperty('timeout');
+        expect(killSpy.mock.calls.map(([pid]) => pid)).toEqual(
+          expect.arrayContaining([100, 101, 102, 103])
+        );
+      } finally {
+        killSpy.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('killProcessTree', () => {
+    it('kills POSIX descendants discovered from ps output', () => {
+      setPlatform('darwin');
+      const spawnSyncMock = child.spawnSync as unknown as Mock;
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      spawnSyncMock.mockReturnValue({
+        status: 0,
+        stdout: ['200 1', '201 200', '202 201'].join('\n'),
+      });
+
+      try {
+        killProcessTree({ pid: 200 } as any, 'SIGKILL');
+
+        expect(killSpy.mock.calls.map(([pid]) => pid)).toEqual(
+          expect.arrayContaining([200, 201, 202])
+        );
+      } finally {
+        killSpy.mockRestore();
+      }
     });
   });
 });
