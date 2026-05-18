@@ -6,6 +6,7 @@ import {
   LEAD_PARTICIPANT_AVATAR_URL,
   PARTICIPANT_AVATAR_URLS,
 } from './memberAvatarCatalog';
+import { isHealthyOpenCodeAppMcpConnectivityAdvisory } from './openCodeAdvisoryHealth';
 
 import type {
   LeadActivityState,
@@ -1170,6 +1171,9 @@ export function buildMemberLaunchPresentation({
   spawnRuntimeAlive,
   spawnBootstrapConfirmed,
   spawnBootstrapStalled,
+  spawnAgentToolAccepted,
+  spawnHardFailure,
+  spawnLivenessKind,
   spawnFirstSpawnAcceptedAt,
   spawnUpdatedAt,
   runtimeAdvisory,
@@ -1187,6 +1191,9 @@ export function buildMemberLaunchPresentation({
   spawnRuntimeAlive: boolean | undefined;
   spawnBootstrapConfirmed?: boolean;
   spawnBootstrapStalled?: boolean;
+  spawnAgentToolAccepted?: boolean;
+  spawnHardFailure?: boolean;
+  spawnLivenessKind?: TeamAgentRuntimeEntry['livenessKind'];
   spawnFirstSpawnAcceptedAt?: string;
   spawnUpdatedAt?: string;
   runtimeAdvisory: MemberRuntimeAdvisory | undefined;
@@ -1205,6 +1212,19 @@ export function buildMemberLaunchPresentation({
   );
   const hasConfirmedSpawnLaunch =
     spawnLaunchState === 'confirmed_alive' && spawnBootstrapConfirmed === true;
+  const suppressOpenCodeAppMcpAdvisory = isHealthyOpenCodeAppMcpConnectivityAdvisory({
+    providerId: member.providerId,
+    runtimeAdvisory,
+    spawnStatus,
+    launchState: spawnLaunchState,
+    runtimeAlive: spawnRuntimeAlive,
+    bootstrapConfirmed: spawnBootstrapConfirmed,
+    agentToolAccepted: spawnAgentToolAccepted,
+    hardFailure: spawnHardFailure,
+    livenessKind: spawnLivenessKind ?? runtimeEntry?.livenessKind,
+    runtimeEntry,
+  });
+  const displayRuntimeAdvisory = suppressOpenCodeAppMcpAdvisory ? undefined : runtimeAdvisory;
   const effectiveSpawnStatus =
     hasConfirmedSpawnLaunch &&
     currentRuntimeOfflineVisualState == null &&
@@ -1223,7 +1243,7 @@ export function buildMemberLaunchPresentation({
     spawnLaunchState,
     spawnLivenessSource,
     effectiveSpawnRuntimeAlive,
-    runtimeAdvisory,
+    displayRuntimeAdvisory,
     isLaunchSettling,
     isTeamAlive,
     isTeamProvisioning,
@@ -1247,9 +1267,18 @@ export function buildMemberLaunchPresentation({
     isTeamAlive,
     isTeamProvisioning
   );
-  const runtimeAdvisoryLabel = getMemberRuntimeAdvisoryLabel(runtimeAdvisory, member.providerId);
-  const runtimeAdvisoryTitle = getMemberRuntimeAdvisoryTitle(runtimeAdvisory, member.providerId);
-  const runtimeAdvisoryTone = getMemberRuntimeAdvisoryTone(runtimeAdvisory, member.providerId);
+  const runtimeAdvisoryLabel = getMemberRuntimeAdvisoryLabel(
+    displayRuntimeAdvisory,
+    member.providerId
+  );
+  const runtimeAdvisoryTitle = getMemberRuntimeAdvisoryTitle(
+    displayRuntimeAdvisory,
+    member.providerId
+  );
+  const runtimeAdvisoryTone = getMemberRuntimeAdvisoryTone(
+    displayRuntimeAdvisory,
+    member.providerId
+  );
   const keepLaunchSettlingVisuals = isTeamProvisioning === true || isLaunchSettling;
   const startingIsStale =
     !hasConfirmedSpawnLaunch &&

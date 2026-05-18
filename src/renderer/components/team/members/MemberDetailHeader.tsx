@@ -40,6 +40,9 @@ interface MemberDetailHeaderProps {
   spawnRuntimeAlive?: boolean;
   spawnBootstrapConfirmed?: boolean;
   spawnBootstrapStalled?: boolean;
+  spawnAgentToolAccepted?: boolean;
+  spawnHardFailure?: boolean;
+  spawnLivenessKind?: TeamAgentRuntimeEntry['livenessKind'];
   spawnFirstSpawnAcceptedAt?: string;
   spawnUpdatedAt?: string;
   isLaunchSettling?: boolean;
@@ -60,6 +63,9 @@ export const MemberDetailHeader = ({
   spawnRuntimeAlive,
   spawnBootstrapConfirmed,
   spawnBootstrapStalled,
+  spawnAgentToolAccepted,
+  spawnHardFailure,
+  spawnLivenessKind,
   spawnFirstSpawnAcceptedAt,
   spawnUpdatedAt,
   isLaunchSettling,
@@ -89,6 +95,9 @@ export const MemberDetailHeader = ({
     spawnRuntimeAlive,
     spawnBootstrapConfirmed,
     spawnBootstrapStalled,
+    spawnAgentToolAccepted,
+    spawnHardFailure,
+    spawnLivenessKind,
     spawnFirstSpawnAcceptedAt,
     spawnUpdatedAt,
     runtimeEntry,

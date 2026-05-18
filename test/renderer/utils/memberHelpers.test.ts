@@ -897,11 +897,7 @@ describe('memberHelpers spawn-aware presence', () => {
     };
 
     expect(
-      getMemberRuntimeAdvisoryLabel(
-        advisory,
-        'opencode',
-        Date.parse('2026-05-17T21:45:00.000Z')
-      )
+      getMemberRuntimeAdvisoryLabel(advisory, 'opencode', Date.parse('2026-05-17T21:45:00.000Z'))
     ).toBe('OpenCode quota error · retry 2h 15m');
 
     const title = getMemberRuntimeAdvisoryTitle(advisory, 'opencode');
@@ -923,9 +919,7 @@ describe('memberHelpers spawn-aware presence', () => {
 
     const title = getMemberRuntimeAdvisoryTitle(advisory, 'opencode');
 
-    expect(title).toContain(
-      'OpenCode delivery completed without required visible/progress proof.'
-    );
+    expect(title).toContain('OpenCode delivery completed without required visible/progress proof.');
     expect(title).toContain('OpenCode responded, but did not create a visible message_send reply.');
     expect(title).not.toContain('visible_reply_still_required');
   });
@@ -954,16 +948,12 @@ describe('memberHelpers spawn-aware presence', () => {
       message: 'opencode_prompt_acceptance_unknown_after_bridge_timeout',
     };
 
-    expect(getMemberRuntimeAdvisoryLabel(advisory, 'opencode')).toBe(
-      'OpenCode delivery error'
-    );
+    expect(getMemberRuntimeAdvisoryLabel(advisory, 'opencode')).toBe('OpenCode delivery error');
 
     const title = getMemberRuntimeAdvisoryTitle(advisory, 'opencode');
 
     expect(title).toContain('OpenCode runtime delivery error.');
-    expect(title).toContain(
-      'OpenCode bridge outcome unknown after timeout, retrying/observing.'
-    );
+    expect(title).toContain('OpenCode bridge outcome unknown after timeout, retrying/observing.');
     expect(title).not.toContain('Network or connectivity error');
     expect(title).not.toContain('opencode_prompt_acceptance_unknown_after_bridge_timeout');
   });
@@ -1110,25 +1100,32 @@ describe('memberHelpers spawn-aware presence', () => {
     expect(title).toContain('permission_denied');
   });
 
-  it.each(['permission_denied', 'error', 'failed', 'failure', 'aborted', 'canceled', 'cancelled', 'interrupted', 'enospc'])(
-    'does not let refresh pattern consume directly attached failure token _%s',
-    (suffix) => {
-      const message = `resolved_behavior_changed:old->new_${suffix}`;
-      const advisory = {
-        kind: 'api_error' as const,
-        observedAt: '2026-05-18T08:31:46.075Z',
-        reasonCode: 'backend_error' as const,
-        message,
-      };
+  it.each([
+    'permission_denied',
+    'error',
+    'failed',
+    'failure',
+    'aborted',
+    'canceled',
+    'cancelled',
+    'interrupted',
+    'enospc',
+  ])('does not let refresh pattern consume directly attached failure token _%s', (suffix) => {
+    const message = `resolved_behavior_changed:old->new_${suffix}`;
+    const advisory = {
+      kind: 'api_error' as const,
+      observedAt: '2026-05-18T08:31:46.075Z',
+      reasonCode: 'backend_error' as const,
+      message,
+    };
 
-      expect(getMemberRuntimeAdvisoryLabel(advisory, 'opencode')).toBe('OpenCode API error');
-      expect(getMemberRuntimeAdvisoryTone(advisory, 'opencode')).toBe('error');
+    expect(getMemberRuntimeAdvisoryLabel(advisory, 'opencode')).toBe('OpenCode API error');
+    expect(getMemberRuntimeAdvisoryTone(advisory, 'opencode')).toBe('error');
 
-      const title = getMemberRuntimeAdvisoryTitle(advisory, 'opencode');
-      expect(title).toContain('OpenCode API error.');
-      expect(title).toContain(message);
-    }
-  );
+    const title = getMemberRuntimeAdvisoryTitle(advisory, 'opencode');
+    expect(title).toContain('OpenCode API error.');
+    expect(title).toContain(message);
+  });
 
   it.each([
     'resolved_behavior_changed:old->new/auth_unavailable',
@@ -1212,21 +1209,24 @@ describe('memberHelpers spawn-aware presence', () => {
     'OpenCode session is stale (resolved_behavior_changed:old->new); Key limit exceeded (total limit)',
     'OpenCode session is stale (resolved_behavior_changed:old->new); 429 too many requests',
     'OpenCode session is stale (resolved_behavior_changed:old->new); Free usage exceeded, subscribe to Go',
-  ])('does not format stale refresh text with quota/rate failures as clean refresh: %s', (message) => {
-    const advisory = {
-      kind: 'api_error' as const,
-      observedAt: '2026-05-18T08:31:46.075Z',
-      reasonCode: 'backend_error' as const,
-      message,
-    };
+  ])(
+    'does not format stale refresh text with quota/rate failures as clean refresh: %s',
+    (message) => {
+      const advisory = {
+        kind: 'api_error' as const,
+        observedAt: '2026-05-18T08:31:46.075Z',
+        reasonCode: 'backend_error' as const,
+        message,
+      };
 
-    expect(getMemberRuntimeAdvisoryLabel(advisory, 'opencode')).toBe('OpenCode API error');
-    expect(getMemberRuntimeAdvisoryTone(advisory, 'opencode')).toBe('error');
+      expect(getMemberRuntimeAdvisoryLabel(advisory, 'opencode')).toBe('OpenCode API error');
+      expect(getMemberRuntimeAdvisoryTone(advisory, 'opencode')).toBe('error');
 
-    const title = getMemberRuntimeAdvisoryTitle(advisory, 'opencode');
-    expect(title).toContain('OpenCode API error.');
-    expect(title).toContain(message);
-  });
+      const title = getMemberRuntimeAdvisoryTitle(advisory, 'opencode');
+      expect(title).toContain('OpenCode API error.');
+      expect(title).toContain(message);
+    }
+  );
 
   it('does not format stale refresh text with unknown extra text as clean refresh', () => {
     const message =
@@ -1339,9 +1339,7 @@ describe('memberHelpers spawn-aware presence', () => {
       'opencode'
     );
 
-    expect(title).toContain(
-      'OpenCode created a reply without the required taskRefs metadata.'
-    );
+    expect(title).toContain('OpenCode created a reply without the required taskRefs metadata.');
     expect(title).not.toContain('visible_reply_missing_task_refs');
   });
 
@@ -1407,6 +1405,43 @@ describe('memberHelpers spawn-aware presence', () => {
     expect(presentation.presenceLabel).toBe('OpenCode session refresh');
     expect(presentation.runtimeAdvisoryLabel).toBe('OpenCode session refresh');
     expect(presentation.runtimeAdvisoryTone).toBe('warning');
+    expect(presentation.dotClass).not.toContain('bg-red-400');
+  });
+
+  it('keeps recovered OpenCode App MCP connectivity advisory out of the terminal presentation', () => {
+    const presentation = buildMemberLaunchPresentation({
+      member: { ...member, providerId: 'opencode' },
+      spawnStatus: 'online',
+      spawnLaunchState: 'confirmed_alive',
+      spawnLivenessSource: 'heartbeat',
+      spawnRuntimeAlive: true,
+      spawnBootstrapConfirmed: true,
+      spawnAgentToolAccepted: true,
+      spawnHardFailure: false,
+      spawnLivenessKind: 'runtime_process',
+      runtimeEntry: {
+        memberName: 'alice',
+        providerId: 'opencode',
+        alive: true,
+        restartable: false,
+        livenessKind: 'runtime_process',
+        updatedAt: '2026-05-18T17:21:24.498Z',
+      },
+      runtimeAdvisory: {
+        kind: 'api_error',
+        observedAt: '2026-05-18T17:20:36.681Z',
+        reasonCode: 'network_error',
+        message:
+          'OpenCode app MCP was not connected before message delivery (status=attach_failed, connected=null). OpenCode app MCP readiness check failed: Unable to connect.',
+      },
+      isLaunchSettling: false,
+      isTeamAlive: true,
+      isTeamProvisioning: false,
+    });
+
+    expect(presentation.presenceLabel).not.toContain('OpenCode API error');
+    expect(presentation.runtimeAdvisoryLabel).toBeNull();
+    expect(presentation.runtimeAdvisoryTone).toBeNull();
     expect(presentation.dotClass).not.toContain('bg-red-400');
   });
 

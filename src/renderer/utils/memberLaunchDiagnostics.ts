@@ -1,3 +1,5 @@
+import { isHealthyOpenCodeAppMcpConnectivityAdvisory } from './openCodeAdvisoryHealth';
+
 import type {
   MemberLaunchState,
   MemberRuntimeAdvisory,
@@ -443,12 +445,31 @@ export function buildMemberLaunchDiagnosticsPayload(params: {
   const providerBackendId = runtimeEntry?.providerBackendId ?? params.member?.providerBackendId;
   const laneId = runtimeEntry?.laneId ?? params.member?.laneId;
   const laneKind = runtimeEntry?.laneKind ?? params.member?.laneKind;
+  const livenessKind = spawnEntry?.livenessKind ?? runtimeEntry?.livenessKind;
+  const launchState = spawnEntry?.launchState ?? params.launchState;
+  const spawnStatus = spawnEntry?.status ?? params.spawnStatus;
   const runtimeAdvisoryTitle = boundedString(params.runtimeAdvisoryTitle);
   const runtimeAdvisoryLabel = boundedString(params.runtimeAdvisoryLabel ?? undefined);
   const runtimeAdvisoryMessage = boundedString(runtimeAdvisory?.message);
-  const runtimeAdvisoryCardError = isRuntimeAdvisoryCardError(runtimeAdvisory, providerId)
-    ? (runtimeAdvisoryTitle ?? runtimeAdvisoryLabel ?? runtimeAdvisoryMessage)
-    : undefined;
+  const suppressOpenCodeAppMcpAdvisory = isHealthyOpenCodeAppMcpConnectivityAdvisory({
+    providerId,
+    runtimeAdvisory,
+    runtimeAdvisoryLabel,
+    runtimeAdvisoryTitle,
+    runtimeAdvisoryMessage,
+    spawnStatus,
+    launchState,
+    runtimeAlive: spawnEntry?.runtimeAlive,
+    bootstrapConfirmed: spawnEntry?.bootstrapConfirmed,
+    agentToolAccepted: spawnEntry?.agentToolAccepted,
+    hardFailure: spawnEntry?.hardFailure,
+    livenessKind,
+    runtimeEntry,
+  });
+  const runtimeAdvisoryCardError =
+    !suppressOpenCodeAppMcpAdvisory && isRuntimeAdvisoryCardError(runtimeAdvisory, providerId)
+      ? (runtimeAdvisoryTitle ?? runtimeAdvisoryLabel ?? runtimeAdvisoryMessage)
+      : undefined;
   const runtimeDiagnosticSeverity =
     spawnEntry?.runtimeDiagnosticSeverity ?? runtimeEntry?.runtimeDiagnosticSeverity;
   const spawnRuntimeDiagnosticCardError = isRuntimeDiagnosticCardError({
@@ -505,9 +526,6 @@ export function buildMemberLaunchDiagnosticsPayload(params: {
   const runId = boundedString(params.runId ?? undefined);
   const runtimeUpdatedAt = maybeString(runtimeEntry?.updatedAt);
   const spawnUpdatedAt = maybeString(spawnEntry?.updatedAt);
-  const livenessKind = spawnEntry?.livenessKind ?? runtimeEntry?.livenessKind;
-  const launchState = spawnEntry?.launchState ?? params.launchState;
-  const spawnStatus = spawnEntry?.status ?? params.spawnStatus;
   const diagnosticHints = buildDiagnosticHints({
     memberCardError,
     runtimeDiagnostic,

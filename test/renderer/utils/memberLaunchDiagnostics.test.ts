@@ -220,13 +220,166 @@ describe('member launch diagnostics', () => {
     );
   });
 
+  it('does not surface recovered OpenCode App MCP connectivity advisory as card error', () => {
+    const appMcpMessage =
+      'OpenCode app MCP was not connected before message delivery (status=attach_failed, connected=null). OpenCode app MCP readiness check failed: Unable to connect. Is the computer able to access the url?';
+    const payload = buildMemberLaunchDiagnosticsPayload({
+      memberName: 'bob',
+      member: { name: 'bob', providerId: 'opencode' },
+      runtimeAdvisoryLabel: 'OpenCode API error',
+      runtimeAdvisoryTitle: `Network or connectivity error. ${appMcpMessage}`,
+      spawnEntry: {
+        status: 'online',
+        launchState: 'confirmed_alive',
+        runtimeAlive: true,
+        bootstrapConfirmed: true,
+        agentToolAccepted: true,
+        hardFailure: false,
+        livenessKind: 'runtime_process',
+        runtimeDiagnostic: 'OpenCode runtime process detected after bootstrap confirmation',
+        runtimeDiagnosticSeverity: 'info',
+        updatedAt: '2026-05-18T17:15:34.482Z',
+      },
+      runtimeEntry: {
+        memberName: 'bob',
+        providerId: 'opencode',
+        alive: true,
+        restartable: false,
+        livenessKind: 'runtime_process',
+        updatedAt: '2026-05-18T17:21:24.498Z',
+      },
+      runtimeAdvisory: {
+        kind: 'api_error',
+        observedAt: '2026-05-18T17:20:36.681Z',
+        reasonCode: 'network_error',
+        message: appMcpMessage,
+      },
+    });
+
+    expect(payload.memberCardError).toBeUndefined();
+    expect(hasMemberLaunchDiagnosticsError(payload)).toBe(false);
+    expect(payload.runtimeAdvisoryReasonCode).toBe('network_error');
+    expect(payload.diagnostics).toContain(appMcpMessage);
+  });
+
+  it('keeps OpenCode App MCP connectivity advisory as error when health is not clean', () => {
+    const appMcpMessage =
+      'OpenCode app MCP was not connected before message delivery (status=attach_failed, connected=null). OpenCode app MCP readiness check failed: Unable to connect.';
+
+    for (const spawnEntry of [
+      {
+        status: 'online' as const,
+        launchState: 'confirmed_alive' as const,
+        runtimeAlive: true,
+        bootstrapConfirmed: true,
+        agentToolAccepted: true,
+        hardFailure: true,
+        updatedAt: '2026-05-18T17:15:34.482Z',
+      },
+      {
+        status: 'error' as const,
+        launchState: 'failed_to_start' as const,
+        runtimeAlive: true,
+        bootstrapConfirmed: true,
+        agentToolAccepted: true,
+        hardFailure: false,
+        updatedAt: '2026-05-18T17:15:34.482Z',
+      },
+    ]) {
+      const payload = buildMemberLaunchDiagnosticsPayload({
+        memberName: 'bob',
+        member: { name: 'bob', providerId: 'opencode' },
+        runtimeAdvisoryLabel: 'OpenCode API error',
+        runtimeAdvisoryTitle: `Network or connectivity error. ${appMcpMessage}`,
+        spawnEntry,
+        runtimeAdvisory: {
+          kind: 'api_error',
+          observedAt: '2026-05-18T17:20:36.681Z',
+          reasonCode: 'network_error',
+          message: appMcpMessage,
+        },
+      });
+
+      expect(payload.memberCardError).toBe(`Network or connectivity error. ${appMcpMessage}`);
+      expect(hasMemberLaunchDiagnosticsError(payload)).toBe(true);
+    }
+  });
+
+  it.each([
+    [
+      'quota_exhausted' as const,
+      'OpenCode quota exhausted.',
+      'Free usage exceeded, subscribe to Go',
+    ],
+    ['auth_error' as const, 'OpenCode authentication issue.', 'authentication_failed'],
+    ['rate_limited' as const, 'OpenCode rate limited the request.', '429 rate limited'],
+  ])(
+    'keeps OpenCode %s advisory as card error on healthy members',
+    (reasonCode, title, message) => {
+      const payload = buildMemberLaunchDiagnosticsPayload({
+        memberName: 'bob',
+        member: { name: 'bob', providerId: 'opencode' },
+        runtimeAdvisoryLabel: 'OpenCode API error',
+        runtimeAdvisoryTitle: title,
+        spawnEntry: {
+          status: 'online',
+          launchState: 'confirmed_alive',
+          runtimeAlive: true,
+          bootstrapConfirmed: true,
+          agentToolAccepted: true,
+          hardFailure: false,
+          livenessKind: 'runtime_process',
+          updatedAt: '2026-05-18T17:15:34.482Z',
+        },
+        runtimeAdvisory: {
+          kind: 'api_error',
+          observedAt: '2026-05-18T17:20:36.681Z',
+          reasonCode,
+          message,
+        },
+      });
+
+      expect(payload.memberCardError).toBe(title);
+      expect(hasMemberLaunchDiagnosticsError(payload)).toBe(true);
+    }
+  );
+
+  it('does not suppress non-OpenCode App MCP connectivity advisory', () => {
+    const appMcpMessage =
+      'OpenCode app MCP was not connected before message delivery (status=attach_failed, connected=null). OpenCode app MCP readiness check failed: Unable to connect.';
+    const payload = buildMemberLaunchDiagnosticsPayload({
+      memberName: 'claude',
+      member: { name: 'claude', providerId: 'anthropic' },
+      runtimeAdvisoryLabel: 'Anthropic API error',
+      runtimeAdvisoryTitle: `Network or connectivity error. ${appMcpMessage}`,
+      spawnEntry: {
+        status: 'online',
+        launchState: 'confirmed_alive',
+        runtimeAlive: true,
+        bootstrapConfirmed: true,
+        agentToolAccepted: true,
+        hardFailure: false,
+        livenessKind: 'runtime_process',
+        updatedAt: '2026-05-18T17:15:34.482Z',
+      },
+      runtimeAdvisory: {
+        kind: 'api_error',
+        observedAt: '2026-05-18T17:20:36.681Z',
+        reasonCode: 'network_error',
+        message: appMcpMessage,
+      },
+    });
+
+    expect(payload.memberCardError).toBe(`Network or connectivity error. ${appMcpMessage}`);
+    expect(hasMemberLaunchDiagnosticsError(payload)).toBe(true);
+  });
+
   it('does not surface recoverable OpenCode session refresh advisory as card error', () => {
     const payload = buildMemberLaunchDiagnosticsPayload({
       memberName: 'tom',
       member: { name: 'tom', providerId: 'opencode' },
       runtimeAdvisoryLabel: 'OpenCode session refresh',
-      runtimeAdvisoryTitle:
-        'OpenCode session changed; refreshing the session before retry.',
+      runtimeAdvisoryTitle: 'OpenCode session changed; refreshing the session before retry.',
       spawnEntry: {
         status: 'online',
         launchState: 'confirmed_alive',
@@ -322,7 +475,8 @@ describe('member launch diagnostics', () => {
         kind: 'api_error',
         observedAt: '2026-05-18T08:31:46.075Z',
         reasonCode: 'backend_error',
-        message: 'OpenCode API error. opencode_prompt_delivery_session_refresh_scheduled permission denied',
+        message:
+          'OpenCode API error. opencode_prompt_delivery_session_refresh_scheduled permission denied',
       },
     });
 
@@ -341,8 +495,7 @@ describe('member launch diagnostics', () => {
         hardFailure: true,
         error: 'OpenCode API error. resolved_behavior_changed:permission_blocked->pending',
         hardFailureReason: 'OpenCode API error',
-        runtimeDiagnostic:
-          'resolved_behavior_changed:responded_non_visible_tool->pending',
+        runtimeDiagnostic: 'resolved_behavior_changed:responded_non_visible_tool->pending',
         runtimeDiagnosticSeverity: 'error',
         updatedAt: '2026-05-18T08:13:23.902Z',
       },
@@ -351,8 +504,7 @@ describe('member launch diagnostics', () => {
         providerId: 'opencode',
         alive: true,
         restartable: false,
-        runtimeDiagnostic:
-          'resolved_behavior_changed:responded_non_visible_tool->pending',
+        runtimeDiagnostic: 'resolved_behavior_changed:responded_non_visible_tool->pending',
         runtimeDiagnosticSeverity: 'error',
         diagnostics: ['resolved_behavior_changed:tool_error->session_error'],
         updatedAt: '2026-05-18T08:34:47.845Z',
@@ -402,8 +554,7 @@ describe('member launch diagnostics', () => {
         providerId: 'opencode',
         alive: true,
         restartable: false,
-        runtimeDiagnostic:
-          'opencode_session_refresh_scheduled_after_resolved_behavior_changed',
+        runtimeDiagnostic: 'opencode_session_refresh_scheduled_after_resolved_behavior_changed',
         runtimeDiagnosticSeverity: 'error',
         diagnostics: ['resolved_behavior_changed:old->new'],
         updatedAt: '2026-05-18T08:34:47.845Z',
@@ -454,9 +605,7 @@ describe('member launch diagnostics', () => {
       },
     });
 
-    expect(payload.memberCardError).toBe(
-      'OpenCode API errorresolved_behavior_changed:old->new'
-    );
+    expect(payload.memberCardError).toBe('OpenCode API errorresolved_behavior_changed:old->new');
     expect(hasMemberLaunchDiagnosticsError(payload)).toBe(true);
   });
 
@@ -469,8 +618,7 @@ describe('member launch diagnostics', () => {
         launchState: 'failed_to_start',
         hardFailure: true,
         error: 'OpenCode API error. resolved_behavior_changed:old->new',
-        hardFailureReason:
-          'opencode_session_refresh_scheduled_after_resolved_behavior_changed',
+        hardFailureReason: 'opencode_session_refresh_scheduled_after_resolved_behavior_changed',
         runtimeDiagnostic: 'opencode_app_mcp_transport_changed:old->new',
         runtimeDiagnosticSeverity: 'error',
         updatedAt: '2026-05-18T08:13:23.902Z',
@@ -478,9 +626,7 @@ describe('member launch diagnostics', () => {
     });
 
     expect(payload.memberCardError).toBeUndefined();
-    expect(payload.diagnostics).toContain(
-      'OpenCode API error. resolved_behavior_changed:old->new'
-    );
+    expect(payload.diagnostics).toContain('OpenCode API error. resolved_behavior_changed:old->new');
     expect(payload.diagnosticHints).toBeUndefined();
     expect(hasMemberLaunchDiagnosticsError(payload)).toBe(false);
   });
@@ -510,9 +656,7 @@ describe('member launch diagnostics', () => {
 
     expect(payload.memberCardError).toBeUndefined();
     expect(payload.diagnostics).toContain('resolved_behavior_changed:old->new');
-    expect(payload.memberCardError).not.toBe(
-      'matched OpenCode runtime pid and process identity'
-    );
+    expect(payload.memberCardError).not.toBe('matched OpenCode runtime pid and process identity');
   });
 
   it('uses suppressed spawn runtime diagnostics as refresh evidence for generic OpenCode API errors', () => {
@@ -679,7 +823,17 @@ describe('member launch diagnostics', () => {
     expect(hasMemberLaunchDiagnosticsError(payload)).toBe(true);
   });
 
-  it.each(['permission_denied', 'error', 'failed', 'failure', 'aborted', 'canceled', 'cancelled', 'interrupted', 'enospc'])(
+  it.each([
+    'permission_denied',
+    'error',
+    'failed',
+    'failure',
+    'aborted',
+    'canceled',
+    'cancelled',
+    'interrupted',
+    'enospc',
+  ])(
     'keeps card error when refresh marker directly consumes failure-looking suffix _%s',
     (suffix) => {
       const error = `OpenCode API error. resolved_behavior_changed:old->new_${suffix}`;
