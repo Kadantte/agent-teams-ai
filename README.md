@@ -26,7 +26,11 @@
   <sub>Free desktop app for AI agent teams. Auto-detects Claude/Codex/OpenCode (200+ models). Use the provider access you already have - subscriptions or API keys. Not just coding agents.</sub>
 </p>
 
+<!--
 <img width="1304" height="820" alt="image" src="https://github.com/user-attachments/assets/dea53a01-68b3-4c36-bcf6-e4d1ad4cdb31" />
+-->
+<img width="2560" height="1604" alt="telegram-cloud-photo-size-2-5213160716557294036-w" src="https://github.com/user-attachments/assets/cbe0e1e7-f73c-4dd7-94e0-c694fcaf491e" />
+
 
 <table>
 <tr>
