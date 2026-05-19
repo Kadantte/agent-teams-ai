@@ -22,6 +22,13 @@ Default local run target:
 - Do not start the browser/web dev mode for normal development or smoke checks. The browser path is limited and lacks the full desktop runtime, IPC, terminal, provider auth, and team lifecycle behavior.
 - When documenting or recommending startup commands, point contributors to the desktop app unless a task explicitly asks for browser-mode internals.
 
+Fast local lint:
+
+- Use `pnpm lint:fast:files -- <changed files>` for quick preflight on files you touched.
+- Use `pnpm lint:fast` for a faster source-tree lint pass when full type-aware lint is too slow.
+- `lint:fast` intentionally uses `eslint.fast.config.js` without TypeScript project-service rules. It is not a replacement for `pnpm typecheck` or the full `pnpm lint` gate.
+- Keep using `pnpm typecheck` after TypeScript changes, and use full `pnpm lint` when validating a broad PR or changing lint-sensitive architecture boundaries.
+
 For new features:
 
 - Default home for medium and large features: `src/features/<feature-name>/`

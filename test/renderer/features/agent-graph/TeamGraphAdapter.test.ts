@@ -1,12 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   TeamGraphAdapter,
   type TeamGraphData,
 } from '@features/agent-graph/renderer/adapters/TeamGraphAdapter';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { InboxMessage, TeamTaskWithKanban } from '@shared/types/team';
 import type { GraphDataPort } from '@claude-teams/agent-graph';
+import type {
+  InboxMessage,
+  MemberSpawnStatusEntry,
+  TeamAgentRuntimeEntry,
+  TeamTaskWithKanban,
+} from '@shared/types/team';
 
 function createBaseTeamData(
   overrides?: Partial<TeamGraphData> & {
@@ -60,6 +64,23 @@ function createBaseTeamData(
 
 function findNode(graph: GraphDataPort, nodeId: string) {
   return graph.nodes.find((node) => node.id === nodeId);
+}
+
+function createLiveRuntimeEntry(
+  memberName: string,
+  overrides: Partial<TeamAgentRuntimeEntry> = {}
+): TeamAgentRuntimeEntry {
+  return {
+    memberName,
+    alive: true,
+    restartable: true,
+    providerId: 'codex',
+    providerBackendId: 'codex-native',
+    livenessKind: 'runtime_process',
+    pid: 12345,
+    updatedAt: '2026-03-28T19:00:00.000Z',
+    ...overrides,
+  };
 }
 
 function adaptWithActiveTaskLogActivity(
@@ -183,6 +204,62 @@ describe('TeamGraphAdapter particles', () => {
     const graph = adapter.adapt(createBaseTeamData(), 'my-team');
 
     expect(graph.layout?.mode).toBe('grid-under-lead');
+  });
+
+  it('uses runtime entries when deriving member launch status', () => {
+    const adapter = TeamGraphAdapter.create();
+    const spawnStatuses: Record<string, MemberSpawnStatusEntry> = {
+      alice: {
+        status: 'online',
+        launchState: 'confirmed_alive',
+        runtimeAlive: true,
+        bootstrapConfirmed: true,
+        livenessKind: 'runtime_process',
+        updatedAt: '2026-03-28T19:00:00.000Z',
+      },
+    };
+    const teamData = createBaseTeamData({
+      members: [
+        {
+          name: 'team-lead',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+          agentType: 'team-lead',
+        },
+        {
+          name: 'alice',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 1,
+          lastActiveAt: null,
+          messageCount: 0,
+          providerId: 'codex',
+          providerBackendId: 'codex-native',
+        },
+      ],
+    });
+
+    const withoutRuntime = adapter.adapt(teamData, 'my-team', spawnStatuses);
+    expect(findNode(withoutRuntime, 'member:my-team:alice')?.launchStatusLabel).toBe(
+      'stale runtime'
+    );
+
+    const withRuntime = adapter.adapt(
+      {
+        ...teamData,
+        runtimeEntriesByMember: {
+          alice: createLiveRuntimeEntry('alice'),
+        },
+      },
+      'my-team',
+      spawnStatuses
+    );
+
+    expect(findNode(withRuntime, 'member:my-team:alice')?.launchStatusLabel).toBeUndefined();
+    expect(findNode(withRuntime, 'member:my-team:alice')?.launchVisualState).toBeUndefined();
   });
 
   it('applies saved grid owner order only in grid-under-lead mode', () => {

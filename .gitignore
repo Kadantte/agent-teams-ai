@@ -53,6 +53,7 @@ temp/
 
 eslint-fix/
 .eslintcache
+.eslintcache-fast
 remotion/*
 
 .home/

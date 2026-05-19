@@ -67,6 +67,7 @@ import type {
   MemberSpawnStatusEntry,
   MemberSpawnStatusesSnapshot,
   ResolvedTeamMember,
+  TeamAgentRuntimeEntry,
   TeamProcess,
   TeamProvisioningProgress,
   TeamViewSnapshot,
@@ -76,6 +77,7 @@ import type { LeadContextUsage } from '@shared/types/team';
 export interface TeamGraphData extends TeamViewSnapshot {
   members: ResolvedTeamMember[];
   messageFeed: InboxMessage[];
+  runtimeEntriesByMember?: Record<string, TeamAgentRuntimeEntry>;
 }
 
 function toGraphLaunchVisualState(
@@ -438,6 +440,7 @@ export class TeamGraphAdapter {
   ): void {
     const percent = leadContext?.contextUsedPercent;
     const leadMember = data.members.find((member) => member.name === leadName);
+    const runtimeEntry = data.runtimeEntriesByMember?.[leadName];
     const isTeamVisualOnline = data.isAlive || isTeamProvisioning;
     const activeTool = TeamGraphAdapter.#selectVisibleTool(
       activeTools?.[leadName],
@@ -454,6 +457,7 @@ export class TeamGraphAdapter {
           spawnLivenessSource: undefined,
           spawnRuntimeAlive: undefined,
           spawnBootstrapStalled: undefined,
+          runtimeEntry,
           runtimeAdvisory: leadMember.runtimeAdvisory,
           isLaunchSettling: false,
           isTeamAlive: data.isAlive,
@@ -545,6 +549,7 @@ export class TeamGraphAdapter {
       const memberId =
         memberNodeIdByAlias.get(member.name) ?? buildGraphMemberNodeIdForMember(teamName, member);
       const spawn = spawnStatuses?.[member.name];
+      const runtimeEntry = data.runtimeEntriesByMember?.[member.name];
       const activeTool = TeamGraphAdapter.#selectVisibleTool(
         activeTools?.[member.name],
         finishedVisible?.[member.name]
@@ -576,6 +581,9 @@ export class TeamGraphAdapter {
         spawnAgentToolAccepted: spawn?.agentToolAccepted,
         spawnHardFailure: spawn?.hardFailure,
         spawnLivenessKind: spawn?.livenessKind,
+        spawnFirstSpawnAcceptedAt: spawn?.firstSpawnAcceptedAt,
+        spawnUpdatedAt: spawn?.updatedAt,
+        runtimeEntry,
         runtimeAdvisory: member.runtimeAdvisory,
         isLaunchSettling,
         isTeamAlive: data.isAlive,

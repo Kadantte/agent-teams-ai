@@ -51,6 +51,8 @@
     "typecheck": "tsc --noEmit",
     "typecheck:workspace": "pnpm typecheck && pnpm --filter agent-teams-mcp typecheck && pnpm --filter agent-teams-mcp typecheck:test",
     "lint": "eslint src/ --cache --cache-location .eslintcache --cache-strategy content",
+    "lint:fast": "eslint --config eslint.fast.config.js --cache --cache-location .eslintcache-fast --cache-strategy content src/",
+    "lint:fast:files": "eslint --config eslint.fast.config.js --cache --cache-location .eslintcache-fast --cache-strategy content",
     "lint:mcp": "pnpm --filter agent-teams-mcp lint",
     "lint:fix": "eslint src/ --fix --cache --cache-location .eslintcache --cache-strategy content",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css}\"",

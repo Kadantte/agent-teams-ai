@@ -254,6 +254,13 @@ describe('GraphActivityHud', () => {
       button.textContent?.includes('+1 more')
     );
     expect(moreButton).not.toBeUndefined();
+    expect(moreButton?.className).toContain('pointer-events-auto');
+
+    const shell = host.querySelector('.z-10');
+    expect(shell?.className).toContain('pointer-events-none');
+    expect(host.querySelector('[data-activity-entry-id="item-1"]')?.className).toContain(
+      'pointer-events-auto'
+    );
 
     await act(async () => {
       moreButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
