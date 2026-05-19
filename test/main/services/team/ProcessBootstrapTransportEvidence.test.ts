@@ -209,6 +209,67 @@ describe('ProcessBootstrapTransportEvidence', () => {
     );
   });
 
+  it('keeps submitted state when the runtime fails before bootstrap confirmation', () => {
+    const summary = summarizeProcessBootstrapTransportEvents([
+      {
+        type: 'mailbox_bootstrap_written',
+        timestamp: '2026-05-07T10:00:00.000Z',
+        detail: 'messageId=bootstrap-alice-1',
+      },
+      {
+        type: 'bootstrap_submitted',
+        timestamp: '2026-05-07T10:00:01.000Z',
+        detail: 'messageId=bootstrap-alice-1',
+      },
+      {
+        type: 'failed',
+        timestamp: '2026-05-07T10:00:02.000Z',
+        detail: 'bootstrap confirmation timeout',
+      },
+    ]);
+
+    expect(summary).toMatchObject({
+      submitted: true,
+      hasProgress: true,
+      lastStage: 'runtime failed: bootstrap confirmation timeout',
+      terminalFailure: {
+        kind: 'runtime_failed_before_confirmation',
+        reason: 'runtime failed: bootstrap confirmation timeout',
+      },
+    });
+    expect(buildProcessBootstrapTimeoutDiagnostic(summary!)).toBe(
+      'Bootstrap prompt was submitted, but teammate did not bootstrap-confirm before timeout. Last transport stage: runtime failed: bootstrap confirmation timeout'
+    );
+  });
+
+  it('keeps submitted state when the process exits after durable bootstrap submission', () => {
+    const summary = summarizeProcessBootstrapTransportEvents([
+      {
+        type: 'bootstrap_submitted',
+        timestamp: '2026-05-07T10:00:01.000Z',
+        detail: 'messageId=bootstrap-bob-1',
+      },
+      {
+        type: 'exited',
+        timestamp: '2026-05-07T10:00:02.000Z',
+        detail: 'process exited before bootstrap confirmation',
+      },
+    ]);
+
+    expect(summary).toMatchObject({
+      submitted: true,
+      hasProgress: true,
+      lastStage: 'runtime exited: process exited before bootstrap confirmation',
+      terminalFailure: {
+        kind: 'process_exited_before_confirmation',
+        reason: 'runtime exited: process exited before bootstrap confirmation',
+      },
+    });
+    expect(buildProcessBootstrapPendingDiagnostic(summary!)).toBe(
+      'Bootstrap prompt was submitted; waiting for bootstrap confirmation. Last transport stage: runtime exited: process exited before bootstrap confirmation.'
+    );
+  });
+
   it('keeps active phase pending and turns final timeout into final projection', () => {
     expect(deriveProcessTransportProjectionPhase({ launchPhase: 'active' })).toBe('active');
     expect(
