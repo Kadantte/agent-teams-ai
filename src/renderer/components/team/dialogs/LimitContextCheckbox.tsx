@@ -1,13 +1,8 @@
 import React from 'react';
 
 import { Checkbox } from '@renderer/components/ui/checkbox';
+import { HoverTooltip } from '@renderer/components/ui/hover-tooltip';
 import { Label } from '@renderer/components/ui/label';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@renderer/components/ui/tooltip';
 import { Info } from 'lucide-react';
 
 interface LimitContextCheckboxProps {
@@ -44,20 +39,15 @@ export const LimitContextCheckbox: React.FC<LimitContextCheckboxProps> = ({
       ) : null}
       {disabled && <span className="text-[10px] italic">(always 200K for this model)</span>}
     </Label>
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Info
-            className={`size-3.5 shrink-0 ${disabled ? 'text-text-muted opacity-50' : 'text-text-muted hover:text-text-secondary'} cursor-help`}
-          />
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[260px]">
-          <p>
-            Enable this to cap Anthropic runtimes at 200K tokens. Leave it off only when you want
-            the selected Anthropic model or runtime to use a longer context window when available.
-          </p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <HoverTooltip
+      content="Enable this to cap Anthropic runtimes at 200K tokens. Leave it off only when you want the selected Anthropic model or runtime to use a longer context window when available."
+      title="Enable this to cap Anthropic runtimes at 200K tokens."
+      contentClassName="max-w-[260px]"
+    >
+      <Info
+        className={`size-3.5 shrink-0 ${disabled ? 'text-text-muted opacity-50' : 'text-text-muted hover:text-text-secondary'} cursor-help`}
+        aria-hidden="true"
+      />
+    </HoverTooltip>
   </div>
 );

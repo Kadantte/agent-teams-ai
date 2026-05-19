@@ -43,11 +43,12 @@
     "sectionSubtitle": "शक्तिशाली उपकरण जो मल्टी-एजेंट सहयोग को वास्तव में काम करते हैं।"
   },
   "pricing": {
-    "sectionTitle": "100% मुफ़्त। कोई शर्त नहीं।",
-    "sectionSubtitle": "ओपन सोर्स, कोई API कुंजी नहीं, कोई कॉन्फ़िगरेशन नहीं। बस इंस्टॉल करें और शुरू करें।",
+    "sectionTitle": "इंस्टॉल मुफ़्त। मुफ़्त मॉडल शामिल।",
+    "sectionSubtitle": "मुफ़्त no-auth model से तुरंत शुरू करें - कोई account, API key या credit card नहीं। Claude, Codex, OpenCode/OpenRouter या अन्य providers तभी जोड़ें जब आपको और models चाहिए।",
     "getStarted": "अभी डाउनलोड करें",
     "popular": "मुफ़्त",
-    "note": "ओपन सोर्स। कोई API कुंजी नहीं। कोई कॉन्फ़िगरेशन नहीं। पूरी तरह लोकल चलता है।"
+    "freeModelCallout": "मुफ़्त no-auth model शामिल",
+    "note": "Agent Teams का अपना कोई paid plan नहीं है। मुफ़्त no-auth model से आप तुरंत try कर सकते हैं; paid provider usage optional है और चुने गए provider पर निर्भर है।"
   },
   "testimonials": {
     "sectionTitle": "डेवलपर्स क्या कहते हैं",
@@ -112,7 +113,7 @@
   },
   "meta": {
     "homeTitle": "Agent Teams - डेवलपर्स के लिए AI एजेंट ऑर्केस्ट्रेशन",
-    "homeDescription": "AI एजेंट टीमें बनाने के लिए मुफ़्त, ओपन-सोर्स डेस्कटॉप ऐप। कानबन बोर्ड, कोड रिव्यू, क्रॉस-टीम संचार। पूरी तरह लोकल चलता है।",
+    "homeDescription": "AI agent teams के लिए मुफ़्त open-source desktop app। मुफ़्त no-auth model से शुरू करें, फिर ज़रूरत पर Claude, Codex या OpenCode जोड़ें।",
     "downloadTitle": "macOS, Windows और Linux के लिए Agent Teams डाउनलोड करें",
     "downloadDescription": "macOS, Windows और Linux के लिए Agent Teams डाउनलोड करें। Claude, Codex और OpenCode एजेंट टीमों के लिए मुफ़्त ओपन-सोर्स डेस्कटॉप ऐप।"
   },

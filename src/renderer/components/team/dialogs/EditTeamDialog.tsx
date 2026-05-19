@@ -478,6 +478,7 @@ export const EditTeamDialog = ({
             model: member.model,
             effort: member.effort,
             isolation: member.isolation,
+            mcpPolicy: member.mcpPolicy,
           })) as ResolvedTeamMember[],
         });
 

@@ -411,10 +411,10 @@ jobs:
         run: ${{ matrix.dist_command }} --publish never
 
       - name: Validate packaged bundle (macOS ${{ matrix.arch }})
-        run: node ./scripts/electron-builder/verifyBundle.cjs "release/mac-${{ matrix.arch }}/Agent Teams UI.app" darwin ${{ matrix.arch }}
+        run: node ./scripts/electron-builder/verifyBundle.cjs "release/mac-${{ matrix.arch }}/Agent Teams AI.app" darwin ${{ matrix.arch }}
 
       - name: Smoke packaged app (macOS ${{ matrix.arch }})
-        run: node ./scripts/electron-builder/smokePackagedApp.cjs "release/mac-${{ matrix.arch }}/Agent Teams UI.app" darwin
+        run: node ./scripts/electron-builder/smokePackagedApp.cjs "release/mac-${{ matrix.arch }}/Agent Teams AI.app" darwin
 
       - name: Upload assets to release
         if: ${{ env.IS_RELEASE_BUILD == 'true' }}
@@ -682,6 +682,13 @@ jobs:
           trap 'rm -rf "$TMP_DIR"' EXIT
 
           declare -A COMPATIBILITY_ALIASES=(
+            ["Agent.Teams.AI-arm64.dmg"]="Agent.Teams.AI-${VERSION}-arm64.dmg"
+            ["Agent.Teams.AI-x64.dmg"]="Agent.Teams.AI-${VERSION}-x64.dmg"
+            ["Agent.Teams.AI.Setup.exe"]="Agent.Teams.AI.Setup.${VERSION}.exe"
+            ["Agent.Teams.AI.AppImage"]="Agent.Teams.AI-${VERSION}.AppImage"
+            ["agent-teams-ai-amd64.deb"]="agent-teams-ai_${VERSION}_amd64.deb"
+            ["agent-teams-ai-x86_64.rpm"]="agent-teams-ai-${VERSION}.x86_64.rpm"
+            ["agent-teams-ai.pacman"]="agent-teams-ai-${VERSION}.pacman"
             ["Claude-Agent-Teams-UI-arm64.dmg"]="Agent.Teams.AI-${VERSION}-arm64.dmg"
             ["Claude-Agent-Teams-UI-x64.dmg"]="Agent.Teams.AI-${VERSION}-x64.dmg"
             ["Claude-Agent-Teams-UI-Setup.exe"]="Agent.Teams.AI.Setup.${VERSION}.exe"

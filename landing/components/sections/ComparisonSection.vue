@@ -224,7 +224,7 @@ const rows = computed<ComparisonRow[]>(() => [
   },
   {
     feature: t('comparison.features.price'),
-    us: { status: 'free', note: 'OSS, provider access needed' },
+    us: { status: 'free', note: 'OSS + free model with no auth, paid providers optional' },
     gastown: { status: 'free', note: 'OSS, runtime plans needed' },
     paperclip: { status: 'free', note: 'OSS, self-hosted + infra' },
     cursor: { status: 'text', note: 'Free + paid usage' },
@@ -511,7 +511,7 @@ function getStatusIcon(status: string): string {
 .comparison-table__robot {
   position: absolute;
   right: clamp(28px, 7vw, 96px);
-  bottom: calc(100% - 5px);
+  bottom: calc(100% - 20px);
   z-index: 4;
   width: clamp(82px, 7.2vw, 124px);
   height: auto;

@@ -84,6 +84,7 @@ import type {
   TeamLaunchResponse,
   TeamMemberActivityMeta,
   TeamMessageNotificationData,
+  TeamProvisioningModelCheckRequest,
   TeamProvisioningModelVerificationMode,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
@@ -494,7 +495,8 @@ export interface TeamsAPI {
     providerIds?: TeamLaunchRequest['providerId'][],
     selectedModels?: string[],
     limitContext?: boolean,
-    modelVerificationMode?: TeamProvisioningModelVerificationMode
+    modelVerificationMode?: TeamProvisioningModelVerificationMode,
+    selectedModelChecks?: TeamProvisioningModelCheckRequest[]
   ) => Promise<TeamProvisioningPrepareResult>;
   getWorktreeGitStatus: (projectPath: string) => Promise<TeamWorktreeGitStatus>;
   initializeGitRepository: (projectPath: string) => Promise<TeamWorktreeGitStatus>;

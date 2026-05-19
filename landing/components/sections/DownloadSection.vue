@@ -892,6 +892,11 @@ const releaseDate = computed(() => {
   color: #64748b;
 }
 
+.v-theme--light .download-section__btn {
+  color: #f8fbff;
+  text-shadow: 0 1px 8px rgba(15, 23, 42, 0.34);
+}
+
 .v-theme--light .download-section__release-info {
   color: #94a3b8;
 }

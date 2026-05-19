@@ -1,12 +1,11 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   buildMemberLaunchDiagnosticsPayload,
   formatMemberLaunchDiagnosticsPayload,
+  getMemberLaunchDiagnosticsErrorMessage,
   hasMemberLaunchDiagnosticsDetails,
   hasMemberLaunchDiagnosticsError,
-  getMemberLaunchDiagnosticsErrorMessage,
 } from '@renderer/utils/memberLaunchDiagnostics';
+import { describe, expect, it } from 'vitest';
 
 describe('member launch diagnostics', () => {
   it('builds a bounded copy payload from spawn and runtime evidence', () => {
@@ -1178,6 +1177,87 @@ describe('member launch diagnostics', () => {
     expect(payload.memberCardError).toBe('Anthropic API error. resolved_behavior_changed:old->new');
     expect(payload.diagnostics).toContain(
       'Anthropic API error. resolved_behavior_changed:old->new'
+    );
+  });
+
+  it('prioritizes durable bootstrap timeout over no-stdin stderr noise', () => {
+    const payload = buildMemberLaunchDiagnosticsPayload({
+      teamName: 'signal-ops',
+      runId: 'run-mailbox-written-no-submit',
+      memberName: 'atlas',
+      spawnEntry: {
+        status: 'error',
+        launchState: 'failed_to_start',
+        hardFailure: true,
+        error:
+          'Teammate process atlas@signal-ops did not submit bootstrap prompt: timed out waiting for bootstrap_submitted; last transport stage: mailbox_bootstrap_written: messageId=bootstrap-atlas-1 Last stderr: Warning: no stdin data received in 3s, proceeding without it.',
+        livenessKind: 'stale_metadata',
+        runtimeDiagnostic: 'persisted runtime pid is not alive',
+        runtimeDiagnosticSeverity: 'warning',
+        updatedAt: '2026-05-19T13:53:36.668Z',
+      },
+    });
+
+    expect(payload.probableCause).toBe(
+      'Parent process timed out waiting for durable bootstrap_submitted evidence.'
+    );
+    expect(payload.diagnosticHints?.[0]).toBe(
+      'Parent process timed out waiting for durable bootstrap_submitted evidence.'
+    );
+    expect(payload.diagnosticHints).toContain(
+      'CLI read empty stdin before bootstrap submit; verify headless teammate runtime flag/env and startup input handling.'
+    );
+  });
+
+  it('prioritizes bootstrap submit rejection over no-stdin stderr noise', () => {
+    const payload = buildMemberLaunchDiagnosticsPayload({
+      teamName: 'signal-ops',
+      runId: 'run-submit-rejected-no-stdin',
+      memberName: 'bob',
+      spawnEntry: {
+        status: 'error',
+        launchState: 'failed_to_start',
+        hardFailure: true,
+        error:
+          'Teammate process bob@signal-ops did not submit bootstrap prompt: timed out waiting for bootstrap_submitted; last transport stage: bootstrap_submit_rejected: submit rejected by local prompt handler retryable=true Last stderr: Warning: no stdin data received in 3s, proceeding without it.',
+        updatedAt: '2026-05-19T13:53:36.668Z',
+      },
+    });
+
+    expect(payload.probableCause).toBe(
+      'The teammate process observed bootstrap mail, but local prompt submission did not accept the bootstrap turn.'
+    );
+    expect(payload.diagnosticHints?.[0]).toBe(
+      'The teammate process observed bootstrap mail, but local prompt submission did not accept the bootstrap turn.'
+    );
+    expect(payload.diagnosticHints).toContain(
+      'CLI read empty stdin before bootstrap submit; verify headless teammate runtime flag/env and startup input handling.'
+    );
+  });
+
+  it('prioritizes submitted-but-unconfirmed bootstrap over no-stdin stderr noise', () => {
+    const payload = buildMemberLaunchDiagnosticsPayload({
+      teamName: 'signal-ops',
+      runId: 'run-submitted-no-confirm',
+      memberName: 'alice',
+      spawnEntry: {
+        status: 'error',
+        launchState: 'failed_to_start',
+        hardFailure: true,
+        error:
+          'Teammate was registered but did not bootstrap-confirm before timeout. Last transport stage: bootstrap_submitted: messageId=bootstrap-alice-1 Last stderr: Warning: no stdin data received in 3s, proceeding without it.',
+        updatedAt: '2026-05-19T13:53:36.668Z',
+      },
+    });
+
+    expect(payload.probableCause).toBe(
+      'Bootstrap prompt was submitted, but teammate did not bootstrap-confirm before timeout.'
+    );
+    expect(payload.diagnosticHints?.[0]).toBe(
+      'Bootstrap prompt was submitted, but teammate did not bootstrap-confirm before timeout.'
+    );
+    expect(payload.diagnosticHints).toContain(
+      'CLI read empty stdin before bootstrap submit; verify headless teammate runtime flag/env and startup input handling.'
     );
   });
 });

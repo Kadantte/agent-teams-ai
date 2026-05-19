@@ -183,12 +183,12 @@ const navItems = computed(() => [
   --header-cyan: var(--cyber-cyan);
   --header-violet: var(--cyber-violet);
   --header-magenta: var(--cyber-magenta);
-  --header-height: 128px;
+  --header-height: 126px;
   --header-panel-height: 86px;
   --header-action-size: clamp(54px, 3.25vw, 66px);
   --header-github-width: clamp(150px, 9.7vw, 204px);
-  --header-brand-icon: clamp(58px, 4.1vw, 76px);
-  --header-brand-text: clamp(24px, 1.55vw, 34px);
+  --header-brand-icon: clamp(52px, 3.7vw, 68px);
+  --header-brand-text: clamp(23px, 1.42vw, 32px);
 
   position: fixed;
   top: 0;
@@ -299,7 +299,7 @@ const navItems = computed(() => [
   width: 100%;
   height: var(--header-panel-height);
   min-width: 0;
-  padding: 0 64px 0 clamp(38px, 4.2vw, 82px);
+  padding: 0 46px 0 clamp(24px, 2vw, 38px);
   background: transparent;
   border: 0;
   overflow: hidden;
@@ -548,12 +548,12 @@ const navItems = computed(() => [
 
 @media (max-width: 1439px) {
   .app-header {
-    --header-height: 104px;
+    --header-height: 112px;
     --header-panel-height: 72px;
     --header-action-size: 54px;
     --header-github-width: 124px;
-    --header-brand-icon: 48px;
-    --header-brand-text: 16px;
+    --header-brand-icon: 44px;
+    --header-brand-text: 15px;
   }
 
   .app-header__inner {
@@ -563,8 +563,8 @@ const navItems = computed(() => [
 
   .app-header__brand-frame {
     height: 72px;
-    padding-left: 38px;
-    padding-right: 38px;
+    padding-left: 24px;
+    padding-right: 28px;
   }
 
   .app-header__brand-frame :deep(.app-logo__text) {
@@ -598,7 +598,7 @@ const navItems = computed(() => [
 @media (max-width: 1120px) {
   .app-header {
     --header-github-width: 104px;
-    --header-brand-text: 14px;
+    --header-brand-text: 13px;
   }
 
   .app-header__inner {
@@ -606,8 +606,8 @@ const navItems = computed(() => [
   }
 
   .app-header__brand-frame {
-    padding-left: 26px;
-    padding-right: 34px;
+    padding-left: 18px;
+    padding-right: 24px;
   }
 
   .app-header__nav {
@@ -628,11 +628,11 @@ const navItems = computed(() => [
 
 @media (max-width: 1279px) and (min-width: 768px) {
   .app-header {
-    --header-height: 88px;
+    --header-height: 104px;
     --header-panel-height: 64px;
     --header-action-size: clamp(40px, 5vw, 48px);
-    --header-brand-icon: clamp(38px, 4.8vw, 44px);
-    --header-brand-text: clamp(11px, 1.35vw, 14px);
+    --header-brand-icon: clamp(34px, 4.6vw, 42px);
+    --header-brand-text: clamp(10px, 1.2vw, 12px);
   }
 
   .app-header__inner {
@@ -642,8 +642,8 @@ const navItems = computed(() => [
 
   .app-header__brand-frame {
     height: 64px;
-    padding-left: clamp(18px, 2.4vw, 30px);
-    padding-right: clamp(22px, 3vw, 34px);
+    padding-left: clamp(12px, 1.7vw, 18px);
+    padding-right: clamp(16px, 2vw, 22px);
   }
 
   .app-header__brand-frame :deep(.app-logo) {
@@ -658,7 +658,7 @@ const navItems = computed(() => [
     --nav-pad-start: clamp(14px, 3.4cqw, 28px);
     --nav-pad-end: clamp(18px, 4cqw, 34px);
 
-    top: 12px;
+    top: calc((var(--header-height) - var(--header-panel-height)) / 2);
     left: calc(456 / 2048 * 100%);
     right: calc((2048 - 1568) / 2048 * 100%);
     height: 64px;
@@ -715,6 +715,8 @@ const navItems = computed(() => [
 @media (max-width: 767px) {
   .app-header {
     height: 64px;
+    --header-brand-icon: 34px;
+    --header-brand-text: 12px;
   }
 
   .app-header__inner {

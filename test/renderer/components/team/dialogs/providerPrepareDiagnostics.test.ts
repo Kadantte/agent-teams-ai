@@ -1,11 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
-
 import {
   buildReusableProviderPrepareModelResults,
   mergeReusableProviderPrepareModelResults,
   runProviderPrepareDiagnostics,
 } from '@renderer/components/team/dialogs/providerPrepareDiagnostics';
 import { DEFAULT_PROVIDER_MODEL_SELECTION } from '@shared/utils/providerModelSelection';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { TeamProviderId, TeamProvisioningPrepareResult } from '@shared/types';
 
@@ -94,6 +93,47 @@ describe('runProviderPrepareDiagnostics', () => {
         warningLine: null,
       },
     });
+  });
+
+  it('passes selected model effort checks through compatibility preflight', async () => {
+    const prepareProvisioning = vi.fn(async (): Promise<TeamProvisioningPrepareResult> => ({
+      ready: true,
+      message: 'ready',
+      details: ['Selected model claude-opus-4-6[1m] is available for launch.'],
+    }));
+
+    const result = await runProviderPrepareDiagnostics({
+      cwd: '/tmp/project',
+      providerId: 'anthropic',
+      selectedModelIds: ['claude-opus-4-6[1m]'],
+      selectedModelChecks: [
+        {
+          providerId: 'anthropic',
+          model: 'claude-opus-4-6[1m]',
+          effort: 'medium',
+        },
+      ],
+      prepareProvisioning,
+      limitContext: false,
+    });
+
+    expect(result.status).toBe('ready');
+    expect(prepareProvisioning).toHaveBeenNthCalledWith(
+      1,
+      '/tmp/project',
+      'anthropic',
+      ['anthropic'],
+      ['claude-opus-4-6[1m]'],
+      false,
+      'compatibility',
+      [
+        {
+          providerId: 'anthropic',
+          model: 'claude-opus-4-6[1m]',
+          effort: 'medium',
+        },
+      ]
+    );
   });
 
   it('removes a stale reusable model result when the latest result is advisory', () => {

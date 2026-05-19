@@ -462,6 +462,65 @@ describe('ipc teams handlers', () => {
     expect(handlers.has(TEAM_DELETE_TASK_ATTACHMENT)).toBe(true);
   });
 
+  it('forwards selected model checks with effort to prepareProvisioning', async () => {
+    const handler = handlers.get(TEAM_PREPARE_PROVISIONING)!;
+    const result = (await handler(
+      { sender: { send: vi.fn() } } as never,
+      os.tmpdir(),
+      'anthropic',
+      ['anthropic'],
+      ['claude-opus-4-6[1m]'],
+      false,
+      'compatibility',
+      [
+        {
+          providerId: 'anthropic',
+          model: 'claude-opus-4-6[1m]',
+          effort: 'medium',
+        },
+      ]
+    )) as { success: boolean };
+
+    expect(result.success).toBe(true);
+    expect(provisioningService.prepareForProvisioning).toHaveBeenCalledWith(os.tmpdir(), {
+      providerId: 'anthropic',
+      providerIds: ['anthropic'],
+      modelIds: ['claude-opus-4-6[1m]'],
+      limitContext: false,
+      modelVerificationMode: 'compatibility',
+      modelChecks: [
+        {
+          providerId: 'anthropic',
+          model: 'claude-opus-4-6[1m]',
+          effort: 'medium',
+        },
+      ],
+    });
+  });
+
+  it('rejects invalid selected model check effort for the provider', async () => {
+    const handler = handlers.get(TEAM_PREPARE_PROVISIONING)!;
+    const result = (await handler(
+      { sender: { send: vi.fn() } } as never,
+      os.tmpdir(),
+      'anthropic',
+      ['anthropic'],
+      ['claude-opus-4-6[1m]'],
+      false,
+      'compatibility',
+      [
+        {
+          providerId: 'anthropic',
+          model: 'claude-opus-4-6[1m]',
+          effort: 'xhigh',
+        },
+      ]
+    )) as { success: boolean; error: string };
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('selectedModelChecks effort must be one of');
+  });
+
   it('updates change presence tracking for a team', async () => {
     const handler = handlers.get(TEAM_SET_CHANGE_PRESENCE_TRACKING);
     expect(handler).toBeDefined();

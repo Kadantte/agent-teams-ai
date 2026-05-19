@@ -546,6 +546,44 @@ describe('cli child process helpers', () => {
         vi.useRealTimers();
       }
     });
+
+    it('kills a POSIX launcher, Bun child, and nested shell on execFile timeout', async () => {
+      setPlatform('darwin');
+      vi.useFakeTimers();
+      const execFileMock = child.execFile as unknown as Mock;
+      const spawnSyncMock = child.spawnSync as unknown as Mock;
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      const childProcess = new EventEmitter() as EventEmitter & {
+        pid: number;
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+      };
+      childProcess.pid = 500;
+      childProcess.stdout = new EventEmitter();
+      childProcess.stderr = new EventEmitter();
+      spawnSyncMock.mockReturnValue({
+        status: 0,
+        stdout: ['500 1', '501 500', '502 501'].join('\n'),
+      });
+      execFileMock.mockImplementation(() => childProcess);
+
+      try {
+        const result = execCli('/tmp/cli-dev', ['runtime', 'status', '--json'], { timeout: 100 });
+        const expectation = expect(result).rejects.toMatchObject({
+          killed: true,
+          signal: 'SIGTERM',
+        });
+        await vi.advanceTimersByTimeAsync(100);
+
+        await expectation;
+        expect(killSpy.mock.calls.map(([pid]) => pid)).toEqual(
+          expect.arrayContaining([500, 501, 502])
+        );
+      } finally {
+        killSpy.mockRestore();
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('killProcessTree', () => {

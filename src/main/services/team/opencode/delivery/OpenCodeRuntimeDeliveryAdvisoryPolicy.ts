@@ -12,6 +12,7 @@ import type {
 } from '@shared/types';
 
 export const OPENCODE_RUNTIME_DELIVERY_GENERIC_PROOF_GRACE_MS = 120_000;
+const OPENCODE_RUNTIME_DELIVERY_PROOF_TIMESTAMP_SKEW_MS = 5_000;
 
 export interface OpenCodeRuntimeDeliveryProofSnapshot {
   latestSuccessAt?: number;
@@ -156,14 +157,20 @@ export function hasSupersedingOpenCodeRuntimeDeliveryProof(input: {
   if (!proof) {
     return false;
   }
-  const recordTime = getOpenCodeRuntimeDeliveryRecordTimeMs(input.record);
-  if (typeof proof.latestSuccessAt === 'number' && proof.latestSuccessAt > recordTime) {
+  const promptTime = getOpenCodeRuntimeDeliveryPromptTimeMs(input.record);
+  const isPromptTimeEligible = (proofAt: number): boolean => {
+    if (!Number.isFinite(proofAt) || proofAt <= 0) {
+      return false;
+    }
+    if (!Number.isFinite(promptTime) || promptTime <= 0) {
+      return true;
+    }
+    return proofAt + OPENCODE_RUNTIME_DELIVERY_PROOF_TIMESTAMP_SKEW_MS >= promptTime;
+  };
+  if (typeof proof.visibleReplyAt === 'number' && isPromptTimeEligible(proof.visibleReplyAt)) {
     return true;
   }
-  if (typeof proof.visibleReplyAt === 'number' && proof.visibleReplyAt > 0) {
-    return true;
-  }
-  if (typeof proof.taskProgressAt === 'number' && proof.taskProgressAt > 0) {
+  if (typeof proof.taskProgressAt === 'number' && isPromptTimeEligible(proof.taskProgressAt)) {
     return true;
   }
   return false;

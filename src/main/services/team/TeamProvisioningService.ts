@@ -7,6 +7,7 @@ import {
   type OpenCodeFilePart,
 } from '@features/agent-attachments/main';
 import {
+  resolveAnthropicEffortSupport,
   resolveAnthropicFastMode,
   resolveAnthropicRuntimeSelection,
 } from '@features/anthropic-runtime-profile/main';
@@ -127,6 +128,11 @@ import {
   type ParsedTeammateContent,
 } from '@shared/utils/teammateMessageParser';
 import { buildTeamMemberColorMap } from '@shared/utils/teamMemberColors';
+import {
+  buildTeamMemberMcpSettingSources,
+  normalizeTeamMemberMcpPolicy,
+  requiresStrictTeamMemberMcpConfig,
+} from '@shared/utils/teamMemberMcpPolicy';
 import { createCliAutoSuffixNameGuard, parseNumericSuffixName } from '@shared/utils/teamMemberName';
 import {
   inferTeamProviderIdFromModel,
@@ -568,6 +574,7 @@ import type {
   TeamMember,
   TeamProviderBackendId,
   TeamProviderId,
+  TeamProvisioningModelCheckRequest,
   TeamProvisioningModelVerificationMode,
   TeamProvisioningPrepareIssue,
   TeamProvisioningPrepareResult,
@@ -1328,6 +1335,11 @@ interface RuntimeProviderLaunchFacts {
     | null;
 }
 
+interface ProviderSelectedModelCheck {
+  modelId: string;
+  effort?: EffortLevel;
+}
+
 function extractJsonObjectFromCli<T>(raw: string): T {
   const trimmed = raw.trim();
   try {
@@ -1389,6 +1401,58 @@ function normalizeProviderModelListModels(
   return models;
 }
 
+function normalizeProviderSelectedModelChecks(
+  modelIds: readonly string[],
+  modelChecks?: readonly ProviderSelectedModelCheck[]
+): ProviderSelectedModelCheck[] {
+  const checks: ProviderSelectedModelCheck[] =
+    modelChecks && modelChecks.length > 0
+      ? [...modelChecks]
+      : modelIds.map((modelId) => ({ modelId }));
+  const seen = new Set<string>();
+  const normalized: ProviderSelectedModelCheck[] = [];
+  for (const check of checks) {
+    const modelId = check.modelId.trim();
+    if (!modelId) {
+      continue;
+    }
+    const key = `${modelId}\n${check.effort ?? ''}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push({
+      modelId,
+      ...(check.effort ? { effort: check.effort } : {}),
+    });
+  }
+  return normalized;
+}
+
+function normalizeProvisioningModelCheckRequests(
+  checks: readonly TeamProvisioningModelCheckRequest[] | undefined
+): TeamProvisioningModelCheckRequest[] {
+  const seen = new Set<string>();
+  const normalized: TeamProvisioningModelCheckRequest[] = [];
+  for (const check of checks ?? []) {
+    const model = check.model.trim();
+    if (!model) {
+      continue;
+    }
+    const key = `${check.providerId}\n${model}\n${check.effort ?? ''}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push({
+      providerId: check.providerId,
+      model,
+      ...(check.effort ? { effort: check.effort } : {}),
+    });
+  }
+  return normalized;
+}
+
 function addModelCatalogLaunchModels(
   modelIds: Set<string>,
   catalog: CliProviderModelCatalog
@@ -1444,7 +1508,7 @@ function getAnthropicFastModeDefault(): boolean {
 function resolveAnthropicSelectionFromFacts(params: {
   selectedModel?: string;
   limitContext?: boolean;
-  facts: Pick<RuntimeProviderLaunchFacts, 'modelCatalog' | 'runtimeCapabilities'>;
+  facts: Pick<RuntimeProviderLaunchFacts, 'modelCatalog' | 'modelIds' | 'runtimeCapabilities'>;
 }) {
   return resolveAnthropicRuntimeSelection({
     source: {
@@ -1453,7 +1517,31 @@ function resolveAnthropicSelectionFromFacts(params: {
     },
     selectedModel: params.selectedModel,
     limitContext: params.limitContext === true,
+    availableLaunchModels: params.facts.modelCatalog ? undefined : params.facts.modelIds,
   });
+}
+
+function formatAnthropicEffortSupportFailure(params: {
+  effort: EffortLevel;
+  modelLabel: string;
+  supportedEfforts?: readonly EffortLevel[];
+  kind:
+    | 'unsupported-by-catalog'
+    | 'unsupported-by-runtime-capability'
+    | 'unverified-catalog-missing';
+}): string {
+  if (params.kind === 'unverified-catalog-missing') {
+    return `Anthropic runtime catalog was unavailable, so effort "${params.effort}" for ${params.modelLabel} could not be verified.`;
+  }
+
+  const supported = params.supportedEfforts?.length
+    ? ` Supported efforts: ${params.supportedEfforts.join(', ')}.`
+    : '';
+  const runtimeSuffix =
+    params.kind === 'unsupported-by-runtime-capability'
+      ? ' in the current runtime capability data'
+      : ' in the current runtime';
+  return `${params.modelLabel} does not support Anthropic effort "${params.effort}"${runtimeSuffix}.${supported}`;
 }
 
 function resolveCodexSelectionFromFacts(params: {
@@ -1697,7 +1785,7 @@ function isPureOpenCodeProvisioningRequest(request: {
 export function getOpenCodeMixedProviderProvisioningError(): string {
   return (
     'This OpenCode mixed-team request is outside the current support scope. ' +
-    'Supported mixed teams keep the lead on Anthropic, Codex, or Gemini. OpenCode-led mixed teams still remain blocked in this phase.'
+    'Supported mixed teams keep the lead on Anthropic or Codex. OpenCode-led mixed teams still remain blocked in this phase.'
   );
 }
 
@@ -1757,7 +1845,7 @@ function mergeProvisioningWarnings(
 }
 
 const DETERMINISTIC_BOOTSTRAP_LARGE_TEAM_WARNING_THRESHOLD = 8;
-const DETERMINISTIC_BOOTSTRAP_MAX_PRIMARY_MEMBERS = 16;
+const DETERMINISTIC_BOOTSTRAP_MAX_PRIMARY_MEMBERS = 20;
 
 function buildLargeDeterministicBootstrapWarning(memberCount: number): string | null {
   if (memberCount <= DETERMINISTIC_BOOTSTRAP_LARGE_TEAM_WARNING_THRESHOLD) {
@@ -2049,6 +2137,8 @@ interface ProvisioningRun {
   firstRealTurnSucceeded: boolean;
   /** Path to the generated MCP config file for later cleanup. */
   mcpConfigPath: string | null;
+  /** Paths to per-member generated MCP config files consumed by deterministic bootstrap. */
+  memberMcpConfigPaths: string[];
   /** Path to the deterministic bootstrap spec file for later cleanup. */
   bootstrapSpecPath: string | null;
   /** Path to the deferred first-user-task file consumed by runtime after bootstrap. */
@@ -2145,8 +2235,8 @@ interface ProvisioningRun {
    * Post-compact context reinjection lifecycle.
    * - pendingPostCompactReminder: compact_boundary was received; waiting for idle to inject.
    * - postCompactReminderInFlight: the reminder turn has been injected via stdin, waiting for result.
-   * - suppressPostCompactReminderOutput: true while processing a reminder turn — suppress
-   *   low-value acknowledgement text so the user doesn't see "OK, I'll remember that."
+   * - suppressPostCompactReminderOutput: true while processing a reminder turn - suppress
+   *   low-value context-refresh acknowledgement text.
    */
   pendingPostCompactReminder: boolean;
   postCompactReminderInFlight: boolean;
@@ -4435,7 +4525,16 @@ interface RuntimeBootstrapMemberSpec {
   description?: string;
   useSplitPane?: boolean;
   planModeRequired?: boolean;
+  mcpConfigPath?: string;
+  mcpSettingSources?: string;
+  strictMcpConfig?: boolean;
   nativeAppManagedBootstrap?: NativeAppManagedBootstrapSpec;
+}
+
+interface RuntimeBootstrapMemberMcpLaunchConfig {
+  mcpConfigPath: string;
+  mcpSettingSources: string;
+  strictMcpConfig: boolean;
 }
 
 interface RuntimeBootstrapSpec {
@@ -4467,11 +4566,39 @@ interface RuntimeBootstrapSpec {
   };
 }
 
+const DETERMINISTIC_BOOTSTRAP_MIN_TIMEOUT_MS = 120_000;
+const DETERMINISTIC_BOOTSTRAP_TIMEOUT_PER_MEMBER_MS = 75_000;
+const DETERMINISTIC_BOOTSTRAP_MAX_TIMEOUT_MS = 900_000;
+const DETERMINISTIC_BOOTSTRAP_OUTER_TIMEOUT_GRACE_MS = 30_000;
+
+function getDeterministicBootstrapTimeoutMs(memberCount: number): number {
+  const perMemberBudget = Math.max(0, memberCount) * DETERMINISTIC_BOOTSTRAP_TIMEOUT_PER_MEMBER_MS;
+  return Math.min(
+    DETERMINISTIC_BOOTSTRAP_MAX_TIMEOUT_MS,
+    Math.max(DETERMINISTIC_BOOTSTRAP_MIN_TIMEOUT_MS, perMemberBudget)
+  );
+}
+
+function getProvisioningRunTimeoutMs(
+  run: Pick<ProvisioningRun, 'deterministicBootstrap' | 'effectiveMembers'>
+): number {
+  if (!run.deterministicBootstrap) {
+    return RUN_TIMEOUT_MS;
+  }
+
+  return Math.max(
+    RUN_TIMEOUT_MS,
+    getDeterministicBootstrapTimeoutMs(run.effectiveMembers.length) +
+      DETERMINISTIC_BOOTSTRAP_OUTER_TIMEOUT_GRACE_MS
+  );
+}
+
 function buildDeterministicCreateBootstrapSpec(
   runId: string,
   request: TeamCreateRequest,
   effectiveMembers: TeamCreateRequest['members'],
-  nativeAppManagedBootstrapByMember: ReadonlyMap<string, NativeAppManagedBootstrapSpec> = new Map()
+  nativeAppManagedBootstrapByMember: ReadonlyMap<string, NativeAppManagedBootstrapSpec> = new Map(),
+  mcpLaunchConfigByMember: ReadonlyMap<string, RuntimeBootstrapMemberMcpLaunchConfig> = new Map()
 ): RuntimeBootstrapSpec {
   return {
     version: 1,
@@ -4501,21 +4628,26 @@ function buildDeterministicCreateBootstrapSpec(
           }
         : {}),
     },
-    members: effectiveMembers.map((member) => ({
-      name: member.name,
-      ...(member.role?.trim() ? { role: member.role.trim() } : {}),
-      ...(member.workflow?.trim() ? { workflow: member.workflow.trim() } : {}),
-      ...(request.cwd ? { cwd: request.cwd } : {}),
-      ...(member.model?.trim() ? { model: member.model.trim() } : {}),
-      ...(member.providerId ? { provider: member.providerId } : {}),
-      ...(member.effort ? { effort: member.effort } : {}),
-      ...(member.isolation === 'worktree' ? { isolation: 'worktree' as const } : {}),
-      ...(member.role?.trim() ? { description: member.role.trim() } : {}),
-      ...(nativeAppManagedBootstrapByMember.get(member.name)
-        ? { nativeAppManagedBootstrap: nativeAppManagedBootstrapByMember.get(member.name)! }
-        : {}),
-    })),
+    members: effectiveMembers.map((member) => {
+      const mcpLaunchConfig = mcpLaunchConfigByMember.get(member.name);
+      return {
+        name: member.name,
+        ...(member.role?.trim() ? { role: member.role.trim() } : {}),
+        ...(member.workflow?.trim() ? { workflow: member.workflow.trim() } : {}),
+        ...(request.cwd ? { cwd: request.cwd } : {}),
+        ...(member.model?.trim() ? { model: member.model.trim() } : {}),
+        ...(member.providerId ? { provider: member.providerId } : {}),
+        ...(member.effort ? { effort: member.effort } : {}),
+        ...(member.isolation === 'worktree' ? { isolation: 'worktree' as const } : {}),
+        ...(member.role?.trim() ? { description: member.role.trim() } : {}),
+        ...(mcpLaunchConfig ? mcpLaunchConfig : {}),
+        ...(nativeAppManagedBootstrapByMember.get(member.name)
+          ? { nativeAppManagedBootstrap: nativeAppManagedBootstrapByMember.get(member.name)! }
+          : {}),
+      };
+    }),
     launch: {
+      bootstrapTimeoutMs: getDeterministicBootstrapTimeoutMs(effectiveMembers.length),
       continueOnPartialFailure: true,
     },
     ui: {
@@ -4528,7 +4660,8 @@ function buildDeterministicLaunchBootstrapSpec(
   runId: string,
   request: TeamLaunchRequest,
   effectiveMembers: TeamCreateRequest['members'],
-  nativeAppManagedBootstrapByMember: ReadonlyMap<string, NativeAppManagedBootstrapSpec> = new Map()
+  nativeAppManagedBootstrapByMember: ReadonlyMap<string, NativeAppManagedBootstrapSpec> = new Map(),
+  mcpLaunchConfigByMember: ReadonlyMap<string, RuntimeBootstrapMemberMcpLaunchConfig> = new Map()
 ): RuntimeBootstrapSpec {
   return {
     version: 1,
@@ -4555,21 +4688,26 @@ function buildDeterministicLaunchBootstrapSpec(
           }
         : {}),
     },
-    members: effectiveMembers.map((member) => ({
-      name: member.name,
-      ...(request.cwd ? { cwd: request.cwd } : {}),
-      ...(member.model?.trim() ? { model: member.model.trim() } : {}),
-      ...(member.providerId ? { provider: member.providerId } : {}),
-      ...(member.effort ? { effort: member.effort } : {}),
-      ...(member.isolation === 'worktree' ? { isolation: 'worktree' as const } : {}),
-      ...(member.role?.trim() ? { role: member.role.trim() } : {}),
-      ...(member.workflow?.trim() ? { workflow: member.workflow.trim() } : {}),
-      ...(member.role?.trim() ? { description: member.role.trim() } : {}),
-      ...(nativeAppManagedBootstrapByMember.get(member.name)
-        ? { nativeAppManagedBootstrap: nativeAppManagedBootstrapByMember.get(member.name)! }
-        : {}),
-    })),
+    members: effectiveMembers.map((member) => {
+      const mcpLaunchConfig = mcpLaunchConfigByMember.get(member.name);
+      return {
+        name: member.name,
+        ...(request.cwd ? { cwd: request.cwd } : {}),
+        ...(member.model?.trim() ? { model: member.model.trim() } : {}),
+        ...(member.providerId ? { provider: member.providerId } : {}),
+        ...(member.effort ? { effort: member.effort } : {}),
+        ...(member.isolation === 'worktree' ? { isolation: 'worktree' as const } : {}),
+        ...(member.role?.trim() ? { role: member.role.trim() } : {}),
+        ...(member.workflow?.trim() ? { workflow: member.workflow.trim() } : {}),
+        ...(member.role?.trim() ? { description: member.role.trim() } : {}),
+        ...(mcpLaunchConfig ? mcpLaunchConfig : {}),
+        ...(nativeAppManagedBootstrapByMember.get(member.name)
+          ? { nativeAppManagedBootstrap: nativeAppManagedBootstrapByMember.get(member.name)! }
+          : {}),
+      };
+    }),
     launch: {
+      bootstrapTimeoutMs: getDeterministicBootstrapTimeoutMs(effectiveMembers.length),
       continueOnPartialFailure: true,
     },
     ui: {
@@ -4974,7 +5112,7 @@ function buildDeterministicLaunchHydrationPrompt(
 Do NOT call TeamCreate.
 Do NOT use Agent to spawn or restore teammates.
 Do NOT start implementation in this turn.
-Use this turn only to refresh context, review the current board snapshot, and confirm you are ready.
+Use this turn only to review the current board snapshot and confirm operational readiness.
 ${
   hasOriginalUserPrompt
     ? 'Do NOT create or update any new task in this turn - wait for the next normal operating turn before translating those instructions into board work.'
@@ -4984,7 +5122,7 @@ ${
 Do NOT call TeamCreate.
 Do NOT use Agent to spawn or restore teammates.
 Do NOT repeat the launch summary.
-Use this turn only to refresh context and review the current board snapshot.
+Use this turn only to review the current board snapshot and teammate readiness.
 ${
   hasOriginalUserPrompt
     ? 'Do NOT create or assign any new task in this turn - wait for the next normal operating turn before translating those instructions into board work.'
@@ -5003,7 +5141,7 @@ ${nextSteps}
 ${taskBoardSnapshot}
 ${persistentContext}
 
-If there is nothing else to say after refreshing context, reply with exactly one word: "OK".`;
+Reply with one concise user-facing team status line. Mention whether there is actionable board work and whether any teammate is still bootstrap-pending. Only report board readiness and teammate availability. Do not start work, create tasks, or delegate in this turn.`;
 }
 
 function buildGeminiPostLaunchHydrationPrompt(
@@ -5050,13 +5188,13 @@ function buildGeminiPostLaunchHydrationPrompt(
   });
   const nextStepInstruction = isSolo
     ? hasOriginalUserPrompt
-      ? 'From this point on, use the full operating rules below for all future turns. Do NOT create or update any new task in this context-refresh turn - wait for the next normal operating turn before translating those instructions into board work.'
-      : 'From this point on, use the full operating rules below for all future turns. Do NOT create, assign, or delegate any new task in this context-refresh turn. If the board is empty, stay silent and wait for a fresh user instruction.'
+      ? 'From this point on, use the full operating rules below for all future turns. Do NOT create or update any new task in this turn - wait for the next normal operating turn before translating those instructions into board work.'
+      : 'From this point on, use the full operating rules below for all future turns. Do NOT create, assign, or delegate any new task in this turn. If the board is empty, stay silent and wait for a fresh user instruction.'
     : hasOriginalUserPrompt
-      ? 'From this point on, use the full team operating rules below for all future turns. Do NOT create or assign any new task in this context-refresh turn - wait for the next normal operating turn before translating those instructions into board work. Do NOT assume bootstrap-pending or failed teammates are ready; only treat teammates with confirmed bootstrap as immediately available for blocking assignments.'
-      : 'From this point on, use the full team operating rules below for all future turns. Do NOT create, assign, or delegate any new task in this context-refresh turn. If the board is empty, stay silent and wait for a fresh user instruction. Do NOT assume bootstrap-pending or failed teammates are ready; only treat teammates with confirmed bootstrap as immediately available for blocking assignments.';
+      ? 'From this point on, use the full team operating rules below for all future turns. Do NOT create or assign any new task in this turn - wait for the next normal operating turn before translating those instructions into board work. Do NOT assume bootstrap-pending or failed teammates are ready; only treat teammates with confirmed bootstrap as immediately available for blocking assignments.'
+      : 'From this point on, use the full team operating rules below for all future turns. Do NOT create, assign, or delegate any new task in this turn. If the board is empty, stay silent and wait for a fresh user instruction. Do NOT assume bootstrap-pending or failed teammates are ready; only treat teammates with confirmed bootstrap as immediately available for blocking assignments.';
 
-  return `Gemini launch phase 2 — operating context for team "${run.teamName}".
+  return `Gemini launch phase 2 - team readiness check for team "${run.teamName}".
 
 The first launch/reconnect turn has already completed.
 Do NOT call TeamCreate again.
@@ -5070,7 +5208,7 @@ ${nextStepInstruction}
 ${teammateBootstrapSnapshot}${taskBoardSnapshot}
 ${persistentContext}
 
-This is a context-refresh turn only. Do not re-run launch. If no task planning or delegation is needed right now, reply with exactly one word: "OK".`;
+This is a readiness-check turn only. Do not re-run launch. Reply with one concise user-facing team status line about board readiness and teammate availability. Only report board readiness and teammate availability. Do not start work, create tasks, or delegate in this turn.`;
 }
 
 /**
@@ -6181,6 +6319,7 @@ export class TeamProvisioningService {
   private readonly memberLogsFinder: TeamMemberLogsFinder;
   private readonly transcriptProjectResolver: TeamTranscriptProjectResolver;
   private readonly taskActivityIntervalService = new TeamTaskActivityIntervalService();
+  private readonly leadTaskActivitySyncedRunKeys = new Set<string>();
   private readonly crashRepairedActivityIntervalsByTeam = new Set<string>();
   private readonly pendingCrashRepairSnapshotByTeam = new Map<
     string,
@@ -7342,11 +7481,28 @@ export class TeamProvisioningService {
           `${params.actorLabel} resolves to Anthropic model "${resolvedLaunchModel}", but the current runtime does not list it as launchable.`
         );
       }
-      if (params.effort && !selection.supportedEfforts.includes(params.effort)) {
+      if (params.effort) {
         const modelLabel = selection.displayName ?? resolvedLaunchModel;
-        throw new Error(
-          `${params.actorLabel} uses Anthropic effort "${params.effort}", but ${modelLabel} does not support it in the current runtime.`
-        );
+        const effortSupport = resolveAnthropicEffortSupport({
+          selection,
+          effort: params.effort,
+          runtimeCapabilities: params.facts.runtimeCapabilities,
+        });
+        if (effortSupport.kind !== 'supported') {
+          throw new Error(
+            `${params.actorLabel} uses Anthropic effort "${params.effort}", but ${formatAnthropicEffortSupportFailure(
+              {
+                effort: params.effort,
+                modelLabel,
+                kind: effortSupport.kind,
+                supportedEfforts:
+                  effortSupport.kind === 'unverified-catalog-missing'
+                    ? undefined
+                    : effortSupport.supportedEfforts,
+              }
+            )}`
+          );
+        }
       }
 
       const fastResolution = resolveAnthropicFastMode({
@@ -11961,7 +12117,47 @@ export class TeamProvisioningService {
       ...(configuredMember.model ? { model: configuredMember.model } : {}),
       ...(configuredMember.effort ? { effort: configuredMember.effort } : {}),
       ...(configuredMember.fastMode ? { fastMode: configuredMember.fastMode } : {}),
+      ...(configuredMember.mcpPolicy
+        ? { mcpPolicy: normalizeTeamMemberMcpPolicy(configuredMember.mcpPolicy) }
+        : {}),
     };
+  }
+
+  private async buildRuntimeBootstrapMemberMcpLaunchConfigs(input: {
+    cwd: string;
+    members: TeamCreateRequest['members'];
+    run: ProvisioningRun;
+  }): Promise<Map<string, RuntimeBootstrapMemberMcpLaunchConfig>> {
+    const configs = new Map<string, RuntimeBootstrapMemberMcpLaunchConfig>();
+    for (const member of input.members) {
+      const mcpPolicy = normalizeTeamMemberMcpPolicy(member.mcpPolicy);
+      if (!mcpPolicy) {
+        continue;
+      }
+
+      const memberCwd = member.cwd?.trim() || input.cwd;
+      const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(memberCwd, mcpPolicy);
+      input.run.memberMcpConfigPaths.push(mcpConfigPath);
+      configs.set(member.name, {
+        mcpConfigPath,
+        mcpSettingSources: buildTeamMemberMcpSettingSources(mcpPolicy),
+        strictMcpConfig: requiresStrictTeamMemberMcpConfig(mcpPolicy),
+      });
+    }
+    return configs;
+  }
+
+  private async removeRunMemberMcpConfigFiles(run: ProvisioningRun): Promise<void> {
+    const paths = run.memberMcpConfigPaths?.splice(0) ?? [];
+    await Promise.all(
+      paths.map((configPath) => this.mcpConfigBuilder.removeConfigFile(configPath))
+    );
+  }
+
+  private removeRunMemberMcpConfigFilesLater(run: ProvisioningRun): void {
+    for (const configPath of run.memberMcpConfigPaths?.splice(0) ?? []) {
+      void this.mcpConfigBuilder.removeConfigFile(configPath);
+    }
   }
 
   private buildMembersMetaWritePayload(members: TeamCreateRequest['members']): TeamMember[] {
@@ -11980,6 +12176,7 @@ export class TeamProvisioningService {
           member.fastMode === 'inherit' || member.fastMode === 'on' || member.fastMode === 'off'
             ? member.fastMode
             : undefined,
+        mcpPolicy: normalizeTeamMemberMcpPolicy(member.mcpPolicy),
         agentType: 'general-purpose' as const,
         color: getMemberColorByName(member.name.trim()),
         joinedAt:
@@ -14857,6 +15054,9 @@ export class TeamProvisioningService {
     if (!runId) return { state: 'offline', runId: null };
     const run = this.runs.get(runId);
     if (!run || run.processKilled || run.cancelRequested) return { state: 'offline', runId: null };
+    // Read-repair active lead task intervals for runs that were already active
+    // before interval tracking was introduced or before the renderer polled state.
+    this.syncLeadTaskActivityForState(run, run.leadActivityState, run.leadActivityState);
     return { state: run.leadActivityState, runId };
   }
 
@@ -14993,10 +15193,54 @@ export class TeamProvisioningService {
     return parts.join('\n').trim();
   }
 
+  private getLeadTaskActivityRunKey(run: ProvisioningRun): string {
+    return `${run.teamName}\u0000${run.runId}`;
+  }
+
+  private syncLeadTaskActivityForState(
+    run: ProvisioningRun,
+    state: 'active' | 'idle' | 'offline',
+    previousState: 'active' | 'idle' | 'offline',
+    at = nowIso()
+  ): void {
+    const key = this.getLeadTaskActivityRunKey(run);
+    if (state === 'active') {
+      if (this.leadTaskActivitySyncedRunKeys.has(key)) return;
+      const result = this.taskActivityIntervalService.resumeActiveIntervalsForMember(
+        run.teamName,
+        this.getRunLeadName(run),
+        at
+      );
+      if (result.failed) return;
+      this.leadTaskActivitySyncedRunKeys.add(key);
+      return;
+    }
+
+    const wasSynced = this.leadTaskActivitySyncedRunKeys.has(key);
+    if (previousState !== 'active' && !wasSynced) return;
+    const result = this.taskActivityIntervalService.pauseActiveIntervalsForMember(
+      run.teamName,
+      this.getRunLeadName(run),
+      at
+    );
+    if (result.failed) {
+      this.leadTaskActivitySyncedRunKeys.add(key);
+      return;
+    }
+    this.leadTaskActivitySyncedRunKeys.delete(key);
+  }
+
   private setLeadActivity(run: ProvisioningRun, state: 'active' | 'idle' | 'offline'): void {
-    if (run.leadActivityState === state) return;
+    const previousState = run.leadActivityState;
+    const isCurrentRun = this.isCurrentTrackedRun(run);
+    if (isCurrentRun) {
+      this.syncLeadTaskActivityForState(run, state, previousState);
+    } else {
+      this.leadTaskActivitySyncedRunKeys.delete(this.getLeadTaskActivityRunKey(run));
+    }
+    if (previousState === state) return;
     run.leadActivityState = state;
-    if (!this.isCurrentTrackedRun(run)) return;
+    if (!isCurrentRun) return;
     this.teamChangeEmitter?.({
       type: 'lead-activity',
       teamName: run.teamName,
@@ -16542,7 +16786,10 @@ export class TeamProvisioningService {
       throw new Error(provisioningEnv.warning);
     }
 
-    const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(cwd);
+    const memberMcpPolicy = normalizeTeamMemberMcpPolicy(input.configuredMember.mcpPolicy);
+    const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(cwd, memberMcpPolicy);
+    const memberMcpSettingSources = buildTeamMemberMcpSettingSources(memberMcpPolicy);
+    const strictMemberMcpConfig = requiresStrictTeamMemberMcpConfig(memberMcpPolicy);
     const agentId = `${input.configuredMember.name}@${input.teamName}`;
     const color =
       input.config.members
@@ -16592,9 +16839,10 @@ export class TeamProvisioningService {
         ? ['--agent-type', input.configuredMember.agentType]
         : []),
       '--setting-sources',
-      'user,project,local',
+      memberMcpSettingSources,
       '--mcp-config',
       mcpConfigPath,
+      ...(strictMemberMcpConfig ? ['--strict-mcp-config'] : []),
       '--disallowedTools',
       APP_TEAM_RUNTIME_DISALLOWED_TOOLS,
       ...(input.run.request.skipPermissions !== false
@@ -16685,7 +16933,10 @@ export class TeamProvisioningService {
       throw new Error(provisioningEnv.warning);
     }
 
-    const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(cwd);
+    const memberMcpPolicy = normalizeTeamMemberMcpPolicy(input.configuredMember.mcpPolicy);
+    const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(cwd, memberMcpPolicy);
+    const memberMcpSettingSources = buildTeamMemberMcpSettingSources(memberMcpPolicy);
+    const strictMemberMcpConfig = requiresStrictTeamMemberMcpConfig(memberMcpPolicy);
     const agentId = `${input.configuredMember.name}@${input.teamName}`;
     const color =
       input.config.members
@@ -16706,6 +16957,7 @@ export class TeamProvisioningService {
       ...(input.configuredMember.model ? { model: input.configuredMember.model } : {}),
       ...(input.configuredMember.effort ? { effort: input.configuredMember.effort } : {}),
       ...(input.configuredMember.agentType ? { agentType: input.configuredMember.agentType } : {}),
+      ...(memberMcpPolicy ? { mcpPolicy: memberMcpPolicy } : {}),
       ...(input.configuredMember.isolation === 'worktree'
         ? { isolation: 'worktree' as const }
         : {}),
@@ -16774,9 +17026,10 @@ export class TeamProvisioningService {
         ? ['--agent-type', input.configuredMember.agentType]
         : []),
       '--setting-sources',
-      'user,project,local',
+      memberMcpSettingSources,
       '--mcp-config',
       mcpConfigPath,
+      ...(strictMemberMcpConfig ? ['--strict-mcp-config'] : []),
       '--disallowedTools',
       APP_TEAM_RUNTIME_DISALLOWED_TOOLS,
       ...(input.run.request.skipPermissions !== false
@@ -19000,6 +19253,7 @@ export class TeamProvisioningService {
       providerId?: TeamProviderId;
       providerIds?: TeamProviderId[];
       modelIds?: string[];
+      modelChecks?: TeamProvisioningModelCheckRequest[];
       limitContext?: boolean;
       modelVerificationMode?: TeamProvisioningModelVerificationMode;
     }
@@ -19026,6 +19280,7 @@ export class TeamProvisioningService {
       providerId?: TeamProviderId;
       providerIds?: TeamProviderId[];
       modelIds?: string[];
+      modelChecks?: TeamProvisioningModelCheckRequest[];
       limitContext?: boolean;
       modelVerificationMode?: TeamProvisioningModelVerificationMode;
     }
@@ -19040,11 +19295,24 @@ export class TeamProvisioningService {
     const modelIds = Array.from(
       new Set((opts?.modelIds ?? []).map((modelId) => modelId.trim()).filter(Boolean))
     );
+    const modelChecks = normalizeProvisioningModelCheckRequests(opts?.modelChecks)
+      .map((check) => ({
+        providerId: check.providerId,
+        model: check.model,
+        effort: check.effort ?? null,
+      }))
+      .sort(
+        (left, right) =>
+          left.providerId.localeCompare(right.providerId) ||
+          left.model.localeCompare(right.model) ||
+          (left.effort ?? '').localeCompare(right.effort ?? '')
+      );
     return JSON.stringify({
       cwd: cwd?.trim() || process.cwd(),
       forceFresh: opts?.forceFresh === true,
       providerIds,
       modelIds,
+      modelChecks,
       limitContext: opts?.limitContext === true,
       modelVerificationMode: opts?.modelVerificationMode ?? null,
     });
@@ -19068,6 +19336,7 @@ export class TeamProvisioningService {
       providerId?: TeamProviderId;
       providerIds?: TeamProviderId[];
       modelIds?: string[];
+      modelChecks?: TeamProvisioningModelCheckRequest[];
       limitContext?: boolean;
       modelVerificationMode?: TeamProvisioningModelVerificationMode;
     }
@@ -19104,8 +19373,20 @@ export class TeamProvisioningService {
     const selectedModelIds = Array.from(
       new Set((opts?.modelIds ?? []).map((modelId) => modelId.trim()).filter(Boolean))
     );
+    const selectedModelChecks = normalizeProvisioningModelCheckRequests(opts?.modelChecks);
+    const useStructuredModelChecks = selectedModelChecks.length > 0;
 
     for (const providerId of providerIds) {
+      const providerModelChecks = selectedModelChecks
+        .filter((check) => check.providerId === providerId)
+        .map((check) => ({
+          modelId: check.model,
+          ...(check.effort ? { effort: check.effort } : {}),
+        }));
+      const providerSelectedModelIds = useStructuredModelChecks
+        ? Array.from(new Set(providerModelChecks.map((check) => check.modelId)))
+        : selectedModelIds;
+
       if (providerId === 'opencode') {
         const adapter = this.getOpenCodeRuntimeAdapter();
         if (!adapter) {
@@ -19115,7 +19396,7 @@ export class TeamProvisioningService {
           continue;
         }
 
-        if (selectedModelIds.length === 0) {
+        if (providerSelectedModelIds.length === 0) {
           const prepare = await adapter.prepare({
             runId: `prepare-${randomUUID()}`,
             teamName: '__prepare_opencode__',
@@ -19149,7 +19430,7 @@ export class TeamProvisioningService {
         const openCodeModelPrepare = await this.prepareSelectedOpenCodeModels({
           adapter,
           cwd: targetCwd,
-          modelIds: selectedModelIds,
+          modelIds: providerSelectedModelIds,
           verificationMode: opts?.modelVerificationMode ?? 'deep',
         });
         details.push(...openCodeModelPrepare.details);
@@ -19176,7 +19457,7 @@ export class TeamProvisioningService {
       }
 
       const appendSelectedModelVerification = async (): Promise<void> => {
-        if (selectedModelIds.length === 0) {
+        if (providerSelectedModelIds.length === 0) {
           return;
         }
 
@@ -19184,12 +19465,14 @@ export class TeamProvisioningService {
           claudePath: probeResult.claudePath,
           cwd: targetCwd,
           providerId,
-          modelIds: selectedModelIds,
+          modelIds: providerSelectedModelIds,
+          modelChecks: providerModelChecks,
           limitContext: opts?.limitContext === true,
         });
         details.push(...modelVerification.details);
         warnings.push(...modelVerification.warnings);
         blockingMessages.push(...modelVerification.blockingMessages);
+        issues.push(...(modelVerification.issues ?? []));
       };
 
       const appendOneShotDiagnostic = async (): Promise<void> => {
@@ -19298,7 +19581,7 @@ export class TeamProvisioningService {
           // Preflight warnings (including timeouts) should not block provisioning.
           warnings.push(prefixedWarning);
           const blockingCountBeforeModelChecks = blockingMessages.length;
-          if (!isBlockingPreflightWarning && selectedModelIds.length > 0) {
+          if (!isBlockingPreflightWarning && providerSelectedModelIds.length > 0) {
             await appendSelectedModelVerification();
           }
           if (
@@ -19964,24 +20247,29 @@ export class TeamProvisioningService {
     cwd,
     providerId,
     modelIds,
+    modelChecks,
     limitContext,
   }: {
     claudePath: string;
     cwd: string;
     providerId: TeamProviderId;
     modelIds: string[];
+    modelChecks?: ProviderSelectedModelCheck[];
     limitContext: boolean;
   }): Promise<{
     details: string[];
     warnings: string[];
     blockingMessages: string[];
+    issues?: TeamProvisioningPrepareIssue[];
   }> {
     const details: string[] = [];
     const warnings: string[] = [];
     const blockingMessages: string[] = [];
+    const issues: TeamProvisioningPrepareIssue[] = [];
     const startedAt = Date.now();
+    const selectedModelChecks = normalizeProviderSelectedModelChecks(modelIds, modelChecks);
 
-    if (modelIds.length === 0) {
+    if (selectedModelChecks.length === 0) {
       return { details, warnings, blockingMessages };
     }
 
@@ -20013,35 +20301,99 @@ export class TeamProvisioningService {
         return;
       }
       blockingMessages.push(`Selected model ${requestedModelId} is unavailable. ${outcome.reason}`);
+      issues.push({
+        providerId,
+        modelId: requestedModelId,
+        scope: 'model',
+        severity: 'blocking',
+        code: 'model_unavailable',
+        message: outcome.reason,
+      });
+    };
+
+    const recordAnthropicEffortOutcome = (
+      requestedModelId: string,
+      effort: EffortLevel
+    ): boolean => {
+      const selection = resolveAnthropicSelectionFromFacts({
+        selectedModel: requestedModelId,
+        limitContext,
+        facts: runtimeFacts,
+      });
+      const modelLabel = selection.displayName ?? selection.resolvedLaunchModel ?? requestedModelId;
+      const effortSupport = resolveAnthropicEffortSupport({
+        selection,
+        effort,
+        runtimeCapabilities: runtimeFacts.runtimeCapabilities,
+      });
+      if (effortSupport.kind === 'supported') {
+        return true;
+      }
+
+      const reason = formatAnthropicEffortSupportFailure({
+        effort,
+        modelLabel,
+        kind: effortSupport.kind,
+        supportedEfforts:
+          effortSupport.kind === 'unverified-catalog-missing'
+            ? undefined
+            : effortSupport.supportedEfforts,
+      });
+      blockingMessages.push(`Selected model ${requestedModelId} is unavailable. ${reason}`);
+      issues.push({
+        providerId,
+        modelId: requestedModelId,
+        scope: 'model',
+        severity: 'blocking',
+        code:
+          effortSupport.kind === 'unverified-catalog-missing'
+            ? 'effort_unverified'
+            : 'effort_unsupported',
+        message: reason,
+      });
+      return false;
     };
 
     appendPreflightDebugLog('provider_model_catalog_check_start', {
       providerId,
       cwd,
-      modelIds,
+      modelIds: selectedModelChecks.map((check) => check.modelId),
     });
 
-    for (const modelId of modelIds) {
-      const label = modelId.trim();
+    const checksByModelId = new Map<string, ProviderSelectedModelCheck[]>();
+    for (const check of selectedModelChecks) {
+      const label = check.modelId.trim();
       if (!label) {
         continue;
       }
+      checksByModelId.set(label, [...(checksByModelId.get(label) ?? []), check]);
+    }
 
-      recordOutcome(
-        label,
-        this.resolveProviderCompatibilityModel({
-          providerId,
-          requestedModelId: label,
-          runtimeFacts,
-          limitContext,
-        })
-      );
+    for (const [label, checks] of checksByModelId.entries()) {
+      const outcome = this.resolveProviderCompatibilityModel({
+        providerId,
+        requestedModelId: label,
+        runtimeFacts,
+        limitContext,
+      });
+      let effortSupported = true;
+      if (outcome.kind !== 'unavailable' && providerId === 'anthropic') {
+        for (const check of checks) {
+          if (check.effort && !recordAnthropicEffortOutcome(label, check.effort)) {
+            effortSupported = false;
+          }
+        }
+      }
+      if (!effortSupported) {
+        continue;
+      }
+      recordOutcome(label, outcome);
     }
 
     appendPreflightDebugLog('provider_model_catalog_check_complete', {
       providerId,
       cwd,
-      modelIds,
+      modelIds: selectedModelChecks.map((check) => check.modelId),
       durationMs: Date.now() - startedAt,
       modelCount: runtimeFacts.modelIds.size,
       details,
@@ -20049,7 +20401,12 @@ export class TeamProvisioningService {
       blockingMessages,
     });
 
-    return { details, warnings, blockingMessages };
+    return {
+      details,
+      warnings,
+      blockingMessages,
+      ...(issues.length > 0 ? { issues } : {}),
+    };
   }
 
   private async resolveProviderDefaultModel(
@@ -20999,7 +21356,7 @@ export class TeamProvisioningService {
           this.cleanupRun(run);
         })();
       }
-    }, RUN_TIMEOUT_MS);
+    }, getProvisioningRunTimeoutMs(run));
 
     child.once('error', (error) => {
       const hint = run.isLaunch ? ' (launch)' : '';
@@ -21438,6 +21795,7 @@ export class TeamProvisioningService {
         requiresFirstRealTurnSuccess: false,
         firstRealTurnSucceeded: false,
         mcpConfigPath: null,
+        memberMcpConfigPaths: [],
         bootstrapSpecPath: null,
         bootstrapUserPromptPath: null,
         isLaunch: false,
@@ -21569,6 +21927,11 @@ export class TeamProvisioningService {
           cwd: request.cwd,
           members: effectiveMemberSpecs,
         });
+        const memberMcpLaunchConfigs = await this.buildRuntimeBootstrapMemberMcpLaunchConfigs({
+          cwd: request.cwd,
+          members: effectiveMemberSpecs,
+          run,
+        });
         if (nativeBootstrapBuild.diagnostics.warning) {
           run.progress = {
             ...run.progress,
@@ -21587,7 +21950,8 @@ export class TeamProvisioningService {
           runId,
           request,
           effectiveMemberSpecs,
-          nativeBootstrapBuild.specs
+          nativeBootstrapBuild.specs,
+          memberMcpLaunchConfigs
         );
         emitProvisioningCheckpoint(run, 'Writing deterministic bootstrap spec file');
         bootstrapSpecPath = await writeDeterministicBootstrapSpecFile(bootstrapSpec);
@@ -21632,6 +21996,11 @@ export class TeamProvisioningService {
           () => {}
         );
         run.bootstrapUserPromptPath = null;
+        if (run.mcpConfigPath) {
+          await this.mcpConfigBuilder.removeConfigFile(run.mcpConfigPath).catch(() => {});
+          run.mcpConfigPath = null;
+        }
+        await this.removeRunMemberMcpConfigFiles(run).catch(() => {});
         throw error;
       }
       const launchModelArg = getLaunchModelArg(
@@ -21733,6 +22102,7 @@ export class TeamProvisioningService {
           await this.mcpConfigBuilder.removeConfigFile(run.mcpConfigPath).catch(() => {});
           run.mcpConfigPath = null;
         }
+        await this.removeRunMemberMcpConfigFiles(run).catch(() => {});
         if (provisioningEnv.anthropicApiKeyHelper) {
           await cleanupAnthropicTeamApiKeyHelperMaterial({
             directory: provisioningEnv.anthropicApiKeyHelper.directory,
@@ -21795,7 +22165,7 @@ export class TeamProvisioningService {
             this.cleanupRun(run);
           })();
         }
-      }, RUN_TIMEOUT_MS);
+      }, getProvisioningRunTimeoutMs(run));
 
       child.once('error', (error) => {
         const progress = updateProgress(run, 'failed', 'Failed to start Claude CLI', {
@@ -22167,6 +22537,7 @@ export class TeamProvisioningService {
           providerId: normalizeOptionalTeamProviderId(member.providerId),
           model: member.model,
           effort: member.effort,
+          mcpPolicy: normalizeTeamMemberMcpPolicy(member.mcpPolicy),
           cwd: member.cwd?.trim() || undefined,
         })),
       ],
@@ -22719,6 +23090,7 @@ export class TeamProvisioningService {
         requiresFirstRealTurnSuccess: false,
         firstRealTurnSucceeded: false,
         mcpConfigPath: null,
+        memberMcpConfigPaths: [],
         bootstrapSpecPath: null,
         bootstrapUserPromptPath: null,
         isLaunch: true,
@@ -22846,6 +23218,11 @@ export class TeamProvisioningService {
           cwd: request.cwd,
           members: effectiveMemberSpecs,
         });
+        const memberMcpLaunchConfigs = await this.buildRuntimeBootstrapMemberMcpLaunchConfigs({
+          cwd: request.cwd,
+          members: effectiveMemberSpecs,
+          run,
+        });
         if (nativeBootstrapBuild.diagnostics.warning) {
           run.progress = {
             ...run.progress,
@@ -22864,7 +23241,8 @@ export class TeamProvisioningService {
           runId,
           request,
           effectiveMemberSpecs,
-          nativeBootstrapBuild.specs
+          nativeBootstrapBuild.specs,
+          memberMcpLaunchConfigs
         );
         emitProvisioningCheckpoint(run, 'Writing deterministic bootstrap spec file');
         bootstrapSpecPath = await writeDeterministicBootstrapSpecFile(bootstrapSpec);
@@ -22901,6 +23279,11 @@ export class TeamProvisioningService {
           () => {}
         );
         run.bootstrapUserPromptPath = null;
+        if (run.mcpConfigPath) {
+          await this.mcpConfigBuilder.removeConfigFile(run.mcpConfigPath).catch(() => {});
+          run.mcpConfigPath = null;
+        }
+        await this.removeRunMemberMcpConfigFiles(run).catch(() => {});
         await this.restorePrelaunchConfig(request.teamName);
         throw error;
       }
@@ -23038,6 +23421,7 @@ export class TeamProvisioningService {
           () => {}
         );
         run.bootstrapUserPromptPath = null;
+        await this.removeRunMemberMcpConfigFiles(run).catch(() => {});
         if (provisioningEnv.anthropicApiKeyHelper) {
           await cleanupAnthropicTeamApiKeyHelperMaterial({
             directory: provisioningEnv.anthropicApiKeyHelper.directory,
@@ -23098,7 +23482,7 @@ export class TeamProvisioningService {
             this.cleanupRun(run);
           })();
         }
-      }, RUN_TIMEOUT_MS);
+      }, getProvisioningRunTimeoutMs(run));
 
       child.once('error', (error) => {
         const progress = updateProgress(run, 'failed', 'Failed to start Claude CLI (launch)', {
@@ -25941,6 +26325,7 @@ export class TeamProvisioningService {
     model?: string;
     effort?: EffortLevel;
     fastMode?: TeamFastMode;
+    mcpPolicy?: ReturnType<typeof normalizeTeamMemberMcpPolicy>;
     cwd?: string;
     agentType?: string;
     removedAt?: number | string;
@@ -25991,6 +26376,9 @@ export class TeamProvisioningService {
           : undefined;
     const agentType =
       metaMember?.agentType?.trim() || configuredMember?.agentType?.trim() || undefined;
+    const mcpPolicy =
+      normalizeTeamMemberMcpPolicy(metaMember?.mcpPolicy) ??
+      normalizeTeamMemberMcpPolicy(configuredMember?.mcpPolicy);
     const cwd = metaMember?.cwd?.trim() || configuredMember?.cwd?.trim() || undefined;
     const removedAt = metaMember?.removedAt ?? configuredMember?.removedAt;
 
@@ -26004,6 +26392,7 @@ export class TeamProvisioningService {
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       ...(fastMode ? { fastMode } : {}),
+      ...(mcpPolicy ? { mcpPolicy } : {}),
       ...(cwd ? { cwd } : {}),
       ...(agentType ? { agentType } : {}),
       ...(removedAt != null ? { removedAt } : {}),
@@ -28561,9 +28950,39 @@ export class TeamProvisioningService {
       return false;
     }
 
+    const secondaryLanes = run.mixedSecondaryLanes ?? [];
+    const confirmedSecondaryMembers = new Set<string>();
+    for (const lane of secondaryLanes) {
+      const memberName = lane.member.name.trim();
+      if (!memberName) {
+        return false;
+      }
+      if (lane.state !== 'finished' || !lane.result) {
+        return false;
+      }
+      if (lane.runId && lane.result.runId !== lane.runId) {
+        return false;
+      }
+      const evidence = resolveOpenCodeSecondaryLaneMemberEvidence(lane, memberName);
+      if (
+        evidence?.launchState !== 'confirmed_alive' ||
+        evidence.bootstrapConfirmed !== true ||
+        evidence.hardFailure === true
+      ) {
+        return false;
+      }
+      confirmedSecondaryMembers.add(memberName);
+    }
+
     return expectedMembers.every((memberName) => {
       const member = run.memberSpawnStatuses.get(memberName);
-      return member?.launchState === 'confirmed_alive';
+      if (member?.launchState !== 'confirmed_alive' || member.bootstrapConfirmed !== true) {
+        return false;
+      }
+      const isSecondaryMember = secondaryLanes.some((lane) =>
+        matchesTeamMemberIdentity(lane.member.name, memberName)
+      );
+      return !isSecondaryMember || confirmedSecondaryMembers.has(memberName);
     });
   }
 
@@ -32916,7 +33335,7 @@ export class TeamProvisioningService {
     }
 
     const message = [
-      `Context reminder (post-compaction) — your context was compacted. Here are your standing rules and current state:`,
+      `Apply these standing rules and current team state before responding:`,
       ``,
       `You are "${leadName}", the team lead of team "${run.teamName}".`,
       `You are running in a non-interactive CLI session. Do not ask questions.`,
@@ -32925,7 +33344,7 @@ export class TeamProvisioningService {
       persistentContext,
       taskBoardBlock.trim() ? `\n${taskBoardBlock}` : '',
       ``,
-      `This is a context-only reminder. Do NOT start new work or execute tasks in this turn. Reply with a single word: "OK".`,
+      `Do NOT start new work or execute tasks in this turn. Reply with one concise user-facing team status line about board readiness and teammate availability. Only report board readiness and teammate availability.`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -34436,7 +34855,6 @@ export class TeamProvisioningService {
     if (run.teamLaunchedNotificationFired) {
       return;
     }
-    run.teamLaunchedNotificationFired = true;
 
     try {
       const config = ConfigManager.getInstance().getConfig();
@@ -34447,6 +34865,7 @@ export class TeamProvisioningService {
       if (run.isLaunch && joinedCount > 0 && !allJoined) {
         return;
       }
+      run.teamLaunchedNotificationFired = true;
       const body = run.isLaunch
         ? allJoined
           ? `Team "${displayName}" has been launched - all ${joinedCount} teammates joined and are ready for tasks.`
@@ -35096,6 +35515,7 @@ export class TeamProvisioningService {
       void this.mcpConfigBuilder.removeConfigFile(run.mcpConfigPath);
       run.mcpConfigPath = null;
     }
+    this.removeRunMemberMcpConfigFilesLater(run);
     if (run.bootstrapSpecPath) {
       void removeDeterministicBootstrapSpecFile(run.bootstrapSpecPath);
       run.bootstrapSpecPath = null;
@@ -36040,6 +36460,7 @@ export class TeamProvisioningService {
       providerId: 'opencode',
       model: member.model?.trim() || undefined,
       effort: isTeamEffortLevel(member.effort) ? member.effort : undefined,
+      mcpPolicy: normalizeTeamMemberMcpPolicy(member.mcpPolicy),
       cwd: member.cwd?.trim() || undefined,
       joinedAt: Date.now(),
     };
@@ -36788,6 +37209,7 @@ export class TeamProvisioningService {
             providerId: configMember?.providerId,
             model: configMember?.model,
             effort: configMember?.effort,
+            mcpPolicy: configMember?.mcpPolicy,
           };
         });
         const memberOverridesUsed = members.some(
@@ -36931,9 +37353,20 @@ export class TeamProvisioningService {
       const model = typeof member.model === 'string' ? member.model.trim() || undefined : undefined;
       const effort = isTeamEffortLevel(member.effort) ? member.effort : undefined;
       const cwd = typeof member.cwd === 'string' ? member.cwd.trim() || undefined : undefined;
+      const mcpPolicy = normalizeTeamMemberMcpPolicy(member.mcpPolicy);
       const prev = byName.get(name);
       if (!prev) {
-        byName.set(name, { name, role, workflow, isolation, cwd, providerId, model, effort });
+        byName.set(name, {
+          name,
+          role,
+          workflow,
+          isolation,
+          cwd,
+          providerId,
+          model,
+          effort,
+          mcpPolicy,
+        });
       } else {
         byName.set(name, {
           ...prev,
@@ -36944,6 +37377,7 @@ export class TeamProvisioningService {
           providerId: prev.providerId || providerId,
           model: prev.model || model,
           effort: prev.effort || effort,
+          mcpPolicy: prev.mcpPolicy || mcpPolicy,
         });
       }
     }
@@ -37036,6 +37470,7 @@ export class TeamProvisioningService {
           provider?: string;
           model?: string;
           effort?: string;
+          mcpPolicy?: unknown;
           cwd?: string;
           removedAt?: unknown;
         }[];
@@ -37061,6 +37496,7 @@ export class TeamProvisioningService {
           providerId: normalizeTeamMemberProviderId(member.providerId ?? member.provider),
           model: typeof member.model === 'string' ? member.model.trim() || undefined : undefined,
           effort: isTeamEffortLevel(member.effort) ? member.effort : undefined,
+          mcpPolicy: normalizeTeamMemberMcpPolicy(member.mcpPolicy),
         });
       }
       // Defense: ignore CLI auto-suffixed duplicates (alice-2) when base name exists.

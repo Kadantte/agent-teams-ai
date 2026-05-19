@@ -734,6 +734,38 @@ export class CliInstallerService {
     };
   }
 
+  private getLatestProviderStatusForModelVerification(
+    providerId: CliProviderId,
+    binaryPath: string,
+    installedVersion: string | null
+  ): CliProviderStatus | null {
+    const snapshot = this.latestStatusSnapshot;
+    if (
+      !snapshot ||
+      snapshot.flavor !== 'agent_teams_orchestrator' ||
+      snapshot.binaryPath !== binaryPath ||
+      snapshot.installedVersion !== installedVersion
+    ) {
+      return null;
+    }
+
+    const provider =
+      cloneCliInstallationStatus(snapshot).providers.find(
+        (candidate) => candidate.providerId === providerId
+      ) ?? null;
+    if (
+      !provider ||
+      provider.models.length <= 0 ||
+      provider.supported !== true ||
+      provider.authenticated !== true ||
+      provider.capabilities.oneShot !== true
+    ) {
+      return null;
+    }
+
+    return provider;
+  }
+
   // ---------------------------------------------------------------------------
   // Public: getStatus
   // ---------------------------------------------------------------------------
@@ -844,10 +876,12 @@ export class CliInstallerService {
       return nextProviderStatus;
     }
 
-    const providerStatus = await this.multimodelBridgeService.getProviderStatus(
-      binaryPath,
-      providerId
-    );
+    const providerStatus =
+      this.getLatestProviderStatusForModelVerification(
+        providerId,
+        binaryPath,
+        versionProbe.version
+      ) ?? (await this.multimodelBridgeService.getProviderStatus(binaryPath, providerId));
     const nextProviderStatus = this.applyProviderModelAvailabilityToProvider(
       binaryPath,
       versionProbe.version,

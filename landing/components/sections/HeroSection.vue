@@ -131,9 +131,10 @@ onUnmounted(() => {
     <v-container class="cyber-hero__container">
       <div class="cyber-hero__layout">
         <div class="cyber-hero__copy">
-          <h1 class="cyber-hero__title" aria-label="Agent Teams">
+          <h1 class="cyber-hero__title" aria-label="Agent Teams AI">
             <span>Agent</span>
             <span class="cyber-hero__title-accent">Teams</span>
+            <span class="cyber-hero__title-accent">AI</span>
           </h1>
 
           <p class="cyber-hero__slogan cyber-panel">

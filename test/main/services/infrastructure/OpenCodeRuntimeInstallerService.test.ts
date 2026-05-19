@@ -2,15 +2,20 @@ import { createHash } from 'crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { gzipSync } from 'zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { gzipSync } from 'zlib';
 
 const execCliMock = vi.hoisted(() => vi.fn());
+const buildMergedCliPathMock = vi.hoisted(() => vi.fn());
 const getCachedShellEnvMock = vi.hoisted(() => vi.fn());
 const resolveInteractiveShellEnvBestEffortMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@main/utils/childProcess', () => ({
   execCli: execCliMock,
+}));
+
+vi.mock('@main/utils/cliPathMerge', () => ({
+  buildMergedCliPath: () => buildMergedCliPathMock(),
 }));
 
 vi.mock('@main/utils/shellEnv', () => ({
@@ -79,6 +84,8 @@ describe('OpenCodeRuntimeInstallerService resolver', () => {
     process.env.PATH = '';
     execCliMock.mockReset();
     execCliMock.mockResolvedValue({ stdout: 'opencode 1.0.0\n', stderr: '' });
+    buildMergedCliPathMock.mockReset();
+    buildMergedCliPathMock.mockReturnValue('');
     getCachedShellEnvMock.mockReset();
     getCachedShellEnvMock.mockReturnValue(null);
     resolveInteractiveShellEnvBestEffortMock.mockReset();
@@ -211,6 +218,22 @@ describe('OpenCodeRuntimeInstallerService resolver', () => {
     });
   });
 
+  it('returns a verified OpenCode binary from the merged CLI PATH without interactive shell env resolution', async () => {
+    const binaryPath = path.join(tempRoot!, 'merged-cli-path', 'bin', 'opencode');
+    await mkdir(path.dirname(binaryPath), { recursive: true });
+    await writeFile(binaryPath, 'binary', { mode: 0o755 });
+    buildMergedCliPathMock.mockReturnValue(path.dirname(binaryPath));
+
+    await expect(resolveVerifiedOpenCodeRuntimeBinaryPath({ shellEnvTimeoutMs: 0 })).resolves.toBe(
+      binaryPath
+    );
+    expect(resolveInteractiveShellEnvBestEffortMock).not.toHaveBeenCalled();
+    expect(execCliMock).toHaveBeenCalledWith(binaryPath, ['--version'], {
+      timeout: 10_000,
+      windowsHide: true,
+    });
+  });
+
   it('reports PATH-installed OpenCode as installed after best-effort shell env resolution', async () => {
     const binaryPath = path.join(tempRoot!, 'homebrew', 'bin', 'opencode');
     await mkdir(path.dirname(binaryPath), { recursive: true });
@@ -224,6 +247,53 @@ describe('OpenCodeRuntimeInstallerService resolver', () => {
       source: 'path',
       state: 'ready',
       binaryPath,
+      version: 'opencode 1.0.0',
+    });
+  });
+
+  it('prefers a working PATH OpenCode binary over a broken app-managed manifest', async () => {
+    const appManagedBinaryPath = path.join(
+      tempRoot!,
+      'data',
+      'runtimes',
+      'opencode',
+      'versions',
+      '1.0.0',
+      'opencode-test',
+      'opencode'
+    );
+    const pathBinaryPath = path.join(tempRoot!, 'homebrew', 'bin', 'opencode');
+    const manifestPath = path.join(tempRoot!, 'data', 'runtimes', 'opencode', 'current.json');
+    await mkdir(path.dirname(appManagedBinaryPath), { recursive: true });
+    await mkdir(path.dirname(pathBinaryPath), { recursive: true });
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(appManagedBinaryPath, 'broken binary', { mode: 0o755 });
+    await writeFile(pathBinaryPath, 'path binary', { mode: 0o755 });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        version: '1.0.0',
+        platformPackage: 'opencode-test',
+        binaryPath: appManagedBinaryPath,
+        integrity: 'sha512-test',
+        installedAt: '2026-05-12T00:00:00.000Z',
+      })}\n`,
+      'utf8'
+    );
+    buildMergedCliPathMock.mockReturnValue(path.dirname(pathBinaryPath));
+    execCliMock.mockImplementation(async (binaryPath: string) => {
+      if (binaryPath === appManagedBinaryPath) {
+        throw new Error('broken app-managed runtime');
+      }
+      return { stdout: 'opencode 1.0.0\n', stderr: '' };
+    });
+
+    await expect(new OpenCodeRuntimeInstallerService().getStatus()).resolves.toMatchObject({
+      installed: true,
+      source: 'path',
+      state: 'ready',
+      binaryPath: pathBinaryPath,
       version: 'opencode 1.0.0',
     });
   });

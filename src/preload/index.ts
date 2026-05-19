@@ -331,6 +331,7 @@ import type {
   TeamLaunchResponse,
   TeamMemberActivityMeta,
   TeamMessageNotificationData,
+  TeamProvisioningModelCheckRequest,
   TeamProvisioningModelVerificationMode,
   TeamProvisioningPrepareResult,
   TeamProvisioningProgress,
@@ -927,7 +928,8 @@ const electronAPI: ElectronAPI = {
       providerIds?: TeamLaunchRequest['providerId'][],
       selectedModels?: string[],
       limitContext?: boolean,
-      modelVerificationMode?: TeamProvisioningModelVerificationMode
+      modelVerificationMode?: TeamProvisioningModelVerificationMode,
+      selectedModelChecks?: TeamProvisioningModelCheckRequest[]
     ) => {
       return invokeIpcWithResult<TeamProvisioningPrepareResult>(
         TEAM_PREPARE_PROVISIONING,
@@ -936,7 +938,8 @@ const electronAPI: ElectronAPI = {
         providerIds,
         selectedModels,
         limitContext,
-        modelVerificationMode
+        modelVerificationMode,
+        selectedModelChecks
       );
     },
     getWorktreeGitStatus: async (projectPath: string) => {

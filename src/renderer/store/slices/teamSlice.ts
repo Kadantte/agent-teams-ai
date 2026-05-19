@@ -2035,6 +2035,7 @@ function buildConfigFallbackMemberSnapshots(snapshot: TeamViewSnapshot): TeamMem
       providerBackendId: member.providerBackendId,
       model: member.model,
       effort: member.effort,
+      mcpPolicy: member.mcpPolicy,
       selectedFastMode: member.fastMode,
       cwd: member.cwd,
       removedAt: member.removedAt,
@@ -2082,6 +2083,7 @@ interface SummaryFallbackMemberSource {
   agentId?: string;
   role?: string;
   color?: string;
+  mcpPolicy?: TeamMemberSnapshot['mcpPolicy'];
 }
 
 function normalizeSummaryTeammateName(
@@ -2120,6 +2122,7 @@ function getSummaryRosterTeammateSources(summary: TeamSummary): SummaryFallbackM
       agentId: member.agentId,
       role: member.role,
       color: member.color,
+      mcpPolicy: member.mcpPolicy,
     });
   }
   return sources;
@@ -2218,7 +2221,7 @@ function buildSummaryFallbackMemberSnapshots(
   const seenNames = new Set<string>();
   const buildSnapshot = (
     name: string,
-    source?: { agentId?: string; role?: string; color?: string },
+    source?: Omit<SummaryFallbackMemberSource, 'name'>,
     lead = false
   ): TeamMemberSnapshot | null => {
     const trimmed = name.trim();
@@ -2237,6 +2240,7 @@ function buildSummaryFallbackMemberSnapshots(
       color: source?.color ?? getMemberColorByName(trimmed),
       agentType: lead ? 'team-lead' : undefined,
       role: source?.role ?? (lead ? 'Team Lead' : undefined),
+      mcpPolicy: source?.mcpPolicy,
     };
   };
 
@@ -3070,6 +3074,33 @@ export interface TeamSlice {
 
 // --- Per-team launch params persistence ---
 const LAUNCH_PARAMS_PREFIX = 'team:launchParams:';
+const MESSAGES_PANEL_MODE_STORAGE_KEY = 'team:messagesPanelMode';
+const DEFAULT_MESSAGES_PANEL_MODE: TeamMessagesPanelMode = 'sidebar';
+const VALID_MESSAGES_PANEL_MODES: ReadonlySet<TeamMessagesPanelMode> = new Set([
+  'sidebar',
+  'inline',
+  'bottom-sheet',
+  'floating-composer',
+]);
+
+export function loadPersistedMessagesPanelMode(): TeamMessagesPanelMode {
+  try {
+    const persisted = localStorage.getItem(MESSAGES_PANEL_MODE_STORAGE_KEY);
+    return VALID_MESSAGES_PANEL_MODES.has(persisted as TeamMessagesPanelMode)
+      ? (persisted as TeamMessagesPanelMode)
+      : DEFAULT_MESSAGES_PANEL_MODE;
+  } catch {
+    return DEFAULT_MESSAGES_PANEL_MODE;
+  }
+}
+
+export function savePersistedMessagesPanelMode(mode: TeamMessagesPanelMode): void {
+  try {
+    localStorage.setItem(MESSAGES_PANEL_MODE_STORAGE_KEY, mode);
+  } catch {
+    // ignore - best-effort UI preference persistence
+  }
+}
 
 export function getCurrentProvisioningProgressForTeam(
   state: Pick<TeamSlice, 'currentProvisioningRunIdByTeam' | 'provisioningRuns'>,
@@ -3440,10 +3471,13 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   toolApprovalSettings: loadToolApprovalSettings(),
 
   // Messages panel UI state
-  messagesPanelMode: 'sidebar' as const,
+  messagesPanelMode: loadPersistedMessagesPanelMode(),
   messagesPanelWidth: 340,
   sidebarLogsHeight: 213,
-  setMessagesPanelMode: (mode: TeamMessagesPanelMode) => set({ messagesPanelMode: mode }),
+  setMessagesPanelMode: (mode: TeamMessagesPanelMode) => {
+    savePersistedMessagesPanelMode(mode);
+    set({ messagesPanelMode: mode });
+  },
   setMessagesPanelWidth: (width: number) => set({ messagesPanelWidth: width }),
   setSidebarLogsHeight: (height: number) => set({ sidebarLogsHeight: height }),
 
@@ -5572,7 +5606,11 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
           description: request.description || '',
           color: request.color,
           memberCount: request.members.length,
-          members: request.members.map((m) => ({ name: m.name, role: m.role })),
+          members: request.members.map((m) => ({
+            name: m.name,
+            role: m.role,
+            mcpPolicy: m.mcpPolicy,
+          })),
           taskCount: 0,
           lastActivity: null,
           projectPath: request.cwd || undefined,

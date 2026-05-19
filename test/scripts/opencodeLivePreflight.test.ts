@@ -17,6 +17,7 @@ interface StopChildOptions {
 
 interface OpenCodeLivePreflightTestHooks {
   __opencodeLivePreflightTestHooks: {
+    isHealthyOpenCodeHostResponse(response: { ok: boolean }): boolean;
     stopChild(child: FakeChild, options?: StopChildOptions): Promise<void>;
     taskkillProcessTree(pid: number): Promise<void>;
   };
@@ -36,6 +37,14 @@ describe('opencode live preflight cleanup', () => {
       await fs.rm(tempDir, { recursive: true, force: true });
       tempDir = '';
     }
+  });
+
+  it('accepts an HTTP 2xx OpenCode health response without requiring a JSON body', async () => {
+    const { isHealthyOpenCodeHostResponse } = (await loadTestHooks())
+      .__opencodeLivePreflightTestHooks;
+
+    expect(isHealthyOpenCodeHostResponse({ ok: true })).toBe(true);
+    expect(isHealthyOpenCodeHostResponse({ ok: false })).toBe(false);
   });
 
   it('waits for child close after Windows process-tree cleanup', async () => {

@@ -18,6 +18,7 @@ import { getReviewStateFromTask } from '@shared/utils/reviewState';
 import { buildStandaloneSlashCommandMeta } from '@shared/utils/slashCommands';
 import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import { buildTeamMemberColorMap } from '@shared/utils/teamMemberColors';
+import { normalizeTeamMemberMcpPolicy } from '@shared/utils/teamMemberMcpPolicy';
 import { parseNumericSuffixName, validateTeamMemberNameFormat } from '@shared/utils/teamMemberName';
 import { normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 import { extractToolPreview, formatToolSummaryFromCalls } from '@shared/utils/toolSummary';
@@ -998,6 +999,7 @@ export class TeamDataService {
         model: member.model,
         effort: member.effort,
         fastMode: member.fastMode,
+        mcpPolicy: normalizeTeamMemberMcpPolicy(member.mcpPolicy),
       })),
     };
   }
@@ -1812,6 +1814,7 @@ export class TeamDataService {
       providerId: normalizeOptionalTeamProviderId(request.providerId),
       model: request.model?.trim() || undefined,
       effort: isTeamEffortLevel(request.effort) ? request.effort : undefined,
+      mcpPolicy: normalizeTeamMemberMcpPolicy(request.mcpPolicy),
       agentType: 'general-purpose',
       joinedAt: Date.now(),
     };
@@ -1888,6 +1891,7 @@ export class TeamDataService {
             member.fastMode === 'inherit' || member.fastMode === 'on' || member.fastMode === 'off'
               ? member.fastMode
               : undefined,
+          mcpPolicy: normalizeTeamMemberMcpPolicy(member.mcpPolicy),
           agentType: prev?.agentType ?? 'general-purpose',
           agentId: isSameActiveMember ? prev?.agentId : undefined,
           color: prev?.color,
@@ -3011,6 +3015,7 @@ export class TeamDataService {
         model: member.model?.trim() || undefined,
         effort: isTeamEffortLevel(member.effort) ? member.effort : undefined,
         fastMode: member.fastMode,
+        mcpPolicy: normalizeTeamMemberMcpPolicy(member.mcpPolicy),
         agentType: 'general-purpose' as const,
         joinedAt,
       }))

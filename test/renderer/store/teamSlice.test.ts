@@ -8,6 +8,8 @@ import {
   getActiveTeamPendingReplyWaits,
   hasActiveTeamPendingReplyWait,
   getCurrentProvisioningProgressForTeam,
+  loadPersistedMessagesPanelMode,
+  savePersistedMessagesPanelMode,
   selectMemberMessagesForTeamMember,
   selectResolvedMemberForTeamName,
   selectResolvedMembersForTeamName,
@@ -344,11 +346,37 @@ describe('teamSlice actions', () => {
     });
     hoisted.restartMember.mockResolvedValue(undefined);
     hoisted.skipMemberForLaunch.mockResolvedValue(undefined);
+    window.localStorage.removeItem('team:messagesPanelMode');
   });
 
   afterEach(() => {
     restoreWindowAnimationFrame();
     vi.useRealTimers();
+  });
+
+  it('restores the selected messages panel mode from localStorage', () => {
+    window.localStorage.setItem('team:messagesPanelMode', 'bottom-sheet');
+
+    const store = createSliceStore();
+
+    expect(store.getState().messagesPanelMode).toBe('bottom-sheet');
+  });
+
+  it('persists messages panel mode changes and ignores invalid stored values', () => {
+    const store = createSliceStore();
+
+    store.getState().setMessagesPanelMode('floating-composer');
+
+    expect(window.localStorage.getItem('team:messagesPanelMode')).toBe('floating-composer');
+    expect(loadPersistedMessagesPanelMode()).toBe('floating-composer');
+
+    window.localStorage.setItem('team:messagesPanelMode', 'bad-mode');
+
+    expect(loadPersistedMessagesPanelMode()).toBe('sidebar');
+
+    savePersistedMessagesPanelMode('inline');
+
+    expect(window.localStorage.getItem('team:messagesPanelMode')).toBe('inline');
   });
 
   it('records terminal provisioning fanout diagnostics without changing visible graph hydrate behavior', () => {

@@ -149,7 +149,7 @@ export const CollapsibleTeamSection = memo(function CollapsibleTeamSection({
           {headerExtra}
         </div>
         {action && (
-          <div className="relative z-10 flex shrink-0 items-center self-start">{action}</div>
+          <div className="relative z-10 flex shrink-0 items-center self-stretch">{action}</div>
         )}
       </div>
       {keepMounted ? (

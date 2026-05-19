@@ -219,6 +219,35 @@ function firstEvidence(parts: readonly string[], pattern: RegExp): string[] {
 const WORKSPACE_TRUST_FAILURE_PATTERN =
   /workspace trust is not accepted|cannot start in headless process runtime because workspace trust|open that workspace once interactively and accept trust|workspace_trust_preflight_not_confirmed|workspace trust was not confirmed|workspace trust preflight blocked launch/i;
 
+const BOOTSTRAP_TRANSPORT_EVIDENCE_PATTERN = new RegExp(
+  [
+    'mailbox_bootstrap_written',
+    'bootstrap_prompt_observed',
+    'bootstrap_submit_attempted',
+    'bootstrap_submitted',
+    'inbox_poller_ready',
+    'runtime_events_log',
+  ].join('|'),
+  'i'
+);
+
+const MODEL_NO_BOOTSTRAP_PATTERN = new RegExp(
+  [
+    'did not bootstrap-confirm',
+    'bootstrap unconfirmed',
+    'bootstrap-confirm before timeout',
+    'bootstrap was not confirmed',
+    'bootstrap not confirmed',
+    'check-in not yet received',
+    'bootstrap_stalled',
+    'did not submit bootstrap prompt',
+    'bootstrap_submit_accepted_without_uuid',
+    'timed out waiting for bootstrap_submitted',
+    'last transport stage:\\s*(?:mailbox_bootstrap_written|bootstrap_prompt_observed|bootstrap_submit_attempted|bootstrap_submitted)',
+  ].join('|'),
+  'i'
+);
+
 export function isWorkspaceTrustLaunchFailureText(value: string): boolean {
   return WORKSPACE_TRUST_FAILURE_PATTERN.test(value);
 }
@@ -228,6 +257,7 @@ export function classifyLaunchFailureArtifact(
 ): LaunchFailureArtifactClassification {
   const parts = collectLaunchFailureSearchParts(input);
   const text = parts.join('\n').toLowerCase();
+  const hasBootstrapTransportEvidence = BOOTSTRAP_TRANSPORT_EVIDENCE_PATTERN.test(text);
   const candidates: {
     code: LaunchFailureArtifactClassificationCode;
     confidence: number;
@@ -268,8 +298,7 @@ export function classifyLaunchFailureArtifact(
     {
       code: 'model_no_bootstrap',
       confidence: 0.82,
-      pattern:
-        /did not bootstrap-confirm|bootstrap unconfirmed|bootstrap-confirm before timeout|bootstrap was not confirmed|bootstrap not confirmed|check-in not yet received|bootstrap_stalled/i,
+      pattern: MODEL_NO_BOOTSTRAP_PATTERN,
     },
     {
       code: 'process_exited',
@@ -279,6 +308,9 @@ export function classifyLaunchFailureArtifact(
   ];
 
   for (const candidate of candidates) {
+    if (candidate.code === 'stdin_missing' && hasBootstrapTransportEvidence) {
+      continue;
+    }
     if (candidate.pattern.test(text)) {
       return {
         code: candidate.code,
@@ -305,22 +337,27 @@ export function extractLaunchBootstrapTransportBreadcrumb(
   ];
   const evidence = firstEvidence(
     parts,
-    /bootstrap_submit_|last transport stage|no stdin data received|local prompt handler/i
+    /bootstrap_submit_|mailbox_bootstrap_written|bootstrap_prompt_observed|bootstrap_submitted|last transport stage|no stdin data received|local prompt handler/i
   ).map(redactLaunchFailureArtifactText);
   const retryableRaw = retryableMatches.at(-1)?.[1]?.toLowerCase();
   return {
-    lastTransportStage: lastStageMatches.at(-1)?.[1]?.trim() ?? null,
+    lastTransportStage: normalizeLastTransportStage(lastStageMatches.at(-1)?.[1]),
     submitRejected: /bootstrap_submit_rejected|submit rejected by local prompt handler/i.test(
       combined
     ),
     retryable: retryableRaw === 'true' ? true : retryableRaw === 'false' ? false : null,
     noStdinWarning: /no stdin data received|proceeding without it/i.test(combined),
     bootstrapSubmitted:
-      /(?:event["']?\s*:\s*["']bootstrap_submitted["']|bootstrap_submit_accepted|bootstrap submitted)/i.test(
+      /(?:(?:event|type)["']?\s*[:=]\s*["']bootstrap_submitted["']|bootstrap_submit_accepted|bootstrap submitted)/i.test(
         combined
       ),
     evidence,
   };
+}
+
+function normalizeLastTransportStage(stage: string | undefined): string | null {
+  const normalized = stage?.replace(/\s+Last\s+(?:stderr|stdout):.*$/i, '').trim();
+  return normalized || null;
 }
 
 async function readBoundedTextFile(sourcePath: string): Promise<{ text?: string; issue?: string }> {

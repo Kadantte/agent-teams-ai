@@ -346,7 +346,7 @@ describe('TeamProvisioningService post-compact lifecycle', () => {
     expect(text).not.toContain('continue with any pending work');
     // Should be context-only
     expect(text).toContain('Do NOT start new work');
-    expect(text).toContain('Reply with a single word');
+    expect(text).toContain('Reply with one concise user-facing team status line');
     // Should contain persistent context
     expect(text).toContain('Constraints:');
     expect(text).toContain('Do NOT call TeamDelete');

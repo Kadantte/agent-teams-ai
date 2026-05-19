@@ -8,6 +8,17 @@
  * Class-based with ES #private fields and DI-ready constructor.
  */
 
+import {
+  type GraphDataPort,
+  type GraphEdge,
+  type GraphLayoutMode,
+  type GraphLayoutPort,
+  type GraphNode,
+  type GraphNodeState,
+  type GraphOwnerSlotAssignment,
+  type GraphParticle,
+  TASK_COLUMN_MAX_VISIBLE_ROWS,
+} from '@claude-teams/agent-graph';
 import { getUnreadCount } from '@renderer/services/commentReadStorage';
 import {
   agentAvatarUrl,
@@ -51,31 +62,23 @@ import {
 } from '../../core/domain/taskGraphSemantics';
 
 import type {
-  GraphDataPort,
-  GraphEdge,
-  GraphLayoutMode,
-  GraphLayoutPort,
-  GraphNode,
-  GraphNodeState,
-  GraphOwnerSlotAssignment,
-  GraphParticle,
-} from '@claude-teams/agent-graph';
-import type {
   ActiveToolCall,
   InboxMessage,
   LeadActivityState,
+  LeadContextUsage,
   MemberSpawnStatusEntry,
   MemberSpawnStatusesSnapshot,
   ResolvedTeamMember,
+  TeamAgentRuntimeEntry,
   TeamProcess,
   TeamProvisioningProgress,
   TeamViewSnapshot,
 } from '@shared/types/team';
-import type { LeadContextUsage } from '@shared/types/team';
 
 export interface TeamGraphData extends TeamViewSnapshot {
   members: ResolvedTeamMember[];
   messageFeed: InboxMessage[];
+  runtimeEntriesByMember?: Record<string, TeamAgentRuntimeEntry>;
 }
 
 function toGraphLaunchVisualState(
@@ -438,6 +441,7 @@ export class TeamGraphAdapter {
   ): void {
     const percent = leadContext?.contextUsedPercent;
     const leadMember = data.members.find((member) => member.name === leadName);
+    const runtimeEntry = data.runtimeEntriesByMember?.[leadName];
     const isTeamVisualOnline = data.isAlive || isTeamProvisioning;
     const activeTool = TeamGraphAdapter.#selectVisibleTool(
       activeTools?.[leadName],
@@ -454,6 +458,7 @@ export class TeamGraphAdapter {
           spawnLivenessSource: undefined,
           spawnRuntimeAlive: undefined,
           spawnBootstrapStalled: undefined,
+          runtimeEntry,
           runtimeAdvisory: leadMember.runtimeAdvisory,
           isLaunchSettling: false,
           isTeamAlive: data.isAlive,
@@ -545,6 +550,7 @@ export class TeamGraphAdapter {
       const memberId =
         memberNodeIdByAlias.get(member.name) ?? buildGraphMemberNodeIdForMember(teamName, member);
       const spawn = spawnStatuses?.[member.name];
+      const runtimeEntry = data.runtimeEntriesByMember?.[member.name];
       const activeTool = TeamGraphAdapter.#selectVisibleTool(
         activeTools?.[member.name],
         finishedVisible?.[member.name]
@@ -576,6 +582,9 @@ export class TeamGraphAdapter {
         spawnAgentToolAccepted: spawn?.agentToolAccepted,
         spawnHardFailure: spawn?.hardFailure,
         spawnLivenessKind: spawn?.livenessKind,
+        spawnFirstSpawnAcceptedAt: spawn?.firstSpawnAcceptedAt,
+        spawnUpdatedAt: spawn?.updatedAt,
+        runtimeEntry,
         runtimeAdvisory: member.runtimeAdvisory,
         isLaunchSettling,
         isTeamAlive: data.isAlive,
@@ -751,7 +760,7 @@ export class TeamGraphAdapter {
     }
 
     const { visibleNodes: visibleTaskNodes, visibleNodeIdByTaskId } =
-      collapseOverflowStacksWithMeta(rawTaskNodes, teamName, 5);
+      collapseOverflowStacksWithMeta(rawTaskNodes, teamName, TASK_COLUMN_MAX_VISIBLE_ROWS);
     const visibleTaskIds = new Set(
       visibleTaskNodes.flatMap((taskNode) =>
         taskNode.domainRef.kind === 'task' ? [taskNode.domainRef.taskId] : []

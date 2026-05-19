@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-empty-object-type -- Legacy dialog mocks use broad DTO shapes. */
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const openDashboard = vi.fn();
@@ -238,10 +240,18 @@ vi.mock('@renderer/components/team/members/MembersEditorSection', () => ({
 vi.mock('@renderer/components/team/members/TeamRosterEditorSection', () => ({
   TeamRosterEditorSection: (props: any) => {
     teamRosterEditorSectionMock.lastProps = props;
+    const leadProviderNotice = props.leadProviderNoticeById?.[props.providerId] ?? null;
     return React.createElement(
       'div',
       null,
       props.headerTop,
+      leadProviderNotice
+        ? React.createElement(
+            'div',
+            { 'data-testid': 'mock-lead-provider-notice' },
+            leadProviderNotice
+          )
+        : null,
       'team-roster-editor',
       props.headerBottom
     );
@@ -450,9 +460,27 @@ vi.mock('@renderer/components/team/dialogs/ProvisioningProviderStatusList', () =
   failIncompleteProviderChecks: (checks: unknown) => checks,
   getPrimaryProvisioningFailureDetail: () => null,
   getProvisioningFailureHint: () => 'hint',
+  getProvisioningProviderProgressMessage: () => 'Checking selected providers in parallel...',
   getProvisioningProviderBackendSummary: () => null,
   shouldHideProvisioningProviderStatusList: () => false,
-  updateProviderCheck: (checks: unknown) => checks,
+  updateProviderCheck: (
+    checks: {
+      providerId: string;
+      status: string;
+      details: string[];
+      backendSummary?: string | null;
+    }[],
+    providerId: string,
+    patch: { status: string; details: string[]; backendSummary?: string | null }
+  ) =>
+    checks.map((check) =>
+      check.providerId === providerId
+        ? {
+            ...check,
+            ...patch,
+          }
+        : check
+    ),
 }));
 
 vi.mock('@renderer/components/team/dialogs/TeamModelSelector', () => ({
@@ -463,7 +491,7 @@ vi.mock('@renderer/components/team/dialogs/TeamModelSelector', () => ({
     [providerId, model, effort].filter(Boolean).join(' '),
   OPENCODE_ONE_SHOT_DISABLED_BADGE_LABEL: 'team only',
   OPENCODE_ONE_SHOT_DISABLED_REASON:
-    'OpenCode team launch is available for normal teams, but scheduled one-shot prompts still run through claude -p. Choose Anthropic, Codex, or Gemini for one-shot schedules.',
+    'OpenCode team launch is available for normal teams, but scheduled one-shot prompts still run through claude -p. Choose Anthropic or Codex for one-shot schedules.',
 }));
 
 vi.mock('@renderer/components/team/dialogs/EffortLevelSelector', () => ({
@@ -1314,6 +1342,11 @@ describe('LaunchTeamDialog', () => {
     });
 
     expect(host.textContent).toContain('OpenCode cannot lead mixed-provider teams');
+    const providerNotice = host.querySelector('[data-testid="mock-lead-provider-notice"]');
+    expect(providerNotice?.textContent).toContain('OpenCode cannot lead mixed-provider teams');
+    expect(providerNotice?.textContent).toContain(
+      'OpenCode can be added as a teammate under an Anthropic or Codex lead'
+    );
     const submitButton = Array.from(host.querySelectorAll('button')).find(
       (button) => button.textContent === 'Launch team'
     );
@@ -1881,7 +1914,7 @@ describe('LaunchTeamDialog', () => {
       .mocked(runProviderPrepareDiagnostics)
       .mock.calls.filter((call) => call[0]?.providerId === 'opencode');
     expect(inFlightOpencodePrepareCalls).toHaveLength(1);
-    expect(host.textContent).toContain('Selected providers are ready.');
+    expect(host.textContent).toContain('All selected providers are ready.');
 
     await act(async () => {
       root.unmount();
@@ -2015,7 +2048,8 @@ describe('LaunchTeamDialog', () => {
       await flush();
     });
 
-    const callsAfterSameSignatureRerender = vi.mocked(runProviderPrepareDiagnostics).mock.calls.length;
+    const callsAfterSameSignatureRerender = vi.mocked(runProviderPrepareDiagnostics).mock.calls
+      .length;
 
     await act(async () => {
       resolvePrepare({
@@ -2031,7 +2065,7 @@ describe('LaunchTeamDialog', () => {
     expect(vi.mocked(runProviderPrepareDiagnostics)).toHaveBeenCalledTimes(
       callsAfterSameSignatureRerender
     );
-    expect(host.textContent).toContain('Selected providers are ready.');
+    expect(host.textContent).toContain('All selected providers are ready.');
 
     await act(async () => {
       root.unmount();

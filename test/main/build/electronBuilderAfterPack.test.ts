@@ -157,7 +157,7 @@ describe('electron-builder afterPack', () => {
     tempDirs.push(tempDir);
 
     writeFile(
-      path.join(tempDir, 'Contents', 'MacOS', 'Agent Teams UI'),
+      path.join(tempDir, 'Contents', 'MacOS', 'Agent Teams AI'),
       createMachOBuffer('arm64')
     );
     writeFile(
@@ -229,7 +229,7 @@ describe('electron-builder afterPack', () => {
     const tempDir = createTempDir();
     tempDirs.push(tempDir);
 
-    writeFile(path.join(tempDir, 'Agent Teams UI.exe'), createPortableExecutableBuffer('x64'));
+    writeFile(path.join(tempDir, 'Agent Teams AI.exe'), createPortableExecutableBuffer('x64'));
     writeFile(
       path.join(
         tempDir,

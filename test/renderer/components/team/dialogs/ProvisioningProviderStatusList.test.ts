@@ -1,15 +1,16 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createInitialProviderChecks,
   deriveEffectiveProvisioningPrepareState,
   getPrimaryProvisioningFailureDetail,
   getProvisioningFailureHint,
   getProvisioningProviderBackendSummary,
+  getProvisioningProviderProgressMessage,
   ProvisioningProviderStatusList,
-  createInitialProviderChecks,
 } from '@renderer/components/team/dialogs/ProvisioningProviderStatusList';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 describe('ProvisioningProviderStatusList', () => {
   afterEach(() => {
@@ -88,6 +89,7 @@ describe('ProvisioningProviderStatusList', () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
+    const onOpenProviderSettings = vi.fn();
 
     await act(async () => {
       root.render(
@@ -102,6 +104,7 @@ describe('ProvisioningProviderStatusList', () => {
               ],
             },
           ],
+          onOpenProviderSettings,
         })
       );
       await Promise.resolve();
@@ -110,6 +113,7 @@ describe('ProvisioningProviderStatusList', () => {
     expect(host.textContent).toContain('OpenCode (OpenCode CLI): OpenCode app MCP unreachable');
     expect(host.textContent).not.toContain('Selected model checks');
     expect(host.textContent).not.toContain('model unavailable');
+    expect(host.querySelector('button')).toBeNull();
 
     await act(async () => {
       root.unmount();
@@ -200,6 +204,58 @@ describe('ProvisioningProviderStatusList', () => {
     });
   });
 
+  it('offers provider settings for actionable Codex auth notes', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const onOpenProviderSettings = vi.fn();
+
+    await act(async () => {
+      root.render(
+        React.createElement(ProvisioningProviderStatusList, {
+          checks: [
+            {
+              providerId: 'codex',
+              status: 'notes',
+              backendSummary: 'Codex native - auth required',
+              details: [
+                'Codex native requires OPENAI_API_KEY or CODEX_API_KEY, or a connected ChatGPT account. Add one before launching Codex.',
+                'Default - available for launch',
+                '5.5 - available for launch',
+              ],
+            },
+            {
+              providerId: 'anthropic',
+              status: 'notes',
+              details: ['Opus 4.6 - available for launch'],
+            },
+          ],
+          onOpenProviderSettings,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Open Codex settings');
+    const buttons = host.querySelectorAll('button');
+    expect(buttons).toHaveLength(1);
+    const button = buttons[0];
+    expect(button).not.toBeNull();
+
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+
+    expect(onOpenProviderSettings).toHaveBeenCalledWith('codex');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('summarizes OpenCode advisory ping misses without failure wording', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const host = document.createElement('div');
@@ -230,6 +286,44 @@ describe('ProvisioningProviderStatusList', () => {
 
     const detailLines = Array.from(host.querySelectorAll('p'));
     expect(detailLines[0]?.className).toContain('text-[var(--color-text-muted)]');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('hides internal OpenCode MCP proof cache markers from preflight details', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(ProvisioningProviderStatusList, {
+          checks: [
+            {
+              providerId: 'opencode',
+              status: 'ready',
+              backendSummary: 'OpenCode CLI',
+              details: ['opencode_app_mcp_tool_proof_persisted_cache_hit', 'big-pickle - verified'],
+            },
+          ],
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain(
+      'OpenCode (OpenCode CLI): Selected model checks - 1 verified'
+    );
+    expect(host.textContent).toContain('big-pickle - verified');
+    expect(host.textContent).not.toContain('opencode_app_mcp_tool_proof_persisted_cache_hit');
+
+    const detailLines = Array.from(host.querySelectorAll('p'));
+    expect(detailLines).toHaveLength(1);
+    expect(detailLines[0]?.textContent).toBe('big-pickle - verified');
 
     await act(async () => {
       root.unmount();
@@ -482,7 +576,7 @@ describe('ProvisioningProviderStatusList', () => {
       })
     ).toEqual({
       state: 'ready',
-      message: 'Selected providers are ready.',
+      message: 'All selected providers are ready.',
     });
   });
 
@@ -528,5 +622,17 @@ describe('ProvisioningProviderStatusList', () => {
       message:
         'Deep verification is still running. OpenCode free models may take around 20 seconds.',
     });
+  });
+
+  it('labels provider-scoped prepare refreshes without implying every provider restarted', () => {
+    expect(getProvisioningProviderProgressMessage(['opencode'], 3)).toBe(
+      'Checking OpenCode provider...'
+    );
+    expect(getProvisioningProviderProgressMessage(['anthropic', 'codex'], 3)).toBe(
+      'Checking Anthropic, Codex providers...'
+    );
+    expect(getProvisioningProviderProgressMessage(['anthropic', 'codex', 'opencode'], 3)).toBe(
+      'Checking selected providers in parallel...'
+    );
   });
 });

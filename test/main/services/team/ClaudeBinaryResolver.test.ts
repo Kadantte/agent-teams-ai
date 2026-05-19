@@ -72,7 +72,7 @@ describe('ClaudeBinaryResolver', () => {
     });
     process.cwd = vi.fn(() => workspaceRoot);
     Object.defineProperty(process, 'resourcesPath', {
-      value: '/Applications/Agent Teams UI.app/Contents/Resources',
+      value: '/Applications/Agent Teams AI.app/Contents/Resources',
       configurable: true,
       writable: true,
     });
@@ -219,7 +219,7 @@ describe('ClaudeBinaryResolver', () => {
 
   it('prefers the bundled runtime binary for packaged agent_teams_orchestrator builds', async () => {
     const expectedBinary = path.join(
-      '/Applications/Agent Teams UI.app/Contents/Resources',
+      '/Applications/Agent Teams AI.app/Contents/Resources',
       'runtime',
       'claude-multimodel'
     );

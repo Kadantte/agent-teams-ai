@@ -43,11 +43,12 @@
     "sectionSubtitle": "Des outils puissants pour une collaboration multi-agents efficace."
   },
   "pricing": {
-    "sectionTitle": "100% Gratuit. Sans conditions.",
-    "sectionSubtitle": "Open source, sans clé API, sans configuration. Installez et c'est parti.",
+    "sectionTitle": "Installation gratuite. Modèle gratuit inclus.",
+    "sectionSubtitle": "Commencez immédiatement avec un modèle gratuit sans authentification - sans compte, clé API ni carte bancaire. Connectez Claude, Codex, OpenCode/OpenRouter ou un autre provider seulement si vous voulez plus de modèles.",
     "getStarted": "Télécharger",
     "popular": "Gratuit",
-    "note": "Open source. Sans clé API. Sans configuration. Fonctionne entièrement en local."
+    "freeModelCallout": "Modèle gratuit sans authentification inclus",
+    "note": "Agent Teams n'a pas d'offre payante. Le modèle gratuit sans authentification permet d'essayer tout de suite; l'usage de providers payants est optionnel et dépend du provider choisi."
   },
   "testimonials": {
     "sectionTitle": "Ce que disent les développeurs",
@@ -112,7 +113,7 @@
   },
   "meta": {
     "homeTitle": "Agent Teams - Orchestration d'agents IA pour développeurs",
-    "homeDescription": "Application desktop gratuite et open source pour gérer des équipes d'agents IA. Tableau kanban, revue de code, communication inter-équipes. Fonctionne entièrement en local.",
+    "homeDescription": "Application desktop gratuite et open source pour équipes d'agents IA. Commencez avec un modèle gratuit sans authentification, puis connectez Claude, Codex ou OpenCode si besoin.",
     "downloadTitle": "Télécharger Agent Teams pour macOS, Windows et Linux",
     "downloadDescription": "Téléchargez Agent Teams pour macOS, Windows et Linux. Application desktop gratuite et open source pour équipes d'agents Claude, Codex et OpenCode."
   },

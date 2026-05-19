@@ -113,6 +113,7 @@ vi.mock('../../../../src/main/services/team/atomicWrite', () => ({
 
 vi.mock('../../../../src/main/services/team/fileLock', () => ({
   withFileLock: async (_filePath: string, fn: () => Promise<unknown>) => await fn(),
+  withFileLockSync: (_filePath: string, fn: () => unknown) => fn(),
 }));
 
 vi.mock('../../../../src/main/services/team/inboxLock', () => ({

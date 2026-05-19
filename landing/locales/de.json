@@ -43,11 +43,12 @@
     "sectionSubtitle": "Leistungsstarke Tools für effektive Multi-Agenten-Zusammenarbeit."
   },
   "pricing": {
-    "sectionTitle": "100% Kostenlos. Ohne Haken.",
-    "sectionSubtitle": "Open Source, keine API-Schlüssel, keine Konfiguration. Einfach installieren und loslegen.",
+    "sectionTitle": "Kostenlos installieren. Kostenloses Modell inklusive.",
+    "sectionSubtitle": "Starten Sie sofort mit einem kostenlosen Modell ohne Authentifizierung - ohne Konto, API-Schlüssel oder Kreditkarte. Verbinden Sie Claude, Codex, OpenCode/OpenRouter oder andere Provider nur, wenn Sie mehr Modelle möchten.",
     "getStarted": "Herunterladen",
     "popular": "Kostenlos",
-    "note": "Open Source. Keine API-Schlüssel. Keine Konfiguration. Läuft vollständig lokal."
+    "freeModelCallout": "Kostenloses Modell ohne Authentifizierung inklusive",
+    "note": "Agent Teams hat keinen eigenen Bezahlplan. Mit dem kostenlosen Modell ohne Authentifizierung können Sie sofort testen; kostenpflichtige Provider-Nutzung ist optional und hängt vom gewählten Provider ab."
   },
   "testimonials": {
     "sectionTitle": "Was Entwickler sagen",
@@ -112,7 +113,7 @@
   },
   "meta": {
     "homeTitle": "Agent Teams - KI-Agenten-Orchestrierung für Entwickler",
-    "homeDescription": "Kostenlose Open-Source-Desktop-App für KI-Agenten-Teams. Kanban-Board, Code-Review, teamübergreifende Kommunikation. Läuft vollständig lokal.",
+    "homeDescription": "Kostenlose Open-Source-Desktop-App für KI-Agenten-Teams. Starten Sie mit einem kostenlosen Modell ohne Authentifizierung und verbinden Sie Claude, Codex oder OpenCode bei Bedarf.",
     "downloadTitle": "Agent Teams für macOS, Windows und Linux herunterladen",
     "downloadDescription": "Laden Sie Agent Teams für macOS, Windows und Linux herunter. Kostenlose Open-Source-Desktop-App für Claude-, Codex- und OpenCode-Agententeams."
   },

@@ -77,7 +77,7 @@ function isOpenCodeRuntimeDeliveryCleanSessionRefreshDiagnostic(message: string)
   );
 }
 
-function isInformationalOpenCodeRuntimeDeliveryDiagnostic(
+export function isInformationalOpenCodeRuntimeDeliveryDiagnostic(
   message: string | null | undefined
 ): boolean {
   const normalized = message?.trim().toLowerCase();

@@ -29,6 +29,7 @@ const ACTIVITY_SHELL_HEIGHT =
   ACTIVITY_LANE.maxVisibleItems * ACTIVITY_LANE.rowHeight +
   ACTIVITY_LANE.overflowHeight;
 const NEW_ACTIVITY_HIGHLIGHT_MS = 1_000;
+const INTERACTIVE_ACTIVITY_CONTROL_CLASS = 'pointer-events-auto';
 
 interface GraphActivityHudProps {
   teamName: string;
@@ -456,7 +457,7 @@ export const GraphActivityHud = ({
           key={entry.graphItem.id}
           data-activity-entry-id={entry.graphItem.id}
           className={[
-            'h-[72px] min-h-[72px] min-w-0 max-w-full cursor-pointer overflow-hidden rounded-md border transition-[border-color,background-color,box-shadow] duration-500',
+            `${INTERACTIVE_ACTIVITY_CONTROL_CLASS} h-[72px] min-h-[72px] min-w-0 max-w-full cursor-pointer overflow-hidden rounded-md border transition-[border-color,background-color,box-shadow] duration-500`,
             isHighlighted
               ? 'border-sky-300/70 bg-[rgba(14,34,62,0.56)] shadow-[0_0_0_1px_rgba(125,211,252,0.30),0_0_18px_rgba(56,189,248,0.22)]'
               : 'border-transparent',
@@ -536,7 +537,7 @@ export const GraphActivityHud = ({
                     ref={(element) => {
                       shellRefs.current.set(lane.node.id, element);
                     }}
-                    className="pointer-events-auto absolute z-10 origin-top-left select-none opacity-0"
+                    className="pointer-events-none absolute z-10 origin-top-left select-none opacity-0"
                     style={{
                       width: `${laneWidth}px`,
                       maxWidth: `${laneWidth}px`,
@@ -561,7 +562,7 @@ export const GraphActivityHud = ({
                         {lane.overflowCount > 0 ? (
                           <button
                             type="button"
-                            className="h-8 min-h-8 w-full rounded-md border border-white/10 bg-[rgba(8,14,28,0.64)] px-3 py-1 text-center text-[11px] font-medium text-slate-300 transition-colors hover:border-white/20 hover:bg-[rgba(12,20,40,0.78)]"
+                            className={`${INTERACTIVE_ACTIVITY_CONTROL_CLASS} h-8 min-h-8 w-full rounded-md border border-white/10 bg-[rgba(8,14,28,0.64)] px-3 py-1 text-center text-[11px] font-medium text-slate-300 transition-colors hover:border-white/20 hover:bg-[rgba(12,20,40,0.78)]`}
                             onClick={() => handleOpenOwnerActivity(lane.node)}
                           >
                             +{lane.overflowCount} more

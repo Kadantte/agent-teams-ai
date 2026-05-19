@@ -13,8 +13,8 @@ const execCliMock = vi.fn();
 const buildProviderAwareCliEnvMock = vi.fn();
 const resolveInteractiveShellEnvMock = vi.fn<() => Promise<NodeJS.ProcessEnv>>();
 const readFileMock = vi.fn<(path: PathLike, encoding: BufferEncoding) => Promise<string>>();
-const enrichProviderStatusMock = vi.fn(
-  (provider, _options?: { hydrateModelCatalog?: boolean }) => Promise.resolve(provider)
+const enrichProviderStatusMock = vi.fn((provider, _options?: { hydrateModelCatalog?: boolean }) =>
+  Promise.resolve(provider)
 );
 const enrichProviderStatusesMock = vi.fn((providers) => Promise.resolve(providers));
 
@@ -343,6 +343,42 @@ describe('ClaudeMultimodelBridgeService', () => {
     expect(calls).not.toContain('model list --json --provider all');
   });
 
+  it('returns a scoped provider error when single-provider summary status times out', async () => {
+    execCliMock.mockImplementation((_binaryPath, args) => {
+      const normalizedArgs = Array.isArray(args) ? args.join(' ') : '';
+      if (normalizedArgs === 'runtime status --json --provider codex --summary') {
+        return Promise.reject(
+          new Error(
+            'Command timed out after 25000ms: /mock/agent_teams_orchestrator runtime status --json --provider codex --summary'
+          )
+        );
+      }
+
+      return Promise.reject(new Error(`Unexpected execCli call: ${normalizedArgs}`));
+    });
+
+    const { ClaudeMultimodelBridgeService } =
+      await import('@main/services/runtime/ClaudeMultimodelBridgeService');
+    const service = new ClaudeMultimodelBridgeService();
+
+    const provider = await service.getProviderStatus('/mock/agent_teams_orchestrator', 'codex');
+    const calls = execCliMock.mock.calls.map((call) => call[1].join(' '));
+
+    expect(provider).toMatchObject({
+      providerId: 'codex',
+      verificationState: 'error',
+      statusMessage: 'Provider status unavailable',
+    });
+    expect(provider.detailMessage).toContain('Command timed out after 25000ms');
+    expect(calls).toEqual(['runtime status --json --provider codex --summary']);
+    expect(vi.mocked(console.warn).mock.calls.map((call) => call.join(' '))).toEqual([
+      expect.stringContaining(
+        'Provider-scoped summary runtime status unavailable for codex, returning scoped error'
+      ),
+    ]);
+    vi.mocked(console.warn).mockClear();
+  });
+
   it('loads frontend providers with parallel provider-scoped runtime status probes', async () => {
     const providerPayloads = {
       anthropic: {
@@ -439,9 +475,7 @@ describe('ClaudeMultimodelBridgeService', () => {
     ).toEqual([8 * 1024 * 1024, 8 * 1024 * 1024, 8 * 1024 * 1024]);
     expect(enrichProviderStatusMock).toHaveBeenCalledTimes(3);
     expect(
-      enrichProviderStatusMock.mock.calls.every(
-        (call) => call[1]?.hydrateModelCatalog === false
-      )
+      enrichProviderStatusMock.mock.calls.every((call) => call[1]?.hydrateModelCatalog === false)
     ).toBe(true);
     expect(providers.map((provider) => provider.providerId)).toEqual([
       'anthropic',
@@ -506,10 +540,7 @@ describe('ClaudeMultimodelBridgeService', () => {
           ? (args[providerArgIndex + 1] as keyof typeof summaryPayloads)
           : null;
 
-      if (
-        normalizedArgs === 'runtime status --json --provider codex' &&
-        providerId === 'codex'
-      ) {
+      if (normalizedArgs === 'runtime status --json --provider codex' && providerId === 'codex') {
         return Promise.resolve({
           stdout: JSON.stringify({
             schemaVersion: 2,
@@ -707,6 +738,157 @@ describe('ClaudeMultimodelBridgeService', () => {
       modelCatalogRefreshState: 'ready',
       modelCatalog: {
         defaultModelId: 'gpt-5.4',
+      },
+    });
+  });
+
+  it('queues fresh single-provider catalog hydration behind an in-flight one', async () => {
+    let resolveHydration!: (value: { stdout: string; stderr: string; exitCode: number }) => void;
+    const hydration = new Promise<{ stdout: string; stderr: string; exitCode: number }>(
+      (resolve) => {
+        resolveHydration = resolve;
+      }
+    );
+    let fullStatusCalls = 0;
+
+    execCliMock.mockImplementation((_binaryPath, args) => {
+      const normalizedArgs = Array.isArray(args) ? args.join(' ') : '';
+
+      if (normalizedArgs === 'runtime status --json --provider codex --summary') {
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            schemaVersion: 2,
+            providers: {
+              codex: {
+                providerId: 'codex',
+                displayName: 'Codex',
+                supported: true,
+                authenticated: true,
+                authMethod: 'api_key',
+                verificationState: 'verified',
+                canLoginFromUi: false,
+                statusMessage: null,
+                models: ['gpt-5.4'],
+                capabilities: { teamLaunch: true, oneShot: true },
+                runtimeCapabilities: { modelCatalog: { dynamic: true, source: 'app-server' } },
+              },
+            },
+          }),
+          stderr: '',
+          exitCode: 0,
+        });
+      }
+
+      if (normalizedArgs === 'runtime status --json --provider codex') {
+        fullStatusCalls += 1;
+        if (fullStatusCalls === 1) {
+          return hydration;
+        }
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            schemaVersion: 2,
+            providers: {
+              codex: {
+                providerId: 'codex',
+                displayName: 'Codex',
+                supported: true,
+                authenticated: false,
+                authMethod: null,
+                verificationState: 'unknown',
+                canLoginFromUi: false,
+                statusMessage: 'fresh full status should not overwrite live summary',
+                models: ['gpt-5.4'],
+                capabilities: { teamLaunch: true, oneShot: true },
+                runtimeCapabilities: { modelCatalog: { dynamic: true, source: 'app-server' } },
+                modelCatalog: {
+                  schemaVersion: 1,
+                  providerId: 'codex',
+                  source: 'app-server',
+                  status: 'ready',
+                  fetchedAt: '2026-05-17T00:01:00.000Z',
+                  staleAt: '2026-05-17T00:11:00.000Z',
+                  defaultModelId: 'fresh-model',
+                  defaultLaunchModel: 'fresh-model',
+                  models: [],
+                  diagnostics: {
+                    configReadState: 'skipped',
+                    appServerState: 'healthy',
+                  },
+                },
+              },
+            },
+          }),
+          stderr: '',
+          exitCode: 0,
+        });
+      }
+
+      return Promise.reject(new Error(`Unexpected execCli call: ${normalizedArgs}`));
+    });
+
+    const { ClaudeMultimodelBridgeService } =
+      await import('@main/services/runtime/ClaudeMultimodelBridgeService');
+    const service = new ClaudeMultimodelBridgeService();
+    const firstUpdate = vi.fn();
+    const secondUpdate = vi.fn();
+
+    await service.getProviderStatus('/mock/agent_teams_orchestrator', 'codex', firstUpdate);
+    await service.getProviderStatus('/mock/agent_teams_orchestrator', 'codex', secondUpdate);
+    expect(
+      execCliMock.mock.calls.filter(
+        (call) => call[1].join(' ') === 'runtime status --json --provider codex'
+      )
+    ).toHaveLength(1);
+
+    resolveHydration({
+      stdout: JSON.stringify({
+        schemaVersion: 2,
+        providers: {
+          codex: {
+            providerId: 'codex',
+            displayName: 'Codex',
+            supported: true,
+            authenticated: false,
+            authMethod: null,
+            verificationState: 'unknown',
+            canLoginFromUi: false,
+            statusMessage: 'full status should not overwrite live summary',
+            models: ['gpt-5.4'],
+            capabilities: { teamLaunch: true, oneShot: true },
+            runtimeCapabilities: { modelCatalog: { dynamic: true, source: 'app-server' } },
+            modelCatalog: {
+              schemaVersion: 1,
+              providerId: 'codex',
+              source: 'app-server',
+              status: 'ready',
+              fetchedAt: '2026-05-17T00:00:00.000Z',
+              staleAt: '2026-05-17T00:10:00.000Z',
+              defaultModelId: 'gpt-5.4',
+              defaultLaunchModel: 'gpt-5.4',
+              models: [],
+              diagnostics: {
+                configReadState: 'skipped',
+                appServerState: 'healthy',
+              },
+            },
+          },
+        },
+      }),
+      stderr: '',
+      exitCode: 0,
+    });
+
+    await vi.waitFor(() => {
+      expect(secondUpdate).toHaveBeenCalledTimes(1);
+    });
+    expect(fullStatusCalls).toBe(2);
+    expect(firstUpdate).not.toHaveBeenCalled();
+    expect(secondUpdate.mock.calls[0]?.[0]).toMatchObject({
+      authenticated: true,
+      authMethod: 'api_key',
+      statusMessage: null,
+      modelCatalog: {
+        defaultModelId: 'fresh-model',
       },
     });
   });
@@ -1161,9 +1343,8 @@ describe('ClaudeMultimodelBridgeService', () => {
 
     const hasOldCatalogUpdate = [...firstUpdates.mock.calls, ...secondUpdates.mock.calls].some(
       ([providers]) =>
-        providers
-          .find((provider) => provider.providerId === 'codex')
-          ?.modelCatalog?.defaultModelId === 'old-model'
+        providers.find((provider) => provider.providerId === 'codex')?.modelCatalog
+          ?.defaultModelId === 'old-model'
     );
     expect(hasOldCatalogUpdate).toBe(false);
   });

@@ -212,17 +212,17 @@ Group entries by type: `What's New` > `Improvements` > `Bug Fixes` > `Breaking C
 
 electron-builder generates these artifacts per platform:
 
-| Platform        | Versioned Name                       | Stable Name (for /latest/download) |
-| --------------- | ------------------------------------ | ---------------------------------- |
-| macOS arm64 DMG | `Agent.Teams.AI-<VER>-arm64.dmg`     | `Claude-Agent-Teams-UI-arm64.dmg`  |
-| macOS x64 DMG   | `Agent.Teams.AI-<VER>-x64.dmg`       | `Claude-Agent-Teams-UI-x64.dmg`    |
-| macOS arm64 ZIP | `Agent.Teams.AI-<VER>-arm64-mac.zip` | -                                  |
-| macOS x64 ZIP   | `Agent.Teams.AI-<VER>-x64-mac.zip`   | -                                  |
-| Windows         | `Agent.Teams.AI.Setup.<VER>.exe`     | `Claude-Agent-Teams-UI-Setup.exe`  |
-| Linux AppImage  | `Agent.Teams.AI-<VER>.AppImage`      | `Claude-Agent-Teams-UI.AppImage`   |
-| Linux deb       | `agent-teams-ai_<VER>_amd64.deb`     | `Claude-Agent-Teams-UI-amd64.deb`  |
-| Linux rpm       | `agent-teams-ai-<VER>.x86_64.rpm`    | `Claude-Agent-Teams-UI-x86_64.rpm` |
-| Linux pacman    | `agent-teams-ai-<VER>.pacman`        | `Claude-Agent-Teams-UI.pacman`     |
+| Platform        | Versioned Name                       | Stable Name (for /latest/download) | Compatibility Alias                |
+| --------------- | ------------------------------------ | ---------------------------------- | ---------------------------------- |
+| macOS arm64 DMG | `Agent.Teams.AI-<VER>-arm64.dmg`     | `Agent.Teams.AI-arm64.dmg`         | `Claude-Agent-Teams-UI-arm64.dmg`  |
+| macOS x64 DMG   | `Agent.Teams.AI-<VER>-x64.dmg`       | `Agent.Teams.AI-x64.dmg`           | `Claude-Agent-Teams-UI-x64.dmg`    |
+| macOS arm64 ZIP | `Agent.Teams.AI-<VER>-arm64-mac.zip` | -                                  | -                                  |
+| macOS x64 ZIP   | `Agent.Teams.AI-<VER>-x64-mac.zip`   | -                                  | -                                  |
+| Windows         | `Agent.Teams.AI.Setup.<VER>.exe`     | `Agent.Teams.AI.Setup.exe`         | `Claude-Agent-Teams-UI-Setup.exe`  |
+| Linux AppImage  | `Agent.Teams.AI-<VER>.AppImage`      | `Agent.Teams.AI.AppImage`          | `Claude-Agent-Teams-UI.AppImage`   |
+| Linux deb       | `agent-teams-ai_<VER>_amd64.deb`     | `agent-teams-ai-amd64.deb`         | `Claude-Agent-Teams-UI-amd64.deb`  |
+| Linux rpm       | `agent-teams-ai-<VER>.x86_64.rpm`    | `agent-teams-ai-x86_64.rpm`        | `Claude-Agent-Teams-UI-x86_64.rpm` |
+| Linux pacman    | `agent-teams-ai-<VER>.pacman`        | `agent-teams-ai.pacman`            | `Claude-Agent-Teams-UI.pacman`     |
 
 ## Stable Download Links
 
@@ -232,10 +232,11 @@ It starts only after **release-mac** (two matrix jobs), **release-win**, and **r
 This enables permanent links in README that always point to the latest release:
 
 ```
-https://github.com/777genius/agent-teams-ai/releases/latest/download/Claude-Agent-Teams-UI-arm64.dmg
+https://github.com/777genius/agent-teams-ai/releases/latest/download/Agent.Teams.AI-arm64.dmg
 ```
 
 GitHub automatically redirects `/releases/latest/download/FILENAME` to the asset from the most recent release. No README updates needed when releasing a new version.
+The `Claude-Agent-Teams-UI-*` aliases are kept only for backward compatibility with older links and clients.
 
 ## macOS Code Signing
 

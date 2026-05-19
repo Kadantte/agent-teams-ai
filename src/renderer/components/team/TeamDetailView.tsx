@@ -144,6 +144,7 @@ import { TeamChangesSection } from './TeamChangesSection';
 import { TeamProvisioningBanner } from './TeamProvisioningBanner';
 import { loadTeamSessionMetadata } from './teamSessionFetchGuards';
 import { TeamSessionsSection } from './TeamSessionsSection';
+import { useTeamAgentRuntimeWatcher } from './useTeamAgentRuntimeWatcher';
 
 import type { KanbanFilterState } from './kanban/KanbanFilterPopover';
 import type { KanbanSortState } from './kanban/KanbanSortPopover';
@@ -915,8 +916,6 @@ const TeamSpawnStatusWatcher = memo(function TeamSpawnStatusWatcher({
   return null;
 });
 
-const TEAM_AGENT_RUNTIME_REFRESH_MS = 5_000;
-
 const TeamAgentRuntimeWatcher = memo(function TeamAgentRuntimeWatcher({
   teamName,
   isTeamProvisioning,
@@ -928,37 +927,12 @@ const TeamAgentRuntimeWatcher = memo(function TeamAgentRuntimeWatcher({
   isTeamAlive?: boolean;
   isThisTabActive: boolean;
 }): null {
-  const { leadActivity, fetchTeamAgentRuntime } = useStore(
-    useShallow((s) => ({
-      leadActivity: s.leadActivityByTeam[teamName],
-      fetchTeamAgentRuntime: s.fetchTeamAgentRuntime,
-    }))
-  );
-
-  useEffect(() => {
-    if (!isThisTabActive) return;
-    const shouldWatch =
-      isTeamProvisioning ||
-      isTeamAlive === true ||
-      leadActivity === 'active' ||
-      leadActivity === 'idle';
-    if (!shouldWatch) return;
-
-    void fetchTeamAgentRuntime(teamName);
-    const timer = window.setInterval(() => {
-      void fetchTeamAgentRuntime(teamName);
-    }, TEAM_AGENT_RUNTIME_REFRESH_MS);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [
-    fetchTeamAgentRuntime,
+  useTeamAgentRuntimeWatcher({
+    teamName,
+    enabled: isThisTabActive,
     isTeamAlive,
     isTeamProvisioning,
-    isThisTabActive,
-    leadActivity,
-    teamName,
-  ]);
+  });
 
   return null;
 });
@@ -3332,6 +3306,7 @@ export const TeamDetailView = memo(function TeamDetailView({
                           providerId: entry.providerId,
                           model: entry.model,
                           effort: entry.effort,
+                          mcpPolicy: entry.mcpPolicy,
                         });
                       }
                       setAddMemberDialogOpen(false);

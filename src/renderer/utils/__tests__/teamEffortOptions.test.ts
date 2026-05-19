@@ -10,7 +10,7 @@ function createProviderStatus(
   options: {
     source?: 'anthropic-models-api' | 'app-server' | 'static-fallback';
     configPassthrough?: boolean;
-    runtimeValues?: CliProviderStatus['runtimeCapabilities'];
+    runtimeValues?: CliProviderStatus['runtimeCapabilities'] | null;
   } = {}
 ): CliProviderStatus {
   const source =
@@ -40,14 +40,17 @@ function createProviderStatus(
       },
     },
     modelAvailability: [],
-    runtimeCapabilities: options.runtimeValues ?? {
-      modelCatalog: { dynamic: true, source },
-      reasoningEffort: {
-        supported: true,
-        values: model.supportedReasoningEfforts,
-        configPassthrough: options.configPassthrough === true,
-      },
-    },
+    runtimeCapabilities:
+      options.runtimeValues === undefined
+        ? {
+            modelCatalog: { dynamic: true, source },
+            reasoningEffort: {
+              supported: true,
+              values: model.supportedReasoningEfforts,
+              configPassthrough: options.configPassthrough === true,
+            },
+          }
+        : options.runtimeValues,
     canLoginFromUi: true,
     capabilities: {
       teamLaunch: true,
@@ -189,6 +192,90 @@ describe('team effort options', () => {
       { value: 'high', label: 'High' },
       { value: 'max', label: 'Max' },
     ]);
+  });
+
+  it('shows fallback Anthropic effort options for known models while catalog truth is unavailable', () => {
+    expect(
+      getTeamEffortOptions({
+        providerId: 'anthropic',
+        model: 'claude-opus-4-6[1m]',
+        providerStatus: {
+          providerId: 'anthropic',
+          displayName: 'Anthropic',
+          supported: true,
+          authenticated: true,
+          authMethod: 'claude.ai',
+          verificationState: 'verified',
+          models: ['claude-opus-4-6'],
+          modelCatalog: null,
+          modelAvailability: [],
+          runtimeCapabilities: null,
+          canLoginFromUi: true,
+          capabilities: {
+            teamLaunch: true,
+            oneShot: true,
+            extensions: {
+              plugins: { status: 'supported', ownership: 'shared', reason: null },
+              mcp: { status: 'supported', ownership: 'shared', reason: null },
+              skills: { status: 'supported', ownership: 'shared', reason: null },
+              apiKeys: { status: 'supported', ownership: 'shared', reason: null },
+            },
+          },
+        },
+      })
+    ).toEqual([
+      { value: '', label: 'Default' },
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'high', label: 'High' },
+      { value: 'max', label: 'Max' },
+    ]);
+  });
+
+  it('does not invent Anthropic effort options for unknown models without catalog truth', () => {
+    expect(
+      getTeamEffortOptions({
+        providerId: 'anthropic',
+        model: 'claude-experimental-5',
+        providerStatus: null,
+      })
+    ).toEqual([{ value: '', label: 'Default' }]);
+  });
+
+  it('shows known Anthropic effort options when catalog lacks the exact selected model entry', () => {
+    const providerStatus = createProviderStatus(
+      'anthropic',
+      {
+        id: 'haiku',
+        launchModel: 'haiku',
+        displayName: 'Haiku 4.5',
+        hidden: false,
+        supportedReasoningEfforts: [],
+        defaultReasoningEffort: null,
+        inputModalities: ['text', 'image'],
+        supportsPersonality: false,
+        isDefault: true,
+        upgrade: false,
+        source: 'anthropic-models-api',
+      },
+      { runtimeValues: null }
+    );
+
+    const presentation = getTeamEffortSelectorPresentation({
+      providerId: 'anthropic',
+      model: 'claude-opus-4-6[1m]',
+      providerStatus,
+    });
+
+    expect(presentation.options).toEqual([
+      { value: '', label: 'Default' },
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'high', label: 'High' },
+      { value: 'max', label: 'Max' },
+    ]);
+    expect(presentation.disabled).toBe(false);
+    expect(presentation.canValidateValue).toBe(false);
   });
 
   it('shows only Default when the selected Anthropic model does not support effort', () => {

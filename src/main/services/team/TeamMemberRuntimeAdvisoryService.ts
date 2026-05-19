@@ -498,18 +498,10 @@ export class TeamMemberRuntimeAdvisoryService {
           getOpenCodeRuntimeDeliveryRecordTimeMs(right) -
           getOpenCodeRuntimeDeliveryRecordTimeMs(left)
       );
-    const latestSuccess = ordered.find(isTerminalSuccessfulOpenCodeDeliveryRecord);
     const latestError = ordered.find((record) => {
       return this.isOpenCodeDeliveryAdvisoryCandidate(record, now);
     });
     if (!latestError) {
-      return null;
-    }
-    if (
-      latestSuccess &&
-      getOpenCodeRuntimeDeliveryRecordTimeMs(latestSuccess) >
-        getOpenCodeRuntimeDeliveryRecordTimeMs(latestError)
-    ) {
       return null;
     }
 

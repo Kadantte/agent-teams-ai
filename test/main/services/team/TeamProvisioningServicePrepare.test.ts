@@ -1,10 +1,9 @@
+import { DEFAULT_PROVIDER_MODEL_SELECTION } from '@shared/utils/providerModelSelection';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_PROVIDER_MODEL_SELECTION } from '@shared/utils/providerModelSelection';
 
 vi.mock('@main/services/team/ClaudeBinaryResolver', () => ({
   ClaudeBinaryResolver: { resolve: vi.fn() },
@@ -95,13 +94,13 @@ vi.mock('@main/utils/childProcess', () => ({
   killProcessTree: vi.fn(),
 }));
 
-import {
-  TeamProvisioningService,
-  buildDirectTmuxRestartEnvAssignments,
-} from '@main/services/team/TeamProvisioningService';
+import { ProviderConnectionService } from '@main/services/runtime/ProviderConnectionService';
 import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
 import { TeamRuntimeAdapterRegistry } from '@main/services/team/runtime';
-import { ProviderConnectionService } from '@main/services/runtime/ProviderConnectionService';
+import {
+  buildDirectTmuxRestartEnvAssignments,
+  TeamProvisioningService,
+} from '@main/services/team/TeamProvisioningService';
 import { spawnCli } from '@main/utils/childProcess';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 
@@ -667,7 +666,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
         limitContext: false,
         facts,
       })
-    ).toThrow('does not support it in the current runtime');
+    ).toThrow('does not support Anthropic effort "low" in the current runtime');
   });
 
   afterEach(async () => {
@@ -2394,6 +2393,81 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     expect(spawnProbe).not.toHaveBeenCalled();
   });
 
+  it('allows selected Anthropic effort checks when model catalog is missing but model is known', async () => {
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'buildProvisioningEnv').mockResolvedValue({
+      env: {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      authSource: 'none',
+      geminiRuntimeAuth: null,
+      providerArgs: [],
+    });
+    vi.spyOn(svc as any, 'readRuntimeProviderLaunchFacts').mockResolvedValue({
+      defaultModel: null,
+      modelIds: new Set(['claude-opus-4-6[1m]']),
+      modelCatalog: null,
+      runtimeCapabilities: null,
+      providerStatus: null,
+    });
+
+    const result = await (svc as any).verifySelectedProviderModels({
+      claudePath: '/fake/claude',
+      cwd: tempRoot,
+      providerId: 'anthropic',
+      modelIds: ['claude-opus-4-6[1m]'],
+      modelChecks: [{ modelId: 'claude-opus-4-6[1m]', effort: 'medium' }],
+      limitContext: false,
+    });
+
+    expect(result.details).toEqual([
+      'Selected model claude-opus-4-6[1m] is available for launch.',
+    ]);
+    expect(result.blockingMessages).toEqual([]);
+  });
+
+  it('blocks selected Anthropic effort checks when model catalog cannot verify an unknown model', async () => {
+    const svc = new TeamProvisioningService();
+    vi.spyOn(svc as any, 'buildProvisioningEnv').mockResolvedValue({
+      env: {
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      authSource: 'none',
+      geminiRuntimeAuth: null,
+      providerArgs: [],
+    });
+    vi.spyOn(svc as any, 'readRuntimeProviderLaunchFacts').mockResolvedValue({
+      defaultModel: null,
+      modelIds: new Set(['claude-experimental-5']),
+      modelCatalog: null,
+      runtimeCapabilities: null,
+      providerStatus: null,
+    });
+
+    const result = await (svc as any).verifySelectedProviderModels({
+      claudePath: '/fake/claude',
+      cwd: tempRoot,
+      providerId: 'anthropic',
+      modelIds: ['claude-experimental-5'],
+      modelChecks: [{ modelId: 'claude-experimental-5', effort: 'medium' }],
+      limitContext: false,
+    });
+
+    expect(result.details).toEqual([]);
+    expect(result.blockingMessages).toEqual([
+      'Selected model claude-experimental-5 is unavailable. Anthropic runtime catalog was unavailable, so effort "medium" for claude-experimental-5 could not be verified.',
+    ]);
+    expect(result.issues).toEqual([
+      expect.objectContaining({
+        providerId: 'anthropic',
+        modelId: 'claude-experimental-5',
+        code: 'effort_unverified',
+      }),
+    ]);
+  });
+
   it('augments dynamic Codex compatibility checks with the app-server catalog', async () => {
     const svc = new TeamProvisioningService();
     vi.spyOn(svc as any, 'buildProvisioningEnv').mockResolvedValue({
@@ -3422,7 +3496,7 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
         limitContext: false,
         facts,
       })
-    ).toThrow('does not support it in the current runtime');
+    ).toThrow('does not support Anthropic effort "max" in the current runtime');
 
     expect(() =>
       (svc as any).validateRuntimeLaunchSelection({
@@ -3434,6 +3508,75 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
         facts,
       })
     ).toThrow('enables Anthropic Fast mode');
+  });
+
+  it('allows known Anthropic effort when runtime catalog is unavailable', () => {
+    const svc = new TeamProvisioningService();
+    const facts = {
+      defaultModel: null,
+      modelIds: new Set<string>(),
+      modelCatalog: null,
+      runtimeCapabilities: {
+        reasoningEffort: {
+          supported: true,
+          values: ['low', 'medium', 'high', 'max'],
+          configPassthrough: true,
+        },
+      },
+    };
+
+    expect(() =>
+      (svc as any).validateRuntimeLaunchSelection({
+        actorLabel: 'Team lead',
+        providerId: 'anthropic',
+        model: 'claude-opus-4-6[1m]',
+        effort: 'medium',
+        limitContext: false,
+        facts,
+      })
+    ).not.toThrow();
+  });
+
+  it('allows known Anthropic effort when catalog is missing and model list only exposes the base launch id', () => {
+    const svc = new TeamProvisioningService();
+    const facts = {
+      defaultModel: null,
+      modelIds: new Set(['claude-opus-4-6']),
+      modelCatalog: null,
+      runtimeCapabilities: null,
+    };
+
+    expect(() =>
+      (svc as any).validateRuntimeLaunchSelection({
+        actorLabel: 'Team lead',
+        providerId: 'anthropic',
+        model: 'claude-opus-4-6[1m]',
+        effort: 'medium',
+        limitContext: false,
+        facts,
+      })
+    ).not.toThrow();
+  });
+
+  it('reports unknown Anthropic effort support as unverified when runtime catalog is unavailable', () => {
+    const svc = new TeamProvisioningService();
+    const facts = {
+      defaultModel: null,
+      modelIds: new Set<string>(),
+      modelCatalog: null,
+      runtimeCapabilities: null,
+    };
+
+    expect(() =>
+      (svc as any).validateRuntimeLaunchSelection({
+        actorLabel: 'Team lead',
+        providerId: 'anthropic',
+        model: 'claude-experimental-5',
+        effort: 'medium',
+        limitContext: false,
+        facts,
+      })
+    ).toThrow('could not be verified');
   });
 
   it('emits a lead-message refresh after provisioning reaches ready', async () => {

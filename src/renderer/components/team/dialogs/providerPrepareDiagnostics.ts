@@ -3,6 +3,7 @@ import { isDefaultProviderModelSelection } from '@shared/utils/providerModelSele
 
 import type {
   TeamProviderId,
+  TeamProvisioningModelCheckRequest,
   TeamProvisioningModelVerificationMode,
   TeamProvisioningPrepareResult,
 } from '@shared/types';
@@ -15,7 +16,8 @@ type PrepareProvisioningFn = (
   providerIds?: TeamProviderId[],
   selectedModels?: string[],
   limitContext?: boolean,
-  modelVerificationMode?: TeamProvisioningModelVerificationMode
+  modelVerificationMode?: TeamProvisioningModelVerificationMode,
+  selectedModelChecks?: TeamProvisioningModelCheckRequest[]
 ) => Promise<TeamProvisioningPrepareResult>;
 
 interface ProviderPrepareDiagnosticsProgress {
@@ -107,6 +109,44 @@ export function buildProviderPrepareModelCheckingLine(
 
 function buildModelSuccessLine(providerId: TeamProviderId, modelId: string): string {
   return `${getModelLabel(providerId, modelId)} - verified`;
+}
+
+function normalizeSelectedModelChecks(
+  providerId: TeamProviderId,
+  selectedModelIds: readonly string[],
+  selectedModelChecks?: readonly TeamProvisioningModelCheckRequest[]
+): TeamProvisioningModelCheckRequest[] {
+  const rawChecks: TeamProvisioningModelCheckRequest[] =
+    selectedModelChecks && selectedModelChecks.length > 0
+      ? [...selectedModelChecks]
+      : selectedModelIds.map((model) => ({ providerId, model }));
+  const seen = new Set<string>();
+  const normalized: TeamProvisioningModelCheckRequest[] = [];
+  for (const check of rawChecks) {
+    const model = check.model.trim();
+    if (!model) {
+      continue;
+    }
+    const key = `${check.providerId}\n${model}\n${check.effort ?? ''}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push({
+      providerId: check.providerId,
+      model,
+      ...(check.effort ? { effort: check.effort } : {}),
+    });
+  }
+  return normalized;
+}
+
+function selectModelChecksForIds(
+  modelChecks: readonly TeamProvisioningModelCheckRequest[],
+  modelIds: readonly string[]
+): TeamProvisioningModelCheckRequest[] {
+  const modelIdSet = new Set(modelIds);
+  return modelChecks.filter((check) => modelIdSet.has(check.model));
 }
 
 function buildModelAvailableLine(providerId: TeamProviderId, modelId: string): string {
@@ -899,16 +939,25 @@ export async function runProviderPrepareDiagnostics({
   limitContext,
   onModelProgress,
   cachedModelResultsById,
+  selectedModelChecks,
 }: {
   cwd: string;
   providerId: TeamProviderId;
   selectedModelIds: string[];
+  selectedModelChecks?: TeamProvisioningModelCheckRequest[];
   prepareProvisioning: PrepareProvisioningFn;
   limitContext?: boolean;
   onModelProgress?: (progress: ProviderPrepareDiagnosticsProgress) => void;
   cachedModelResultsById?: Record<string, ProviderPrepareDiagnosticsModelResult>;
 }): Promise<ProviderPrepareDiagnosticsResult> {
-  if (selectedModelIds.length === 0) {
+  const normalizedModelChecks = normalizeSelectedModelChecks(
+    providerId,
+    selectedModelIds,
+    selectedModelChecks
+  );
+  const hasExplicitModelChecks = (selectedModelChecks?.length ?? 0) > 0;
+  const orderedModelIds = Array.from(new Set(normalizedModelChecks.map((check) => check.model)));
+  if (orderedModelIds.length === 0) {
     const runtimeResult = await prepareProvisioning(
       cwd,
       providerId,
@@ -936,9 +985,6 @@ export async function runProviderPrepareDiagnostics({
     };
   }
 
-  const orderedModelIds = Array.from(
-    new Set(selectedModelIds.map((modelId) => modelId.trim()).filter(Boolean))
-  );
   const reusableModelResultsById = cachedModelResultsById ?? {};
   const modelResultsById = new Map<string, ProviderPrepareDiagnosticsModelResult>();
   const modelLines = new Map<string, string>();
@@ -1039,7 +1085,10 @@ export async function runProviderPrepareDiagnostics({
           [providerId],
           uncachedModelIds,
           limitContext,
-          'compatibility'
+          'compatibility',
+          ...(hasExplicitModelChecks
+            ? [selectModelChecksForIds(normalizedModelChecks, uncachedModelIds)]
+            : [])
         );
         runtimeDetailLines = createRuntimeDetailLines(compatibilityResult).filter(
           (entry) => !isModelScopedEntryForAnyModel(uncachedModelIds, entry)
@@ -1177,7 +1226,10 @@ export async function runProviderPrepareDiagnostics({
           [providerId],
           compatibilityPassedModelIds,
           limitContext,
-          'deep'
+          'deep',
+          ...(hasExplicitModelChecks
+            ? [selectModelChecksForIds(normalizedModelChecks, compatibilityPassedModelIds)]
+            : [])
         );
         runtimeDetailLines = createRuntimeDetailLines(batchedModelResult).filter(
           (entry) => !isModelScopedEntryForAnyModel(compatibilityPassedModelIds, entry)
@@ -1328,7 +1380,10 @@ export async function runProviderPrepareDiagnostics({
           [providerId],
           uncachedModelIds,
           limitContext,
-          'compatibility'
+          'compatibility',
+          ...(hasExplicitModelChecks
+            ? [selectModelChecksForIds(normalizedModelChecks, uncachedModelIds)]
+            : [])
         );
         runtimeDetailLines = createRuntimeDetailLines(compatibilityResult).filter(
           (entry) => !isModelScopedEntryForAnyModel(uncachedModelIds, entry)

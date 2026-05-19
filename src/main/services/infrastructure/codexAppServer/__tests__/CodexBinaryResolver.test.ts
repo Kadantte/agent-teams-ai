@@ -327,6 +327,137 @@ describe('CodexBinaryResolver', () => {
     expect(buildEnrichedEnvMock).toHaveBeenCalledWith(codexShim);
   });
 
+  it('reuses a recent known-good binary when revalidation transiently fails', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    setPlatform('darwin');
+    process.env.PATH = '/usr/local/bin:/usr/bin:/bin';
+    const codexShim = path.posix.join('/usr/local/bin', 'codex');
+    let canLaunch = true;
+
+    accessMock.mockImplementation((filePath) => {
+      if (filePath === codexShim) {
+        return Promise.resolve();
+      }
+      return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
+    execCliMock.mockImplementation(() => {
+      if (canLaunch) {
+        return Promise.resolve({ stdout: 'codex-cli 0.130.0', stderr: '' });
+      }
+      return Promise.reject(new Error('codex --version timed out'));
+    });
+
+    const { CodexBinaryResolver } = await import('../CodexBinaryResolver');
+    CodexBinaryResolver.clearCache();
+
+    await expect(CodexBinaryResolver.resolve()).resolves.toBe(codexShim);
+
+    canLaunch = false;
+    vi.advanceTimersByTime(30_001);
+
+    await expect(CodexBinaryResolver.resolve()).resolves.toBe(codexShim);
+  });
+
+  it('expires stale known-good reuse from the last real launch verification', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    setPlatform('darwin');
+    process.env.PATH = '/usr/local/bin:/usr/bin:/bin';
+    const codexShim = path.posix.join('/usr/local/bin', 'codex');
+    let canLaunch = true;
+
+    accessMock.mockImplementation((filePath) => {
+      if (filePath === codexShim) {
+        return Promise.resolve();
+      }
+      return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
+    execCliMock.mockImplementation(() => {
+      if (canLaunch) {
+        return Promise.resolve({ stdout: 'codex-cli 0.130.0', stderr: '' });
+      }
+      return Promise.reject(new Error('codex --version timed out'));
+    });
+
+    const { CodexBinaryResolver } = await import('../CodexBinaryResolver');
+    CodexBinaryResolver.clearCache();
+
+    await expect(CodexBinaryResolver.resolve()).resolves.toBe(codexShim);
+
+    canLaunch = false;
+    vi.advanceTimersByTime(290_000);
+
+    await expect(CodexBinaryResolver.resolve()).resolves.toBe(codexShim);
+
+    vi.advanceTimersByTime(10_001);
+
+    await expect(CodexBinaryResolver.resolve()).resolves.toBeNull();
+  });
+
+  it('prefers a newly resolved binary over stale known-good reuse', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    setPlatform('darwin');
+    const oldCodexShim = path.posix.join('/old/bin', 'codex');
+    const newCodexShim = path.posix.join('/new/bin', 'codex');
+    process.env.PATH = '/old/bin:/usr/bin:/bin';
+    let oldCanLaunch = true;
+
+    accessMock.mockImplementation((filePath) => {
+      if (filePath === oldCodexShim || filePath === newCodexShim) {
+        return Promise.resolve();
+      }
+      return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
+    execCliMock.mockImplementation((binaryPath) => {
+      if (binaryPath === oldCodexShim) {
+        if (oldCanLaunch) {
+          return Promise.resolve({ stdout: 'codex-cli 0.130.0', stderr: '' });
+        }
+        return Promise.reject(new Error('old codex --version timed out'));
+      }
+      return Promise.resolve({ stdout: 'codex-cli 0.131.0', stderr: '' });
+    });
+
+    const { CodexBinaryResolver } = await import('../CodexBinaryResolver');
+    CodexBinaryResolver.clearCache();
+
+    await expect(CodexBinaryResolver.resolve()).resolves.toBe(oldCodexShim);
+
+    oldCanLaunch = false;
+    process.env.PATH = '/new/bin:/usr/bin:/bin';
+    vi.advanceTimersByTime(30_001);
+
+    await expect(CodexBinaryResolver.resolve()).resolves.toBe(newCodexShim);
+  });
+
+  it('does not reuse a recent known-good binary after the file disappears', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    setPlatform('darwin');
+    process.env.PATH = '/usr/local/bin:/usr/bin:/bin';
+    const codexShim = path.posix.join('/usr/local/bin', 'codex');
+    let filePresent = true;
+
+    accessMock.mockImplementation((filePath) => {
+      if (filePath === codexShim && filePresent) {
+        return Promise.resolve();
+      }
+      return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
+
+    const { CodexBinaryResolver } = await import('../CodexBinaryResolver');
+    CodexBinaryResolver.clearCache();
+
+    await expect(CodexBinaryResolver.resolve()).resolves.toBe(codexShim);
+
+    filePresent = false;
+    vi.advanceTimersByTime(30_001);
+
+    await expect(CodexBinaryResolver.resolve()).resolves.toBeNull();
+  });
+
   it('uses enriched env for Codex version probes', async () => {
     setPlatform('darwin');
     const codexShim = path.posix.join('/usr/local/bin', 'codex');

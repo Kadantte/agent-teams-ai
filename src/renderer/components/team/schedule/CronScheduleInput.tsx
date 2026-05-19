@@ -246,7 +246,7 @@ export const CronScheduleInput = ({
           </SelectContent>
         </Select>
         <p className="text-[11px] text-[var(--color-text-muted)]">
-          Pre-warms CLI environment before scheduled execution
+          Prepares selected providers before scheduled execution
         </p>
       </div>
     </div>

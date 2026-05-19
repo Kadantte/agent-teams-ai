@@ -135,8 +135,8 @@ const OPENCODE_MODEL_ROW_ESTIMATE_PX = 92;
 const PROVIDERS: ProviderDef[] = [
   { id: 'anthropic', label: 'Anthropic', comingSoon: false },
   { id: 'codex', label: 'Codex', comingSoon: false },
-  { id: 'gemini', label: 'Gemini', comingSoon: false },
   { id: 'opencode', label: 'OpenCode', comingSoon: false },
+  { id: 'gemini', label: 'Gemini', comingSoon: false },
 ];
 
 function getOpenCodeSourceInfo(model: string): OpenCodeSourceInfo | null {
@@ -328,10 +328,105 @@ function getOpenCodeModelPricingInfo(
   };
 }
 
+function isFreeOpenCodeModelRoute(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return (
+    normalized === 'opencode/big-pickle' ||
+    normalized.includes(':free') ||
+    normalized.endsWith('-free') ||
+    normalized.endsWith('/free')
+  );
+}
+
+function hasFreeOpenCodeModelRoute(providerStatus: CliProviderStatus | null | undefined): boolean {
+  if (providerStatus?.providerId !== 'opencode') {
+    return false;
+  }
+
+  if (providerStatus.models.some(isFreeOpenCodeModelRoute)) {
+    return true;
+  }
+
+  return (
+    providerStatus.modelCatalog?.models.some((model) => {
+      const badgeLabel = model.badgeLabel?.trim().toLowerCase();
+      return (
+        model.metadata?.free === true ||
+        badgeLabel === 'free' ||
+        isFreeOpenCodeModelRoute(model.launchModel) ||
+        isFreeOpenCodeModelRoute(model.id)
+      );
+    }) ?? false
+  );
+}
+
 const OPENCODE_UI_DISABLED_REASON = 'OpenCode team launch is not ready.';
 export const OPENCODE_ONE_SHOT_DISABLED_REASON =
-  'OpenCode team launch is available for normal teams, but scheduled one-shot prompts still run through claude -p. Choose Anthropic, Codex, or Gemini for one-shot schedules.';
+  'OpenCode team launch is available for normal teams, but scheduled one-shot prompts still run through claude -p. Choose Anthropic or Codex for one-shot schedules.';
 export const OPENCODE_ONE_SHOT_DISABLED_BADGE_LABEL = 'team only';
+
+function getOpenCodeReadinessBadgeLabel(
+  providerStatus: CliProviderStatus | null | undefined
+): string {
+  if (!providerStatus) {
+    return 'Check';
+  }
+  if (!providerStatus.supported) {
+    return 'Install';
+  }
+  if (!providerStatus.authenticated) {
+    return 'Free';
+  }
+  return 'Setup';
+}
+
+function getOpenCodeReadinessSummary(providerStatus: CliProviderStatus | null | undefined): string {
+  if (!providerStatus) {
+    return 'OpenCode status: checking runtime';
+  }
+
+  const runtimeReady = providerStatus.supported;
+  const hasFreeModelRoute = hasFreeOpenCodeModelRoute(providerStatus);
+  let readinessSummary = 'team launch blocked';
+  if (runtimeReady) {
+    if (!providerStatus.authenticated) {
+      readinessSummary = hasFreeModelRoute
+        ? 'provider connection optional'
+        : 'provider-backed models need setup';
+    } else if (providerStatus.capabilities.teamLaunch) {
+      readinessSummary = 'team launch ready';
+    }
+  }
+  const parts = [
+    runtimeReady ? 'runtime detected' : 'runtime missing',
+    runtimeReady && !providerStatus.authenticated && hasFreeModelRoute
+      ? 'free models available without auth'
+      : providerStatus.authenticated
+        ? 'provider connected'
+        : 'provider not connected',
+    readinessSummary,
+  ];
+  return `OpenCode status: ${parts.join(' · ')}`;
+}
+
+function getOpenCodeReadinessMessage(providerStatus: CliProviderStatus | null | undefined): string {
+  if (!providerStatus) {
+    return 'The app is still checking the OpenCode runtime. Wait for provider status to finish, then try again.';
+  }
+  if (!providerStatus.supported) {
+    return 'OpenCode is not installed, not found, or the detected runtime is not supported. Install or update OpenCode, then refresh provider status.';
+  }
+  if (!providerStatus.authenticated) {
+    if (hasFreeOpenCodeModelRoute(providerStatus)) {
+      return 'OpenCode is detected. You can use free OpenCode models such as Big Pickle without connecting a provider. Connect a provider only when you want provider-backed models.';
+    }
+    return 'OpenCode is detected, but no free OpenCode model is listed yet. Refresh provider status, or connect a provider in OpenCode for provider-backed models.';
+  }
+  if (!providerStatus.capabilities.teamLaunch) {
+    return 'OpenCode is installed and authenticated, but Agent Teams launch readiness is blocked.';
+  }
+  return 'OpenCode is ready for team launch.';
+}
 
 export function getTeamModelLabel(model: string): string {
   return getCatalogTeamModelLabel(model) ?? model;
@@ -427,7 +522,10 @@ const OpenCodeVirtualizedModelGrid = ({
       return undefined;
     }
 
-    const updateGridWidth = (): void => setGridWidth(element.clientWidth);
+    const updateGridWidth = (): void => {
+      const nextWidth = element.clientWidth;
+      setGridWidth((previousWidth) => (previousWidth === nextWidth ? previousWidth : nextWidth));
+    };
     updateGridWidth();
 
     if (typeof ResizeObserver !== 'undefined') {
@@ -563,6 +661,7 @@ export interface TeamModelSelectorProps {
   onValueChange: (value: string) => void;
   id?: string;
   disableGeminiOption?: boolean;
+  providerNoticeById?: Partial<Record<TeamProviderId, React.ReactNode>>;
   providerDisabledReasonById?: Partial<Record<TeamProviderId, string | null | undefined>>;
   providerDisabledBadgeLabelById?: Partial<Record<TeamProviderId, string | null | undefined>>;
   modelAdvisoryReasonByValue?: Partial<Record<string, string | null | undefined>>;
@@ -577,6 +676,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
   onValueChange,
   id,
   disableGeminiOption = false,
+  providerNoticeById,
   providerDisabledReasonById,
   providerDisabledBadgeLabelById,
   modelAdvisoryReasonByValue,
@@ -591,9 +691,13 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
   const [selectedOpenCodeSourceIds, setSelectedOpenCodeSourceIds] = useState<Set<string>>(
     () => new Set()
   );
-
-  const effectiveProviderId =
+  const selectedProviderId =
     disableGeminiOption && isGeminiUiFrozen() && providerId === 'gemini' ? 'anthropic' : providerId;
+  const [inspectedProviderId, setInspectedProviderId] = useState<TeamProviderId | null>(null);
+  const previousEffectiveProviderIdRef = useRef<TeamProviderId>(selectedProviderId);
+  const previousSelectedProviderIdRef = useRef<TeamProviderId>(selectedProviderId);
+  const effectiveProviderId = inspectedProviderId ?? selectedProviderId;
+  const isInspectingInactiveProvider = inspectedProviderId !== null;
   const { cliStatus: effectiveCliStatus, providerStatus: runtimeProviderStatus } =
     useEffectiveCliProviderStatus(effectiveProviderId);
   const multimodelAvailable =
@@ -624,12 +728,17 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
     }
     return 'Uses the runtime default for the selected provider.';
   }, [effectiveProviderId, runtimeProviderStatus]);
+  const getProviderOverrideDisabledReason = (candidateProviderId: string): string | null => {
+    if (!isTeamProviderId(candidateProviderId)) {
+      return null;
+    }
+
+    return providerDisabledReasonById?.[candidateProviderId]?.trim() || null;
+  };
   const getProviderDisabledReason = (candidateProviderId: string): string | null => {
-    if (isTeamProviderId(candidateProviderId)) {
-      const overrideReason = providerDisabledReasonById?.[candidateProviderId]?.trim();
-      if (overrideReason) {
-        return overrideReason;
-      }
+    const overrideReason = getProviderOverrideDisabledReason(candidateProviderId);
+    if (overrideReason) {
+      return overrideReason;
     }
 
     if (candidateProviderId === 'opencode') {
@@ -644,14 +753,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
           'OpenCode runtime is not installed.'
         );
       }
-      if (!providerStatus.authenticated) {
-        return (
-          providerStatus.detailMessage ??
-          providerStatus.statusMessage ??
-          'OpenCode has no connected provider.'
-        );
-      }
-      if (!providerStatus.capabilities.teamLaunch) {
+      if (providerStatus.authenticated && !providerStatus.capabilities.teamLaunch) {
         return (
           providerStatus.detailMessage ??
           providerStatus.statusMessage ??
@@ -670,6 +772,11 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
   const isProviderSelectable = (candidateProviderId: string): boolean =>
     !isProviderTemporarilyDisabled(candidateProviderId) &&
     (multimodelAvailable || candidateProviderId === 'anthropic');
+  const isProviderInspectable = (candidateProviderId: string): boolean =>
+    candidateProviderId === 'opencode' &&
+    getProviderOverrideDisabledReason(candidateProviderId) === null &&
+    getProviderDisabledReason(candidateProviderId) !== null &&
+    multimodelAvailable;
   const activeProviderSelectable = isProviderSelectable(effectiveProviderId);
   const getProviderStatusBadge = (candidateProviderId: string): string | null => {
     if (isTeamProviderId(candidateProviderId)) {
@@ -681,7 +788,9 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
     }
 
     if (candidateProviderId === 'opencode') {
-      return getProviderDisabledReason(candidateProviderId) ? 'Gated' : null;
+      return getProviderDisabledReason(candidateProviderId)
+        ? getOpenCodeReadinessBadgeLabel(runtimeProviderStatusById.get('opencode'))
+        : null;
     }
 
     const providerDisabledReason = getProviderDisabledReason(candidateProviderId);
@@ -696,10 +805,6 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
     return null;
   };
   const getProviderStatusBadgeLabel = (statusBadge: string | null): string | null => {
-    if (statusBadge === 'Gated') {
-      return 'Gate';
-    }
-
     if (statusBadge === 'Multimodel off') {
       return 'Off';
     }
@@ -717,10 +822,13 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
   );
 
   useEffect(() => {
+    if (isInspectingInactiveProvider) {
+      return;
+    }
     if (normalizedValue !== value) {
       onValueChange(normalizedValue);
     }
-  }, [normalizedValue, onValueChange, value]);
+  }, [isInspectingInactiveProvider, normalizedValue, onValueChange, value]);
 
   const modelOptions = useMemo(() => {
     if (shouldAwaitRuntimeModelList) {
@@ -784,29 +892,43 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
   );
 
   useEffect(() => {
-    if (effectiveProviderId !== 'opencode' || !hasRecommendedOpenCodeModels) {
-      queueMicrotask(() => setRecommendedOnly(false));
+    if (previousSelectedProviderIdRef.current === selectedProviderId) {
+      return;
     }
-  }, [effectiveProviderId, hasRecommendedOpenCodeModels]);
+    previousSelectedProviderIdRef.current = selectedProviderId;
+    setInspectedProviderId(null);
+  }, [selectedProviderId]);
 
   useEffect(() => {
-    queueMicrotask(() => setModelQuery(''));
+    if (recommendedOnly && (effectiveProviderId !== 'opencode' || !hasRecommendedOpenCodeModels)) {
+      setRecommendedOnly(false);
+    }
+  }, [effectiveProviderId, hasRecommendedOpenCodeModels, recommendedOnly]);
+
+  useEffect(() => {
+    if (previousEffectiveProviderIdRef.current === effectiveProviderId) {
+      return;
+    }
+    previousEffectiveProviderIdRef.current = effectiveProviderId;
+    setModelQuery('');
   }, [effectiveProviderId]);
 
   useEffect(() => {
-    if (effectiveProviderId !== 'opencode') {
-      queueMicrotask(() => {
-        setSelectedOpenCodeSourceIds(new Set());
-        setOpenCodeSourceFilterOpen(false);
-      });
+    if (effectiveProviderId === 'opencode') {
+      return;
     }
-  }, [effectiveProviderId]);
+    if (selectedOpenCodeSourceIds.size === 0 && !openCodeSourceFilterOpen) {
+      return;
+    }
+    setSelectedOpenCodeSourceIds(new Set());
+    setOpenCodeSourceFilterOpen(false);
+  }, [effectiveProviderId, openCodeSourceFilterOpen, selectedOpenCodeSourceIds]);
 
   useEffect(() => {
-    if (!openCodeSourceFilterOpen) {
-      queueMicrotask(() => setOpenCodeSourceQuery(''));
+    if (!openCodeSourceFilterOpen && openCodeSourceQuery) {
+      setOpenCodeSourceQuery('');
     }
-  }, [openCodeSourceFilterOpen]);
+  }, [openCodeSourceFilterOpen, openCodeSourceQuery]);
 
   const openCodeSourceOptions = useMemo<OpenCodeSourceOption[]>(() => {
     if (effectiveProviderId !== 'opencode') {
@@ -851,7 +973,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
       Array.from(selectedOpenCodeSourceIds).filter((sourceId) => availableSourceIds.has(sourceId))
     );
     if (nextSelectedSourceIds.size !== selectedOpenCodeSourceIds.size) {
-      queueMicrotask(() => setSelectedOpenCodeSourceIds(nextSelectedSourceIds));
+      setSelectedOpenCodeSourceIds(nextSelectedSourceIds);
     }
   }, [openCodeSourceOptions, selectedOpenCodeSourceIds]);
 
@@ -946,7 +1068,10 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
       if (!normalizedModelQuery) {
         return true;
       }
-      const modelRecommendation = getTeamModelRecommendation(effectiveProviderId, option.value);
+      const modelRecommendation =
+        effectiveProviderId === 'opencode'
+          ? getTeamModelRecommendation(effectiveProviderId, option.value)
+          : null;
       return [
         option.value,
         option.label,
@@ -1008,6 +1133,46 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
     effectiveProviderId === 'opencode' &&
     !shouldShowOpenCodeCatalogLoading &&
     visibleConcreteModelOptionCount > OPENCODE_MODEL_VIRTUALIZATION_THRESHOLD;
+  const activeProviderDisabledReason = activeProviderSelectable
+    ? null
+    : getProviderDisabledReason(effectiveProviderId);
+  const canActivateInspectedOpenCode =
+    effectiveProviderId === 'opencode' && isInspectingInactiveProvider && activeProviderSelectable;
+  const activeProviderStatusPanel =
+    activeProviderDisabledReason && effectiveProviderId === 'opencode'
+      ? {
+          tone: 'warning' as const,
+          title: 'OpenCode is not ready for team launch',
+          summary: getOpenCodeReadinessSummary(runtimeProviderStatus),
+          message: getOpenCodeReadinessMessage(runtimeProviderStatus),
+          reason: activeProviderDisabledReason,
+          actionLabel: null,
+        }
+      : effectiveProviderId === 'opencode' &&
+          runtimeProviderStatus?.supported === true &&
+          runtimeProviderStatus.authenticated === false
+        ? {
+            tone: 'warning' as const,
+            title: hasFreeOpenCodeModelRoute(runtimeProviderStatus)
+              ? 'OpenCode free models are available'
+              : 'OpenCode provider is not connected',
+            summary: getOpenCodeReadinessSummary(runtimeProviderStatus),
+            message: getOpenCodeReadinessMessage(runtimeProviderStatus),
+            reason: null,
+            actionLabel: null,
+          }
+        : canActivateInspectedOpenCode
+          ? {
+              tone: 'ready' as const,
+              title: 'OpenCode is ready',
+              summary: getOpenCodeReadinessSummary(runtimeProviderStatus),
+              message:
+                'OpenCode passed provider readiness. Select it to use OpenCode models for this team.',
+              reason: null,
+              actionLabel: 'Use OpenCode',
+            }
+          : null;
+  const activeProviderNotice = providerNoticeById?.[effectiveProviderId] ?? null;
   const getModelAdvisoryBadgeLabel = (reason: string | null): string =>
     reason?.toLowerCase().includes('ping not confirmed') ? 'Ping not confirmed' : 'Note';
   const renderModelOption = (opt: TeamRuntimeModelOption): React.JSX.Element => {
@@ -1040,6 +1205,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
     const hasBlockingModelIssue = Boolean(modelIssueReason || modelUnavailableReason);
     const hasModelAdvisory = Boolean(modelAdvisoryReason) && !hasBlockingModelIssue;
     const modelSelectable =
+      !isInspectingInactiveProvider &&
       activeProviderSelectable &&
       !modelUnavailableReason &&
       !modelDisabledReason &&
@@ -1053,9 +1219,12 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
       null;
     const openCodeMetadata =
       effectiveProviderId === 'opencode' ? openCodeModelMetadataByValue.get(opt.value) : null;
-    const modelRecommendation =
-      openCodeMetadata?.recommendation ??
-      getTeamModelRecommendation(effectiveProviderId, opt.value);
+    let modelRecommendation: ReturnType<typeof getTeamModelRecommendation> = null;
+    if (effectiveProviderId === 'opencode') {
+      modelRecommendation =
+        openCodeMetadata?.recommendation ??
+        getTeamModelRecommendation(effectiveProviderId, opt.value);
+    }
     const openCodePricingInfo =
       effectiveProviderId === 'opencode' ? (openCodeMetadata?.pricingInfo ?? null) : null;
     const modelButtonTitle =
@@ -1227,8 +1396,20 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
       <Tabs
         value={effectiveProviderId}
         onValueChange={(nextValue) => {
-          if (isTeamProviderId(nextValue) && isProviderSelectable(nextValue)) {
+          if (!isTeamProviderId(nextValue)) {
+            return;
+          }
+          if (isInspectingInactiveProvider && nextValue === selectedProviderId) {
+            setInspectedProviderId(null);
+            return;
+          }
+          if (isProviderSelectable(nextValue)) {
+            setInspectedProviderId(null);
             onProviderChange(nextValue);
+            return;
+          }
+          if (isProviderInspectable(nextValue)) {
+            setInspectedProviderId(nextValue);
           }
         }}
       >
@@ -1238,6 +1419,7 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
               {PROVIDERS.map((provider) => {
                 const providerDisabledReason = getProviderDisabledReason(provider.id);
                 const providerSelectable = isProviderSelectable(provider.id);
+                const providerInspectable = isProviderInspectable(provider.id);
                 const statusBadge = getProviderStatusBadge(provider.id);
                 const statusBadgeLabel = getProviderStatusBadgeLabel(statusBadge);
 
@@ -1245,7 +1427,8 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
                   <TabsTrigger
                     key={provider.id}
                     value={provider.id}
-                    disabled={provider.comingSoon || !providerSelectable}
+                    disabled={provider.comingSoon || (!providerSelectable && !providerInspectable)}
+                    aria-disabled={!providerSelectable || undefined}
                     title={
                       providerDisabledReason ??
                       (statusBadge === 'Multimodel off'
@@ -1295,6 +1478,50 @@ export const TeamModelSelector: React.FC<TeamModelSelectorProps> = ({
             ) : null}
 
             <div className="p-3">
+              {activeProviderNotice ? (
+                <div data-testid="team-model-selector-provider-notice" className="mb-3">
+                  {activeProviderNotice}
+                </div>
+              ) : null}
+              {activeProviderStatusPanel ? (
+                <div
+                  data-testid="team-model-selector-provider-status"
+                  className={cn(
+                    'mb-3 rounded-md border px-3 py-2 text-[11px] leading-relaxed',
+                    activeProviderStatusPanel.tone === 'ready'
+                      ? 'border-emerald-300/30 bg-emerald-300/10 text-emerald-100'
+                      : 'border-amber-300/30 bg-amber-300/10 text-amber-100'
+                  )}
+                >
+                  <div className="flex items-start gap-2">
+                    {activeProviderStatusPanel.tone === 'ready' ? (
+                      <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-200" />
+                    ) : (
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-200" />
+                    )}
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-medium">{activeProviderStatusPanel.title}</p>
+                      <p className="opacity-90">{activeProviderStatusPanel.summary}</p>
+                      <p>{activeProviderStatusPanel.message}</p>
+                      {activeProviderStatusPanel.reason ? (
+                        <p className="opacity-90">Reason: {activeProviderStatusPanel.reason}</p>
+                      ) : null}
+                      {activeProviderStatusPanel.actionLabel ? (
+                        <button
+                          type="button"
+                          className="mt-1 inline-flex h-7 items-center rounded-md border border-emerald-300/35 bg-emerald-300/10 px-2.5 text-[11px] font-medium text-emerald-100 transition-colors hover:border-emerald-200/50 hover:bg-emerald-300/15"
+                          onClick={() => {
+                            setInspectedProviderId(null);
+                            onProviderChange('opencode');
+                          }}
+                        >
+                          {activeProviderStatusPanel.actionLabel}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               {shouldAwaitRuntimeModelList ? (
                 <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
                   Explicit models load from the current runtime. Default remains available while the

@@ -43,16 +43,25 @@ const docsHref = computed(() => {
 
 <style scoped>
 .app-footer {
+  --footer-bg:
+    linear-gradient(180deg, rgba(3, 10, 22, 0.96) 0%, rgba(2, 6, 16, 0.98) 100%);
+  --footer-wall-border: rgba(0, 234, 255, 0.28);
+  --footer-wall-highlight: rgba(255, 255, 255, 0.06);
+
   position: relative;
-  border-top: 1px solid var(--at-c-border);
-  padding: 20px 0;
+  border-top: 1px solid var(--footer-wall-border);
+  padding: 28px 0 22px;
   isolation: isolate;
+  background: var(--footer-bg);
+  box-shadow:
+    0 -28px 70px rgba(0, 0, 0, 0.34),
+    0 -1px 0 var(--footer-wall-highlight) inset;
 }
 
 .app-footer__robot-stage {
   position: absolute;
   right: clamp(24px, 7vw, 112px);
-  bottom: calc(100% - 5px);
+  bottom: calc(100% - 11px);
   z-index: 2;
   width: clamp(178px, 16vw, 236px);
   pointer-events: none;
@@ -92,7 +101,7 @@ const docsHref = computed(() => {
 
 .app-footer__copy {
   font-size: 13px;
-  opacity: 0.5;
+  color: rgba(244, 247, 255, 0.72);
   font-family: var(--at-font-mono);
 }
 
@@ -106,7 +115,7 @@ const docsHref = computed(() => {
   color: var(--at-c-cyan);
   text-decoration: none;
   font-size: 13px;
-  opacity: 0.7;
+  opacity: 0.9;
   transition: opacity 0.2s ease;
   font-family: var(--at-font-mono);
 }
@@ -122,11 +131,19 @@ const docsHref = computed(() => {
 }
 
 .v-theme--light .app-footer {
-  border-top-color: var(--at-c-border);
+  --footer-bg:
+    linear-gradient(180deg, rgba(230, 240, 247, 0.98) 0%, rgba(218, 229, 238, 0.98) 100%);
+  --footer-wall-border: rgba(8, 88, 112, 0.24);
+  --footer-wall-highlight: rgba(255, 255, 255, 0.82);
+
+  border-top-color: var(--footer-wall-border);
+  box-shadow:
+    0 -32px 74px rgba(62, 84, 104, 0.2),
+    0 -1px 0 rgba(255, 255, 255, 0.92) inset;
 }
 
 .v-theme--light .app-footer__copy {
-  opacity: 0.72;
+  color: rgba(42, 50, 61, 0.74);
 }
 
 .v-theme--light .app-footer__link {

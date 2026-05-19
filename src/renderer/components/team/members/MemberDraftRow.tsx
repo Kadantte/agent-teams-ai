@@ -16,6 +16,13 @@ import { HoverTooltip } from '@renderer/components/ui/hover-tooltip';
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@renderer/components/ui/select';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
 import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
@@ -25,19 +32,30 @@ import { reconcileChips, removeChipTokenFromText } from '@renderer/utils/chipUti
 import { isAnthropicSonnetOneMillionContextTeamModel } from '@renderer/utils/teamModelCatalog';
 import { getMemberColorByName } from '@shared/constants/memberColors';
 import {
+  normalizeTeamMemberMcpPolicy,
+  resolveTeamMemberMcpScopes,
+} from '@shared/utils/teamMemberMcpPolicy';
+import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
   GitBranch,
   Info,
+  Plug,
   RotateCcw,
   Trash2,
+  Workflow as WorkflowIcon,
 } from 'lucide-react';
 
 import type { MemberDraft } from './membersEditorTypes';
 import type { InlineChip } from '@renderer/types/inlineChip';
 import type { MentionSuggestion } from '@renderer/types/mention';
-import type { EffortLevel, TeamProviderId } from '@shared/types';
+import type {
+  EffortLevel,
+  TeamMemberMcpMode,
+  TeamMemberMcpPolicy,
+  TeamProviderId,
+} from '@shared/types';
 
 interface MemberDraftRowProps {
   member: MemberDraft;
@@ -90,6 +108,8 @@ interface MemberDraftRowProps {
   showWorktreeIsolationControls?: boolean;
   worktreeIsolationDisabledReason?: string | null;
   onWorktreeIsolationChange?: (id: string, enabled: boolean) => void;
+  onMcpPolicyChange?: (id: string, policy: TeamMemberMcpPolicy | undefined) => void;
+  agentTeamsMcpLocked?: boolean;
   lockedModelAction?: {
     label: string;
     description?: string;
@@ -143,6 +163,8 @@ export const MemberDraftRow = ({
   showWorktreeIsolationControls = false,
   worktreeIsolationDisabledReason,
   onWorktreeIsolationChange,
+  onMcpPolicyChange,
+  agentTeamsMcpLocked = false,
   lockedModelAction,
 }: MemberDraftRowProps): React.JSX.Element => {
   const { isLight } = useTheme();
@@ -152,6 +174,7 @@ export const MemberDraftRow = ({
   );
   const [workflowExpanded, setWorkflowExpanded] = useState(false);
   const [modelExpanded, setModelExpanded] = useState(false);
+  const [mcpExpanded, setMcpExpanded] = useState(false);
 
   // Pre-warm file list cache when workflow section is expanded
   useFileListCacheWarmer(workflowExpanded && projectPath ? projectPath : null);
@@ -199,6 +222,88 @@ export const MemberDraftRow = ({
       onWorkflowChange?.(member.id, newValue);
     },
     [chips, member.id, onWorkflowChange, onWorkflowChipsChange, workflowDraft]
+  );
+
+  const effectiveMcpPolicy = useMemo<TeamMemberMcpPolicy | undefined>(
+    () => (agentTeamsMcpLocked ? { mode: 'appOnly' } : member.mcpPolicy),
+    [agentTeamsMcpLocked, member.mcpPolicy]
+  );
+  const mcpMode: TeamMemberMcpMode = effectiveMcpPolicy?.mode ?? 'inheritLead';
+  const mcpScopes = useMemo(
+    () => resolveTeamMemberMcpScopes(effectiveMcpPolicy),
+    [effectiveMcpPolicy]
+  );
+  const mcpServerNames = useMemo(
+    () => effectiveMcpPolicy?.serverNames ?? [],
+    [effectiveMcpPolicy?.serverNames]
+  );
+  const mcpButtonLabel =
+    mcpMode === 'appOnly'
+      ? 'Agent Teams MCP'
+      : mcpMode === 'strictAllowlist'
+        ? `MCP ${mcpServerNames.length || 'strict'}`
+        : mcpMode === 'inheritScopes'
+          ? 'MCP scopes'
+          : 'MCP inherit';
+  const updateMcpPolicy = useCallback(
+    (policy: TeamMemberMcpPolicy | undefined) => {
+      if (agentTeamsMcpLocked) {
+        return;
+      }
+      onMcpPolicyChange?.(member.id, normalizeTeamMemberMcpPolicy(policy));
+    },
+    [agentTeamsMcpLocked, member.id, onMcpPolicyChange]
+  );
+  const handleMcpModeChange = useCallback(
+    (mode: string) => {
+      if (mode === 'inheritLead') {
+        updateMcpPolicy(undefined);
+        return;
+      }
+      if (mode === 'appOnly') {
+        updateMcpPolicy({ mode: 'appOnly' });
+        return;
+      }
+      if (mode === 'inheritScopes' || mode === 'strictAllowlist') {
+        updateMcpPolicy({
+          mode,
+          scopes: mcpScopes,
+          ...(mode === 'strictAllowlist' && mcpServerNames.length > 0
+            ? { serverNames: mcpServerNames }
+            : {}),
+        });
+      }
+    },
+    [mcpScopes, mcpServerNames, updateMcpPolicy]
+  );
+  const updateMcpScope = useCallback(
+    (scope: 'user' | 'project' | 'local', enabled: boolean) => {
+      if (mcpMode !== 'inheritScopes' && mcpMode !== 'strictAllowlist') {
+        return;
+      }
+      updateMcpPolicy({
+        mode: mcpMode,
+        scopes: { ...mcpScopes, [scope]: enabled },
+        ...(mcpMode === 'strictAllowlist' && mcpServerNames.length > 0
+          ? { serverNames: mcpServerNames }
+          : {}),
+      });
+    },
+    [mcpMode, mcpScopes, mcpServerNames, updateMcpPolicy]
+  );
+  const updateMcpServerNames = useCallback(
+    (value: string) => {
+      const serverNames = value
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean);
+      updateMcpPolicy({
+        mode: 'strictAllowlist',
+        scopes: mcpScopes,
+        serverNames,
+      });
+    },
+    [mcpScopes, updateMcpPolicy]
   );
 
   useEffect(() => {
@@ -307,9 +412,16 @@ export const MemberDraftRow = ({
     Boolean(message)
   );
   const hasWarnings = warningMessages.length > 0 || showSonnetExtraUsageWarning;
-  const anthropicContextModeLabel = limitContext
-    ? '200K limit enabled'
-    : '1M-capable context allowed';
+  const anthropicContextModeLabel = limitContext ? '200K limit enabled' : 'default context setting';
+  const workflowTooltipText = workflowDraft.value.trim()
+    ? 'Edit teammate workflow'
+    : 'Add teammate workflow';
+  const mcpTooltipText = `${mcpButtonLabel}: Control this member's MCP inheritance policy`;
+  const mcpLockedInfoText =
+    'Agent Teams MCP only is enabled for all teammates. This teammate will launch with only the Agent Teams server.';
+  const mcpSettingInfoText = agentTeamsMcpLocked
+    ? mcpLockedInfoText
+    : 'Agent Teams MCP launches this teammate with only the Agent Teams server. Scope and allowlist modes apply only to this teammate launch.';
   const runtimeSummary = formatTeamModelSummary(
     effectiveProviderId,
     effectiveModel?.trim() ?? '',
@@ -346,6 +458,7 @@ export const MemberDraftRow = ({
             value={member.name}
             aria-label={`Member ${index + 1} name`}
             disabled={isRemoved || lockIdentity}
+            title={lockIdentity ? identityLockReason : undefined}
             onChange={(event) => onNameChange(member.id, event.target.value)}
             placeholder="member-name"
           />
@@ -371,25 +484,6 @@ export const MemberDraftRow = ({
       </div>
       <div className="space-y-1">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
-          {showWorkflow && onWorkflowChange ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="relative h-8 shrink-0 gap-1"
-              disabled={isRemoved}
-              onClick={() => setWorkflowExpanded((prev) => !prev)}
-            >
-              {workflowExpanded ? (
-                <ChevronDown className="size-3.5" />
-              ) : (
-                <ChevronRight className="size-3.5" />
-              )}
-              Workflow
-              {!workflowExpanded && workflowDraft.value.trim() ? (
-                <span className="absolute -right-1 -top-1 size-2 rounded-full bg-blue-500" />
-              ) : null}
-            </Button>
-          ) : null}
           <div className="w-full min-w-0 space-y-1 sm:w-[150px] sm:min-w-[150px]">
             <HoverTooltip
               content={modelButtonTooltipContent}
@@ -490,6 +584,70 @@ export const MemberDraftRow = ({
               </span>
             </div>
           ) : null}
+          {showWorkflow && onWorkflowChange ? (
+            <HoverTooltip
+              content={workflowTooltipText}
+              title={workflowTooltipText}
+              dismissOnClick
+              className="shrink-0"
+              contentClassName="max-w-64"
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn(
+                  'relative size-8 shrink-0 px-0',
+                  workflowExpanded &&
+                    'border-blue-400/50 bg-blue-500/10 text-blue-100 hover:bg-blue-500/15'
+                )}
+                aria-label={workflowTooltipText}
+                aria-expanded={workflowExpanded}
+                disabled={isRemoved}
+                onClick={() => setWorkflowExpanded((prev) => !prev)}
+              >
+                <WorkflowIcon className="size-3.5" />
+                {!workflowExpanded && workflowDraft.value.trim() ? (
+                  <span className="absolute -right-1 -top-1 size-2 rounded-full bg-blue-500" />
+                ) : null}
+              </Button>
+            </HoverTooltip>
+          ) : null}
+          {onMcpPolicyChange ? (
+            <HoverTooltip
+              content={mcpTooltipText}
+              title={mcpTooltipText}
+              dismissOnClick
+              className="shrink-0"
+              contentClassName="max-w-64"
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn(
+                  'relative size-8 shrink-0 px-0',
+                  agentTeamsMcpLocked &&
+                    'border-amber-300/50 bg-amber-400/10 text-amber-100 hover:bg-amber-400/15',
+                  !agentTeamsMcpLocked &&
+                    (mcpExpanded || mcpMode !== 'inheritLead') &&
+                    'border-sky-400/45 bg-sky-500/10 text-sky-100 hover:bg-sky-500/15'
+                )}
+                aria-label={mcpTooltipText}
+                aria-expanded={mcpExpanded}
+                disabled={isRemoved}
+                onClick={() => setMcpExpanded((prev) => !prev)}
+              >
+                <Plug className="size-3.5" />
+                {agentTeamsMcpLocked || mcpMode !== 'inheritLead' ? (
+                  <span
+                    className={cn(
+                      'absolute -right-1 -top-1 size-2 rounded-full',
+                      agentTeamsMcpLocked ? 'bg-amber-300' : 'bg-sky-400'
+                    )}
+                  />
+                ) : null}
+              </Button>
+            </HoverTooltip>
+          ) : null}
           {hideActionButton ? null : isRemoved ? (
             <Button
               variant="outline"
@@ -536,6 +694,87 @@ export const MemberDraftRow = ({
           <div className="ml-3 flex items-start gap-2 rounded-md border border-sky-400/25 bg-sky-500/10 px-3 py-2 text-[11px] leading-relaxed text-sky-100">
             <Info className="mt-0.5 size-3.5 shrink-0 text-sky-300" />
             <p className="min-w-0 whitespace-pre-wrap break-words">{infoText}</p>
+          </div>
+        </div>
+      ) : null}
+      {!isRemoved && onMcpPolicyChange && mcpExpanded ? (
+        <div className="space-y-3 pl-3 md:col-span-3">
+          <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+            <div className="grid gap-3 sm:grid-cols-[minmax(160px,220px)_1fr]">
+              <div className="space-y-1">
+                <Label
+                  htmlFor={`member-${member.id}-mcp-mode`}
+                  className="text-[10px] text-[var(--color-text-muted)]"
+                >
+                  MCP mode
+                </Label>
+                <Select
+                  value={mcpMode}
+                  onValueChange={handleMcpModeChange}
+                  disabled={agentTeamsMcpLocked}
+                >
+                  <SelectTrigger
+                    id={`member-${member.id}-mcp-mode`}
+                    className="h-8 text-xs"
+                    disabled={agentTeamsMcpLocked}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inheritLead">Inherit lead</SelectItem>
+                    <SelectItem value="inheritScopes">Choose scopes</SelectItem>
+                    <SelectItem value="strictAllowlist">Strict allowlist</SelectItem>
+                    <SelectItem value="appOnly">Agent Teams MCP</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {(['user', 'project', 'local'] as const).map((scope) => (
+                    <label
+                      key={scope}
+                      className={cn(
+                        'flex h-8 items-center gap-2 rounded-md border border-[var(--color-border)] px-2 text-xs text-[var(--color-text-secondary)]',
+                        (agentTeamsMcpLocked ||
+                          mcpMode === 'inheritLead' ||
+                          mcpMode === 'appOnly') &&
+                          'opacity-50'
+                      )}
+                    >
+                      <Checkbox
+                        checked={mcpMode === 'appOnly' ? false : mcpScopes[scope]}
+                        disabled={
+                          agentTeamsMcpLocked || mcpMode === 'inheritLead' || mcpMode === 'appOnly'
+                        }
+                        onCheckedChange={(checked) => updateMcpScope(scope, checked === true)}
+                      />
+                      <span className="capitalize">{scope}</span>
+                    </label>
+                  ))}
+                </div>
+                {mcpMode === 'strictAllowlist' ? (
+                  <div className="space-y-1">
+                    <Label
+                      htmlFor={`member-${member.id}-mcp-servers`}
+                      className="text-[10px] text-[var(--color-text-muted)]"
+                    >
+                      Server names
+                    </Label>
+                    <Input
+                      id={`member-${member.id}-mcp-servers`}
+                      className="h-8 text-xs"
+                      value={mcpServerNames.join(', ')}
+                      disabled={agentTeamsMcpLocked}
+                      onChange={(event) => updateMcpServerNames(event.target.value)}
+                      placeholder="github, sentry"
+                    />
+                  </div>
+                ) : null}
+                {mcpMode !== 'inheritLead' ? (
+                  <p className="text-[10px] leading-snug text-amber-200">{mcpSettingInfoText}</p>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
       ) : null}

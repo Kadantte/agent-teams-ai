@@ -679,6 +679,11 @@ export class ClaudeMultimodelBridgeService {
 
   private readonly providerStatusHydrationGenerations = new Map<CliProviderId, number>();
 
+  private readonly providerStatusHydrationInFlight = new Map<
+    CliProviderId,
+    { readonly generation: number; readonly promise: Promise<CliProviderStatus> }
+  >();
+
   private beginProviderStatusHydration(providerIds: readonly CliProviderId[]): number {
     const generation = ++this.providerStatusHydrationGeneration;
     for (const providerId of providerIds) {
@@ -689,6 +694,38 @@ export class ClaudeMultimodelBridgeService {
 
   private isProviderStatusHydrationCurrent(providerId: CliProviderId, generation: number): boolean {
     return this.providerStatusHydrationGenerations.get(providerId) === generation;
+  }
+
+  private getProviderCatalogHydration(
+    binaryPath: string,
+    providerId: CliProviderId,
+    generation: number
+  ): Promise<CliProviderStatus | null> {
+    const inFlight = this.providerStatusHydrationInFlight.get(providerId);
+    if (inFlight) {
+      if (inFlight.generation === generation) {
+        return inFlight.promise;
+      }
+
+      return inFlight.promise
+        .catch(() => undefined)
+        .then(() => {
+          if (!this.isProviderStatusHydrationCurrent(providerId, generation)) {
+            return null;
+          }
+          return this.getProviderCatalogHydration(binaryPath, providerId, generation);
+        });
+    }
+
+    const request = this.getProviderStatusFromScopedRuntimeStatus(binaryPath, providerId).finally(
+      () => {
+        if (this.providerStatusHydrationInFlight.get(providerId)?.promise === request) {
+          this.providerStatusHydrationInFlight.delete(providerId);
+        }
+      }
+    );
+    this.providerStatusHydrationInFlight.set(providerId, { generation, promise: request });
+    return request;
   }
 
   private async buildCliEnv(
@@ -708,16 +745,21 @@ export class ClaudeMultimodelBridgeService {
     });
   }
 
-  private isUnifiedRuntimeUnsupported(error: unknown): boolean {
+  private isRuntimeStatusCompatibilityError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     const lower = message.toLowerCase();
     return (
       lower.includes('unknown command') ||
       lower.includes('unknown option') ||
       lower.includes('no such command') ||
-      lower.includes('did you mean') ||
-      lower.includes('runtime status')
+      lower.includes('did you mean')
     );
+  }
+
+  private isUnifiedRuntimeUnsupported(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
+    return this.isRuntimeStatusCompatibilityError(error) || lower.includes('runtime status');
   }
 
   private mapRuntimeProviderStatus(
@@ -961,8 +1003,11 @@ export class ClaudeMultimodelBridgeService {
         continue;
       }
 
-      void this.getProviderStatusFromScopedRuntimeStatus(binaryPath, liveProvider.providerId)
+      void this.getProviderCatalogHydration(binaryPath, liveProvider.providerId, generation)
         .then((hydratedProvider) => {
+          if (!hydratedProvider) {
+            return;
+          }
           if (!this.isProviderStatusHydrationCurrent(liveProvider.providerId, generation)) {
             return;
           }
@@ -1100,8 +1145,11 @@ export class ClaudeMultimodelBridgeService {
         summary: true,
       });
       if (provider.runtimeCapabilities?.modelCatalog?.dynamic === true && onCatalogUpdate) {
-        void this.getProviderStatusFromScopedRuntimeStatus(binaryPath, provider.providerId)
+        void this.getProviderCatalogHydration(binaryPath, provider.providerId, generation)
           .then((hydratedProvider) => {
+            if (!hydratedProvider) {
+              return;
+            }
             if (!this.isProviderStatusHydrationCurrent(provider.providerId, generation)) {
               return;
             }
@@ -1124,24 +1172,35 @@ export class ClaudeMultimodelBridgeService {
       }
       return provider;
     } catch (error) {
-      if (!this.isUnifiedRuntimeUnsupported(error)) {
+      if (providerId === 'gemini' && this.isRuntimeStatusCompatibilityError(error)) {
+        return this.buildGeminiStatus(binaryPath);
+      }
+
+      if (this.isRuntimeStatusCompatibilityError(error)) {
         logger.warn(
           `Provider-scoped summary runtime status unavailable for ${providerId}, falling back to full probe: ${
             error instanceof Error ? error.message : String(error)
           }`
         );
+        try {
+          return await this.getProviderStatusFromScopedRuntimeStatus(binaryPath, providerId);
+        } catch (fullError) {
+          logger.warn(
+            `Provider-scoped full runtime status unavailable for ${providerId}, returning scoped error: ${
+              fullError instanceof Error ? fullError.message : String(fullError)
+            }`
+          );
+          return createRuntimeStatusErrorProviderStatus(providerId, fullError);
+        }
       }
-    }
 
-    if (providerId === 'gemini') {
-      return this.buildGeminiStatus(binaryPath);
+      logger.warn(
+        `Provider-scoped summary runtime status unavailable for ${providerId}, returning scoped error: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return createRuntimeStatusErrorProviderStatus(providerId, error);
     }
-
-    const providers = await this.getProviderStatuses(binaryPath);
-    return (
-      providers.find((provider) => provider.providerId === providerId) ??
-      createDefaultProviderStatus(providerId)
-    );
   }
 
   async verifyProviderStatus(

@@ -115,7 +115,12 @@ function findExecutable(bundlePath, platform) {
     const packageJson = fs.existsSync(packageJsonPath)
       ? JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
       : {};
-    const preferredNames = [packageJson.name, 'agent-teams-ai', 'Agent Teams UI'].filter(Boolean);
+    const preferredNames = [
+      packageJson.name,
+      'agent-teams-ai',
+      'Agent Teams AI',
+      'Agent Teams UI',
+    ].filter(Boolean);
     for (const name of preferredNames) {
       const candidate = path.join(bundlePath, name);
       if (fs.existsSync(candidate)) return candidate;

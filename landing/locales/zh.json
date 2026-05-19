@@ -43,11 +43,12 @@
     "sectionSubtitle": "强大的工具，让多智能体协作真正有效。"
   },
   "pricing": {
-    "sectionTitle": "100% 免费，没有附加条件。",
-    "sectionSubtitle": "开源，无需 API 密钥，无需配置。安装即用。",
+    "sectionTitle": "免费安装。内置免费模型。",
+    "sectionSubtitle": "可立即使用无需认证的免费模型 - 无需账号、API 密钥或信用卡。只有在需要更多模型时，才连接 Claude、Codex、OpenCode/OpenRouter 或其他提供商。",
     "getStarted": "立即下载",
     "popular": "免费",
-    "note": "开源。无需 API 密钥。无需配置。完全本地运行。"
+    "freeModelCallout": "已包含无需认证的免费模型",
+    "note": "Agent Teams 没有自己的付费套餐。无需认证的免费模型可让你立即试用；付费提供商的使用是可选的，并由你选择的提供商控制。"
   },
   "testimonials": {
     "sectionTitle": "开发者怎么说",
@@ -112,7 +113,7 @@
   },
   "meta": {
     "homeTitle": "Agent Teams - 面向开发者的 AI 智能体编排",
-    "homeDescription": "免费开源桌面应用，用于组建 AI 智能体团队。看板、代码审查、跨团队通信。完全本地运行。",
+    "homeDescription": "面向 AI 智能体团队的免费开源桌面应用。先使用无需认证的免费模型，需要更多模型时再连接 Claude、Codex 或 OpenCode。",
     "downloadTitle": "下载适用于 macOS、Windows 和 Linux 的 Agent Teams",
     "downloadDescription": "下载适用于 macOS、Windows 和 Linux 的 Agent Teams。面向 Claude、Codex 和 OpenCode 智能体团队的免费开源桌面应用。"
   },

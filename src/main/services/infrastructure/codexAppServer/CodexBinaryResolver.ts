@@ -9,13 +9,16 @@ import { buildMergedCliPath } from '@main/utils/cliPathMerge';
 import { getCachedShellEnv } from '@main/utils/shellEnv';
 
 const CACHE_VERIFY_TTL_MS = 30_000;
+const STALE_POSITIVE_CACHE_TTL_MS = 5 * 60_000;
 const VERSION_CACHE_TTL_MS = 30_000;
 const BINARY_LAUNCH_VERIFY_TIMEOUT_MS = 3_000;
 
 let cachedBinaryPath: string | null | undefined;
 let cacheVerifiedAt = 0;
+let cacheLaunchVerifiedAt = 0;
 let resolveInFlight: Promise<string | null> | null = null;
 let cachedMissHadShellEnv = false;
+let cachedPositiveIsStale = false;
 const versionCache = new Map<string, { version: string | null; observedAt: number }>();
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -117,29 +120,54 @@ async function verifyBinary(candidate: string): Promise<string | null> {
   return null;
 }
 
+async function canReuseStalePositiveBinary(
+  candidate: string | null,
+  launchVerifiedAt: number
+): Promise<boolean> {
+  if (
+    !candidate ||
+    launchVerifiedAt <= 0 ||
+    Date.now() - launchVerifiedAt > STALE_POSITIVE_CACHE_TTL_MS
+  ) {
+    return false;
+  }
+
+  return fileExists(candidate);
+}
+
 export class CodexBinaryResolver {
   static clearCache(): void {
     cachedBinaryPath = undefined;
     cacheVerifiedAt = 0;
+    cacheLaunchVerifiedAt = 0;
     resolveInFlight = null;
     cachedMissHadShellEnv = false;
+    cachedPositiveIsStale = false;
     versionCache.clear();
   }
 
   static async resolve(): Promise<string | null> {
+    let stalePositiveBinaryPath: string | null = null;
+    let stalePositiveLaunchVerifiedAt = 0;
+
     if (cachedBinaryPath !== undefined) {
       if (cachedBinaryPath === null) {
         if (!cachedMissHadShellEnv && getCachedShellEnv() !== null) {
           cachedBinaryPath = undefined;
           cacheVerifiedAt = 0;
+          cacheLaunchVerifiedAt = 0;
           cachedMissHadShellEnv = false;
+          cachedPositiveIsStale = false;
         } else {
           const verifiedAppManagedBinaryPath =
             await resolveVerifiedAppManagedCodexRuntimeBinaryPath();
           if (verifiedAppManagedBinaryPath) {
+            const now = Date.now();
             cachedBinaryPath = verifiedAppManagedBinaryPath;
-            cacheVerifiedAt = Date.now();
+            cacheVerifiedAt = now;
+            cacheLaunchVerifiedAt = now;
             cachedMissHadShellEnv = false;
+            cachedPositiveIsStale = false;
             return verifiedAppManagedBinaryPath;
           }
           if (Date.now() - cacheVerifiedAt <= CACHE_VERIFY_TTL_MS) {
@@ -147,22 +175,36 @@ export class CodexBinaryResolver {
           }
           cachedBinaryPath = undefined;
           cacheVerifiedAt = 0;
+          cacheLaunchVerifiedAt = 0;
           cachedMissHadShellEnv = false;
+          cachedPositiveIsStale = false;
         }
       } else {
-        if (Date.now() - cacheVerifiedAt <= CACHE_VERIFY_TTL_MS) {
+        const now = Date.now();
+        const stalePositiveIsStillAllowed =
+          !cachedPositiveIsStale || now - cacheLaunchVerifiedAt <= STALE_POSITIVE_CACHE_TTL_MS;
+        if (now - cacheVerifiedAt <= CACHE_VERIFY_TTL_MS && stalePositiveIsStillAllowed) {
           return cachedBinaryPath;
         }
 
-        const verified = await verifyBinary(cachedBinaryPath);
+        const cachedPositiveBinaryPath = cachedBinaryPath;
+        const cachedPositiveLaunchVerifiedAt = cacheLaunchVerifiedAt;
+        const verified = await verifyBinary(cachedPositiveBinaryPath);
         if (verified) {
-          cacheVerifiedAt = Date.now();
+          const verifiedAt = Date.now();
+          cacheVerifiedAt = verifiedAt;
+          cacheLaunchVerifiedAt = verifiedAt;
           cachedMissHadShellEnv = false;
+          cachedPositiveIsStale = false;
           return verified;
         }
 
+        stalePositiveBinaryPath = cachedPositiveBinaryPath;
+        stalePositiveLaunchVerifiedAt = cachedPositiveLaunchVerifiedAt;
         cachedBinaryPath = undefined;
         cacheVerifiedAt = 0;
+        cacheLaunchVerifiedAt = 0;
+        cachedPositiveIsStale = false;
       }
     }
 
@@ -172,7 +214,20 @@ export class CodexBinaryResolver {
       });
     }
 
-    return resolveInFlight;
+    const resolved = await resolveInFlight;
+    if (
+      !resolved &&
+      (await canReuseStalePositiveBinary(stalePositiveBinaryPath, stalePositiveLaunchVerifiedAt))
+    ) {
+      cachedBinaryPath = stalePositiveBinaryPath;
+      cacheVerifiedAt = Date.now();
+      cacheLaunchVerifiedAt = stalePositiveLaunchVerifiedAt;
+      cachedMissHadShellEnv = false;
+      cachedPositiveIsStale = true;
+      return stalePositiveBinaryPath;
+    }
+
+    return resolved;
   }
 
   private static async runResolve(): Promise<string | null> {
@@ -187,16 +242,21 @@ export class CodexBinaryResolver {
     for (const candidate of candidates) {
       const resolved = await verifyBinary(candidate);
       if (resolved) {
+        const now = Date.now();
         cachedBinaryPath = resolved;
-        cacheVerifiedAt = Date.now();
+        cacheVerifiedAt = now;
+        cacheLaunchVerifiedAt = now;
         cachedMissHadShellEnv = false;
+        cachedPositiveIsStale = false;
         return resolved;
       }
     }
 
     cachedBinaryPath = null;
     cacheVerifiedAt = Date.now();
+    cacheLaunchVerifiedAt = 0;
     cachedMissHadShellEnv = getCachedShellEnv() !== null;
+    cachedPositiveIsStale = false;
     return null;
   }
 

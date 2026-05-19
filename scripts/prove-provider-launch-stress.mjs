@@ -7,12 +7,11 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { resolveLiveSmokeOrchestratorCliPath } from './lib/live-smoke-runtime.mjs';
 import { preflightOpenCodeLiveEnvironment } from './lib/opencode-live-preflight.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
-const orchestratorRoot = process.env.CLAUDE_DEV_RUNTIME_ROOT?.trim();
-const siblingOrchestrator = path.resolve(repoRoot, '..', 'agent_teams_orchestrator');
 const requestedOrder =
   process.env.PROVIDER_LAUNCH_STRESS_ORDER?.trim() || 'anthropic,codex,opencode,mixed';
 
@@ -25,14 +24,20 @@ const env = {
   PROVIDER_LAUNCH_STRESS_ANTHROPIC_AUTH:
     process.env.PROVIDER_LAUNCH_STRESS_ANTHROPIC_AUTH?.trim() ||
     (process.env.ANTHROPIC_API_KEY?.trim() ? 'api-key' : 'subscription'),
+  CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS:
+    process.env.CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS?.trim() || '90000',
+  CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS:
+    process.env.CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS?.trim() || '30000',
   OPENCODE_E2E: '1',
   OPENCODE_E2E_USE_REAL_APP_CREDENTIALS: '1',
   OPENCODE_DISABLE_AUTOUPDATE: process.env.OPENCODE_DISABLE_AUTOUPDATE ?? '1',
 };
 
 if (!env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH?.trim()) {
-  const runtimeRoot = orchestratorRoot ? path.resolve(orchestratorRoot) : siblingOrchestrator;
-  env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH = path.join(runtimeRoot, 'cli');
+  env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH = resolveLiveSmokeOrchestratorCliPath({
+    env,
+    repoRoot,
+  });
 }
 
 console.log('Running provider launch stress live smoke');

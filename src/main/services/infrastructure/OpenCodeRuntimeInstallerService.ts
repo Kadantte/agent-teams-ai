@@ -1,4 +1,5 @@
 import { execCli } from '@main/utils/childProcess';
+import { buildMergedCliPath } from '@main/utils/cliPathMerge';
 import { getAppDataPath } from '@main/utils/pathDecoder';
 import { safeSendToRenderer } from '@main/utils/safeWebContentsSend';
 import { getCachedShellEnv, resolveInteractiveShellEnvBestEffort } from '@main/utils/shellEnv';
@@ -142,6 +143,7 @@ function resolvePathOpenCodeBinary(
   const pathEntries = [
     ...additionalEnvSources.flatMap((env) => splitPathEnv(env?.PATH)),
     ...splitPathEnv(shellEnv.PATH),
+    ...splitPathEnv(buildMergedCliPath()),
     ...splitPathEnv(process.env.PATH),
   ];
   const seen = new Set<string>();

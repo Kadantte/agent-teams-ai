@@ -23,7 +23,10 @@ vi.mock('@renderer/components/team/dialogs/LimitContextCheckbox', () => ({
 }));
 
 vi.mock('@renderer/components/team/dialogs/TeamModelSelector', () => ({
+  formatTeamModelSummary: (providerId: string, model: string, effort?: string) =>
+    [providerId, model || 'Default', effort].filter(Boolean).join(' · '),
   getProviderScopedTeamModelLabel: (_providerId: string, model: string) => model || 'Default',
+  getTeamEffortLabel: (effort: string) => effort || 'Default',
   getTeamProviderLabel: (providerId: string) => providerId,
   TeamModelSelector: () => React.createElement('div', null, 'team-model-selector'),
 }));

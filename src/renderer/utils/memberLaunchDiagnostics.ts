@@ -381,11 +381,6 @@ function buildDiagnosticHints(input: {
       'Bootstrap submit was rejected because local prompt/bash command queue was not empty.'
     );
   }
-  if (textIncludesAny(text, ['no stdin data received in 3s'])) {
-    hints.push(
-      'CLI read empty stdin before bootstrap submit; verify headless teammate runtime flag/env and startup input handling.'
-    );
-  }
   if (
     textIncludesAny(text, ['bootstrap_submit_rejected', 'submit rejected by local prompt handler'])
   ) {
@@ -395,11 +390,28 @@ function buildDiagnosticHints(input: {
   }
   if (
     textIncludesAny(text, [
+      'did not bootstrap-confirm',
+      'bootstrap-confirm before timeout',
+      'bootstrap was not confirmed',
+      'last transport stage: bootstrap_submitted',
+    ])
+  ) {
+    hints.push(
+      'Bootstrap prompt was submitted, but teammate did not bootstrap-confirm before timeout.'
+    );
+  }
+  if (
+    textIncludesAny(text, [
       'did not submit bootstrap prompt',
       'timed out waiting for bootstrap_submitted',
     ])
   ) {
     hints.push('Parent process timed out waiting for durable bootstrap_submitted evidence.');
+  }
+  if (textIncludesAny(text, ['no stdin data received in 3s'])) {
+    hints.push(
+      'CLI read empty stdin before bootstrap submit; verify headless teammate runtime flag/env and startup input handling.'
+    );
   }
   if (
     input.livenessKind === 'stale_metadata' ||

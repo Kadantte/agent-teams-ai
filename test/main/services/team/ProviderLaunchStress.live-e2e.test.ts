@@ -5,16 +5,17 @@ import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createOpenCodeLiveHarness, waitForOpenCodeLanesStopped, waitUntil } from './openCodeLiveTestHarness';
+import { TeamDataService } from '../../../../src/main/services/team/TeamDataService';
+import { TeamProvisioningService } from '../../../../src/main/services/team/TeamProvisioningService';
+import { TeamTaskReader } from '../../../../src/main/services/team/TeamTaskReader';
 import {
   getTasksBasePath,
   getTeamsBasePath,
   setClaudeBasePathOverride,
 } from '../../../../src/main/utils/pathDecoder';
 import { killProcessByPid } from '../../../../src/main/utils/processKill';
-import { TeamDataService } from '../../../../src/main/services/team/TeamDataService';
-import { TeamProvisioningService } from '../../../../src/main/services/team/TeamProvisioningService';
-import { TeamTaskReader } from '../../../../src/main/services/team/TeamTaskReader';
+
+import { createOpenCodeLiveHarness, waitForOpenCodeLanesStopped, waitUntil } from './openCodeLiveTestHarness';
 
 import type {
   TeamAgentRuntimeSnapshot,
@@ -37,13 +38,34 @@ const liveDescribe =
     ? describe
     : describe.skip;
 
-const DEFAULT_ORCHESTRATOR_CLI = '/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli';
+const DEFAULT_ORCHESTRATOR_CLI = '/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli-source';
 const DEFAULT_ANTHROPIC_MODEL = 'haiku';
 const DEFAULT_CODEX_MODEL = 'gpt-5.4-mini';
 const DEFAULT_CODEX_EFFORT = 'low' as const;
 const DEFAULT_OPENCODE_MODEL = 'openai/gpt-5.4-mini';
 const DEFAULT_ORDER: ProviderLaunchStressScenario[] = ['anthropic', 'codex', 'opencode', 'mixed'];
-const MEMBER_NAMES = ['alice', 'bob', 'jack', 'tom', 'atlas', 'nova', 'cody', 'oscar'];
+const MEMBER_NAMES = [
+  'alice',
+  'bob',
+  'jack',
+  'tom',
+  'atlas',
+  'nova',
+  'cody',
+  'oscar',
+  'maya',
+  'liam',
+  'ivy',
+  'noah',
+  'zoe',
+  'ryan',
+  'emma',
+  'owen',
+  'luna',
+  'finn',
+  'aria',
+  'milo',
+];
 const RESTART_CONFIRM_TIMEOUT_MS = 300_000;
 const POST_LAUNCH_WORK_TIMEOUT_MS = 300_000;
 let currentStressTempDir = '';
@@ -73,6 +95,8 @@ liveDescribe('provider launch stress live e2e', () => {
   let previousNodeEnv: string | undefined;
   let previousAnthropicApiKey: string | undefined;
   let previousAnthropicAuthToken: string | undefined;
+  let previousRuntimeReadyTimeout: string | undefined;
+  let previousInboxPollerReadyTimeout: string | undefined;
   let previousClaudeJsonConfig: string | null | undefined;
   const activeScenarios: ActiveScenario[] = [];
 
@@ -114,10 +138,16 @@ liveDescribe('provider launch stress live e2e', () => {
     previousNodeEnv = process.env.NODE_ENV;
     previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
     previousAnthropicAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    previousRuntimeReadyTimeout = process.env.CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS;
+    previousInboxPollerReadyTimeout = process.env.CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS;
 
     process.env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH =
       process.env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH?.trim() || DEFAULT_ORCHESTRATOR_CLI;
     process.env.CLAUDE_TEAM_CLI_FLAVOR = 'agent_teams_orchestrator';
+    process.env.CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS =
+      process.env.CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS?.trim() || '90000';
+    process.env.CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS =
+      process.env.CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS?.trim() || '30000';
     process.env.CODEX_HOME = resolveConnectedCodexHome(previousCodexHome);
     process.env.HOME = usingAnthropicSubscriptionAuth() ? os.userInfo().homedir : tempHome;
     process.env.USERPROFILE = usingAnthropicSubscriptionAuth() ? os.userInfo().homedir : tempHome;
@@ -148,6 +178,8 @@ liveDescribe('provider launch stress live e2e', () => {
     restoreEnv('NODE_ENV', previousNodeEnv);
     restoreEnv('ANTHROPIC_API_KEY', previousAnthropicApiKey);
     restoreEnv('ANTHROPIC_AUTH_TOKEN', previousAnthropicAuthToken);
+    restoreEnv('CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS', previousRuntimeReadyTimeout);
+    restoreEnv('CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS', previousInboxPollerReadyTimeout);
 
     if (process.env.PROVIDER_LAUNCH_STRESS_KEEP_TEMP === '1') {
       process.stderr.write(`[ProviderLaunchStress.live] preserved temp dir: ${tempDir}\n`);
@@ -159,7 +191,7 @@ liveDescribe('provider launch stress live e2e', () => {
   }, 240_000);
 
   it(
-    'launches, restarts, and exercises post-launch work for provider teams with five teammates each',
+    'launches, restarts, and exercises post-launch work for provider teams with the requested teammate count',
     async () => {
       const orchestratorCli = process.env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH?.trim();
       expect(orchestratorCli).toBeTruthy();
@@ -495,6 +527,7 @@ function buildStressCreateRequest(input: {
     effort: providerId === 'codex' ? input.selection.codexEffort : undefined,
     fastMode: providerId === 'codex' ? 'off' : undefined,
     skipPermissions: true,
+    extraCliArgs: process.env.PROVIDER_LAUNCH_STRESS_EXTRA_CLI_ARGS?.trim() || undefined,
     prompt: 'Keep the team idle after bootstrap. Do not start extra work.',
     members,
   };
@@ -534,7 +567,7 @@ function resolveStressMemberProvider(
   return providers[index % providers.length] ?? 'anthropic';
 }
 
-function resolveScenarioSelection(scenario: ProviderLaunchStressScenario): {
+function resolveScenarioSelection(_scenario: ProviderLaunchStressScenario): {
   anthropicModel: string;
   codexModel: string;
   codexEffort: 'low' | 'medium' | 'high' | 'xhigh';
