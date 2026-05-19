@@ -7,6 +7,7 @@ import path from 'node:path';
 const CHILD_CLOSE_GRACE_MS = 3_000;
 const CHILD_FORCE_CLOSE_GRACE_MS = 1_000;
 const TASKKILL_TIMEOUT_MS = 5_000;
+const OPENCODE_HEALTH_FETCH_TIMEOUT_MS = 1_000;
 
 export async function preflightOpenCodeLiveEnvironment(input) {
   const repoRoot = input.repoRoot;
@@ -125,13 +126,12 @@ async function canStartOpenCodeHost(opencodeBin, cwd, env) {
         return { ok: false, reason: output || `process exited with code ${child.exitCode}` };
       }
       try {
-        const response = await fetch(`http://127.0.0.1:${port}/global/health`);
-        if (response.ok) {
-          const data = await response.json().catch(() => ({}));
-          if (data?.healthy === true) {
-            return { ok: true };
-          }
+        const response = await fetchOpenCodeHealth(port);
+        if (isHealthyOpenCodeHostResponse(response)) {
+          response.body?.cancel().catch(() => undefined);
+          return { ok: true };
         }
+        response.body?.cancel().catch(() => undefined);
       } catch {
         // Host is still starting.
       }
@@ -141,6 +141,22 @@ async function canStartOpenCodeHost(opencodeBin, cwd, env) {
   } finally {
     await stopChild(child);
   }
+}
+
+async function fetchOpenCodeHealth(port) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OPENCODE_HEALTH_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(`http://127.0.0.1:${port}/global/health`, {
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function isHealthyOpenCodeHostResponse(response) {
+  return response.ok;
 }
 
 async function stopChild(child, options = {}) {
@@ -271,6 +287,7 @@ function compactOutput(value) {
 }
 
 export const __opencodeLivePreflightTestHooks = {
+  isHealthyOpenCodeHostResponse,
   stopChild,
   taskkillProcessTree,
 };

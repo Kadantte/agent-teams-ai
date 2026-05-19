@@ -162,6 +162,7 @@ export class OpenCodeBridgeCommandClient {
       body,
     };
     const inputPath = await this.writeInputFile(envelope);
+    const outputPath = `${inputPath}.output.json`;
 
     try {
       const maxAttempts =
@@ -169,13 +170,22 @@ export class OpenCodeBridgeCommandClient {
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         const processResult = await this.processRunner.run({
           binaryPath: this.binaryPath,
-          args: ['runtime', 'opencode-command', '--json', '--input', inputPath],
+          args: [
+            'runtime',
+            'opencode-command',
+            '--json',
+            '--input',
+            inputPath,
+            '--output',
+            outputPath,
+          ],
           cwd: resolveOpenCodeBridgeProcessCwd(this.binaryPath, options.cwd),
           timeoutMs: options.timeoutMs,
           stdoutLimitBytes: options.stdoutLimitBytes ?? DEFAULT_STDOUT_LIMIT_BYTES,
           stderrLimitBytes: options.stderrLimitBytes ?? DEFAULT_STDERR_LIMIT_BYTES,
           env: await this.resolveEnv(),
         });
+        const stdout = await this.readBridgeOutput(processResult.stdout, outputPath);
 
         if (processResult.timedOut) {
           return this.contractFailure(
@@ -204,7 +214,7 @@ export class OpenCodeBridgeCommandClient {
           );
         }
 
-        const parsed = parseSingleBridgeJsonResult<TData>(processResult.stdout);
+        const parsed = parseSingleBridgeJsonResult<TData>(stdout);
         if (!parsed.ok) {
           if (shouldRetryEmptyReadinessStdout(command, parsed.error, attempt, maxAttempts)) {
             await sleep(EMPTY_STDOUT_READINESS_RETRY_DELAY_MS);
@@ -212,7 +222,7 @@ export class OpenCodeBridgeCommandClient {
           }
 
           return this.contractFailure(envelope, 'contract_violation', parsed.error, false, {
-            stdoutPreview: redactBridgeDiagnosticText(processResult.stdout.slice(0, 2_000)),
+            stdoutPreview: redactBridgeDiagnosticText(stdout.slice(0, 2_000)),
             stderrPreview: redactBridgeDiagnosticText(processResult.stderr.slice(0, 2_000)),
             attempts: attempt,
           });
@@ -239,6 +249,18 @@ export class OpenCodeBridgeCommandClient {
       if (!this.keepInputFile) {
         await fs.unlink(inputPath).catch(() => undefined);
       }
+      await fs.unlink(outputPath).catch(() => undefined);
+    }
+  }
+
+  private async readBridgeOutput(stdout: string, outputPath: string): Promise<string> {
+    if (stdout.trim().length > 0) {
+      return stdout;
+    }
+    try {
+      return await fs.readFile(outputPath, 'utf8');
+    } catch {
+      return stdout;
     }
   }
 

@@ -95,6 +95,8 @@ liveDescribe('provider launch stress live e2e', () => {
   let previousNodeEnv: string | undefined;
   let previousAnthropicApiKey: string | undefined;
   let previousAnthropicAuthToken: string | undefined;
+  let previousRuntimeReadyTimeout: string | undefined;
+  let previousInboxPollerReadyTimeout: string | undefined;
   let previousClaudeJsonConfig: string | null | undefined;
   const activeScenarios: ActiveScenario[] = [];
 
@@ -136,10 +138,16 @@ liveDescribe('provider launch stress live e2e', () => {
     previousNodeEnv = process.env.NODE_ENV;
     previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
     previousAnthropicAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    previousRuntimeReadyTimeout = process.env.CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS;
+    previousInboxPollerReadyTimeout = process.env.CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS;
 
     process.env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH =
       process.env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH?.trim() || DEFAULT_ORCHESTRATOR_CLI;
     process.env.CLAUDE_TEAM_CLI_FLAVOR = 'agent_teams_orchestrator';
+    process.env.CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS =
+      process.env.CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS?.trim() || '90000';
+    process.env.CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS =
+      process.env.CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS?.trim() || '30000';
     process.env.CODEX_HOME = resolveConnectedCodexHome(previousCodexHome);
     process.env.HOME = usingAnthropicSubscriptionAuth() ? os.userInfo().homedir : tempHome;
     process.env.USERPROFILE = usingAnthropicSubscriptionAuth() ? os.userInfo().homedir : tempHome;
@@ -170,6 +178,8 @@ liveDescribe('provider launch stress live e2e', () => {
     restoreEnv('NODE_ENV', previousNodeEnv);
     restoreEnv('ANTHROPIC_API_KEY', previousAnthropicApiKey);
     restoreEnv('ANTHROPIC_AUTH_TOKEN', previousAnthropicAuthToken);
+    restoreEnv('CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS', previousRuntimeReadyTimeout);
+    restoreEnv('CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS', previousInboxPollerReadyTimeout);
 
     if (process.env.PROVIDER_LAUNCH_STRESS_KEEP_TEMP === '1') {
       process.stderr.write(`[ProviderLaunchStress.live] preserved temp dir: ${tempDir}\n`);

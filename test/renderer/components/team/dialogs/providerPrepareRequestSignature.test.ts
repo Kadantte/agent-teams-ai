@@ -600,6 +600,213 @@ describe('providerPrepareRequestSignature', () => {
     expect(first).toBe(second);
   });
 
+  it('ignores launchable Codex account telemetry churn', () => {
+    const providerIds = ['codex'] as const;
+    const first = buildProviderPrepareRuntimeStatusSignature(
+      providerIds,
+      providerStatusMap([
+        [
+          'codex',
+          {
+            providerId: 'codex',
+            supported: true,
+            authenticated: true,
+            authMethod: 'chatgpt',
+            selectedBackendId: 'codex-native',
+            resolvedBackendId: 'codex-native',
+            connection: {
+              supportsOAuth: false,
+              supportsApiKey: true,
+              configurableAuthModes: ['auto', 'chatgpt', 'api_key'],
+              configuredAuthMode: 'chatgpt',
+              apiKeyConfigured: false,
+              apiKeySource: null,
+              codex: {
+                preferredAuthMode: 'chatgpt',
+                effectiveAuthMode: 'chatgpt',
+                appServerState: 'healthy',
+                appServerStatusMessage: null,
+                managedAccount: {
+                  type: 'chatgpt',
+                  email: 'user@example.com',
+                  planType: 'plus',
+                },
+                requiresOpenaiAuth: false,
+                localAccountArtifactsPresent: true,
+                localActiveChatgptAccountPresent: true,
+                login: {
+                  status: 'idle',
+                  error: null,
+                  startedAt: null,
+                },
+                rateLimits: null,
+                launchAllowed: true,
+                launchIssueMessage: null,
+                launchReadinessState: 'ready_chatgpt',
+              },
+            },
+          },
+        ],
+      ])
+    );
+    const second = buildProviderPrepareRuntimeStatusSignature(
+      providerIds,
+      providerStatusMap([
+        [
+          'codex',
+          {
+            providerId: 'codex',
+            supported: true,
+            authenticated: true,
+            authMethod: 'chatgpt',
+            selectedBackendId: 'codex-native',
+            resolvedBackendId: 'codex-native',
+            connection: {
+              supportsOAuth: false,
+              supportsApiKey: true,
+              configurableAuthModes: ['auto', 'chatgpt', 'api_key'],
+              configuredAuthMode: 'chatgpt',
+              apiKeyConfigured: false,
+              apiKeySource: null,
+              codex: {
+                preferredAuthMode: 'chatgpt',
+                effectiveAuthMode: 'chatgpt',
+                appServerState: 'degraded',
+                appServerStatusMessage: 'rate limits refresh failed',
+                managedAccount: {
+                  type: 'chatgpt',
+                  email: 'user@example.com',
+                  planType: 'plus',
+                },
+                requiresOpenaiAuth: false,
+                localAccountArtifactsPresent: false,
+                localActiveChatgptAccountPresent: true,
+                login: {
+                  status: 'pending',
+                  error: null,
+                  startedAt: '2026-05-19T00:00:00.000Z',
+                },
+                rateLimits: {
+                  limitId: 'codex',
+                  limitName: null,
+                  primary: {
+                    usedPercent: 87,
+                    windowDurationMins: 300,
+                    resetsAt: 1_779_120_000_000,
+                  },
+                  secondary: null,
+                  credits: null,
+                  planType: 'plus',
+                },
+                launchAllowed: true,
+                launchIssueMessage: 'Ready with degraded account verification.',
+                launchReadinessState: 'warning_degraded_but_launchable',
+              },
+            },
+          },
+        ],
+      ])
+    );
+
+    expect(first).toBe(second);
+  });
+
+  it('changes the Codex runtime signature when launchability changes', () => {
+    const providerIds = ['codex'] as const;
+    const ready = buildProviderPrepareRuntimeStatusSignature(
+      providerIds,
+      providerStatusMap([
+        [
+          'codex',
+          {
+            providerId: 'codex',
+            supported: true,
+            authenticated: true,
+            authMethod: 'chatgpt',
+            selectedBackendId: 'codex-native',
+            resolvedBackendId: 'codex-native',
+            connection: {
+              supportsOAuth: false,
+              supportsApiKey: true,
+              configurableAuthModes: ['auto', 'chatgpt', 'api_key'],
+              configuredAuthMode: 'chatgpt',
+              apiKeyConfigured: false,
+              apiKeySource: null,
+              codex: {
+                preferredAuthMode: 'chatgpt',
+                effectiveAuthMode: 'chatgpt',
+                appServerState: 'healthy',
+                appServerStatusMessage: null,
+                managedAccount: {
+                  type: 'chatgpt',
+                  email: 'user@example.com',
+                  planType: 'plus',
+                },
+                requiresOpenaiAuth: false,
+                localAccountArtifactsPresent: true,
+                localActiveChatgptAccountPresent: true,
+                login: {
+                  status: 'idle',
+                  error: null,
+                  startedAt: null,
+                },
+                rateLimits: null,
+                launchAllowed: true,
+                launchIssueMessage: null,
+                launchReadinessState: 'ready_chatgpt',
+              },
+            },
+          },
+        ],
+      ])
+    );
+    const missingAuth = buildProviderPrepareRuntimeStatusSignature(
+      providerIds,
+      providerStatusMap([
+        [
+          'codex',
+          {
+            providerId: 'codex',
+            supported: true,
+            authenticated: false,
+            authMethod: null,
+            selectedBackendId: 'codex-native',
+            resolvedBackendId: 'codex-native',
+            connection: {
+              supportsOAuth: false,
+              supportsApiKey: true,
+              configurableAuthModes: ['auto', 'chatgpt', 'api_key'],
+              configuredAuthMode: 'chatgpt',
+              apiKeyConfigured: false,
+              apiKeySource: null,
+              codex: {
+                preferredAuthMode: 'chatgpt',
+                effectiveAuthMode: null,
+                appServerState: 'healthy',
+                appServerStatusMessage: null,
+                managedAccount: null,
+                requiresOpenaiAuth: true,
+                localAccountArtifactsPresent: true,
+                localActiveChatgptAccountPresent: false,
+                login: {
+                  status: 'idle',
+                  error: null,
+                  startedAt: null,
+                },
+                rateLimits: null,
+                launchAllowed: false,
+                launchIssueMessage: 'Connect a ChatGPT account.',
+                launchReadinessState: 'missing_auth',
+              },
+            },
+          },
+        ],
+      ])
+    );
+
+    expect(ready).not.toBe(missingAuth);
+  });
+
   it('ignores volatile member draft ids in provider prepare signatures', () => {
     const first = buildProviderPrepareMembersSignature([
       {

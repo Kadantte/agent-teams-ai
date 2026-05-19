@@ -14,6 +14,19 @@ type SelectedModelChecksByProvider = ReadonlyMap<
   readonly ProviderModelCheckSignatureInput[]
 >;
 
+function getCodexPrepareRuntimeSignature(
+  codex: NonNullable<NonNullable<CliProviderStatus['connection']>['codex']>
+): Record<string, unknown> {
+  return {
+    preferredAuthMode: codex.preferredAuthMode,
+    effectiveAuthMode: codex.effectiveAuthMode,
+    managedAccountType: codex.managedAccount?.type ?? null,
+    requiresOpenaiAuth: codex.requiresOpenaiAuth ?? null,
+    launchAllowed: codex.launchAllowed,
+    launchReadinessState: codex.launchAllowed ? 'launchable' : codex.launchReadinessState,
+  };
+}
+
 function normalizeModelIds(modelIds: readonly string[] | null | undefined): string[] {
   return Array.from(
     new Set((modelIds ?? []).map((modelId) => modelId.trim()).filter(Boolean))
@@ -100,22 +113,7 @@ export function buildProviderPrepareRuntimeStatusSignature(
                 apiKeyConfigured: provider.connection.apiKeyConfigured,
                 apiKeySource: provider.connection.apiKeySource ?? null,
                 codex: provider.connection.codex
-                  ? {
-                      preferredAuthMode: provider.connection.codex.preferredAuthMode,
-                      effectiveAuthMode: provider.connection.codex.effectiveAuthMode,
-                      appServerState: provider.connection.codex.appServerState,
-                      managedAccountType: provider.connection.codex.managedAccount?.type ?? null,
-                      managedAccountEmail: provider.connection.codex.managedAccount?.email ?? null,
-                      requiresOpenaiAuth: provider.connection.codex.requiresOpenaiAuth ?? null,
-                      localAccountArtifactsPresent:
-                        provider.connection.codex.localAccountArtifactsPresent ?? null,
-                      localActiveChatgptAccountPresent:
-                        provider.connection.codex.localActiveChatgptAccountPresent ?? null,
-                      loginStatus: provider.connection.codex.login?.status ?? null,
-                      launchAllowed: provider.connection.codex.launchAllowed,
-                      launchIssueMessage: provider.connection.codex.launchIssueMessage ?? null,
-                      launchReadinessState: provider.connection.codex.launchReadinessState,
-                    }
+                  ? getCodexPrepareRuntimeSignature(provider.connection.codex)
                   : null,
               }
             : null,

@@ -59,7 +59,15 @@ describe('OpenCodeBridgeCommandClient', () => {
     expect(runner.calls).toHaveLength(1);
     expect(runner.calls[0]).toMatchObject({
       binaryPath: '/usr/local/bin/agent-teams-controller',
-      args: ['runtime', 'opencode-command', '--json', '--input', expect.any(String)],
+      args: [
+        'runtime',
+        'opencode-command',
+        '--json',
+        '--input',
+        expect.any(String),
+        '--output',
+        expect.any(String),
+      ],
       cwd: '/tmp/project',
       timeoutMs: 10_000,
       env: expect.objectContaining({
@@ -68,6 +76,7 @@ describe('OpenCodeBridgeCommandClient', () => {
     });
 
     const inputPath = runner.calls[0].args[4];
+    const outputPath = runner.calls[0].args[6];
     expect(JSON.parse(await runner.readInputEnvelope(0))).toMatchObject({
       schemaVersion: 1,
       requestId: 'req-1',
@@ -77,6 +86,33 @@ describe('OpenCodeBridgeCommandClient', () => {
       body: { runId: 'run-1' },
     });
     await expect(fs.access(inputPath)).rejects.toThrow();
+    await expect(fs.access(outputPath)).rejects.toThrow();
+  });
+
+  it('reads bridge JSON from the output file when stdout is empty', async () => {
+    runner.nextResult = {
+      stdout: '',
+      stderr: '',
+      exitCode: 0,
+      timedOut: false,
+    };
+    runner.nextOutputFileContents = `${JSON.stringify(bridgeSuccess({ data: { runId: 'run-1' } }))}\n`;
+    const client = createClient();
+
+    const result = await client.execute(
+      'opencode.launchTeam',
+      { runId: 'run-1' },
+      {
+        cwd: '/tmp/project',
+        timeoutMs: 10_000,
+      }
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      requestId: 'req-1',
+      command: 'opencode.launchTeam',
+    });
   });
 
   it('fails closed when stdout contains logs plus json', async () => {
@@ -455,10 +491,17 @@ class FakeBridgeProcessRunner implements OpenCodeBridgeProcessRunner {
     exitCode: 0,
     timedOut: false,
   };
+  nextOutputFileContents: string | null = null;
 
   async run(input: OpenCodeBridgeProcessRunInput): Promise<OpenCodeBridgeProcessRunResult> {
     this.calls.push(input);
     this.inputEnvelopes.push(await fs.readFile(input.args[4], 'utf8'));
+    const outputFlagIndex = input.args.indexOf('--output');
+    const outputPath = outputFlagIndex >= 0 ? input.args[outputFlagIndex + 1] : undefined;
+    if (this.nextOutputFileContents !== null && outputPath) {
+      await fs.writeFile(outputPath, this.nextOutputFileContents, 'utf8');
+      this.nextOutputFileContents = null;
+    }
     return this.nextResults.shift() ?? this.nextResult;
   }
 
