@@ -7,12 +7,11 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { resolveLiveSmokeOrchestratorCliPath } from './lib/live-smoke-runtime.mjs';
 import { preflightOpenCodeLiveEnvironment } from './lib/opencode-live-preflight.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
-const orchestratorRoot = process.env.CLAUDE_DEV_RUNTIME_ROOT?.trim();
-const siblingOrchestrator = path.resolve(repoRoot, '..', 'agent_teams_orchestrator');
 const requestedOrder =
   process.env.PROVIDER_LAUNCH_STRESS_ORDER?.trim() || 'anthropic,codex,opencode,mixed';
 
@@ -31,8 +30,10 @@ const env = {
 };
 
 if (!env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH?.trim()) {
-  const runtimeRoot = orchestratorRoot ? path.resolve(orchestratorRoot) : siblingOrchestrator;
-  env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH = path.join(runtimeRoot, 'cli');
+  env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH = resolveLiveSmokeOrchestratorCliPath({
+    env,
+    repoRoot,
+  });
 }
 
 console.log('Running provider launch stress live smoke');
