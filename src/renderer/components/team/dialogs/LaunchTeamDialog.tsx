@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   reconcileAnthropicRuntimeSelections,
@@ -107,28 +107,27 @@ import { loadProjectPathProjects, type ProjectPathProject } from './projectPathP
 import { ProjectPathSelector } from './ProjectPathSelector';
 import { buildProviderPrepareModelCacheKey } from './providerPrepareCacheKey';
 import {
-  getProviderPrepareCachedSnapshot,
   mergeReusableProviderPrepareModelResults,
   type ProviderPrepareDiagnosticsModelResult,
   runProviderPrepareDiagnostics,
 } from './providerPrepareDiagnostics';
+import { buildProviderPreparePlans, type ProviderPreparePlan } from './providerPreparePlans';
 import {
   buildProviderPrepareModelChecksSignature,
-  buildProviderPrepareRequestSignature,
   buildProviderPrepareRuntimeStatusSignature,
 } from './providerPrepareRequestSignature';
 import {
   getShortLivedProviderPrepareModelIssueReasons,
-  getShortLivedProviderPrepareModelResults,
   storeShortLivedProviderPrepareModelResults,
 } from './providerPrepareShortLivedCache';
 import { getProvisioningModelIssue } from './provisioningModelIssues';
+import { ProvisioningProviderRuntimeSettingsDialog } from './ProvisioningProviderRuntimeSettingsDialog';
 import {
   deriveEffectiveProvisioningPrepareState,
-  failIncompleteProviderChecks,
   getPrimaryProvisioningFailureDetail,
   getProvisioningFailureHint,
   getProvisioningProviderBackendSummary,
+  getProvisioningProviderProgressMessage,
   type ProvisioningProviderCheck,
   ProvisioningProviderStatusList,
   shouldHideProvisioningProviderStatusList,
@@ -157,6 +156,7 @@ import type { ActiveTeamRef } from './CreateTeamDialog';
 import type { MemberDraft } from '@renderer/components/team/members/membersEditorTypes';
 import type { MentionSuggestion } from '@renderer/types/mention';
 import type {
+  CliProviderId,
   CreateScheduleInput,
   EffortLevel,
   ResolvedTeamMember,
@@ -463,6 +463,11 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const [prepareMessage, setPrepareMessage] = useState<string | null>(null);
   const [prepareWarnings, setPrepareWarnings] = useState<string[]>([]);
   const [prepareChecks, setPrepareChecks] = useState<ProvisioningProviderCheck[]>([]);
+  const [prepareProviderInvalidationEpochById, setPrepareProviderInvalidationEpochById] = useState<
+    Partial<Record<TeamProviderId, number>>
+  >({});
+  const [providerSettingsProviderId, setProviderSettingsProviderId] =
+    useState<TeamProviderId | null>(null);
   const prepareRequestSeqRef = useRef(0);
   const appliedDefaultProjectPathRef = useRef<string | null>(null);
   const storeMembers = useStore((s) => selectResolvedMembersForTeamName(s, s.selectedTeamName));
@@ -474,6 +479,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const [savedLaunchProviderBackendId, setSavedLaunchProviderBackendId] = useState<string | null>(
     null
   );
+
+  useEffect(() => {
+    if (!open) {
+      setProviderSettingsProviderId(null);
+    }
+  }, [open]);
 
   // Advanced CLI section state (with localStorage persistence)
   const [worktreeEnabled, setWorktreeEnabledRaw] = useState(
@@ -540,10 +551,13 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   }, [effectiveCliStatus?.providers]);
   const runtimeBackendSummaryByProviderRef = useRef(runtimeBackendSummaryByProvider);
   const prepareChecksRef = useRef<ProvisioningProviderCheck[]>([]);
+  const prepareMessageRef = useRef<string | null>(null);
   const prepareModelResultsCacheRef = useRef(
     new Map<string, Record<string, ProviderPrepareDiagnosticsModelResult>>()
   );
-  const lastPrepareRequestSignatureRef = useRef<string | null>(null);
+  const lastPrepareProviderSignatureByIdRef = useRef(new Map<TeamProviderId, string>());
+  const prepareProviderRequestSeqByIdRef = useRef(new Map<TeamProviderId, number>());
+  const prepareWarningsByProviderIdRef = useRef(new Map<TeamProviderId, string[]>());
 
   useEffect(() => {
     runtimeBackendSummaryByProviderRef.current = runtimeBackendSummaryByProvider;
@@ -552,8 +566,31 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     prepareChecksRef.current = prepareChecks;
   }, [prepareChecks]);
   useEffect(() => {
+    prepareMessageRef.current = prepareMessage;
+  }, [prepareMessage]);
+
+  const invalidatePrepareProvider = useCallback((providerId: CliProviderId): void => {
+    if (!isTeamProviderId(providerId)) {
+      return;
+    }
+
+    lastPrepareProviderSignatureByIdRef.current.delete(providerId);
+    prepareProviderRequestSeqByIdRef.current.set(
+      providerId,
+      (prepareProviderRequestSeqByIdRef.current.get(providerId) ?? 0) + 1
+    );
+    prepareWarningsByProviderIdRef.current.delete(providerId);
+    setPrepareProviderInvalidationEpochById((current) => ({
+      ...current,
+      [providerId]: (current[providerId] ?? 0) + 1,
+    }));
+  }, []);
+
+  useEffect(() => {
     if (!open) {
-      lastPrepareRequestSignatureRef.current = null;
+      lastPrepareProviderSignatureByIdRef.current.clear();
+      prepareProviderRequestSeqByIdRef.current.clear();
+      prepareWarningsByProviderIdRef.current.clear();
     }
   }, [open]);
   const runtimeProviderStatusById = useMemo(
@@ -1429,40 +1466,13 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     worktreeGitReadiness,
     hasSelectedWorktreeIsolation
   );
-  const prepareRuntimeStatusSignature = useMemo(
-    () =>
-      buildProviderPrepareRuntimeStatusSignature(
-        selectedMemberProviders,
-        runtimeProviderStatusById
-      ),
-    [runtimeProviderStatusById, selectedMemberProviders]
-  );
   const selectedModelChecksByProviderSignature = useMemo(
     () => buildProviderPrepareModelChecksSignature(selectedModelChecksByProvider),
     [selectedModelChecksByProvider]
   );
-  const prepareRequestSignature = useMemo(
-    () =>
-      buildProviderPrepareRequestSignature({
-        cwd: effectiveCwd,
-        selectedProviderId,
-        selectedModel,
-        selectedMemberProviders,
-        limitContext: effectiveAnthropicRuntimeLimitContext,
-        runtimeStatusSignature: prepareRuntimeStatusSignature,
-        modelChecksSignature: selectedModelChecksByProviderSignature,
-      }),
-    [
-      effectiveCwd,
-      effectiveAnthropicRuntimeLimitContext,
-      prepareRuntimeStatusSignature,
-      selectedMemberProviders,
-      selectedModel,
-      selectedModelChecksByProviderSignature,
-      selectedProviderId,
-    ]
-  );
   const shortLivedModelIssueReasons = useMemo(() => {
+    void prepareChecks;
+    void selectedModelChecksByProviderSignature;
     const modelAdvisoryReasonByProvider: Partial<Record<TeamProviderId, Record<string, string>>> =
       {};
     const modelIssueReasonByProvider: Partial<Record<TeamProviderId, Record<string, string>>> = {};
@@ -1480,13 +1490,20 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
 
     for (const providerId of selectedMemberProviders) {
       const backendSummary = runtimeBackendSummaryByProvider.get(providerId) ?? null;
+      const providerRuntimeStatusSignature = buildProviderPrepareRuntimeStatusSignature(
+        [providerId],
+        runtimeProviderStatusById
+      );
+      const providerModelChecksSignature = buildProviderPrepareModelChecksSignature(
+        new Map([[providerId, selectedModelChecksByProvider.get(providerId) ?? []]])
+      );
       const cacheKey = buildProviderPrepareModelCacheKey({
         cwd: effectiveCwd,
         providerId,
         backendSummary,
         limitContext: effectiveAnthropicRuntimeLimitContext,
-        runtimeStatusSignature: prepareRuntimeStatusSignature,
-        modelChecksSignature: selectedModelChecksByProviderSignature,
+        runtimeStatusSignature: providerRuntimeStatusSignature,
+        modelChecksSignature: providerModelChecksSignature,
       });
       const issueReasons = getShortLivedProviderPrepareModelIssueReasons({
         providerId,
@@ -1513,8 +1530,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     effectiveCwd,
     isLaunchMode,
     prepareChecks,
-    prepareRuntimeStatusSignature,
     runtimeBackendSummaryByProvider,
+    runtimeProviderStatusById,
+    selectedModelChecksByProvider,
     selectedModelChecksByProviderSignature,
     selectedMemberProviders,
   ]);
@@ -1530,13 +1548,17 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   useEffect(() => {
     if (!open || !isLaunchMode) {
       prepareRequestSeqRef.current += 1;
-      lastPrepareRequestSignatureRef.current = null;
+      lastPrepareProviderSignatureByIdRef.current.clear();
+      prepareProviderRequestSeqByIdRef.current.clear();
+      prepareWarningsByProviderIdRef.current.clear();
       return;
     }
 
     if (typeof api.teams.prepareProvisioning !== 'function') {
       prepareRequestSeqRef.current += 1;
-      lastPrepareRequestSignatureRef.current = null;
+      lastPrepareProviderSignatureByIdRef.current.clear();
+      prepareProviderRequestSeqByIdRef.current.clear();
+      prepareWarningsByProviderIdRef.current.clear();
       setPrepareState('failed');
       setPrepareWarnings([]);
       setPrepareChecks([]);
@@ -1548,7 +1570,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
 
     if (!effectiveCwd) {
       prepareRequestSeqRef.current += 1;
-      lastPrepareRequestSignatureRef.current = null;
+      lastPrepareProviderSignatureByIdRef.current.clear();
+      prepareProviderRequestSeqByIdRef.current.clear();
+      prepareWarningsByProviderIdRef.current.clear();
       setPrepareState('idle');
       setPrepareWarnings([]);
       setPrepareChecks([]);
@@ -1556,71 +1580,107 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       return;
     }
 
-    if (lastPrepareRequestSignatureRef.current === prepareRequestSignature) {
+    const selectedProviderIdSet = new Set(selectedMemberProviders);
+    for (const providerId of Array.from(lastPrepareProviderSignatureByIdRef.current.keys())) {
+      if (!selectedProviderIdSet.has(providerId)) {
+        lastPrepareProviderSignatureByIdRef.current.delete(providerId);
+        prepareProviderRequestSeqByIdRef.current.delete(providerId);
+        prepareWarningsByProviderIdRef.current.delete(providerId);
+      }
+    }
+
+    const providerPlans = buildProviderPreparePlans({
+      cwd: effectiveCwd,
+      providerIds: selectedMemberProviders,
+      selectedModelChecksByProvider,
+      backendSummaryByProvider: runtimeBackendSummaryByProviderRef.current,
+      limitContext: effectiveAnthropicRuntimeLimitContext,
+      runtimeProviderStatusById,
+      cachedModelResultsByCacheKey: prepareModelResultsCacheRef.current,
+    });
+    const changedPlans = providerPlans.filter(
+      (plan) =>
+        lastPrepareProviderSignatureByIdRef.current.get(plan.providerId) !== plan.requestSignature
+    );
+    const loadingMessage = getProvisioningProviderProgressMessage(
+      changedPlans.map((plan) => plan.providerId),
+      selectedMemberProviders.length
+    );
+    const getSelectedWarnings = (): string[] =>
+      selectedMemberProviders.flatMap(
+        (providerId) => prepareWarningsByProviderIdRef.current.get(providerId) ?? []
+      );
+    const commitChecks = (nextChecks: ProvisioningProviderCheck[]): void => {
+      prepareChecksRef.current = nextChecks;
+      setPrepareChecks(nextChecks);
+    };
+    const applyPrepareOutcome = (
+      nextChecks: ProvisioningProviderCheck[],
+      pendingMessage: string | null
+    ): void => {
+      const selectedWarnings = getSelectedWarnings();
+      setPrepareWarnings(selectedWarnings);
+
+      if (nextChecks.some((check) => check.status === 'pending' || check.status === 'checking')) {
+        setPrepareState('loading');
+        setPrepareMessage(pendingMessage);
+        return;
+      }
+
+      const anyFailure = nextChecks.some((check) => check.status === 'failed');
+      const anyNotes =
+        selectedWarnings.length > 0 || nextChecks.some((check) => check.status === 'notes');
+      const failureMessage =
+        getPrimaryProvisioningFailureDetail(nextChecks) ??
+        'Some selected providers need attention.';
+      setPrepareState(anyFailure ? 'failed' : 'ready');
+      setPrepareMessage(
+        anyFailure
+          ? failureMessage
+          : anyNotes
+            ? 'All selected providers are ready, with notes.'
+            : 'All selected providers are ready.'
+      );
+    };
+
+    let checks = alignProvisioningChecks(prepareChecksRef.current, selectedMemberProviders);
+    for (const plan of changedPlans) {
+      checks = updateProviderCheck(checks, plan.providerId, {
+        status: plan.selectedModelIds.length > 0 ? plan.cachedSnapshot.status : 'checking',
+        backendSummary: plan.backendSummary,
+        details: plan.cachedSnapshot.details,
+      });
+      prepareWarningsByProviderIdRef.current.delete(plan.providerId);
+    }
+    commitChecks(checks);
+    applyPrepareOutcome(
+      checks,
+      changedPlans.length > 0
+        ? loadingMessage
+        : (prepareMessageRef.current ??
+            getProvisioningProviderProgressMessage([], selectedMemberProviders.length))
+    );
+
+    if (changedPlans.length === 0) {
       return;
     }
-    lastPrepareRequestSignatureRef.current = prepareRequestSignature;
 
-    const requestSeq = ++prepareRequestSeqRef.current;
-    const initialChecks = alignProvisioningChecks(
-      prepareChecksRef.current,
-      selectedMemberProviders
-    );
-    setPrepareState('loading');
-    setPrepareMessage('Checking selected providers in parallel...');
-    setPrepareWarnings([]);
-    setPrepareChecks(initialChecks);
+    const generation = prepareRequestSeqRef.current;
+    const runningPlans = changedPlans.map((plan) => {
+      const requestSeq = (prepareProviderRequestSeqByIdRef.current.get(plan.providerId) ?? 0) + 1;
+      prepareProviderRequestSeqByIdRef.current.set(plan.providerId, requestSeq);
+      lastPrepareProviderSignatureByIdRef.current.set(plan.providerId, plan.requestSignature);
+      return { ...plan, requestSeq };
+    });
+    const isPlanCurrent = (plan: ProviderPreparePlan & { requestSeq: number }): boolean =>
+      prepareRequestSeqRef.current === generation &&
+      lastPrepareProviderSignatureByIdRef.current.get(plan.providerId) === plan.requestSignature &&
+      prepareProviderRequestSeqByIdRef.current.get(plan.providerId) === plan.requestSeq;
 
     void (async () => {
-      let checks = initialChecks;
-      const providerPlans = selectedMemberProviders.map((providerId) => {
-        const selectedModelChecks = selectedModelChecksByProvider.get(providerId) ?? [];
-        const selectedModelIds = selectedModelChecks.map((check) => check.model);
-        const backendSummary = runtimeBackendSummaryByProviderRef.current.get(providerId) ?? null;
-        const cacheKey = buildProviderPrepareModelCacheKey({
-          cwd: effectiveCwd,
-          providerId,
-          backendSummary,
-          limitContext: effectiveAnthropicRuntimeLimitContext,
-          runtimeStatusSignature: prepareRuntimeStatusSignature,
-          modelChecksSignature: selectedModelChecksByProviderSignature,
-        });
-        const cachedModelResultsById = {
-          ...getShortLivedProviderPrepareModelResults({
-            providerId,
-            cacheKey,
-          }),
-          ...(prepareModelResultsCacheRef.current.get(cacheKey) ?? {}),
-        };
-        const cachedSnapshot = getProviderPrepareCachedSnapshot({
-          providerId,
-          selectedModelIds,
-          cachedModelResultsById,
-        });
-        return {
-          providerId,
-          selectedModelChecks,
-          selectedModelIds,
-          backendSummary,
-          cacheKey,
-          cachedModelResultsById,
-          cachedSnapshot,
-        };
-      });
-
-      try {
-        for (const plan of providerPlans) {
-          checks = updateProviderCheck(checks, plan.providerId, {
-            status: plan.selectedModelIds.length > 0 ? plan.cachedSnapshot.status : 'checking',
-            backendSummary: plan.backendSummary,
-            details: plan.cachedSnapshot.details,
-          });
-        }
-        if (prepareRequestSeqRef.current === requestSeq) {
-          setPrepareChecks(checks);
-        }
-        const providerResults = await Promise.all(
-          providerPlans.map(async (plan) => {
+      await Promise.all(
+        runningPlans.map(async (plan) => {
+          try {
             const prepResult = await runProviderPrepareDiagnostics({
               cwd: effectiveCwd,
               providerId: plan.providerId,
@@ -1630,88 +1690,71 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               limitContext: effectiveAnthropicRuntimeLimitContext,
               cachedModelResultsById: plan.cachedModelResultsById,
               onModelProgress: ({ status, details }) => {
-                checks = updateProviderCheck(checks, plan.providerId, {
+                if (!isPlanCurrent(plan)) {
+                  return;
+                }
+                const nextChecks = updateProviderCheck(prepareChecksRef.current, plan.providerId, {
                   status,
                   backendSummary: plan.backendSummary,
                   details,
                 });
-                if (prepareRequestSeqRef.current === requestSeq) {
-                  setPrepareChecks(checks);
-                }
+                commitChecks(nextChecks);
+                applyPrepareOutcome(nextChecks, loadingMessage);
               },
             });
-            return { ...plan, prepResult };
-          })
-        );
-        let anyFailure = false;
-        let anyNotes = false;
-        const collectedWarnings: string[] = [];
-        for (const plan of providerResults) {
-          if (plan.prepResult.warnings.length > 0) {
-            anyNotes = true;
-            collectedWarnings.push(
-              ...plan.prepResult.warnings.map(
+            if (!isPlanCurrent(plan)) {
+              return;
+            }
+            prepareWarningsByProviderIdRef.current.set(
+              plan.providerId,
+              prepResult.warnings.map(
                 (warning) => `${getProviderLabel(plan.providerId)}: ${warning}`
               )
             );
-          }
-          if (plan.prepResult.status === 'failed') {
-            anyFailure = true;
-          } else if (plan.prepResult.status === 'notes') {
-            anyNotes = true;
-          }
-          if (prepareRequestSeqRef.current === requestSeq) {
             prepareModelResultsCacheRef.current.set(
               plan.cacheKey,
               mergeReusableProviderPrepareModelResults(
                 prepareModelResultsCacheRef.current.get(plan.cacheKey),
-                plan.prepResult.modelResultsById
+                prepResult.modelResultsById
               )
             );
             storeShortLivedProviderPrepareModelResults({
               providerId: plan.providerId,
               cacheKey: plan.cacheKey,
-              modelResultsById: plan.prepResult.modelResultsById,
+              modelResultsById: prepResult.modelResultsById,
             });
+            const nextChecks = updateProviderCheck(prepareChecksRef.current, plan.providerId, {
+              status: prepResult.status,
+              backendSummary: plan.backendSummary,
+              details: prepResult.details,
+            });
+            commitChecks(nextChecks);
+            applyPrepareOutcome(nextChecks, loadingMessage);
+          } catch (error) {
+            if (!isPlanCurrent(plan)) {
+              return;
+            }
+            const failureMessage =
+              error instanceof Error ? error.message : 'Failed to prepare selected providers';
+            const nextChecks = updateProviderCheck(prepareChecksRef.current, plan.providerId, {
+              status: 'failed',
+              backendSummary: plan.backendSummary,
+              details: [failureMessage],
+            });
+            prepareWarningsByProviderIdRef.current.delete(plan.providerId);
+            commitChecks(nextChecks);
+            applyPrepareOutcome(nextChecks, failureMessage);
           }
-          checks = updateProviderCheck(checks, plan.providerId, {
-            status: plan.prepResult.status,
-            backendSummary: plan.backendSummary,
-            details: plan.prepResult.details,
-          });
-        }
-        if (prepareRequestSeqRef.current === requestSeq) {
-          setPrepareChecks(checks);
-        }
-        if (prepareRequestSeqRef.current !== requestSeq) return;
-        const failureMessage =
-          getPrimaryProvisioningFailureDetail(checks) ?? 'Some selected providers need attention.';
-        setPrepareState(anyFailure ? 'failed' : 'ready');
-        setPrepareMessage(
-          anyFailure
-            ? failureMessage
-            : anyNotes
-              ? 'All selected providers are ready, with notes.'
-              : 'All selected providers are ready.'
-        );
-        setPrepareWarnings(collectedWarnings);
-      } catch (error) {
-        if (prepareRequestSeqRef.current !== requestSeq) return;
-        const failureMessage =
-          error instanceof Error ? error.message : 'Failed to prepare selected providers';
-        setPrepareState('failed');
-        setPrepareWarnings([]);
-        setPrepareChecks(failIncompleteProviderChecks(checks, failureMessage));
-        setPrepareMessage(failureMessage);
-      }
+        })
+      );
     })();
   }, [
     open,
     isLaunchMode,
     effectiveCwd,
     effectiveAnthropicRuntimeLimitContext,
-    prepareRequestSignature,
-    selectedProviderId,
+    prepareProviderInvalidationEpochById,
+    runtimeProviderStatusById,
     selectedMemberProviders,
     selectedModelChecksByProvider,
     selectedModelChecksByProviderSignature,
@@ -2985,7 +3028,13 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                       </p>
                     </div>
                   </div>
-                  <ProvisioningProviderStatusList checks={prepareChecks} className="mt-2" />
+                  <ProvisioningProviderStatusList
+                    checks={prepareChecks}
+                    className="mt-2"
+                    onOpenProviderSettings={(providerId) =>
+                      setProviderSettingsProviderId(providerId)
+                    }
+                  />
                 </>
               ) : null}
 
@@ -3005,7 +3054,13 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                       {effectivePrepare.message}
                     </p>
                   ) : null}
-                  <ProvisioningProviderStatusList checks={prepareChecks} className="mt-1" />
+                  <ProvisioningProviderStatusList
+                    checks={prepareChecks}
+                    className="mt-1"
+                    onOpenProviderSettings={(providerId) =>
+                      setProviderSettingsProviderId(providerId)
+                    }
+                  />
                   {prepareWarnings.length > 0 && prepareChecks.length === 0 ? (
                     <div className="mt-0.5 space-y-0.5 pl-5">
                       {prepareWarnings.map((warning, index) => (
@@ -3043,6 +3098,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                       checks={prepareChecks}
                       className="mt-2"
                       suppressDetailsMatching={effectivePrepare.message}
+                      onOpenProviderSettings={(providerId) =>
+                        setProviderSettingsProviderId(providerId)
+                      }
                     />
                   ) : null}
                   {prepareWarnings.length > 0 && prepareChecks.length === 0 ? (
@@ -3113,6 +3171,14 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
           </div>
         </DialogFooter>
       </DialogContent>
+      <ProvisioningProviderRuntimeSettingsDialog
+        openProviderId={providerSettingsProviderId}
+        onOpenProviderIdChange={(providerId) => setProviderSettingsProviderId(providerId)}
+        providers={effectiveCliStatus?.providers ?? []}
+        projectPath={effectiveCwd || null}
+        disabled={isSubmitting || launchInFlight}
+        onProviderRuntimeChanged={invalidatePrepareProvider}
+      />
     </Dialog>
   );
 };

@@ -93,12 +93,12 @@ describe('TeamMcpConfigBuilder', () => {
 
   function readGeneratedServer(
     configPath: string
-  ): { command?: string; args?: string[]; env?: Record<string, string> } | undefined {
+  ): { command?: string; args?: string[]; enabled?: boolean; env?: Record<string, string> } | undefined {
     const raw = fs.readFileSync(configPath, 'utf8');
     const parsed = JSON.parse(raw) as {
       mcpServers?: Record<
         string,
-        { command?: string; args?: string[]; env?: Record<string, string> }
+        { command?: string; args?: string[]; enabled?: boolean; env?: Record<string, string> }
       >;
     };
     return parsed.mcpServers?.['agent-teams'];
@@ -465,6 +465,70 @@ describe('TeamMcpConfigBuilder', () => {
     expect(Object.keys(parsed.mcpServers)).toEqual(['agent-teams']);
   });
 
+  it('inlines allowlisted MCP servers for strict member policies with Claude precedence', async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-mcp-home-'));
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-mcp-project-'));
+    createdDirs.push(homeDir, projectDir);
+    mockHomeDir = homeDir;
+
+    fs.writeFileSync(
+      path.join(homeDir, '.claude.json'),
+      JSON.stringify(
+        {
+          mcpServers: {
+            github: { type: 'http', url: 'https://user.example.com/mcp' },
+            sentry: { command: 'node', args: ['sentry.js'] },
+          },
+          projects: {
+            [projectDir]: {
+              mcpServers: {
+                github: { type: 'http', url: 'https://local.example.com/mcp' },
+              },
+            },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    fs.writeFileSync(
+      path.join(projectDir, '.mcp.json'),
+      JSON.stringify(
+        {
+          mcpServers: {
+            github: { type: 'http', url: 'https://project.example.com/mcp' },
+            linear: { type: 'http', url: 'https://linear.example.com/mcp' },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    const builder = new TeamMcpConfigBuilder();
+    const configPath = await builder.writeConfigFile(projectDir, {
+      mode: 'strictAllowlist',
+      serverNames: ['GitHub', 'LINEAR'],
+    });
+    createdPaths.push(configPath);
+
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
+      mcpServers: Record<string, { command?: string; args?: string[]; type?: string; url?: string }>;
+    };
+
+    expect(Object.keys(parsed.mcpServers).sort()).toEqual(['agent-teams', 'github', 'linear']);
+    expect(parsed.mcpServers.github).toEqual({
+      type: 'http',
+      url: 'https://local.example.com/mcp',
+    });
+    expect(parsed.mcpServers.linear).toEqual({
+      type: 'http',
+      url: 'https://linear.example.com/mcp',
+    });
+    expect(parsed.mcpServers.sentry).toBeUndefined();
+  });
+
   it('generated agent-teams server ignores same-named user MCP entry', async () => {
     const { sourceEntry, tsxCli } = mockSourceWorkspaceEntryAvailable();
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-mcp-home-'));
@@ -489,10 +553,70 @@ describe('TeamMcpConfigBuilder', () => {
     createdPaths.push(configPath);
 
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
-      mcpServers: Record<string, { command?: string; args?: string[] }>;
+      mcpServers: Record<string, { command?: string; args?: string[]; enabled?: boolean }>;
     };
 
     expectNodeTsxSourceEntry(parsed.mcpServers['agent-teams'], tsxCli, sourceEntry);
+    expect(parsed.mcpServers['agent-teams']?.enabled).toBe(true);
+  });
+
+  it('forces generated agent-teams MCP even when user, project, local, or allowlist settings shadow it', async () => {
+    const { sourceEntry, tsxCli } = mockSourceWorkspaceEntryAvailable();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-mcp-home-'));
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-mcp-project-'));
+    createdDirs.push(homeDir, projectDir);
+    mockHomeDir = homeDir;
+
+    fs.writeFileSync(
+      path.join(homeDir, '.claude.json'),
+      JSON.stringify(
+        {
+          mcpServers: {
+            'agent-teams': { command: 'node', args: ['user-shadow.js'], enabled: false },
+          },
+          projects: {
+            [projectDir]: {
+              mcpServers: {
+                'agent-teams': {
+                  command: 'node',
+                  args: ['local-shadow.js'],
+                  enabled: false,
+                },
+              },
+            },
+          },
+        },
+        null,
+        2
+      )
+    );
+    fs.writeFileSync(
+      path.join(projectDir, '.mcp.json'),
+      JSON.stringify(
+        {
+          mcpServers: {
+            'agent-teams': { command: 'node', args: ['project-shadow.js'], enabled: false },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    const builder = new TeamMcpConfigBuilder();
+    const configPath = await builder.writeConfigFile(projectDir, {
+      mode: 'strictAllowlist',
+      serverNames: ['agent-teams'],
+    });
+    createdPaths.push(configPath);
+
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
+      mcpServers: Record<string, { command?: string; args?: string[]; enabled?: boolean }>;
+    };
+
+    expect(Object.keys(parsed.mcpServers)).toEqual(['agent-teams']);
+    expectNodeTsxSourceEntry(parsed.mcpServers['agent-teams'], tsxCli, sourceEntry);
+    expect(parsed.mcpServers['agent-teams']?.enabled).toBe(true);
   });
 
   it('forces the generated agent-teams MCP server on regardless of user, local, or project settings', async () => {

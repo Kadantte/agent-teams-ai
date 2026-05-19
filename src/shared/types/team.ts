@@ -15,10 +15,21 @@ export interface TeamMember {
   model?: string;
   effort?: EffortLevel;
   fastMode?: TeamFastMode;
+  mcpPolicy?: TeamMemberMcpPolicy;
   color?: string;
   joinedAt?: number;
   cwd?: string;
   removedAt?: number;
+}
+
+export type TeamMemberMcpScope = 'user' | 'project' | 'local';
+
+export type TeamMemberMcpMode = 'inheritLead' | 'inheritScopes' | 'strictAllowlist' | 'appOnly';
+
+export interface TeamMemberMcpPolicy {
+  mode: TeamMemberMcpMode;
+  scopes?: Partial<Record<TeamMemberMcpScope, boolean>>;
+  serverNames?: string[];
 }
 
 export interface TeamConfig {
@@ -47,6 +58,7 @@ export interface TeamSummaryMember {
   agentId?: string;
   role?: string;
   color?: string;
+  mcpPolicy?: TeamMemberMcpPolicy;
 }
 
 export interface TeamSummary {
@@ -837,6 +849,7 @@ export interface ResolvedTeamMember {
   providerBackendId?: TeamProviderBackendId;
   model?: string;
   effort?: EffortLevel;
+  mcpPolicy?: TeamMemberMcpPolicy;
   selectedFastMode?: TeamFastMode;
   resolvedFastMode?: boolean;
   laneId?: string;
@@ -906,6 +919,7 @@ export interface TeamMemberSnapshot {
   providerBackendId?: TeamProviderBackendId;
   model?: string;
   effort?: EffortLevel;
+  mcpPolicy?: TeamMemberMcpPolicy;
   selectedFastMode?: TeamFastMode;
   resolvedFastMode?: boolean;
   laneId?: string;
@@ -1394,6 +1408,7 @@ export interface TeamProvisioningMemberInput {
   model?: string;
   effort?: EffortLevel;
   fastMode?: TeamFastMode;
+  mcpPolicy?: TeamMemberMcpPolicy;
 }
 
 export type TeamWorktreeGitBlockReason =
@@ -1661,6 +1676,7 @@ export interface AddMemberRequest {
   providerId?: TeamProviderId;
   model?: string;
   effort?: EffortLevel;
+  mcpPolicy?: TeamMemberMcpPolicy;
 }
 
 export interface RemoveMemberRequest {

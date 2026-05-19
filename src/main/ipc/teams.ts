@@ -115,6 +115,7 @@ import {
   buildStandaloneSlashCommandMeta,
   parseStandaloneSlashCommand,
 } from '@shared/utils/slashCommands';
+import { normalizeTeamMemberMcpPolicy } from '@shared/utils/teamMemberMcpPolicy';
 import { isTeamProviderId, normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 import crypto from 'crypto';
 import { app, BrowserWindow, type IpcMain, type IpcMainInvokeEvent, Notification } from 'electron';
@@ -1564,6 +1565,7 @@ interface RuntimeRosterMutationMember {
   model?: string;
   effort?: EffortLevel;
   fastMode?: TeamFastMode;
+  mcpPolicy?: ReturnType<typeof normalizeTeamMemberMcpPolicy>;
   removedAt?: number | string | null;
 }
 
@@ -1622,7 +1624,9 @@ function didOpenCodeRosterMemberChange(
       ) ||
     (previous.model?.trim() || undefined) !== (next.model?.trim() || undefined) ||
     previous.effort !== next.effort ||
-    previous.fastMode !== next.fastMode
+    previous.fastMode !== next.fastMode ||
+    JSON.stringify(normalizeTeamMemberMcpPolicy(previous.mcpPolicy)) !==
+      JSON.stringify(normalizeTeamMemberMcpPolicy(next.mcpPolicy))
   );
 }
 
@@ -1661,6 +1665,7 @@ function toRollbackReplaceMembersRequest(members: RuntimeRosterMutationMember[])
     model?: string;
     effort?: EffortLevel;
     fastMode?: TeamFastMode;
+    mcpPolicy?: ReturnType<typeof normalizeTeamMemberMcpPolicy>;
   }[];
 } {
   return {
@@ -1676,6 +1681,7 @@ function toRollbackReplaceMembersRequest(members: RuntimeRosterMutationMember[])
         model: member.model?.trim() || undefined,
         effort: member.effort,
         fastMode: member.fastMode,
+        mcpPolicy: normalizeTeamMemberMcpPolicy(member.mcpPolicy),
       })),
   };
 }
@@ -1885,6 +1891,7 @@ async function validateProvisioningRequest(
       model: typeof model === 'string' ? model.trim() || undefined : undefined,
       effort: effortValidation.value,
       fastMode: fastModeValidation.value,
+      mcpPolicy: normalizeTeamMemberMcpPolicy((member as { mcpPolicy?: unknown }).mcpPolicy),
     });
   }
 
@@ -4295,7 +4302,7 @@ async function handleAddMember(
   if (!payload || typeof payload !== 'object') {
     return { success: false, error: 'Invalid payload' };
   }
-  const { name, role, workflow, isolation, providerId, model } = payload as {
+  const { name, role, workflow, isolation, providerId, model, mcpPolicy } = payload as {
     name?: unknown;
     role?: unknown;
     workflow?: unknown;
@@ -4303,6 +4310,7 @@ async function handleAddMember(
     providerId?: unknown;
     model?: unknown;
     effort?: unknown;
+    mcpPolicy?: unknown;
   };
   const vName = validateTeammateName(name);
   if (!vName.valid) return { success: false, error: vName.error ?? 'Invalid member name' };
@@ -4351,6 +4359,7 @@ async function handleAddMember(
       providerId: providerValidation.value,
       model: typeof model === 'string' ? model.trim() || undefined : undefined,
       effort: effortValidation.value,
+      mcpPolicy: normalizeTeamMemberMcpPolicy(mcpPolicy),
     });
     invalidateTeamRosterSnapshotCaches(tn);
 
@@ -4431,6 +4440,7 @@ async function handleReplaceMembers(
     model?: string;
     effort?: EffortLevel;
     fastMode?: TeamFastMode;
+    mcpPolicy?: ReturnType<typeof normalizeTeamMemberMcpPolicy>;
   }[] = [];
   for (const item of payload.members) {
     if (!item || typeof item !== 'object') {
@@ -4446,6 +4456,7 @@ async function handleReplaceMembers(
       model?: unknown;
       effort?: unknown;
       fastMode?: unknown;
+      mcpPolicy?: unknown;
     };
     const vName = validateTeammateName(m.name);
     if (!vName.valid) return { success: false, error: vName.error ?? 'Invalid member name' };
@@ -4498,6 +4509,7 @@ async function handleReplaceMembers(
       model: typeof m.model === 'string' ? m.model.trim() || undefined : undefined,
       effort: effortValidation.value,
       fastMode: fastModeValidation.value,
+      mcpPolicy: normalizeTeamMemberMcpPolicy(m.mcpPolicy),
     });
   }
 

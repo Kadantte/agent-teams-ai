@@ -460,9 +460,27 @@ vi.mock('@renderer/components/team/dialogs/ProvisioningProviderStatusList', () =
   failIncompleteProviderChecks: (checks: unknown) => checks,
   getPrimaryProvisioningFailureDetail: () => null,
   getProvisioningFailureHint: () => 'hint',
+  getProvisioningProviderProgressMessage: () => 'Checking selected providers in parallel...',
   getProvisioningProviderBackendSummary: () => null,
   shouldHideProvisioningProviderStatusList: () => false,
-  updateProviderCheck: (checks: unknown) => checks,
+  updateProviderCheck: (
+    checks: {
+      providerId: string;
+      status: string;
+      details: string[];
+      backendSummary?: string | null;
+    }[],
+    providerId: string,
+    patch: { status: string; details: string[]; backendSummary?: string | null }
+  ) =>
+    checks.map((check) =>
+      check.providerId === providerId
+        ? {
+            ...check,
+            ...patch,
+          }
+        : check
+    ),
 }));
 
 vi.mock('@renderer/components/team/dialogs/TeamModelSelector', () => ({
@@ -2030,7 +2048,8 @@ describe('LaunchTeamDialog', () => {
       await flush();
     });
 
-    const callsAfterSameSignatureRerender = vi.mocked(runProviderPrepareDiagnostics).mock.calls.length;
+    const callsAfterSameSignatureRerender = vi.mocked(runProviderPrepareDiagnostics).mock.calls
+      .length;
 
     await act(async () => {
       resolvePrepare({

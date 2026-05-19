@@ -34,6 +34,10 @@ import {
 import { ProviderModelBadges } from '@renderer/components/runtime/ProviderModelBadges';
 import { getProviderRuntimeBackendSummary } from '@renderer/components/runtime/ProviderRuntimeBackendSelector';
 import { ProviderRuntimeSettingsDialog } from '@renderer/components/runtime/ProviderRuntimeSettingsDialog';
+import {
+  getProviderTerminalCommand,
+  getProviderTerminalLogoutCommand,
+} from '@renderer/components/runtime/providerTerminalCommands';
 import { TerminalLogPanel } from '@renderer/components/terminal/TerminalLogPanel';
 import { TerminalModal } from '@renderer/components/terminal/TerminalModal';
 import { useCliInstaller } from '@renderer/hooks/useCliInstaller';
@@ -393,62 +397,6 @@ function getProviderLabel(providerId: CliProviderId): string {
   }
 }
 
-function getProviderTerminalCommand(provider: CliProviderStatus): {
-  args: string[];
-  env?: Record<string, string>;
-} {
-  if (provider.providerId === 'gemini') {
-    return {
-      args: ['login'],
-      env: {
-        CLAUDE_CODE_ENTRY_PROVIDER: 'gemini',
-        CLAUDE_CODE_GEMINI_BACKEND: provider.selectedBackendId ?? 'auto',
-      },
-    };
-  }
-
-  if (provider.providerId === 'codex') {
-    return {
-      args: ['auth', 'login', '--provider', provider.providerId],
-      env: {
-        CLAUDE_CODE_CODEX_BACKEND: provider.selectedBackendId ?? 'codex-native',
-      },
-    };
-  }
-
-  return {
-    args: ['auth', 'login', '--provider', provider.providerId],
-  };
-}
-
-function getProviderTerminalLogoutCommand(provider: CliProviderStatus): {
-  args: string[];
-  env?: Record<string, string>;
-} {
-  if (provider.providerId === 'gemini') {
-    return {
-      args: ['logout'],
-      env: {
-        CLAUDE_CODE_ENTRY_PROVIDER: 'gemini',
-        CLAUDE_CODE_GEMINI_BACKEND: provider.selectedBackendId ?? 'auto',
-      },
-    };
-  }
-
-  if (provider.providerId === 'codex') {
-    return {
-      args: ['auth', 'logout', '--provider', provider.providerId],
-      env: {
-        CLAUDE_CODE_CODEX_BACKEND: provider.selectedBackendId ?? 'codex-native',
-      },
-    };
-  }
-
-  return {
-    args: ['auth', 'logout', '--provider', provider.providerId],
-  };
-}
-
 const ProviderDetailSkeleton = (): React.JSX.Element => {
   return (
     <div className="mt-1 space-y-2">
@@ -584,18 +532,35 @@ function hasVisibleAuthenticatedMultimodelProvider(
   return visibleProviders.some((provider) => provider.authenticated);
 }
 
+function isOpenCodeProviderEffectivelyReady(provider: CliProviderStatus): boolean {
+  return (
+    provider.providerId === 'opencode' &&
+    provider.supported === true &&
+    provider.authenticated === true &&
+    provider.verificationState === 'verified' &&
+    provider.capabilities.teamLaunch === true
+  );
+}
+
+function isOpenCodeRuntimeReady(openCodeRuntimeStatus: OpenCodeRuntimeStatus | null): boolean {
+  return (
+    openCodeRuntimeStatus?.installed === true &&
+    (openCodeRuntimeStatus.source === 'path' ||
+      (openCodeRuntimeStatus.source === 'app-managed' && openCodeRuntimeStatus.state !== 'failed'))
+  );
+}
+
 function shouldShowOpenCodeInstallAction(
   provider: CliProviderStatus,
   showSkeleton: boolean,
   openCodeRuntimeStatus: OpenCodeRuntimeStatus | null
 ): boolean {
-  const runtimeReady =
-    openCodeRuntimeStatus?.installed === true &&
-    (openCodeRuntimeStatus.source === 'path' ||
-      (openCodeRuntimeStatus.source === 'app-managed' && openCodeRuntimeStatus.state !== 'failed'));
-  const runtimeNeedsInstall = !runtimeReady;
-
-  return provider.providerId === 'opencode' && !showSkeleton && runtimeNeedsInstall;
+  return (
+    provider.providerId === 'opencode' &&
+    !showSkeleton &&
+    !isOpenCodeProviderEffectivelyReady(provider) &&
+    !isOpenCodeRuntimeReady(openCodeRuntimeStatus)
+  );
 }
 
 function shouldShowCodexInstallAction(

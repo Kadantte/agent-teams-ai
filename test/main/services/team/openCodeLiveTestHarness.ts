@@ -1,8 +1,7 @@
+import Fastify from 'fastify';
 import { constants as fsConstants, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-
-import Fastify from 'fastify';
 
 import { buildMemberWorkSyncRuntimeTurnSettledEnvironment } from '../../../../src/features/member-work-sync/main';
 import { registerTeamRoutes } from '../../../../src/main/http/teams';
@@ -16,11 +15,10 @@ import {
   createOpenCodeBridgeClientIdentity,
   OpenCodeBridgeCommandHandshakePort,
 } from '../../../../src/main/services/team/opencode/bridge/OpenCodeBridgeHandshakeClient';
-import type { RuntimeStoreManifestEvidence } from '../../../../src/main/services/team/opencode/bridge/OpenCodeBridgeCommandContract';
 import { OpenCodeReadinessBridge } from '../../../../src/main/services/team/opencode/bridge/OpenCodeReadinessBridge';
 import {
-  OpenCodeStateChangingBridgeCommandService,
   type OpenCodeBridgeCommandExecutor,
+  OpenCodeStateChangingBridgeCommandService,
   type RuntimeStoreManifestReader,
 } from '../../../../src/main/services/team/opencode/bridge/OpenCodeStateChangingBridgeCommandService';
 import { readOpenCodeRuntimeLaneIndex } from '../../../../src/main/services/team/opencode/store/OpenCodeRuntimeManifestEvidenceReader';
@@ -31,10 +29,10 @@ import { TeamProvisioningService } from '../../../../src/main/services/team/Team
 import { getClaudeBasePath, getTeamsBasePath } from '../../../../src/main/utils/pathDecoder';
 
 import type { HttpServices } from '../../../../src/main/http';
+import type { RuntimeStoreManifestEvidence } from '../../../../src/main/services/team/opencode/bridge/OpenCodeBridgeCommandContract';
 import type { TaskRef } from '../../../../src/shared/types';
 
-const DEFAULT_ORCHESTRATOR_CLI =
-  '/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli-source';
+const DEFAULT_ORCHESTRATOR_CLI = '/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli-source';
 
 export interface InboxMessage {
   from?: string;

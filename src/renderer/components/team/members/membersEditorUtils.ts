@@ -6,6 +6,7 @@ import { isTeamEffortLevel, isTeamEffortLevelForProvider } from '@shared/utils/e
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { migrateProviderBackendId } from '@shared/utils/providerBackend';
 import { buildTeamMemberColorMap } from '@shared/utils/teamMemberColors';
+import { normalizeTeamMemberMcpPolicy } from '@shared/utils/teamMemberMcpPolicy';
 import { validateTeamMemberNameFormat } from '@shared/utils/teamMemberName';
 import {
   inferTeamProviderIdFromModel,
@@ -48,6 +49,7 @@ export function createMemberDraft(initial?: Partial<MemberDraft>): MemberDraft {
     model: normalizeExplicitTeamModelForUi(providerId, initial?.model ?? ''),
     effort: initial?.effort,
     fastMode: initial?.fastMode,
+    mcpPolicy: normalizeTeamMemberMcpPolicy(initial?.mcpPolicy),
     removedAt: initial?.removedAt,
   };
 }
@@ -63,6 +65,7 @@ export function createMemberDraftsFromInputs(
     model?: string;
     effort?: EffortLevel;
     fastMode?: TeamFastMode;
+    mcpPolicy?: unknown;
     isolation?: 'worktree';
     removedAt?: number | string | null;
   }[]
@@ -85,6 +88,7 @@ export function createMemberDraftsFromInputs(
         model: member.model ?? '',
         effort: normalizeDraftEffort(member.effort),
         fastMode: member.fastMode,
+        mcpPolicy: normalizeTeamMemberMcpPolicy(member.mcpPolicy),
         removedAt: member.removedAt,
       });
     });
@@ -339,6 +343,10 @@ export function buildMembersFromDrafts(
       }
       if (member.fastMode) {
         result.fastMode = member.fastMode;
+      }
+      const mcpPolicy = normalizeTeamMemberMcpPolicy(member.mcpPolicy);
+      if (mcpPolicy) {
+        result.mcpPolicy = mcpPolicy;
       }
       return result;
     })

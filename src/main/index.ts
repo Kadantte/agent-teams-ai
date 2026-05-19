@@ -70,6 +70,7 @@ import { ChangeExtractorService } from '@main/services/team/ChangeExtractorServi
 import { CrossTeamService } from '@main/services/team/CrossTeamService';
 import { FileContentResolver } from '@main/services/team/FileContentResolver';
 import { GitDiffFallback } from '@main/services/team/GitDiffFallback';
+import { isInformationalOpenCodeRuntimeDeliveryDiagnostic } from '@main/services/team/opencode/delivery/OpenCodeRuntimeDeliveryDiagnostics';
 import {
   copyOpenCodeLocalMcpLaunchEnv,
   hasOpenCodeLocalMcpLaunchEnv,
@@ -237,6 +238,13 @@ const logger = createLogger('App');
 const appStartedAtMs = Date.now();
 const openCodeManagedHostInstanceId = `${process.pid}-${appStartedAtMs}`;
 let openCodeLifecycleBridge: OpenCodeReadinessBridge | null = null;
+
+function hasWarningRelayDiagnostics(diagnostics: readonly string[]): boolean {
+  return diagnostics.some(
+    (diagnostic) => !isInformationalOpenCodeRuntimeDeliveryDiagnostic(diagnostic)
+  );
+}
+
 if (
   earlyElectronUserDataMigrationResult.migrated &&
   earlyElectronUserDataMigrationResult.legacyPath &&
@@ -1268,9 +1276,12 @@ function wireFileWatcherEvents(context: ServiceContext): void {
               .relayInboxFileToLiveRecipient(teamName, inboxName)
               .then((relay) => {
                 if (relay.diagnostics?.length) {
-                  logger.warn(
-                    `[FileWatcher] relay diagnostics for ${teamName}/${inboxName}: ${relay.diagnostics.join('; ')}`
-                  );
+                  const message = `[FileWatcher] relay diagnostics for ${teamName}/${inboxName}: ${relay.diagnostics.join('; ')}`;
+                  if (hasWarningRelayDiagnostics(relay.diagnostics)) {
+                    logger.warn(message);
+                  } else {
+                    logger.info(message);
+                  }
                 }
               })
               .catch((e: unknown) =>

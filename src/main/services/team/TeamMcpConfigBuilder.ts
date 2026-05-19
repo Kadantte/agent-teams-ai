@@ -7,11 +7,16 @@ import {
 } from '@main/utils/pathDecoder';
 import { resolveInteractiveShellEnv } from '@main/utils/shellEnv';
 import { createLogger } from '@shared/utils/logger';
+import { resolveTeamMemberMcpScopes } from '@shared/utils/teamMemberMcpPolicy';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { McpConfigStateReader } from '../extensions/runtime/McpConfigStateReader';
+
 import { atomicWriteAsync } from './atomicWrite';
+
+import type { TeamMemberMcpPolicy, TeamMemberMcpScope } from '@shared/types';
 
 export interface McpLaunchSpec {
   command: string;
@@ -25,6 +30,10 @@ export interface McpLaunchSpecResolveProgress {
 
 export interface McpLaunchSpecResolveOptions {
   onProgress?: (progress: McpLaunchSpecResolveProgress) => void;
+}
+
+interface WriteMcpConfigOptions {
+  mcpPolicy?: TeamMemberMcpPolicy;
 }
 
 const MCP_SERVER_NAME = 'agent-teams';
@@ -42,6 +51,8 @@ const NODE_RUNTIME_PROBE_TIMEOUT_MS = 5_000;
 const MCP_CONFIG_STALE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 type McpServerConfig = Record<string, unknown>;
+
+const MCP_CONFIG_SCOPE_PRECEDENCE: readonly TeamMemberMcpScope[] = ['user', 'project', 'local'];
 
 function isPackagedApp(): boolean {
   try {
@@ -417,27 +428,42 @@ export async function resolveAgentTeamsMcpLaunchSpec(
 }
 
 export class TeamMcpConfigBuilder {
-  async writeConfigFile(_projectPath?: string): Promise<string> {
+  async writeConfigFile(projectPath?: string, options?: WriteMcpConfigOptions): Promise<string>;
+  async writeConfigFile(projectPath?: string, mcpPolicy?: TeamMemberMcpPolicy): Promise<string>;
+  async writeConfigFile(
+    projectPath?: string,
+    optionsOrPolicy?: WriteMcpConfigOptions | TeamMemberMcpPolicy
+  ): Promise<string> {
     const launchSpec = await resolveAgentTeamsMcpLaunchSpec();
     const configDir = getMcpConfigsBasePath();
     const configPath = path.join(
       configDir,
       `${MCP_CONFIG_PREFIX}${process.pid}-${Date.now()}-${randomUUID()}.json`
     );
+    const mcpPolicy =
+      optionsOrPolicy && 'mcpPolicy' in optionsOrPolicy
+        ? optionsOrPolicy.mcpPolicy
+        : (optionsOrPolicy as TeamMemberMcpPolicy | undefined);
     // Keep the team bootstrap config minimal: recent Claude sidechain runs can
     // lose the agent-teams tool surface when we inline large user MCP bundles
     // into the generated --mcp-config. User/project/local MCP remain loaded
     // through Claude's native settings sources.
-    const generatedServers: Record<string, McpServerConfig> = {
-      [MCP_SERVER_NAME]: {
-        command: launchSpec.command,
-        args: launchSpec.args,
-        enabled: true,
-        env: {
-          [MCP_CLAUDE_DIR_ENV]: getClaudeBasePath(),
-        },
+    const generatedServers: Record<string, McpServerConfig> = Object.create(null);
+    generatedServers[MCP_SERVER_NAME] = {
+      command: launchSpec.command,
+      args: launchSpec.args,
+      enabled: true,
+      env: {
+        [MCP_CLAUDE_DIR_ENV]: getClaudeBasePath(),
       },
     };
+    if (mcpPolicy?.mode === 'strictAllowlist') {
+      for (const [name, config] of Object.entries(
+        await this.readAllowlistedServers(projectPath, mcpPolicy)
+      )) {
+        generatedServers[name] = config;
+      }
+    }
 
     await fs.promises.mkdir(configDir, { recursive: true });
     await atomicWriteAsync(
@@ -452,6 +478,47 @@ export class TeamMcpConfigBuilder {
     );
 
     return configPath;
+  }
+
+  private async readAllowlistedServers(
+    projectPath: string | undefined,
+    policy: TeamMemberMcpPolicy
+  ): Promise<Record<string, McpServerConfig>> {
+    const allowlist = new Set(
+      (policy.serverNames ?? [])
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .map((name) => name.toLowerCase())
+    );
+    if (allowlist.size === 0) {
+      return {};
+    }
+
+    const scopes = resolveTeamMemberMcpScopes(policy);
+    const entries = await new McpConfigStateReader().readConfigured(projectPath);
+    const byScope = new Map<TeamMemberMcpScope, typeof entries>();
+    for (const scope of MCP_CONFIG_SCOPE_PRECEDENCE) {
+      byScope.set(scope, []);
+    }
+    for (const entry of entries) {
+      if (!scopes[entry.scope]) {
+        continue;
+      }
+      byScope.get(entry.scope)?.push(entry);
+    }
+
+    const selected: Record<string, McpServerConfig> = Object.create(null);
+    for (const scope of MCP_CONFIG_SCOPE_PRECEDENCE) {
+      for (const entry of byScope.get(scope) ?? []) {
+        if (entry.name.toLowerCase() === MCP_SERVER_NAME) {
+          continue;
+        }
+        if (allowlist.has(entry.name.toLowerCase())) {
+          selected[entry.name] = entry.config;
+        }
+      }
+    }
+    return selected;
   }
 
   /** Delete a single MCP config file (best-effort). */

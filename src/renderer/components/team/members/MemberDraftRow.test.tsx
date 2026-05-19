@@ -178,27 +178,205 @@ describe('MemberDraftRow', () => {
     });
   });
 
-  it('renders the workflow control as an icon-only button with tooltip text', () => {
+  it('renders workflow and MCP row controls as icon-only buttons with tooltip text', () => {
     const { host, root } = renderMemberDraftRow({
       showWorkflow: true,
       onWorkflowChange: () => undefined,
+      onMcpPolicyChange: () => undefined,
     });
 
     const workflowButton = host.querySelector<HTMLButtonElement>(
       'button[aria-label="Add teammate workflow"]'
     )!;
+    const mcpButton = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) =>
+        button.getAttribute('aria-label') ===
+        "MCP inherit: Control this member's MCP inheritance policy"
+    )!;
+    const removeButton = host.querySelector<HTMLButtonElement>(
+      'button[aria-label="Remove alice"]'
+    )!;
 
     expect(workflowButton).toBeTruthy();
     expect(workflowButton.textContent).not.toContain('Workflow');
     expect(workflowButton.closest('[title]')?.getAttribute('title')).toBe('Add teammate workflow');
-    expect(host.textContent).not.toContain('Workflow (optional)');
+    expect(workflowButton.getAttribute('aria-expanded')).toBe('false');
+
+    expect(mcpButton).toBeTruthy();
+    expect(mcpButton.textContent).not.toContain('MCP');
+    expect(mcpButton.textContent).not.toContain('inherit');
+    const mcpTooltipWrapper = mcpButton.closest('[title]');
+    const mcpTooltipContent = Array.from(mcpTooltipWrapper?.children ?? []).find(
+      (element) => element.getAttribute('aria-hidden') === 'true'
+    );
+    expect(mcpTooltipWrapper?.getAttribute('title')).toBe(
+      "MCP inherit: Control this member's MCP inheritance policy"
+    );
+    expect(mcpTooltipContent?.getAttribute('class')).toContain(
+      'group-hover/hover-tooltip:opacity-100'
+    );
+    expect(mcpButton.getAttribute('aria-expanded')).toBe('false');
+    expect(
+      workflowButton.compareDocumentPosition(mcpButton) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      mcpButton.compareDocumentPosition(removeButton) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
 
     act(() => {
       workflowButton.click();
+      mcpButton.click();
     });
 
     expect(workflowButton.getAttribute('aria-expanded')).toBe('true');
+    expect(mcpButton.getAttribute('aria-expanded')).toBe('true');
+    expect(mcpButton.className).toContain('border-sky-400/45');
+    expect(mcpTooltipWrapper?.getAttribute('title')).toBeNull();
+    expect(mcpTooltipContent?.getAttribute('class')).not.toContain(
+      'group-hover/hover-tooltip:opacity-100'
+    );
     expect(host.textContent).toContain('Workflow (optional)');
+    expect(host.textContent).toContain('MCP mode');
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it.each([
+    {
+      label: 'inherit lead',
+      mcpPolicy: undefined,
+      ariaLabel: "MCP inherit: Control this member's MCP inheritance policy",
+      highlightedBeforeClick: false,
+    },
+    {
+      label: 'agent teams mcp',
+      mcpPolicy: { mode: 'appOnly' as const },
+      ariaLabel: "Agent Teams MCP: Control this member's MCP inheritance policy",
+      highlightedBeforeClick: true,
+    },
+    {
+      label: 'scope inheritance',
+      mcpPolicy: {
+        mode: 'inheritScopes' as const,
+        scopes: { user: true, project: false, local: true },
+      },
+      ariaLabel: "MCP scopes: Control this member's MCP inheritance policy",
+      highlightedBeforeClick: true,
+    },
+    {
+      label: 'strict allowlist',
+      mcpPolicy: {
+        mode: 'strictAllowlist' as const,
+        scopes: { user: true, project: true, local: false },
+        serverNames: ['github', 'linear'],
+      },
+      ariaLabel: "MCP 2: Control this member's MCP inheritance policy",
+      highlightedBeforeClick: true,
+    },
+  ])(
+    'keeps MCP control state correct across $label settings in the row fixture e2e',
+    ({ mcpPolicy, ariaLabel, highlightedBeforeClick }) => {
+      const { host, root } = renderMemberDraftRow({
+        member: createMemberDraft({
+          id: 'member-1',
+          name: 'alice',
+          roleSelection: 'developer',
+          providerId: 'anthropic',
+          model: 'opus',
+          mcpPolicy,
+        }),
+        onMcpPolicyChange: () => undefined,
+      });
+
+      const mcpButton = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(
+        (button) => button.getAttribute('aria-label') === ariaLabel
+      )!;
+      const tooltipWrapper = mcpButton.closest('[title]');
+      const tooltipContent = Array.from(tooltipWrapper?.children ?? []).find(
+        (element) => element.getAttribute('aria-hidden') === 'true'
+      );
+
+      expect(mcpButton).toBeTruthy();
+      expect(mcpButton.textContent).not.toContain('MCP');
+      expect(mcpButton.className.includes('border-sky-400/45')).toBe(highlightedBeforeClick);
+      expect(tooltipWrapper?.getAttribute('title')).toBe(ariaLabel);
+      expect(tooltipContent?.getAttribute('class')).toContain(
+        'group-hover/hover-tooltip:opacity-100'
+      );
+
+      act(() => {
+        mcpButton.click();
+      });
+
+      expect(mcpButton.getAttribute('aria-expanded')).toBe('true');
+      expect(mcpButton.className).toContain('border-sky-400/45');
+      expect(tooltipWrapper?.getAttribute('title')).toBeNull();
+      expect(tooltipContent?.getAttribute('class')).not.toContain(
+        'group-hover/hover-tooltip:opacity-100'
+      );
+      expect(host.textContent).toContain('MCP mode');
+
+      act(() => {
+        root.unmount();
+      });
+    }
+  );
+
+  it('locks MCP controls when Agent Teams MCP master mode is enabled', () => {
+    const onMcpPolicyChange = vi.fn();
+    const { host, root } = renderMemberDraftRow({
+      member: createMemberDraft({
+        id: 'member-1',
+        name: 'alice',
+        roleSelection: 'developer',
+        providerId: 'anthropic',
+        model: 'opus',
+        mcpPolicy: {
+          mode: 'strictAllowlist',
+          scopes: { user: true, project: true, local: true },
+          serverNames: ['github'],
+        },
+      }),
+      onMcpPolicyChange,
+      agentTeamsMcpLocked: true,
+    });
+
+    const mcpButton = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) =>
+        button.getAttribute('aria-label') ===
+        "Agent Teams MCP: Control this member's MCP inheritance policy"
+    )!;
+
+    expect(mcpButton).toBeTruthy();
+    expect(mcpButton.className).toContain('border-amber-300/50');
+    expect(mcpButton.querySelector('.bg-amber-300')).toBeTruthy();
+
+    act(() => {
+      mcpButton.click();
+    });
+
+    expect(host.textContent).toContain('MCP mode');
+    expect(host.textContent).toContain('Agent Teams MCP');
+    expect(host.textContent).toContain(
+      'Agent Teams MCP only is enabled for all teammates. This teammate will launch with only the Agent Teams server.'
+    );
+
+    const mcpModeTrigger = host.querySelector<HTMLButtonElement>('#member-member-1-mcp-mode')!;
+    const scopeCheckboxes = Array.from(
+      host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+    );
+
+    expect(mcpModeTrigger.disabled).toBe(true);
+    expect(scopeCheckboxes).toHaveLength(3);
+    expect(scopeCheckboxes.every((checkbox) => checkbox.disabled)).toBe(true);
+
+    act(() => {
+      scopeCheckboxes[0]?.click();
+    });
+
+    expect(onMcpPolicyChange).not.toHaveBeenCalled();
 
     act(() => {
       root.unmount();

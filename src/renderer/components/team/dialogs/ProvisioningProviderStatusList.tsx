@@ -2,7 +2,7 @@ import React from 'react';
 
 import { formatProviderBackendLabel } from '@renderer/utils/providerBackendIdentity';
 import { getTeamProviderLabel as getCatalogTeamProviderLabel } from '@renderer/utils/teamModelCatalog';
-import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, SlidersHorizontal } from 'lucide-react';
 
 import type { CliProviderStatus, TeamProviderId } from '@shared/types';
 
@@ -131,6 +131,21 @@ export function failIncompleteProviderChecks(
           details: check.details.length > 0 ? check.details : [detail],
         }
   );
+}
+
+export function getProvisioningProviderProgressMessage(
+  providerIds: readonly TeamProviderId[],
+  totalProviderCount: number
+): string {
+  if (providerIds.length === 0 || providerIds.length === totalProviderCount) {
+    return 'Checking selected providers in parallel...';
+  }
+
+  if (providerIds.length === 1) {
+    return `Checking ${getProvisioningProviderLabel(providerIds[0])} provider...`;
+  }
+
+  return `Checking ${providerIds.map(getProvisioningProviderLabel).join(', ')} providers...`;
 }
 
 type ProvisioningDetailSummary =
@@ -667,14 +682,49 @@ const StatusIcon = ({ status }: { status: ProvisioningProviderCheckStatus }): Re
   return <span className="inline-block size-1.5 rounded-full bg-current opacity-60" />;
 };
 
+function getProvisioningProviderSettingsActionLabel(
+  check: ProvisioningProviderCheck
+): string | null {
+  if (check.status !== 'notes' && check.status !== 'failed') {
+    return null;
+  }
+
+  const details = getPublicProvisioningDetails(check.details);
+  const combined = [check.backendSummary ?? '', ...details].join('\n').toLowerCase();
+  if (!combined.trim()) {
+    return null;
+  }
+
+  const hasActionableProviderSetupDetail =
+    combined.includes('auth required') ||
+    combined.includes('authentication required') ||
+    combined.includes('not authenticated') ||
+    combined.includes('not logged in') ||
+    combined.includes('provider is not configured for runtime use') ||
+    combined.includes('connect a chatgpt account') ||
+    combined.includes('connected chatgpt account') ||
+    combined.includes('reconnect chatgpt') ||
+    combined.includes('openai_api_key') ||
+    combined.includes('codex_api_key') ||
+    combined.includes('anthropic_api_key') ||
+    combined.includes('gemini_api_key') ||
+    combined.includes('api key mode is selected');
+
+  return hasActionableProviderSetupDetail
+    ? `Open ${getProvisioningProviderLabel(check.providerId)} settings`
+    : null;
+}
+
 export const ProvisioningProviderStatusList = ({
   checks,
   className = '',
   suppressDetailsMatching,
+  onOpenProviderSettings,
 }: {
   checks: ProvisioningProviderCheck[];
   className?: string;
   suppressDetailsMatching?: string | null;
+  onOpenProviderSettings?: (providerId: TeamProviderId) => void;
 }): React.JSX.Element | null => {
   if (checks.length === 0) {
     return null;
@@ -687,6 +737,9 @@ export const ProvisioningProviderStatusList = ({
         const visibleDetails = getPublicProvisioningDetails(check.details).filter(
           (detail) => detail.trim() !== suppressDetailsMatchingTrimmed
         );
+        const settingsActionLabel = onOpenProviderSettings
+          ? getProvisioningProviderSettingsActionLabel(check)
+          : null;
 
         return (
           <div key={check.providerId}>
@@ -710,6 +763,22 @@ export const ProvisioningProviderStatusList = ({
                     {detail}
                   </p>
                 ))}
+              </div>
+            ) : null}
+            {settingsActionLabel ? (
+              <div className="mt-1 pl-4">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium transition-colors hover:bg-white/5"
+                  style={{
+                    borderColor: 'var(--color-border-subtle)',
+                    color: 'var(--color-text-secondary)',
+                  }}
+                  onClick={() => onOpenProviderSettings?.(check.providerId)}
+                >
+                  <SlidersHorizontal className="size-3" />
+                  {settingsActionLabel}
+                </button>
               </div>
             ) : null}
           </div>

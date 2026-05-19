@@ -844,7 +844,7 @@ export const TeamListView = memo(function TeamListView(): React.JSX.Element {
               if (!role && m.agentType && m.agentType !== 'general-purpose') {
                 role = m.agentType;
               }
-              return { name: m.name, role };
+              return { name: m.name, role, mcpPolicy: m.mcpPolicy };
             });
           setCopyData({
             teamName: uniqueName,

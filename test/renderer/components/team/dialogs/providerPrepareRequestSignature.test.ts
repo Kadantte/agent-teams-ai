@@ -6,12 +6,28 @@ import {
 } from '@renderer/components/team/dialogs/providerPrepareRequestSignature';
 import { describe, expect, it } from 'vitest';
 
+import type { CliProviderStatus, TeamProviderId } from '@shared/types';
+
+type RuntimeSignatureProvider = {
+  providerId: TeamProviderId;
+  [key: string]: unknown;
+};
+
+function providerStatusMap(
+  entries: readonly (readonly [TeamProviderId, RuntimeSignatureProvider])[]
+): ReadonlyMap<TeamProviderId, CliProviderStatus | null | undefined> {
+  return new Map(entries) as unknown as ReadonlyMap<
+    TeamProviderId,
+    CliProviderStatus | null | undefined
+  >;
+}
+
 describe('providerPrepareRequestSignature', () => {
   it('stays stable for semantically identical provider runtime snapshots', () => {
     const providerIds = ['codex'] as const;
     const first = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'codex',
           {
@@ -52,11 +68,11 @@ describe('providerPrepareRequestSignature', () => {
             canLoginFromUi: true,
           },
         ],
-      ]) as any
+      ])
     );
     const second = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'codex',
           {
@@ -97,7 +113,7 @@ describe('providerPrepareRequestSignature', () => {
             canLoginFromUi: true,
           },
         ],
-      ]) as any
+      ])
     );
 
     expect(first).toBe(second);
@@ -107,7 +123,7 @@ describe('providerPrepareRequestSignature', () => {
     const providerIds = ['codex'] as const;
     const authenticated = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'codex',
           {
@@ -128,11 +144,11 @@ describe('providerPrepareRequestSignature', () => {
             canLoginFromUi: true,
           },
         ],
-      ]) as any
+      ])
     );
     const unauthenticated = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'codex',
           {
@@ -154,7 +170,7 @@ describe('providerPrepareRequestSignature', () => {
             canLoginFromUi: true,
           },
         ],
-      ]) as any
+      ])
     );
 
     expect(authenticated).not.toBe(unauthenticated);
@@ -164,7 +180,7 @@ describe('providerPrepareRequestSignature', () => {
     const providerIds = ['codex'] as const;
     const first = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'codex',
           {
@@ -214,11 +230,11 @@ describe('providerPrepareRequestSignature', () => {
             canLoginFromUi: true,
           },
         ],
-      ]) as any
+      ])
     );
     const second = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'codex',
           {
@@ -268,7 +284,7 @@ describe('providerPrepareRequestSignature', () => {
             canLoginFromUi: true,
           },
         ],
-      ]) as any
+      ])
     );
 
     expect(first).not.toBe(second);
@@ -278,7 +294,7 @@ describe('providerPrepareRequestSignature', () => {
     const providerIds = ['opencode'] as const;
     const first = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'opencode',
           {
@@ -308,11 +324,11 @@ describe('providerPrepareRequestSignature', () => {
             ],
           },
         ],
-      ]) as any
+      ])
     );
     const second = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'opencode',
           {
@@ -342,7 +358,7 @@ describe('providerPrepareRequestSignature', () => {
             ],
           },
         ],
-      ]) as any
+      ])
     );
 
     expect(first).toBe(second);
@@ -352,7 +368,7 @@ describe('providerPrepareRequestSignature', () => {
     const providerIds = ['opencode'] as const;
     const first = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'opencode',
           {
@@ -370,11 +386,11 @@ describe('providerPrepareRequestSignature', () => {
             },
           },
         ],
-      ]) as any
+      ])
     );
     const second = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'opencode',
           {
@@ -400,7 +416,7 @@ describe('providerPrepareRequestSignature', () => {
             },
           },
         ],
-      ]) as any
+      ])
     );
 
     expect(first).toBe(second);
@@ -409,7 +425,7 @@ describe('providerPrepareRequestSignature', () => {
   it('still changes the full request signature when selected OpenCode model checks change', () => {
     const runtimeStatusSignature = buildProviderPrepareRuntimeStatusSignature(
       ['opencode'],
-      new Map([
+      providerStatusMap([
         [
           'opencode',
           {
@@ -419,21 +435,15 @@ describe('providerPrepareRequestSignature', () => {
             authMethod: 'oauth',
             selectedBackendId: 'opencode-cli',
             resolvedBackendId: 'opencode-cli',
-            models: [
-              'opencode/minimax-m2.5-free',
-              'opencode/qwen3.6-plus-free',
-            ],
+            models: ['opencode/minimax-m2.5-free', 'opencode/qwen3.6-plus-free'],
             modelCatalog: {
               source: 'live',
               status: 'ready',
-              models: [
-                { id: 'opencode/minimax-m2.5-free' },
-                { id: 'opencode/qwen3.6-plus-free' },
-              ],
+              models: [{ id: 'opencode/minimax-m2.5-free' }, { id: 'opencode/qwen3.6-plus-free' }],
             },
           },
         ],
-      ]) as any
+      ])
     );
 
     const first = buildProviderPrepareRequestSignature({
@@ -464,7 +474,7 @@ describe('providerPrepareRequestSignature', () => {
     const providerIds = ['opencode'] as const;
     const first = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'opencode',
           {
@@ -492,11 +502,11 @@ describe('providerPrepareRequestSignature', () => {
             ],
           },
         ],
-      ]) as any
+      ])
     );
     const second = buildProviderPrepareRuntimeStatusSignature(
       providerIds,
-      new Map([
+      providerStatusMap([
         [
           'opencode',
           {
@@ -524,8 +534,93 @@ describe('providerPrepareRequestSignature', () => {
             ],
           },
         ],
-      ]) as any
+      ])
     );
+
+    expect(first).toBe(second);
+  });
+
+  it('ignores backend option status churn when the selected backend identity is unchanged', () => {
+    const providerIds = ['opencode'] as const;
+    const first = buildProviderPrepareRuntimeStatusSignature(
+      providerIds,
+      providerStatusMap([
+        [
+          'opencode',
+          {
+            providerId: 'opencode',
+            supported: true,
+            authenticated: true,
+            authMethod: 'oauth',
+            selectedBackendId: 'opencode-cli',
+            resolvedBackendId: 'opencode-cli',
+            availableBackends: [
+              {
+                id: 'opencode-cli',
+                available: false,
+                selectable: true,
+                state: 'degraded',
+                recommended: true,
+                audience: 'general',
+                statusMessage: 'PONG probe still running',
+              },
+            ],
+          },
+        ],
+      ])
+    );
+    const second = buildProviderPrepareRuntimeStatusSignature(
+      providerIds,
+      providerStatusMap([
+        [
+          'opencode',
+          {
+            providerId: 'opencode',
+            supported: true,
+            authenticated: true,
+            authMethod: 'oauth',
+            selectedBackendId: 'opencode-cli',
+            resolvedBackendId: 'opencode-cli',
+            availableBackends: [
+              {
+                id: 'opencode-cli',
+                available: true,
+                selectable: true,
+                state: 'ready',
+                recommended: true,
+                audience: 'general',
+                statusMessage: 'Managed runtime verified',
+              },
+            ],
+          },
+        ],
+      ])
+    );
+
+    expect(first).toBe(second);
+  });
+
+  it('ignores volatile member draft ids in provider prepare signatures', () => {
+    const first = buildProviderPrepareMembersSignature([
+      {
+        id: 'draft-before-poll',
+        name: 'tom',
+        roleSelection: '',
+        customRole: 'Developer',
+        providerId: 'opencode',
+        model: 'opencode/big-pickle',
+      },
+    ]);
+    const second = buildProviderPrepareMembersSignature([
+      {
+        id: 'draft-after-poll',
+        name: 'tom',
+        roleSelection: '',
+        customRole: 'Developer',
+        providerId: 'opencode',
+        model: 'opencode/big-pickle',
+      },
+    ]);
 
     expect(first).toBe(second);
   });

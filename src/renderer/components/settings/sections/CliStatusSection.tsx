@@ -28,6 +28,10 @@ import {
 import { ProviderModelBadges } from '@renderer/components/runtime/ProviderModelBadges';
 import { getProviderRuntimeBackendSummary } from '@renderer/components/runtime/ProviderRuntimeBackendSelector';
 import { ProviderRuntimeSettingsDialog } from '@renderer/components/runtime/ProviderRuntimeSettingsDialog';
+import {
+  getProviderTerminalCommand,
+  getProviderTerminalLogoutCommand,
+} from '@renderer/components/runtime/providerTerminalCommands';
 import { TerminalModal } from '@renderer/components/terminal/TerminalModal';
 import { useCliInstaller } from '@renderer/hooks/useCliInstaller';
 import { useStore } from '@renderer/store';
@@ -127,62 +131,6 @@ function getProviderLabel(providerId: CliProviderId): string {
     case 'opencode':
       return 'OpenCode (200+ models)';
   }
-}
-
-function getProviderTerminalCommand(provider: CliProviderStatus): {
-  args: string[];
-  env?: Record<string, string>;
-} {
-  if (provider.providerId === 'gemini') {
-    return {
-      args: ['login'],
-      env: {
-        CLAUDE_CODE_ENTRY_PROVIDER: 'gemini',
-        CLAUDE_CODE_GEMINI_BACKEND: provider.selectedBackendId ?? 'auto',
-      },
-    };
-  }
-
-  if (provider.providerId === 'codex') {
-    return {
-      args: ['auth', 'login', '--provider', provider.providerId],
-      env: {
-        CLAUDE_CODE_CODEX_BACKEND: provider.selectedBackendId ?? 'codex-native',
-      },
-    };
-  }
-
-  return {
-    args: ['auth', 'login', '--provider', provider.providerId],
-  };
-}
-
-function getProviderTerminalLogoutCommand(provider: CliProviderStatus): {
-  args: string[];
-  env?: Record<string, string>;
-} {
-  if (provider.providerId === 'gemini') {
-    return {
-      args: ['logout'],
-      env: {
-        CLAUDE_CODE_ENTRY_PROVIDER: 'gemini',
-        CLAUDE_CODE_GEMINI_BACKEND: provider.selectedBackendId ?? 'auto',
-      },
-    };
-  }
-
-  if (provider.providerId === 'codex') {
-    return {
-      args: ['auth', 'logout', '--provider', provider.providerId],
-      env: {
-        CLAUDE_CODE_CODEX_BACKEND: provider.selectedBackendId ?? 'codex-native',
-      },
-    };
-  }
-
-  return {
-    args: ['auth', 'logout', '--provider', provider.providerId],
-  };
 }
 
 export const CliStatusSection = (): React.JSX.Element | null => {

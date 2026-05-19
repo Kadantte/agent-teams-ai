@@ -20,7 +20,7 @@ import { isGeminiUiFrozen } from '@renderer/utils/geminiUiFreeze';
 import { Loader2 } from 'lucide-react';
 
 import type { MemberDraft } from '@renderer/components/team/members/membersEditorTypes';
-import type { EffortLevel, TeamProviderId } from '@shared/types';
+import type { EffortLevel, TeamMemberMcpPolicy, TeamProviderId } from '@shared/types';
 
 export interface AddMemberEntry {
   name: string;
@@ -30,6 +30,7 @@ export interface AddMemberEntry {
   providerId?: TeamProviderId;
   model?: string;
   effort?: EffortLevel;
+  mcpPolicy?: TeamMemberMcpPolicy;
 }
 
 interface AddMemberDialogProps {
@@ -153,6 +154,7 @@ export const AddMemberDialog = ({
         providerId: m.providerId,
         model: m.model,
         effort: m.effort,
+        mcpPolicy: m.mcpPolicy,
       }))
     );
   };

@@ -35,11 +35,23 @@ const liveDescribe =
     ? describe
     : describe.skip;
 
-const DEFAULT_ORCHESTRATOR_CLI =
-  '/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli-source';
+const DEFAULT_ORCHESTRATOR_CLI = '/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli-source';
 const DEFAULT_LEAD_MODEL = 'claude-opus-4-6[1m]';
 const DEFAULT_MEMBER_MODEL = 'haiku';
 const DEFAULT_LEAD_EFFORT = 'medium' as const;
+const DISABLE_USER_HOOKS_SETTINGS_ARG = "--settings '{\"disableAllHooks\":true}'";
+
+interface LiveBootstrapSpec {
+  members: Array<{
+    name: string;
+    provider?: string;
+    model?: string;
+    effort?: string;
+    mcpConfigPath?: string;
+    mcpSettingSources?: string;
+    strictMcpConfig?: boolean;
+  }>;
+}
 
 liveDescribe('Anthropic launch selection live e2e', () => {
   let tempDir: string;
@@ -156,6 +168,7 @@ liveDescribe('Anthropic launch selection live e2e', () => {
     restoreEnv('CLAUDE_DISABLE_DETERMINISTIC_TEAM_BOOTSTRAP', previousDisableRuntimeBootstrap);
     restoreEnv('CLAUDE_TEAM_PROCESS_RUNTIME_READY_TIMEOUT_MS', previousRuntimeReadyTimeout);
     restoreEnv('CLAUDE_TEAM_PROCESS_INBOX_POLLER_READY_TIMEOUT_MS', previousInboxPollerReadyTimeout);
+    clearBenignLiveWarningsIfOnlyBenign();
 
     if (preserveArtifacts) {
       process.stderr.write(`[AnthropicLaunchSelection.live] preserved temp dir: ${tempDir}\n`);
@@ -180,7 +193,7 @@ liveDescribe('Anthropic launch selection live e2e', () => {
     discardKnownAnthropicLaunchSelectionWarnings();
   }, 180_000);
 
-  it('launches Opus 4.6 1M medium lead with explicit Haiku teammate without inherited effort', async () => {
+  it('launches Anthropic teammates with distinct model effort and MCP policies', async () => {
     const orchestratorCli = process.env.CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH?.trim();
     expect(orchestratorCli).toBeTruthy();
     await assertExecutable(orchestratorCli!);
@@ -204,7 +217,7 @@ liveDescribe('Anthropic launch selection live e2e', () => {
         model: leadModel,
         effort: leadEffort,
         skipPermissions: true,
-        extraCliArgs: "--settings '{\"disableAllHooks\":true}'",
+        extraCliArgs: DISABLE_USER_HOOKS_SETTINGS_ARG,
         prompt: 'Keep the team idle after bootstrap. Do not start extra work.',
         members: [
           {
@@ -212,10 +225,25 @@ liveDescribe('Anthropic launch selection live e2e', () => {
             role: 'Reviewer',
             providerId: 'anthropic',
             model: memberModel,
+            mcpPolicy: { mode: 'appOnly' },
           },
           {
             name: 'alice',
             role: 'Developer',
+            mcpPolicy: {
+              mode: 'inheritScopes',
+              scopes: { user: false, project: false, local: true },
+            },
+          },
+          {
+            name: 'bob',
+            role: 'Auditor',
+            providerId: 'anthropic',
+            model: memberModel,
+            mcpPolicy: {
+              mode: 'strictAllowlist',
+              serverNames: ['github'],
+            },
           },
         ],
       },
@@ -225,7 +253,15 @@ liveDescribe('Anthropic launch selection live e2e', () => {
     );
 
     const run = (
-      svc as unknown as { runs: Map<string, { allEffectiveMembers?: TeamMember[] }> }
+      svc as unknown as {
+        runs: Map<
+          string,
+          {
+            allEffectiveMembers?: TeamMember[];
+            bootstrapSpecPath?: string | null;
+          }
+        >;
+      }
     ).runs.get(response.runId);
     expect(run?.allEffectiveMembers).toEqual([
       expect.objectContaining({
@@ -233,14 +269,60 @@ liveDescribe('Anthropic launch selection live e2e', () => {
         providerId: 'anthropic',
         model: memberModel,
         effort: undefined,
+        mcpPolicy: { mode: 'appOnly' },
       }),
       expect.objectContaining({
         name: 'alice',
         providerId: 'anthropic',
         model: leadModel,
         effort: leadEffort,
+        mcpPolicy: {
+          mode: 'inheritScopes',
+          scopes: { user: false, project: false, local: true },
+        },
+      }),
+      expect.objectContaining({
+        name: 'bob',
+        providerId: 'anthropic',
+        model: memberModel,
+        effort: undefined,
+        mcpPolicy: {
+          mode: 'strictAllowlist',
+          serverNames: ['github'],
+        },
       }),
     ]);
+    expect(run?.bootstrapSpecPath).toEqual(expect.any(String));
+    const bootstrapSpec = JSON.parse(
+      await fs.readFile(run!.bootstrapSpecPath!, 'utf8')
+    ) as LiveBootstrapSpec;
+    const bootstrapMembersByName = new Map(
+      bootstrapSpec.members.map((member) => [member.name, member])
+    );
+    expect(bootstrapMembersByName.get('jack')).toMatchObject({
+      provider: 'anthropic',
+      model: memberModel,
+      mcpConfigPath: expect.any(String),
+      mcpSettingSources: 'user,project,local',
+      strictMcpConfig: true,
+    });
+    expect(bootstrapMembersByName.get('jack')).not.toHaveProperty('effort');
+    expect(bootstrapMembersByName.get('alice')).toMatchObject({
+      provider: 'anthropic',
+      model: leadModel,
+      effort: leadEffort,
+      mcpConfigPath: expect.any(String),
+      mcpSettingSources: 'local',
+      strictMcpConfig: false,
+    });
+    expect(bootstrapMembersByName.get('bob')).toMatchObject({
+      provider: 'anthropic',
+      model: memberModel,
+      mcpConfigPath: expect.any(String),
+      mcpSettingSources: 'user,project,local',
+      strictMcpConfig: true,
+    });
+    expect(bootstrapMembersByName.get('bob')).not.toHaveProperty('effort');
 
     await waitUntil(async () => {
       const last = progressEvents.at(-1);
@@ -256,7 +338,7 @@ liveDescribe('Anthropic launch selection live e2e', () => {
         if (statuses.teamLaunchState === 'partial_failure') {
           throw new Error(await formatLaunchDiagnostics(svc!, teamName!, progressEvents));
         }
-        return ['jack', 'alice'].every((memberName) => {
+        return ['jack', 'alice', 'bob'].every((memberName) => {
           const member = statuses.statuses[memberName];
           return (
             member?.status === 'online' &&
@@ -277,13 +359,16 @@ liveDescribe('Anthropic launch selection live e2e', () => {
           snapshot.members.jack?.providerId === 'anthropic' &&
           snapshot.members.jack.alive === true &&
           snapshot.members.alice?.providerId === 'anthropic' &&
-          snapshot.members.alice.alive === true
+          snapshot.members.alice.alive === true &&
+          snapshot.members.bob?.providerId === 'anthropic' &&
+          snapshot.members.bob.alive === true
         );
       },
       180_000,
       2_000,
       () => formatLaunchDiagnostics(svc!, teamName!, progressEvents)
     );
+    clearBenignLiveWarningsIfOnlyBenign();
   }, 480_000);
 });
 
@@ -573,4 +658,16 @@ function redactSecrets(text: string): string {
   return text
     .replace(/sk-ant-api03-[A-Za-z0-9_-]+/g, '<redacted-anthropic-key>')
     .replace(/\b(?:sk|ak)-[A-Za-z0-9_-]{20,}\b/g, '<redacted-api-key>');
+}
+
+function clearBenignLiveWarningsIfOnlyBenign(): void {
+  const warn = vi.mocked(console.warn);
+  if (
+    warn.mock.calls.length > 0 &&
+    warn.mock.calls.every((call) =>
+      call.map((part) => String(part)).join(' ').includes('[getConfig] slow read diag=')
+    )
+  ) {
+    warn.mockClear();
+  }
 }

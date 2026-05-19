@@ -3306,6 +3306,7 @@ export const TeamDetailView = memo(function TeamDetailView({
                           providerId: entry.providerId,
                           model: entry.model,
                           effort: entry.effort,
+                          mcpPolicy: entry.mcpPolicy,
                         });
                       }
                       setAddMemberDialogOpen(false);

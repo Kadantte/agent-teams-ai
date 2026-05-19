@@ -1,5 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts';
@@ -630,6 +631,66 @@ describe('CLI status visibility during completed install state', () => {
     );
     expect(progressButton).not.toBeUndefined();
     expect(progressButton).toHaveProperty('disabled', true);
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('does not show OpenCode retry install when the provider is effectively ready', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.cliInstallerState = 'idle';
+    storeState.openCodeRuntimeStatus = {
+      installed: false,
+      source: 'app-managed',
+      state: 'failed',
+      error: 'app-managed OpenCode install failed earlier',
+    };
+    storeState.openCodeRuntimeStatusLoading = false;
+    storeState.cliStatus = createInstalledCliStatus({
+      flavor: 'agent_teams_orchestrator',
+      displayName: 'Multimodel runtime',
+      supportsSelfUpdate: false,
+      showVersionDetails: false,
+      showBinaryPath: false,
+      authLoggedIn: true,
+      providers: [
+        {
+          providerId: 'opencode',
+          displayName: 'OpenCode (200+ models)',
+          supported: true,
+          authenticated: true,
+          authMethod: 'opencode_managed',
+          verificationState: 'verified',
+          statusMessage: 'Ready',
+          models: ['opencode/big-pickle'],
+          canLoginFromUi: false,
+          capabilities: {
+            teamLaunch: true,
+            oneShot: false,
+          },
+          backend: { kind: 'opencode-cli', label: 'OpenCode CLI' },
+          modelCatalog: null,
+        },
+      ],
+    });
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(CliStatusBanner));
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Connected via opencode managed');
+    expect(host.textContent).not.toContain('Retry install');
+    const retryButton = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Retry install'
+    );
+    expect(retryButton).toBeUndefined();
 
     await act(async () => {
       root.unmount();

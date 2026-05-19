@@ -47,7 +47,6 @@ function normalizeModelChecks(
 export function buildProviderPrepareMembersSignature(members: readonly MemberDraft[]): string {
   return JSON.stringify(
     members.map((member) => ({
-      id: member.id,
       providerId: member.providerId ?? null,
       model: member.model?.trim() || null,
       effort: member.effort ?? null,
@@ -120,16 +119,6 @@ export function buildProviderPrepareRuntimeStatusSignature(
                   : null,
               }
             : null,
-          availableBackends: (provider?.availableBackends ?? [])
-            .map((backend) => ({
-              id: backend.id,
-              available: backend.available,
-              selectable: backend.selectable,
-              state: backend.state ?? null,
-              recommended: backend.recommended,
-              audience: backend.audience ?? null,
-            }))
-            .sort((left, right) => left.id.localeCompare(right.id)),
         };
       })
   );

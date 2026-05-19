@@ -12,15 +12,16 @@ import {
   getTeamsBasePath,
   setClaudeBasePathOverride,
 } from '../../../../src/main/utils/pathDecoder';
+
 import {
   assertExecutable,
   FatalWaitError,
   formatMemberWorkSyncDiagnostics,
   formatProgressDump,
+  type MemberWorkSyncLiveControlServer,
   readRuntimeTurnSettledProcessedMetas,
   restoreEnv,
   startMemberWorkSyncControlServer,
-  type MemberWorkSyncLiveControlServer,
   waitUntil,
 } from './memberWorkSyncLiveHarness';
 
@@ -45,8 +46,7 @@ const liveDescribe =
     ? describe
     : describe.skip;
 
-const DEFAULT_ORCHESTRATOR_CLI =
-  '/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli-source';
+const DEFAULT_ORCHESTRATOR_CLI = '/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli-source';
 const DEFAULT_MODEL = 'gpt-5.4-mini';
 const DEFAULT_EFFORT = 'low' as const;
 

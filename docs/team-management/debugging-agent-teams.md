@@ -59,6 +59,29 @@ Desktop launches use the app-managed process backend by default. That is the sup
 normal app launches because the app owns the process lifecycle, runtime logs, cleanup, and bootstrap
 evidence.
 
+## Live Smoke Runtime Launcher
+
+Live/dev smoke tests should use the orchestrator source launcher by default:
+
+```bash
+CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH=/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli-source \
+  pnpm vitest run --maxWorkers 1 --minWorkers 1 test/main/services/team/AnthropicLaunchSelection.live.test.ts
+```
+
+`cli-source` runs `src/entrypoints/cli.tsx` directly through Bun. Use it while developing launch/runtime code so the smoke test cannot accidentally pass or fail against a stale `dist/local-cli/cli.js` bundle.
+
+For release or production-like smoke checks, test the built wrapper explicitly:
+
+```bash
+cd /Users/belief/dev/projects/claude/agent_teams_orchestrator
+bun run build
+cd /Users/belief/dev/projects/claude/claude_team
+CLAUDE_AGENT_TEAMS_ORCHESTRATOR_CLI_PATH=/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli \
+  pnpm vitest run --maxWorkers 1 --minWorkers 1 test/main/services/team/AnthropicLaunchSelection.live.test.ts
+```
+
+The built wrapper `cli` reads `dist/local-cli/cli.js`. `cli-dev` reads `dist/local-cli-dev/cli.js`; it is useful for dev-bundle checks, but it is not the production wrapper.
+
 For local debugging, force pane-backed teammates through `tmux`:
 
 ```bash

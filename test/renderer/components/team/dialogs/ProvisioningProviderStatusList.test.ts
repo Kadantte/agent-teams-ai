@@ -7,6 +7,7 @@ import {
   getPrimaryProvisioningFailureDetail,
   getProvisioningFailureHint,
   getProvisioningProviderBackendSummary,
+  getProvisioningProviderProgressMessage,
   ProvisioningProviderStatusList,
 } from '@renderer/components/team/dialogs/ProvisioningProviderStatusList';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -88,6 +89,7 @@ describe('ProvisioningProviderStatusList', () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
+    const onOpenProviderSettings = vi.fn();
 
     await act(async () => {
       root.render(
@@ -102,6 +104,7 @@ describe('ProvisioningProviderStatusList', () => {
               ],
             },
           ],
+          onOpenProviderSettings,
         })
       );
       await Promise.resolve();
@@ -110,6 +113,7 @@ describe('ProvisioningProviderStatusList', () => {
     expect(host.textContent).toContain('OpenCode (OpenCode CLI): OpenCode app MCP unreachable');
     expect(host.textContent).not.toContain('Selected model checks');
     expect(host.textContent).not.toContain('model unavailable');
+    expect(host.querySelector('button')).toBeNull();
 
     await act(async () => {
       root.unmount();
@@ -193,6 +197,58 @@ describe('ProvisioningProviderStatusList', () => {
       'Codex (Codex native): Selected model checks - 1 model timed out'
     );
     expect(host.textContent).toContain('5.3 Codex - check failed - Model verification timed out');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('offers provider settings for actionable Codex auth notes', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const onOpenProviderSettings = vi.fn();
+
+    await act(async () => {
+      root.render(
+        React.createElement(ProvisioningProviderStatusList, {
+          checks: [
+            {
+              providerId: 'codex',
+              status: 'notes',
+              backendSummary: 'Codex native - auth required',
+              details: [
+                'Codex native requires OPENAI_API_KEY or CODEX_API_KEY, or a connected ChatGPT account. Add one before launching Codex.',
+                'Default - available for launch',
+                '5.5 - available for launch',
+              ],
+            },
+            {
+              providerId: 'anthropic',
+              status: 'notes',
+              details: ['Opus 4.6 - available for launch'],
+            },
+          ],
+          onOpenProviderSettings,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Open Codex settings');
+    const buttons = host.querySelectorAll('button');
+    expect(buttons).toHaveLength(1);
+    const button = buttons[0];
+    expect(button).not.toBeNull();
+
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+
+    expect(onOpenProviderSettings).toHaveBeenCalledWith('codex');
 
     await act(async () => {
       root.unmount();
@@ -566,5 +622,17 @@ describe('ProvisioningProviderStatusList', () => {
       message:
         'Deep verification is still running. OpenCode free models may take around 20 seconds.',
     });
+  });
+
+  it('labels provider-scoped prepare refreshes without implying every provider restarted', () => {
+    expect(getProvisioningProviderProgressMessage(['opencode'], 3)).toBe(
+      'Checking OpenCode provider...'
+    );
+    expect(getProvisioningProviderProgressMessage(['anthropic', 'codex'], 3)).toBe(
+      'Checking Anthropic, Codex providers...'
+    );
+    expect(getProvisioningProviderProgressMessage(['anthropic', 'codex', 'opencode'], 3)).toBe(
+      'Checking selected providers in parallel...'
+    );
   });
 });

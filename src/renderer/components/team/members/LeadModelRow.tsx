@@ -9,9 +9,7 @@ import {
 import { EffortLevelSelector } from '@renderer/components/team/dialogs/EffortLevelSelector';
 import { LimitContextCheckbox } from '@renderer/components/team/dialogs/LimitContextCheckbox';
 import {
-  formatTeamModelSummary,
   getProviderScopedTeamModelLabel,
-  getTeamEffortLabel,
   getTeamProviderLabel,
   TeamModelSelector,
 } from '@renderer/components/team/dialogs/TeamModelSelector';
@@ -113,11 +111,6 @@ export const LeadModelRow = ({
   const contextLimitDisabled =
     disableAnthropicContextLimit ??
     (providerId === 'anthropic' && isAnthropicHaikuTeamModel(model));
-  const runtimeSummary = formatTeamModelSummary(providerId, model, effort);
-  const runtimeMeta = [
-    effort || providerId === 'anthropic' ? `Effort ${getTeamEffortLabel(effort ?? '')}` : null,
-    providerId === 'anthropic' ? (limitContext ? '200K context' : '1M-capable context') : null,
-  ].filter((item): item is string => Boolean(item));
 
   useEffect(() => {
     if (hasActiveProviderNotice && !modelExpanded) {
@@ -196,12 +189,6 @@ export const LeadModelRow = ({
             {hasModelIssue ? <AlertTriangle className="size-3.5 shrink-0 text-red-300" /> : null}
             {hasModelAdvisory ? <Info className="size-3.5 shrink-0 text-amber-300" /> : null}
           </Button>
-          {runtimeMeta.length > 0 ? (
-            <p className="truncate px-1 text-[10px] leading-tight text-[var(--color-text-muted)]">
-              {runtimeMeta.join(' · ')}
-              <span className="sr-only">. {runtimeSummary}</span>
-            </p>
-          ) : null}
         </div>
       </div>
       {hasWarnings ? (

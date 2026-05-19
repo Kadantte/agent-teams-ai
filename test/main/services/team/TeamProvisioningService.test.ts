@@ -1,12 +1,12 @@
-import type { ChildProcess } from 'child_process';
+import { buildWorkspaceTrustPathCandidates } from '@features/workspace-trust/main';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import { promises as fsPromises } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildWorkspaceTrustPathCandidates } from '@features/workspace-trust/main';
+
+import type { ChildProcess } from 'child_process';
 
 const hoisted = vi.hoisted(() => ({
   paths: {
@@ -129,26 +129,19 @@ vi.mock('@main/utils/pathDecoder', async (importOriginal) => {
 });
 
 import {
-  getMixedLaunchFallbackRecoveryError,
-  TeamProvisioningService,
-} from '@main/services/team/TeamProvisioningService';
+  killTmuxPaneForCurrentPlatformSync,
+  listRuntimeProcessTableForCurrentPlatform,
+  listTmuxPanePidsForCurrentPlatform,
+  listTmuxPaneRuntimeInfoForCurrentPlatform,
+  sendKeysToTmuxPaneForCurrentPlatform,
+} from '@features/tmux-installer/main';
 import { agentTeamsMcpHttpServer } from '@main/services/team/AgentTeamsMcpHttpServer';
-import { TeamTaskActivityIntervalService } from '@main/services/team/TeamTaskActivityIntervalService';
 import {
   clearAutoResumeService,
   getAutoResumeService,
   initializeAutoResumeService,
 } from '@main/services/team/AutoResumeService';
-import { getTeamBootstrapStatePath } from '@main/services/team/TeamBootstrapStateReader';
-import {
-  createPersistedLaunchSnapshot,
-  snapshotFromRuntimeMemberStatuses,
-} from '@main/services/team/TeamLaunchStateEvaluator';
-import {
-  getTeamLaunchStatePath,
-  getTeamLaunchSummaryPath,
-} from '@main/services/team/TeamLaunchStateStore';
-import { TeamConfigReader } from '@main/services/team/TeamConfigReader';
+import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
 import { OPEN_CODE_BRIDGE_SCHEMA_VERSION } from '@main/services/team/opencode/bridge/OpenCodeBridgeCommandContract';
 import { OpenCodeReadinessBridge } from '@main/services/team/opencode/bridge/OpenCodeReadinessBridge';
 import {
@@ -167,12 +160,26 @@ import {
   OPENCODE_RUNTIME_STORE_DESCRIPTORS,
   RuntimeStoreBatchWriter,
 } from '@main/services/team/opencode/store/RuntimeStoreManifest';
-import { ClaudeBinaryResolver } from '@main/services/team/ClaudeBinaryResolver';
 import { OpenCodeTeamRuntimeAdapter } from '@main/services/team/runtime/OpenCodeTeamRuntimeAdapter';
 import { TeamRuntimeAdapterRegistry } from '@main/services/team/runtime/TeamRuntimeAdapter';
+import { getTeamBootstrapStatePath } from '@main/services/team/TeamBootstrapStateReader';
+import { TeamConfigReader } from '@main/services/team/TeamConfigReader';
+import {
+  createPersistedLaunchSnapshot,
+  snapshotFromRuntimeMemberStatuses,
+} from '@main/services/team/TeamLaunchStateEvaluator';
+import {
+  getTeamLaunchStatePath,
+  getTeamLaunchSummaryPath,
+} from '@main/services/team/TeamLaunchStateStore';
+import {
+  getMixedLaunchFallbackRecoveryError,
+  TeamProvisioningService,
+} from '@main/services/team/TeamProvisioningService';
+import { TeamTaskActivityIntervalService } from '@main/services/team/TeamTaskActivityIntervalService';
 import { spawnCli } from '@main/utils/childProcess';
-import { killProcessByPid } from '@main/utils/processKill';
 import { encodePath } from '@main/utils/pathDecoder';
+import { killProcessByPid } from '@main/utils/processKill';
 import {
   listWindowsProcessTable,
   listWindowsProcessTableSync,
@@ -181,13 +188,6 @@ import {
   AGENT_TEAMS_NAMESPACED_LEAD_BOOTSTRAP_TOOL_NAMES,
   AGENT_TEAMS_NAMESPACED_TEAMMATE_OPERATIONAL_TOOL_NAMES,
 } from 'agent-teams-controller';
-import {
-  killTmuxPaneForCurrentPlatformSync,
-  listRuntimeProcessTableForCurrentPlatform,
-  listTmuxPanePidsForCurrentPlatform,
-  listTmuxPaneRuntimeInfoForCurrentPlatform,
-  sendKeysToTmuxPaneForCurrentPlatform,
-} from '@features/tmux-installer/main';
 import pidusage from 'pidusage';
 
 const EXPECTED_RUNTIME_PIDUSAGE_OPTIONS =
@@ -623,6 +623,37 @@ function createMemberSpawnRun(params?: {
     isLaunch: false,
     provisioningComplete: false,
   } as any;
+}
+
+type LeadActivityTestState = 'active' | 'idle' | 'offline';
+
+interface LeadActivityTestRun {
+  runId: string;
+  teamName: string;
+  leadActivityState: LeadActivityTestState;
+  request: {
+    members: { name: string; role: string }[];
+  };
+}
+
+interface LeadActivityServiceInternals {
+  runs: Map<string, LeadActivityTestRun>;
+  aliveRunByTeam: Map<string, string>;
+  setLeadActivity(run: LeadActivityTestRun, state: LeadActivityTestState): void;
+}
+
+function toLeadActivityTestRun(
+  params: Parameters<typeof createMemberSpawnRun>[0],
+  leadActivityState: LeadActivityTestState,
+  leadName: string
+): LeadActivityTestRun {
+  return {
+    ...createMemberSpawnRun(params),
+    leadActivityState,
+    request: {
+      members: [{ name: leadName, role: 'Team Lead' }],
+    },
+  };
 }
 
 const TEST_OPENCODE_APP_MANAGED_BOOTSTRAP_PROMPT = [
@@ -1274,6 +1305,7 @@ describe('TeamProvisioningService', () => {
           },
           expectedMembers: ['alice', 'bob'],
           allEffectiveMembers: [{ name: 'alice' }, { name: 'bob' }],
+          teamLaunchedNotificationFired: undefined as boolean | undefined,
           memberSpawnStatuses: new Map([
             [
               'alice',
@@ -1327,6 +1359,205 @@ describe('TeamProvisioningService', () => {
         (svc as any).emitMemberSpawnChange(run, 'bob');
         await Promise.resolve();
         expect(addTeamNotification).toHaveBeenCalledTimes(1);
+      } finally {
+        NotificationManager.resetInstance();
+      }
+    });
+
+    it('does not latch the launched notification flag when called before all teammates join', async () => {
+      const { NotificationManager } =
+        await import('@main/services/infrastructure/NotificationManager');
+      const addTeamNotification = vi.fn(async (_payload: unknown) => undefined);
+      NotificationManager.setInstance({ addTeamNotification } as never);
+
+      try {
+        const svc = new TeamProvisioningService();
+        const run = {
+          runId: 'run-early-launch-toast',
+          teamName: 'early-launch-toast-team',
+          isLaunch: true,
+          request: {
+            cwd: tempClaudeRoot,
+            displayName: 'early-launch-toast-team',
+          },
+          expectedMembers: ['alice', 'bob'],
+          allEffectiveMembers: [{ name: 'alice' }, { name: 'bob' }],
+          teamLaunchedNotificationFired: undefined as boolean | undefined,
+          memberSpawnStatuses: new Map([
+            [
+              'alice',
+              createMemberSpawnStatusEntry({
+                status: 'online',
+                launchState: 'confirmed_alive',
+                runtimeAlive: true,
+                bootstrapConfirmed: true,
+              }),
+            ],
+            [
+              'bob',
+              createMemberSpawnStatusEntry({
+                status: 'waiting',
+                launchState: 'runtime_pending_bootstrap',
+                runtimeAlive: true,
+                bootstrapConfirmed: false,
+              }),
+            ],
+          ]),
+        };
+        const internals = svc as unknown as {
+          fireTeamLaunchedNotification(targetRun: typeof run): Promise<void>;
+        };
+
+        await internals.fireTeamLaunchedNotification(run);
+
+        expect(addTeamNotification).not.toHaveBeenCalled();
+        expect(run.teamLaunchedNotificationFired).toBeUndefined();
+
+        run.memberSpawnStatuses.set(
+          'bob',
+          createMemberSpawnStatusEntry({
+            status: 'online',
+            launchState: 'confirmed_alive',
+            runtimeAlive: true,
+            bootstrapConfirmed: true,
+          })
+        );
+
+        await internals.fireTeamLaunchedNotification(run);
+
+        expect(addTeamNotification).toHaveBeenCalledTimes(1);
+      } finally {
+        NotificationManager.resetInstance();
+      }
+    });
+
+    it('waits for current mixed secondary lane evidence before firing team launched', async () => {
+      const { NotificationManager } =
+        await import('@main/services/infrastructure/NotificationManager');
+      const addTeamNotification = vi.fn(async (_payload: unknown) => undefined);
+      NotificationManager.setInstance({ addTeamNotification } as never);
+
+      try {
+        const svc = new TeamProvisioningService();
+        const jackLane: {
+          laneId: string;
+          providerId: 'opencode';
+          member: { name: string; providerId: 'opencode' };
+          runId: string;
+          state: 'queued' | 'launching' | 'finished';
+          result: null | {
+            runId: string;
+            teamName: string;
+            launchPhase: 'finished';
+            teamLaunchState: 'clean_success';
+            members: Record<
+              string,
+              {
+                memberName: string;
+                providerId: 'opencode';
+                launchState: 'confirmed_alive';
+                agentToolAccepted: boolean;
+                runtimeAlive: boolean;
+                bootstrapConfirmed: boolean;
+                hardFailure: boolean;
+              }
+            >;
+            warnings: string[];
+            diagnostics: string[];
+          };
+          warnings: string[];
+          diagnostics: string[];
+        } = {
+          laneId: 'secondary:opencode:jack',
+          providerId: 'opencode',
+          member: { name: 'jack', providerId: 'opencode' },
+          runId: 'opencode-run-jack-current',
+          state: 'launching',
+          result: null,
+          warnings: [],
+          diagnostics: [],
+        };
+        const run = {
+          runId: 'run-mixed-lane-race',
+          teamName: 'mixed-lane-race-team',
+          isLaunch: true,
+          provisioningComplete: true,
+          processKilled: false,
+          cancelRequested: false,
+          progress: { state: 'ready' },
+          request: {
+            cwd: tempClaudeRoot,
+            displayName: 'mixed-lane-race-team',
+          },
+          expectedMembers: ['alice', 'jack'],
+          allEffectiveMembers: [{ name: 'alice' }, { name: 'jack', providerId: 'opencode' }],
+          mixedSecondaryLanes: [jackLane],
+          memberSpawnStatuses: new Map([
+            [
+              'alice',
+              createMemberSpawnStatusEntry({
+                status: 'online',
+                launchState: 'confirmed_alive',
+                runtimeAlive: true,
+                bootstrapConfirmed: true,
+              }),
+            ],
+            [
+              'jack',
+              createMemberSpawnStatusEntry({
+                status: 'online',
+                launchState: 'confirmed_alive',
+                runtimeAlive: true,
+                bootstrapConfirmed: true,
+              }),
+            ],
+          ]),
+        };
+        const internals = svc as unknown as {
+          runs: Map<string, typeof run>;
+          aliveRunByTeam: Map<string, string>;
+          emitMemberSpawnChange(targetRun: typeof run, memberName: string): void;
+        };
+        internals.runs.set(run.runId, run);
+        internals.aliveRunByTeam.set(run.teamName, run.runId);
+
+        internals.emitMemberSpawnChange(run, 'jack');
+        await Promise.resolve();
+
+        expect(addTeamNotification).not.toHaveBeenCalled();
+
+        jackLane.state = 'finished';
+        jackLane.result = {
+          runId: 'opencode-run-jack-current',
+          teamName: 'mixed-lane-race-team',
+          launchPhase: 'finished',
+          teamLaunchState: 'clean_success',
+          members: {
+            jack: {
+              memberName: 'jack',
+              providerId: 'opencode',
+              launchState: 'confirmed_alive',
+              agentToolAccepted: true,
+              runtimeAlive: true,
+              bootstrapConfirmed: true,
+              hardFailure: false,
+            },
+          },
+          warnings: [],
+          diagnostics: [],
+        };
+
+        internals.emitMemberSpawnChange(run, 'jack');
+        await Promise.resolve();
+
+        expect(addTeamNotification).toHaveBeenCalledTimes(1);
+        expect(addTeamNotification).toHaveBeenCalledWith(
+          expect.objectContaining({
+            teamEventType: 'team_launched',
+            teamName: 'mixed-lane-race-team',
+            body: 'Team "mixed-lane-race-team" has been launched - all 2 teammates joined and are ready for tasks.',
+          })
+        );
       } finally {
         NotificationManager.resetInstance();
       }
@@ -2179,6 +2410,108 @@ describe('TeamProvisioningService', () => {
         hardFailureReason: timeoutReason,
         error: timeoutReason,
       });
+    });
+  });
+
+  describe('lead activity task intervals', () => {
+    it('read-repairs active lead task intervals once when lead activity is polled', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-02T10:00:00.000Z'));
+      const resumeSpy = vi
+        .spyOn(TeamTaskActivityIntervalService.prototype, 'resumeActiveIntervalsForMember')
+        .mockReturnValue({ changedTasks: 1 });
+      try {
+        const svc = new TeamProvisioningService();
+        const internals = svc as unknown as LeadActivityServiceInternals;
+        const teamName = 'lead-activity-read-repair-team';
+        const run = toLeadActivityTestRun(
+          {
+            runId: 'run-lead-read-repair',
+            teamName,
+            expectedMembers: ['alice'],
+          },
+          'active',
+          'lead'
+        );
+        internals.runs.set(run.runId, run);
+        internals.aliveRunByTeam.set(teamName, run.runId);
+
+        expect(svc.getLeadActivityState(teamName)).toEqual({
+          state: 'active',
+          runId: run.runId,
+        });
+        expect(svc.getLeadActivityState(teamName)).toEqual({
+          state: 'active',
+          runId: run.runId,
+        });
+
+        expect(resumeSpy).toHaveBeenCalledTimes(1);
+        expect(resumeSpy).toHaveBeenCalledWith(teamName, 'lead', '2026-05-02T10:00:00.000Z');
+      } finally {
+        resumeSpy.mockRestore();
+      }
+    });
+
+    it('syncs lead task intervals only for the currently tracked run', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-02T10:05:00.000Z'));
+      const resumeSpy = vi
+        .spyOn(TeamTaskActivityIntervalService.prototype, 'resumeActiveIntervalsForMember')
+        .mockReturnValue({ changedTasks: 1 });
+      const pauseSpy = vi
+        .spyOn(TeamTaskActivityIntervalService.prototype, 'pauseActiveIntervalsForMember')
+        .mockReturnValue({ changedTasks: 1 });
+      try {
+        const svc = new TeamProvisioningService();
+        const internals = svc as unknown as LeadActivityServiceInternals;
+        const teamName = 'lead-activity-current-run-team';
+        const run = toLeadActivityTestRun(
+          {
+            runId: 'run-current-lead-activity',
+            teamName,
+            expectedMembers: ['alice'],
+          },
+          'idle',
+          'team-lead'
+        );
+        internals.runs.set(run.runId, run);
+        internals.aliveRunByTeam.set(teamName, run.runId);
+
+        internals.setLeadActivity(run, 'active');
+        internals.setLeadActivity(run, 'active');
+        internals.setLeadActivity(run, 'idle');
+
+        expect(resumeSpy).toHaveBeenCalledTimes(1);
+        expect(resumeSpy).toHaveBeenCalledWith(
+          teamName,
+          'team-lead',
+          '2026-05-02T10:05:00.000Z'
+        );
+        expect(pauseSpy).toHaveBeenCalledTimes(1);
+        expect(pauseSpy).toHaveBeenCalledWith(
+          teamName,
+          'team-lead',
+          '2026-05-02T10:05:00.000Z'
+        );
+
+        const staleRun = toLeadActivityTestRun(
+          {
+            runId: 'run-stale-lead-activity',
+            teamName,
+            expectedMembers: ['alice'],
+          },
+          'active',
+          'team-lead'
+        );
+        internals.runs.set(staleRun.runId, staleRun);
+
+        internals.setLeadActivity(staleRun, 'offline');
+
+        expect(pauseSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        resumeSpy.mockRestore();
+        pauseSpy.mockRestore();
+      }
     });
   });
 
@@ -14935,6 +15268,106 @@ describe('TeamProvisioningService', () => {
       expect(launchArgs).not.toContain('--strict-mcp-config');
     });
 
+    it('launches direct process teammate restarts with strict per-member MCP policy', async () => {
+      const teamName = 'process-strict-mcp-team';
+      const projectPath = path.join(tempProjectsBase, 'process-strict-mcp-project');
+      fs.mkdirSync(projectPath, { recursive: true });
+
+      vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+      const child = Object.assign(new EventEmitter(), {
+        pid: 4568,
+        stdin: { on: vi.fn(), unref: vi.fn() },
+        stdout: { pipe: vi.fn(), unref: vi.fn() },
+        stderr: { pipe: vi.fn(), unref: vi.fn() },
+        unref: vi.fn(),
+      });
+      vi.mocked(spawnCli).mockReturnValue(child as any);
+
+      const mcpConfigBuilder = {
+        writeConfigFile: vi.fn(async () => '/mock/strict-mcp-config.json'),
+      };
+      const svc = new TeamProvisioningService(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        mcpConfigBuilder as any
+      );
+      const run = createMemberSpawnRun({
+        teamName,
+        expectedMembers: ['forge'],
+        memberSpawnStatuses: new Map(),
+      });
+      run.child = { pid: 111 };
+      run.request = { providerId: 'codex', skipPermissions: true };
+      run.detectedSessionId = 'lead-session-1';
+      const configuredMember = {
+        name: 'forge',
+        role: 'Developer',
+        providerId: 'codex',
+        model: 'gpt-5.4',
+        effort: 'medium',
+        agentType: 'general-purpose',
+        mcpPolicy: {
+          mode: 'strictAllowlist' as const,
+          scopes: { user: true, project: true, local: false },
+          serverNames: ['github'],
+        },
+      };
+      const config = {
+        name: 'Process Strict MCP Team',
+        projectPath,
+        leadSessionId: 'lead-session-1',
+        members: [{ name: 'team-lead', agentType: 'team-lead' }, configuredMember],
+      };
+
+      (svc as any).buildProvisioningEnv = vi.fn(async () => ({
+        env: { CODEX_API_KEY: 'test-openai-key' },
+        authSource: 'openai_api_key',
+        providerArgs: [],
+      }));
+      (svc as any).buildTeamRuntimeLaunchArgsPlan = vi.fn(async () => ({
+        fastModeArgs: [],
+        runtimeTurnSettledHookArgs: [],
+        providerArgs: [],
+        settingsArgs: [],
+        extraArgs: [],
+      }));
+      (svc as any).materializeDirectProcessNativeBootstrapContext = vi.fn(async () => ({}));
+      (svc as any).updateDirectTmuxRestartMemberConfig = vi.fn(async () => {});
+      (svc as any).enqueueDirectRestartPrompt = vi.fn();
+      (svc as any).appendDirectProcessRuntimeEvent = vi.fn(async () => {});
+
+      await (svc as any).launchDirectProcessMemberRestart({
+        run,
+        teamName,
+        displayName: 'Process Strict MCP Team',
+        leadName: 'team-lead',
+        memberName: 'forge',
+        config,
+        configuredMember,
+        persistedRuntimeMembers: [],
+      });
+
+      child.emit('close', 0, null);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      expect(mcpConfigBuilder.writeConfigFile).toHaveBeenCalledWith(
+        projectPath,
+        configuredMember.mcpPolicy
+      );
+      const launchArgs = vi.mocked(spawnCli).mock.calls[0]?.[1] as string[];
+      expect(launchArgs).toEqual(
+        expect.arrayContaining([
+          '--setting-sources',
+          'user,project,local',
+          '--mcp-config',
+          '/mock/strict-mcp-config.json',
+          '--strict-mcp-config',
+        ])
+      );
+    });
+
     it('rejects a second restart request while the first restart is still in flight', async () => {
       const svc = new TeamProvisioningService();
       const run = createMemberSpawnRun({
@@ -15440,7 +15873,9 @@ describe('TeamProvisioningService', () => {
       memberWorktreeManager?: { ensureMemberWorktree: ReturnType<typeof vi.fn> };
     }) {
       const mcpConfigBuilder = {
-        writeConfigFile: vi.fn(async () => path.join(tempClaudeRoot, 'mcp-config.json')),
+        writeConfigFile: vi.fn(async (_projectPath?: string, _policy?: unknown) =>
+          path.join(tempClaudeRoot, 'mcp-config.json')
+        ),
         removeConfigFile: vi.fn(async () => {}),
       };
       const membersMetaStore = {
@@ -15509,6 +15944,9 @@ describe('TeamProvisioningService', () => {
           model?: string;
           effort?: string;
           role?: string;
+          mcpConfigPath?: string;
+          mcpSettingSources?: string;
+          strictMcpConfig?: boolean;
         }>;
       };
     }
@@ -15714,6 +16152,96 @@ describe('TeamProvisioningService', () => {
         expect.objectContaining({ providerBackendId: 'codex-native' })
       );
       expect(progress).toEqual(expect.arrayContaining(['validating', 'spawning', 'configuring']));
+
+      await svc.cancelProvisioning(runId);
+    });
+
+    it('passes per-member MCP launch settings into deterministic bootstrap specs', async () => {
+      allowConsoleLogs();
+      vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+      vi.mocked(spawnCli).mockReturnValue(createRunningChild() as any);
+
+      const { svc, mcpConfigBuilder } = createSafeLaunchService();
+      mcpConfigBuilder.writeConfigFile.mockImplementation(async (_projectPath, policy) => {
+        const mode =
+          policy && typeof policy === 'object' && 'mode' in policy
+            ? (policy as { mode?: unknown }).mode
+            : undefined;
+        if (mode === 'appOnly') return '/mock/member-mcp-app-only.json';
+        if (mode === 'inheritScopes') return '/mock/member-mcp-local-only.json';
+        if (mode === 'strictAllowlist') return '/mock/member-mcp-strict.json';
+        return '/mock/lead-mcp-config.json';
+      });
+
+      const { runId } = await svc.createTeam(
+        {
+          teamName: 'safe-member-mcp-policy-bootstrap',
+          cwd: tempClaudeRoot,
+          providerId: 'codex',
+          providerBackendId: 'codex-native',
+          model: 'gpt-5.4',
+          effort: 'medium',
+          members: [
+            {
+              name: 'alice',
+              providerId: 'codex',
+              mcpPolicy: { mode: 'appOnly' },
+            },
+            {
+              name: 'bob',
+              providerId: 'codex',
+              mcpPolicy: {
+                mode: 'inheritScopes',
+                scopes: { user: false, project: false, local: true },
+              },
+            },
+            {
+              name: 'jack',
+              providerId: 'codex',
+              mcpPolicy: {
+                mode: 'strictAllowlist',
+                serverNames: ['github'],
+              },
+            },
+          ],
+        },
+        () => {}
+      );
+
+      const spawnArgs = vi.mocked(spawnCli).mock.calls[0]?.[1] as string[];
+      const bootstrapSpec = readBootstrapSpecFromSpawnArgs(spawnArgs);
+      expect(bootstrapSpec.members).toEqual([
+        expect.objectContaining({
+          name: 'alice',
+          mcpConfigPath: '/mock/member-mcp-app-only.json',
+          mcpSettingSources: 'user,project,local',
+          strictMcpConfig: true,
+        }),
+        expect.objectContaining({
+          name: 'bob',
+          mcpConfigPath: '/mock/member-mcp-local-only.json',
+          mcpSettingSources: 'local',
+          strictMcpConfig: false,
+        }),
+        expect.objectContaining({
+          name: 'jack',
+          mcpConfigPath: '/mock/member-mcp-strict.json',
+          mcpSettingSources: 'user,project,local',
+          strictMcpConfig: true,
+        }),
+      ]);
+      expect(mcpConfigBuilder.writeConfigFile).toHaveBeenCalledWith(tempClaudeRoot, {
+        mode: 'appOnly',
+      });
+      expect(mcpConfigBuilder.writeConfigFile).toHaveBeenCalledWith(tempClaudeRoot, {
+        mode: 'inheritScopes',
+        scopes: { user: false, project: false, local: true },
+      });
+      expect(mcpConfigBuilder.writeConfigFile).toHaveBeenCalledWith(tempClaudeRoot, {
+        mode: 'strictAllowlist',
+        serverNames: ['github'],
+      });
+      expect(mcpConfigBuilder.writeConfigFile).toHaveBeenCalledWith(tempClaudeRoot);
 
       await svc.cancelProvisioning(runId);
     });
