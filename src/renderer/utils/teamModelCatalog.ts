@@ -526,7 +526,7 @@ export function getVisibleTeamProviderModels(
   providerStatus?: RuntimeAwareProviderStatus | null
 ): string[] {
   const sourceModels =
-    providerId === 'opencode' && models.length === 0
+    providerId === 'opencode'
       ? (getRuntimeCatalogLaunchModels(providerId, providerStatus) ?? models)
       : models;
 

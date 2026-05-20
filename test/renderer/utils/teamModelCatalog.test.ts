@@ -221,9 +221,9 @@ describe('teamModelCatalog', () => {
     ]);
   });
 
-  it('uses the OpenCode model catalog when the runtime model list is empty', () => {
+  it('uses the OpenCode model catalog when the runtime model list is summary-only', () => {
     expect(
-      getVisibleTeamProviderModels('opencode', [], {
+      getVisibleTeamProviderModels('opencode', ['opencode/big-pickle'], {
         providerId: 'opencode',
         authMethod: 'opencode_managed',
         backend: { kind: 'opencode-cli', label: 'OpenCode CLI' },

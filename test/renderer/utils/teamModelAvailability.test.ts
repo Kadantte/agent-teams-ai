@@ -245,8 +245,8 @@ describe('teamModelAvailability', () => {
     ).toBe('openrouter/moonshotai/kimi-k2');
   });
 
-  it('uses the OpenCode model catalog when runtime models are missing', () => {
-    const providerStatus = createOpenCodeProviderStatus([], {
+  it('uses the OpenCode model catalog when runtime models are summary-only', () => {
+    const providerStatus = createOpenCodeProviderStatus(['opencode/big-pickle'], {
       modelCatalog: {
         schemaVersion: 1,
         providerId: 'opencode',
