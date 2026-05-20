@@ -49,8 +49,6 @@ https://github.com/user-attachments/assets/35e27989-726d-4059-8662-bae610e46b42
 
 No prerequisites - the app can detect supported runtimes/providers and guide setup from the UI.
 
-If you want the FRESHEST version, clone the repo and run it from the `dev` branch.
-
 <table align="center">
 <tr>
 <td align="center">
@@ -343,16 +341,16 @@ local packaging.
 - [ ] Planning mode to organize agent plans before execution
 - [ ] Visual workflow editor ([@xyflow/react](https://github.com/xyflow/xyflow)) for building and orchestrating agent pipelines with drag & drop
 - [ ] Remote agent execution via SSH: launch and manage agent teams on remote machines over SSH (stream-json protocol over SSH channel, SFTP-based file monitoring for tasks/inboxes/config)
-- [ ] CLI runtime: Run not only on a local PC but in any headless/console environment (web UI), e.g. VPS, remote server, etc.
+- [x] CLI runtime: Run not only on a local PC but in any headless/console environment (web UI), e.g. VPS, remote server, etc.
 - [ ] 2 modes: current (agent teams), and a new mode: regular subagents (no communication between them)
 - [ ] Curate what context each agent sees (files, docs, MCP servers, skills)
-- [ ] Slash commands
+- [x] Slash commands
 - [ ] Outgoing message queue — queue user messages while the lead (or agent) is busy; clear agent-busy status in the UI; flush to stdin or relay from inbox when idle (durable queue on disk for the lead inbox path)
 - [ ] `createTasksBatch` — IPC/service API to create many team tasks in one call (playbooks, markdown checklist import, scripts); complements single `createTask`
 - [ ] Command palette — extend Cmd/Ctrl+K beyond project/session search to runnable actions (quick commands, navigation shortcuts, team/task operations) in a keyboard-first flow
 - [ ] Custom kanban columns
 - [ ] Run terminal commands
-- [ ] Monitor agents processes/stats
+- [x] Monitor agents processes/stats
 - [ ] Reusable agents with SOUL.md
 - [ ] Сommunicate via messenger
 - [ ] SDK to programmatically launch agents
