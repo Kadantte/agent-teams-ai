@@ -148,6 +148,7 @@ export interface RuntimeProviderDirectoryEntryDto {
     hasKnownModels: boolean;
     requiresManualConfig: boolean;
     supportedInlineAuth: boolean;
+    configuredAuthless: boolean;
   };
 }
 
@@ -170,6 +171,7 @@ export interface RuntimeProviderManagementViewDto {
   title: string;
   runtime: RuntimeProviderManagementRuntimeDto;
   providers: readonly RuntimeProviderConnectionDto[];
+  configuredModels?: readonly RuntimeProviderModelDto[];
   defaultModel: string | null;
   fallbackModel: string | null;
   diagnostics: readonly string[];
@@ -228,6 +230,28 @@ export type RuntimeProviderModelAvailabilityDto =
   | 'unknown'
   | 'untested';
 
+export type RuntimeProviderModelAccessKindDto =
+  | 'no_model'
+  | 'unknown_model'
+  | 'credentialed'
+  | 'builtin_free'
+  | 'configured_authless'
+  | 'verified'
+  | 'not_authenticated'
+  | 'execution_failed';
+
+export type RuntimeProviderModelRouteKindDto =
+  | 'connected_provider'
+  | 'builtin_free'
+  | 'configured_local'
+  | 'catalog_provider';
+
+export type RuntimeProviderModelProofStateDto =
+  | 'not_required'
+  | 'needs_probe'
+  | 'verified'
+  | 'failed';
+
 export interface RuntimeProviderModelDto {
   modelId: string;
   providerId: string;
@@ -236,6 +260,11 @@ export interface RuntimeProviderModelDto {
   free: boolean;
   default: boolean;
   availability: RuntimeProviderModelAvailabilityDto;
+  accessKind?: RuntimeProviderModelAccessKindDto;
+  routeKind?: RuntimeProviderModelRouteKindDto;
+  proofState?: RuntimeProviderModelProofStateDto;
+  requiresExecutionProof?: boolean;
+  accessReason?: string | null;
 }
 
 export interface RuntimeProviderManagementModelsDto {

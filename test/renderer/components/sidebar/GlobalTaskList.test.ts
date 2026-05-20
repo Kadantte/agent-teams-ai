@@ -1,5 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GlobalTask } from '../../../../src/shared/types';
@@ -150,6 +151,14 @@ function flushMicrotasks(): Promise<void> {
   return Promise.resolve();
 }
 
+function setElectronApiForTest(value: unknown): void {
+  Object.defineProperty(window, 'electronAPI', {
+    configurable: true,
+    writable: true,
+    value,
+  });
+}
+
 function findButton(host: HTMLElement, label: string): HTMLButtonElement | null {
   return (
     Array.from(host.querySelectorAll('button')).find(
@@ -211,12 +220,14 @@ describe('GlobalTaskList project grouping', () => {
     taskLocalState.togglePin.mockClear();
     taskLocalState.toggleArchive.mockClear();
     taskLocalState.renameTask.mockClear();
+    setElectronApiForTest(undefined);
     localStorage.clear();
     localStorage.setItem('sidebarTasksGrouping', 'project');
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
+    setElectronApiForTest(undefined);
     vi.unstubAllGlobals();
     storeListeners.clear();
   });
@@ -306,6 +317,34 @@ describe('GlobalTaskList project grouping', () => {
       await flushMicrotasks();
     });
 
+    expect(
+      host.querySelector('[data-testid="sidebar-task-item"]')?.getAttribute('data-team-offline')
+    ).toBe('true');
+
+    await act(async () => {
+      root.unmount();
+      await flushMicrotasks();
+    });
+  });
+
+  it('marks task cards as offline when alive-list is initialized before teams are loaded', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const aliveList = vi.fn(() => Promise.resolve([]));
+    setElectronApiForTest({ teams: { aliveList } });
+    storeState.globalTasks = [makeTask(1)];
+    storeState.teams = [];
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(GlobalTaskList));
+      await flushMicrotasks();
+      await flushMicrotasks();
+    });
+
+    expect(aliveList).toHaveBeenCalled();
     expect(
       host.querySelector('[data-testid="sidebar-task-item"]')?.getAttribute('data-team-offline')
     ).toBe('true');

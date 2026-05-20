@@ -1846,6 +1846,7 @@ async function initializeServices(): Promise<void> {
         isBusy: (input) => teamProvisioningService.getOpenCodeMemberDeliveryBusyStatus(input),
       },
     ],
+    resolveControlUrl: async () => getTeamControlApiBaseUrl(),
     proofMissingRecoveryGuard: {
       shouldDispatch: async (input) => {
         const status = await teamProvisioningService.getOpenCodeRuntimeDeliveryStatus(

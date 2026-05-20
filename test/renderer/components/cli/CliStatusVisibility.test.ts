@@ -751,6 +751,98 @@ describe('CLI status visibility during completed install state', () => {
     });
   });
 
+  it('shows compact OpenCode configured-local and verified counts on the dashboard card', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.cliInstallerState = 'idle';
+    storeState.cliStatus = createInstalledCliStatus({
+      flavor: 'agent_teams_orchestrator',
+      displayName: 'Multimodel runtime',
+      supportsSelfUpdate: false,
+      showVersionDetails: false,
+      showBinaryPath: false,
+      authLoggedIn: true,
+      providers: [
+        {
+          providerId: 'opencode',
+          displayName: 'OpenCode (200+ models)',
+          supported: true,
+          authenticated: true,
+          authMethod: 'opencode_configured_local',
+          verificationState: 'verified',
+          statusMessage: null,
+          models: [],
+          canLoginFromUi: false,
+          capabilities: {
+            teamLaunch: true,
+            oneShot: false,
+          },
+          backend: { kind: 'opencode-cli', label: 'OpenCode CLI' },
+          modelCatalog: {
+            schemaVersion: 1,
+            providerId: 'opencode',
+            source: 'app-server',
+            status: 'ready',
+            fetchedAt: '2026-05-12T00:00:00.000Z',
+            staleAt: '2026-05-12T00:10:00.000Z',
+            defaultModelId: 'llama.cpp/qwen-test:0.5b',
+            defaultLaunchModel: 'llama.cpp/qwen-test:0.5b',
+            models: [
+              {
+                id: 'llama.cpp/qwen-test:0.5b',
+                launchModel: 'llama.cpp/qwen-test:0.5b',
+                displayName: 'qwen-test:0.5b',
+                hidden: false,
+                supportedReasoningEfforts: [],
+                defaultReasoningEffort: null,
+                inputModalities: ['text'],
+                supportsPersonality: true,
+                isDefault: true,
+                upgrade: false,
+                source: 'app-server',
+                badgeLabel: null,
+                metadata: {
+                  opencode: {
+                    providerId: 'llama.cpp',
+                    modelId: 'qwen-test:0.5b',
+                    sourceLabel: 'llama.cpp',
+                    accessKind: 'verified',
+                    routeKind: 'configured_local',
+                    proofState: 'verified',
+                    requiresExecutionProof: false,
+                    reason: null,
+                  },
+                },
+              },
+            ],
+            diagnostics: {
+              configReadState: 'ready',
+              appServerState: 'healthy',
+            },
+          },
+        },
+      ],
+    });
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(CliStatusBanner));
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Free models');
+    expect(host.textContent).toContain('1 configured local');
+    expect(host.textContent).toContain('1 verified');
+    expect(host.textContent).not.toContain('qwen-test:0.5b qwen-test:0.5b');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('shows OpenCode model loading instead of the summary-only big-pickle badge', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     storeState.cliInstallerState = 'idle';

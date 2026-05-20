@@ -34,10 +34,12 @@ export interface McpLaunchSpecResolveOptions {
 
 interface WriteMcpConfigOptions {
   mcpPolicy?: TeamMemberMcpPolicy;
+  controlApiBaseUrl?: string | null;
 }
 
 const MCP_SERVER_NAME = 'agent-teams';
 const MCP_CLAUDE_DIR_ENV = 'AGENT_TEAMS_MCP_CLAUDE_DIR';
+const MCP_CONTROL_URL_ENV = 'CLAUDE_TEAM_CONTROL_URL';
 const logger = createLogger('Service:TeamMcpConfigBuilder');
 const MCP_CONFIG_PREFIX = 'agent-teams-mcp-';
 const MCP_CONFIG_REMOVE_RETRY_DELAYS_MS = [25, 75, 150] as const;
@@ -234,6 +236,14 @@ function mergePathValues(...values: (string | undefined)[]): string | undefined 
     }
   }
   return merged.length > 0 ? merged.join(path.delimiter) : undefined;
+}
+
+function isWriteMcpConfigOptions(value: unknown): value is WriteMcpConfigOptions {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    ('mcpPolicy' in value || 'controlApiBaseUrl' in value)
+  );
 }
 
 function buildNodeResolveEnv(shellEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -440,10 +450,14 @@ export class TeamMcpConfigBuilder {
       configDir,
       `${MCP_CONFIG_PREFIX}${process.pid}-${Date.now()}-${randomUUID()}.json`
     );
-    const mcpPolicy =
-      optionsOrPolicy && 'mcpPolicy' in optionsOrPolicy
-        ? optionsOrPolicy.mcpPolicy
-        : (optionsOrPolicy as TeamMemberMcpPolicy | undefined);
+    const options = isWriteMcpConfigOptions(optionsOrPolicy)
+      ? optionsOrPolicy
+      : ({
+          mcpPolicy: optionsOrPolicy as TeamMemberMcpPolicy | undefined,
+        } satisfies WriteMcpConfigOptions);
+    const mcpPolicy = options.mcpPolicy;
+    const controlApiBaseUrl =
+      options.controlApiBaseUrl?.trim() || process.env[MCP_CONTROL_URL_ENV]?.trim() || '';
     // Keep the team bootstrap config minimal: recent Claude sidechain runs can
     // lose the agent-teams tool surface when we inline large user MCP bundles
     // into the generated --mcp-config. User/project/local MCP remain loaded
@@ -455,6 +469,7 @@ export class TeamMcpConfigBuilder {
       enabled: true,
       env: {
         [MCP_CLAUDE_DIR_ENV]: getClaudeBasePath(),
+        ...(controlApiBaseUrl ? { [MCP_CONTROL_URL_ENV]: controlApiBaseUrl } : {}),
       },
     };
     if (mcpPolicy?.mode === 'strictAllowlist') {

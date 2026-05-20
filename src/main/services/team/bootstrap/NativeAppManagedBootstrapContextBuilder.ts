@@ -42,6 +42,23 @@ export function isNativeAppManagedBootstrapProvider(providerId?: TeamProviderId)
   return providerId == null || providerId === 'anthropic' || providerId === 'codex';
 }
 
+function resolveMemberBriefingRuntimeProvider(providerId?: TeamProviderId): 'native' | 'codex' {
+  return providerId === 'codex' ? 'codex' : 'native';
+}
+
+function buildCodexNativeStartupToolRules(providerId?: TeamProviderId): string[] {
+  if (providerId !== 'codex') {
+    return [];
+  }
+
+  return [
+    '- Codex Native after bootstrap: use Agent Teams MCP tools directly for board work.',
+    '- For task work, if prefixed MCP names are exposed, use mcp__agent-teams__task_get, mcp__agent-teams__task_start, mcp__agent-teams__task_add_comment, and mcp__agent-teams__task_complete.',
+    '- For work sync, if prefixed MCP names are exposed, use mcp__agent-teams__member_work_sync_status and mcp__agent-teams__member_work_sync_report.',
+    '- For visible replies after launch, call agent-teams_message_send or mcp__agent-teams__message_send with teamName, to, from, text, and summary. Do not use SendMessage.',
+  ];
+}
+
 export function canonicalizeNativeBootstrapContextText(input: string): string {
   return input
     .replace(/\r\n/g, '\n')
@@ -194,6 +211,7 @@ function buildLocalNativeMemberBriefing(params: {
     '- Treat yourself as unavailable until the private bootstrap turn succeeds.',
     '- Do not call member_briefing for launch readiness in this flow.',
     '- Use Agent Teams messaging/task tools only after launch readiness is confirmed.',
+    ...buildCodexNativeStartupToolRules(params.providerId),
   ]
     .filter((line) => line.length > 0)
     .join('\n');
@@ -248,6 +266,7 @@ function buildCompactNativeMemberBriefing(params: {
     '- Start real work only from an assigned task or a direct app-delivered instruction.',
     '- Post durable task results as task comments before completing tasks.',
     '- Ask the lead when blocked instead of guessing.',
+    ...buildCodexNativeStartupToolRules(params.providerId),
     '',
     'Current task briefing:',
     boundText(redactNativeBootstrapContextText(params.taskBriefing), taskBriefingLimit),
@@ -301,7 +320,7 @@ export async function buildNativeAppManagedBootstrapSpecsWithDiagnostics(params:
       try {
         briefing = String(
           await controller.tasks.memberBriefing(member.name, {
-            runtimeProvider: 'native',
+            runtimeProvider: resolveMemberBriefingRuntimeProvider(providerId),
             includeActiveProcesses: false,
           })
         );

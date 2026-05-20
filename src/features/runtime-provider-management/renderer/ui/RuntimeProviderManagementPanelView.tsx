@@ -83,6 +83,9 @@ function getDirectoryAction(
 }
 
 function formatDirectorySetupKind(provider: RuntimeProviderDirectoryEntryDto): string {
+  if (provider.metadata.configuredAuthless) {
+    return 'Configured local';
+  }
   switch (provider.setupKind) {
     case 'connected':
       return 'Connected';
@@ -137,6 +140,9 @@ function directoryEntryMatchesQuery(
 }
 
 function directorySetupKindClassName(provider: RuntimeProviderDirectoryEntryDto): string {
+  if (provider.metadata.configuredAuthless) {
+    return 'border-cyan-400/35 bg-cyan-400/10 text-cyan-100';
+  }
   switch (provider.setupKind) {
     case 'connected':
       return 'border-emerald-300/70 bg-emerald-600 text-emerald-50';
@@ -458,8 +464,8 @@ function RuntimeSummary({
               className="mt-2 space-y-1 text-[11px]"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              {state.view.diagnostics.slice(0, 3).map((diagnostic) => (
-                <div key={diagnostic}>{diagnostic}</div>
+              {state.view.diagnostics.slice(0, 3).map((diagnostic, index) => (
+                <div key={`diagnostic-${index}`}>{diagnostic}</div>
               ))}
             </div>
           ) : null}
@@ -710,8 +716,10 @@ function ProviderRow({
   actions,
 }: ProviderRowProps): JSX.Element {
   const connect = getProviderAction(provider, 'connect');
+  const test = getProviderAction(provider, 'test');
   const canOpenConnect = provider.state !== 'connected' && connect?.enabled === true;
-  const canSelectModels = provider.state === 'connected' && provider.modelCount > 0;
+  const canSelectModels =
+    provider.modelCount > 0 && (provider.state === 'connected' || test?.enabled === true);
   const clickable = !disabled && (canOpenConnect || canSelectModels);
   const visuallyActive = active && (canSelectModels || formOpen);
   const handleActivate = (): void => {
@@ -813,7 +821,7 @@ function ProviderRow({
         />
       ) : null}
 
-      {active && provider.state === 'connected' && provider.modelCount > 0 ? (
+      {active && canSelectModels ? (
         <ProviderModelList
           state={state}
           actions={actions}
@@ -845,8 +853,13 @@ function DirectoryProviderRow({
   const connect = getDirectoryAction(provider, 'connect');
   const configure = getDirectoryAction(provider, 'configure');
   const forget = getDirectoryAction(provider, 'forget');
+  const test = getDirectoryAction(provider, 'test');
   const canOpenConnect = provider.state !== 'connected' && connect?.enabled === true;
-  const canSelectModels = provider.state === 'connected' && provider.modelCount !== 0;
+  const canSelectModels =
+    provider.modelCount !== 0 &&
+    (provider.state === 'connected' ||
+      provider.metadata.configuredAuthless === true ||
+      test?.enabled === true);
   const clickable = !disabled && (canOpenConnect || canSelectModels);
   const visuallyActive = active && (canSelectModels || formOpen);
   const handleActivate = (): void => {
@@ -984,7 +997,7 @@ function DirectoryProviderRow({
         />
       ) : null}
 
-      {active && provider.state === 'connected' && provider.modelCount !== 0 ? (
+      {active && canSelectModels ? (
         <ProviderModelList
           state={state}
           actions={actions}
@@ -1004,8 +1017,34 @@ function ModelBadges({
   readonly usedForNewTeams: boolean;
 }): JSX.Element | null {
   const modelRecommendation = getOpenCodeTeamModelRecommendation(model.modelId);
+  const localRoute = model.routeKind === 'configured_local';
+  const builtinFreeRoute = model.routeKind === 'builtin_free';
+  const connectedRoute = model.routeKind === 'connected_provider';
+  const verified =
+    model.proofState === 'verified' ||
+    model.availability === 'available' ||
+    model.accessKind === 'verified';
+  const needsTest = model.proofState === 'needs_probe' || model.requiresExecutionProof === true;
+  const failed =
+    model.proofState === 'failed' ||
+    model.accessKind === 'execution_failed' ||
+    model.availability === 'unavailable' ||
+    model.availability === 'not-authenticated';
+  const unknown = model.accessKind === 'unknown_model' || model.accessKind === 'no_model';
 
-  if (!model.free && !model.default && !usedForNewTeams && !modelRecommendation) {
+  if (
+    !model.free &&
+    !builtinFreeRoute &&
+    !model.default &&
+    !usedForNewTeams &&
+    !modelRecommendation &&
+    !localRoute &&
+    !connectedRoute &&
+    !verified &&
+    !needsTest &&
+    !failed &&
+    !unknown
+  ) {
     return null;
   }
 
@@ -1049,11 +1088,75 @@ function ModelBadges({
       {model.free ? (
         <Badge className="bg-emerald-400/15 px-1.5 py-0 text-[10px] text-emerald-200">free</Badge>
       ) : null}
+      {localRoute ? (
+        <>
+          <Badge className="bg-cyan-400/15 px-1.5 py-0 text-[10px] text-cyan-200">local</Badge>
+          <Badge className="bg-sky-400/15 px-1.5 py-0 text-[10px] text-sky-200">configured</Badge>
+        </>
+      ) : null}
+      {builtinFreeRoute && !model.free ? (
+        <Badge className="bg-emerald-400/15 px-1.5 py-0 text-[10px] text-emerald-200">free</Badge>
+      ) : null}
+      {connectedRoute ? (
+        <Badge className="bg-emerald-400/15 px-1.5 py-0 text-[10px] text-emerald-100">
+          connected
+        </Badge>
+      ) : null}
+      {verified ? (
+        <Badge className="bg-emerald-400/15 px-1.5 py-0 text-[10px] text-emerald-100">
+          verified
+        </Badge>
+      ) : null}
+      {needsTest && !verified ? (
+        <Badge className="bg-amber-400/15 px-1.5 py-0 text-[10px] text-amber-200">needs test</Badge>
+      ) : null}
+      {failed ? (
+        <Badge className="bg-red-400/15 px-1.5 py-0 text-[10px] text-red-200">failed</Badge>
+      ) : null}
+      {unknown ? (
+        <Badge className="bg-slate-400/15 px-1.5 py-0 text-[10px] text-slate-200">unknown</Badge>
+      ) : null}
       {model.default ? (
         <Badge className="bg-amber-400/15 px-1.5 py-0 text-[10px] text-amber-200">default</Badge>
       ) : null}
     </div>
   );
+}
+
+function isUnknownOpenCodeModelRoute(model: RuntimeProviderModelDto): boolean {
+  return model.accessKind === 'unknown_model' || model.accessKind === 'no_model';
+}
+
+function canTestOpenCodeModelRoute(model: RuntimeProviderModelDto): boolean {
+  return !isUnknownOpenCodeModelRoute(model);
+}
+
+function canUseOpenCodeModelRoute(model: RuntimeProviderModelDto): boolean {
+  return (
+    !isUnknownOpenCodeModelRoute(model) &&
+    model.accessKind !== 'not_authenticated' &&
+    model.accessKind !== 'execution_failed' &&
+    model.proofState !== 'failed'
+  );
+}
+
+function canSetOpenCodeDefaultModelRoute(model: RuntimeProviderModelDto): boolean {
+  return canUseOpenCodeModelRoute(model) && !model.default;
+}
+
+function getOpenCodeRouteUnavailableTitle(model: RuntimeProviderModelDto): string | undefined {
+  if (isUnknownOpenCodeModelRoute(model)) {
+    return 'This model is the current OpenCode default, but it is not available in the live catalog yet.';
+  }
+  if (model.accessKind === 'not_authenticated') {
+    return (
+      model.accessReason ?? 'This provider requires authentication before this model can be used.'
+    );
+  }
+  if (model.accessKind === 'execution_failed' || model.proofState === 'failed') {
+    return model.accessReason ?? 'This model route failed its last execution test.';
+  }
+  return undefined;
 }
 
 function ModelResult({
@@ -1167,6 +1270,140 @@ function ModelRow({
         </div>
       </div>
       <ModelResult result={result} />
+    </div>
+  );
+}
+
+function ConfiguredOpenCodeModelsPanel({
+  state,
+  actions,
+  disabled,
+}: {
+  readonly state: RuntimeProviderManagementState;
+  readonly actions: RuntimeProviderManagementActions;
+  readonly disabled: boolean;
+}): JSX.Element | null {
+  const models = state.view?.configuredModels ?? [];
+  if (models.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className="rounded-lg border p-3"
+      style={{
+        borderColor: 'var(--color-border-subtle)',
+        backgroundColor: 'rgba(255, 255, 255, 0.025)',
+      }}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-[var(--color-text)]">
+            Configured OpenCode models
+          </div>
+          <div className="text-xs text-[var(--color-text-muted)]">
+            Ready model routes from OpenCode config, built-in free models, and the current default.
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {models.map((model) => {
+          const selected = state.selectedModelId === model.modelId;
+          const testing = state.testingModelIds.includes(model.modelId);
+          const savingDefault = state.savingDefaultModelId === model.modelId;
+          const result = state.modelResults[model.modelId];
+          const unavailableTitle = getOpenCodeRouteUnavailableTitle(model);
+          const canTest = !disabled && !testing && canTestOpenCodeModelRoute(model);
+          const canUse = !disabled && canUseOpenCodeModelRoute(model);
+          const canSetDefault =
+            !disabled && !savingDefault && canSetOpenCodeDefaultModelRoute(model);
+          return (
+            <div
+              key={model.modelId}
+              data-testid={`configured-opencode-model-row-${model.modelId}`}
+              className="rounded-md border px-3 py-2.5"
+              style={{
+                borderColor: selected ? 'rgba(96, 165, 250, 0.45)' : 'var(--color-border-subtle)',
+                backgroundColor: selected ? 'rgba(96, 165, 250, 0.06)' : 'rgba(255,255,255,0.02)',
+              }}
+            >
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                <div className="min-w-0">
+                  <div
+                    className="text-sm font-medium leading-5"
+                    style={{ color: 'var(--color-text)', overflowWrap: 'anywhere' }}
+                  >
+                    {model.displayName}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--color-text-muted)]">
+                    <span className="break-all">{model.modelId}</span>
+                    <span>{model.sourceLabel}</span>
+                  </div>
+                  <ModelBadges model={model} usedForNewTeams={selected} />
+                </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    disabled={!canTest}
+                    title={canTest ? undefined : unavailableTitle}
+                    onClick={() => {
+                      if (!canTest) return;
+                      void actions.testModel(model.providerId, model.modelId);
+                    }}
+                  >
+                    {testing ? (
+                      <Loader2 className="mr-1 size-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="mr-1 size-3.5" />
+                    )}
+                    Test
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8"
+                    disabled={!canUse}
+                    title={canUse ? undefined : unavailableTitle}
+                    onClick={() => {
+                      if (!canUse) return;
+                      actions.useModelForNewTeams(model.modelId);
+                    }}
+                  >
+                    Use for new teams
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8"
+                    disabled={!canSetDefault}
+                    title={
+                      canSetDefault
+                        ? undefined
+                        : model.default
+                          ? 'This is already the OpenCode default.'
+                          : unavailableTitle
+                    }
+                    onClick={() => {
+                      if (!canSetDefault) return;
+                      void actions.setDefaultModel(model.providerId, model.modelId);
+                    }}
+                  >
+                    {savingDefault ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null}
+                    Set OpenCode default
+                  </Button>
+                </div>
+              </div>
+              <ModelResult result={result} />
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1358,6 +1595,8 @@ export function RuntimeProviderManagementPanelView({
           <span>{state.successMessage}</span>
         </div>
       ) : null}
+
+      <ConfiguredOpenCodeModelsPanel state={state} actions={actions} disabled={disabled} />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">

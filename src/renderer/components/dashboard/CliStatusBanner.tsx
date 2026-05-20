@@ -632,6 +632,49 @@ function shouldShowOpenCodeProviderFreeBadge(provider: CliProviderStatus): boole
   return provider.providerId === 'opencode';
 }
 
+function getOpenCodeDashboardChips(
+  provider: CliProviderStatus
+): { label: string; title?: string }[] {
+  if (!shouldShowOpenCodeProviderFreeBadge(provider)) {
+    return [];
+  }
+
+  const catalogModels = provider.modelCatalog?.models ?? [];
+  const configuredLocalCount = new Set(
+    catalogModels
+      .filter((model) => model.metadata?.opencode?.routeKind === 'configured_local')
+      .map((model) => model.launchModel)
+  ).size;
+  const verifiedCount = new Set(
+    catalogModels
+      .filter((model) => model.metadata?.opencode?.proofState === 'verified')
+      .map((model) => model.launchModel)
+  ).size;
+
+  return [
+    {
+      label: 'Free models',
+      title: OPENCODE_PROVIDER_FREE_BADGE_TITLE,
+    },
+    ...(configuredLocalCount > 0
+      ? [
+          {
+            label: `${configuredLocalCount} configured local`,
+            title: 'Local OpenCode routes imported from your OpenCode config.',
+          },
+        ]
+      : []),
+    ...(verifiedCount > 0
+      ? [
+          {
+            label: `${verifiedCount} verified`,
+            title: 'OpenCode routes with a successful execution proof.',
+          },
+        ]
+      : []),
+  ];
+}
+
 const InstalledBanner = ({
   cliStatus,
   sourceProviderMap,
@@ -842,6 +885,7 @@ const InstalledBanner = ({
                 ? getVisibleTeamProviderModels(provider.providerId, provider.models, provider)
                     .length > 0
                 : provider.models.length > 0;
+            const openCodeDashboardChips = getOpenCodeDashboardChips(provider);
             const hasDetailContent = Boolean(
               (provider.backend?.label && !runtimeSummary) ||
               runtimeSummary ||
@@ -873,14 +917,15 @@ const InstalledBanner = ({
                             ? getProviderLabel(provider.providerId)
                             : provider.displayName}
                         </span>
-                        {shouldShowOpenCodeProviderFreeBadge(provider) ? (
+                        {openCodeDashboardChips.map((chip) => (
                           <span
+                            key={chip.label}
                             className="rounded bg-[rgba(34,197,94,0.14)] px-1.5 py-px text-[9px] font-medium uppercase tracking-[0.06em] text-[rgb(74,222,128)]"
-                            title={OPENCODE_PROVIDER_FREE_BADGE_TITLE}
+                            title={chip.title}
                           >
-                            Free models
+                            {chip.label}
                           </span>
-                        ) : null}
+                        ))}
                       </span>
                       <span
                         className="text-xs"

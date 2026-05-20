@@ -509,6 +509,21 @@ function getRuntimeCatalogLaunchModels(
   return models.length > 0 ? models : null;
 }
 
+function mergeModelLists(primary: readonly string[], supplemental: readonly string[]): string[] {
+  const merged = new Map<string, string>();
+  for (const model of [...primary, ...supplemental]) {
+    const trimmed = model.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const key = trimmed.toLowerCase();
+    if (!merged.has(key)) {
+      merged.set(key, trimmed);
+    }
+  }
+  return Array.from(merged.values());
+}
+
 function getSupplementalVisibleModels(
   providerId: SupportedProviderId,
   models: readonly string[]
@@ -525,10 +540,10 @@ export function getVisibleTeamProviderModels(
   models: readonly string[],
   providerStatus?: RuntimeAwareProviderStatus | null
 ): string[] {
+  const catalogModels =
+    providerId === 'opencode' ? getRuntimeCatalogLaunchModels(providerId, providerStatus) : null;
   const sourceModels =
-    providerId === 'opencode'
-      ? (getRuntimeCatalogLaunchModels(providerId, providerStatus) ?? models)
-      : models;
+    providerId === 'opencode' && catalogModels ? mergeModelLists(catalogModels, models) : models;
 
   return sortTeamProviderModels(
     providerId,

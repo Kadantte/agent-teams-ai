@@ -138,6 +138,37 @@ function buildFailedModelTestResult(
   };
 }
 
+function applyModelTestResultToModel(
+  model: RuntimeProviderModelDto,
+  result: RuntimeProviderModelTestResultDto
+): RuntimeProviderModelDto {
+  if (model.modelId !== result.modelId) {
+    return model;
+  }
+  return {
+    ...model,
+    availability: result.availability,
+    proofState: result.ok ? 'verified' : 'failed',
+    accessKind: result.ok ? 'verified' : model.accessKind,
+    requiresExecutionProof: result.ok ? false : model.requiresExecutionProof,
+  };
+}
+
+function applyModelTestResultToView(
+  view: RuntimeProviderManagementViewDto | null,
+  result: RuntimeProviderModelTestResultDto
+): RuntimeProviderManagementViewDto | null {
+  if (!view?.configuredModels) {
+    return view;
+  }
+  return {
+    ...view,
+    configuredModels: view.configuredModels.map((model) =>
+      applyModelTestResultToModel(model, result)
+    ),
+  };
+}
+
 function resolveSavedModelForNewTeams(models: readonly RuntimeProviderModelDto[]): string | null {
   const savedModelId = getOpenCodeModelForNewTeams();
   if (!savedModelId) {
@@ -829,29 +860,44 @@ export function useRuntimeProviderManagement(
         );
         if (response.error) {
           if (shouldRecordProbeResult()) {
+            const result = buildFailedModelTestResult(providerId, modelId, response.error!.message);
             setModelResults((current) => ({
               ...current,
-              [modelId]: buildFailedModelTestResult(providerId, modelId, response.error!.message),
+              [modelId]: result,
             }));
+            setModels((current) =>
+              current.map((model) => applyModelTestResultToModel(model, result))
+            );
+            setView((current) => applyModelTestResultToView(current, result));
           }
           return;
         }
         if (response.result && shouldRecordProbeResult()) {
+          const result = response.result;
           setModelResults((current) => ({
             ...current,
-            [modelId]: response.result!,
+            [modelId]: result,
           }));
+          setModels((current) =>
+            current.map((model) => applyModelTestResultToModel(model, result))
+          );
+          setView((current) => applyModelTestResultToView(current, result));
         }
       } catch (testError) {
         if (shouldRecordProbeResult()) {
+          const result = buildFailedModelTestResult(
+            providerId,
+            modelId,
+            testError instanceof Error ? testError.message : 'Failed to test model'
+          );
           setModelResults((current) => ({
             ...current,
-            [modelId]: buildFailedModelTestResult(
-              providerId,
-              modelId,
-              testError instanceof Error ? testError.message : 'Failed to test model'
-            ),
+            [modelId]: result,
           }));
+          setModels((current) =>
+            current.map((model) => applyModelTestResultToModel(model, result))
+          );
+          setView((current) => applyModelTestResultToView(current, result));
         }
       } finally {
         setTestingModelIds((current) => current.filter((entry) => entry !== modelId));
@@ -881,15 +927,32 @@ export function useRuntimeProviderManagement(
           setError(response.error.message);
           return;
         }
+        const proofResult: RuntimeProviderModelTestResultDto = {
+          providerId,
+          modelId,
+          ok: true,
+          availability: 'available',
+          message: 'Model probe passed',
+          diagnostics: [],
+        };
         if (response.view) {
-          setView(response.view);
+          setView(applyModelTestResultToView(response.view, proofResult));
         }
+        setModelResults((current) => ({
+          ...current,
+          [modelId]: proofResult,
+        }));
         setSelectedModelId(modelId);
         setModels((current) =>
-          current.map((model) => ({
-            ...model,
-            default: model.modelId === modelId,
-          }))
+          current.map((model) =>
+            applyModelTestResultToModel(
+              {
+                ...model,
+                default: model.modelId === modelId,
+              },
+              proofResult
+            )
+          )
         );
         setSuccessMessage(`OpenCode default set to ${modelId}`);
         await options.onProviderChanged?.();

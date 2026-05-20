@@ -69,6 +69,7 @@ describe('TeamMcpConfigBuilder', () => {
   const createdDirs: string[] = [];
   let tempAppData: string;
   let originalResourcesPath: string | undefined;
+  let originalControlUrl: string | undefined;
 
   function setPackagedMode(isPackaged: boolean, version = '9.9.9-test'): void {
     hoisted.electronState.isPackaged = isPackaged;
@@ -183,6 +184,7 @@ describe('TeamMcpConfigBuilder', () => {
   beforeEach(() => {
     clearResolvedNodePathForTests();
     originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+    originalControlUrl = process.env.CLAUDE_TEAM_CONTROL_URL;
     tempAppData = fs.mkdtempSync(path.join(os.tmpdir(), 'team-mcp-appdata-'));
     createdDirs.push(tempAppData);
     moduleInternal._load = ((request, parent, isMain) => {
@@ -214,6 +216,11 @@ describe('TeamMcpConfigBuilder', () => {
     setClaudeBasePathOverride(null);
     setPackagedMode(false);
     setResourcesPath(originalResourcesPath);
+    if (originalControlUrl === undefined) {
+      delete process.env.CLAUDE_TEAM_CONTROL_URL;
+    } else {
+      process.env.CLAUDE_TEAM_CONTROL_URL = originalControlUrl;
+    }
     moduleInternal._load = originalModuleLoad;
     vi.restoreAllMocks();
     for (const filePath of createdPaths.splice(0)) {
@@ -428,6 +435,87 @@ describe('TeamMcpConfigBuilder', () => {
     expect(Object.keys(parsed.mcpServers)).toEqual(['agent-teams']);
     expect(parsed.mcpServers.globalOnly).toBeUndefined();
     expect(parsed.mcpServers.duplicateServer).toBeUndefined();
+  });
+
+  it('writes Agent Teams MCP only member config even when user and project MCP exist', async () => {
+    const { sourceEntry, tsxCli } = mockSourceWorkspaceEntryAvailable();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-mcp-home-'));
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-mcp-project-'));
+    const claudeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'team-mcp-claude-root-'));
+    createdDirs.push(homeDir, projectDir, claudeRoot);
+    mockHomeDir = homeDir;
+    setClaudeBasePathOverride(claudeRoot);
+
+    fs.writeFileSync(
+      path.join(homeDir, '.claude.json'),
+      JSON.stringify(
+        {
+          mcpServers: {
+            'brave-real-browser': {
+              command: 'node',
+              args: ['brave-real-browser.js'],
+            },
+            context7: {
+              type: 'http',
+              url: 'https://context7.example.com/mcp',
+            },
+            'agent-teams': {
+              command: 'node',
+              args: ['user-shadow-agent-teams.js'],
+              enabled: false,
+            },
+          },
+          projects: {
+            [projectDir]: {
+              mcpServers: {
+                'chrome-devtools': {
+                  command: 'node',
+                  args: ['chrome-devtools.js'],
+                },
+              },
+            },
+          },
+        },
+        null,
+        2
+      )
+    );
+    fs.writeFileSync(
+      path.join(projectDir, '.mcp.json'),
+      JSON.stringify(
+        {
+          mcpServers: {
+            tavily: {
+              command: 'node',
+              args: ['tavily.js'],
+            },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    const builder = new TeamMcpConfigBuilder();
+    const configPath = await builder.writeConfigFile(projectDir, { mode: 'appOnly' });
+    createdPaths.push(configPath);
+
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
+      mcpServers: Record<string, { command?: string; args?: string[]; enabled?: boolean; env?: Record<string, string> }>;
+    };
+
+    expect(Object.keys(parsed.mcpServers)).toEqual(['agent-teams']);
+    expectNodeTsxSourceEntry(parsed.mcpServers['agent-teams'], tsxCli, sourceEntry);
+    expect(parsed.mcpServers['agent-teams']).toMatchObject({
+      enabled: true,
+      env: {
+        AGENT_TEAMS_MCP_CLAUDE_DIR: claudeRoot,
+      },
+    });
+    expect(parsed.mcpServers['brave-real-browser']).toBeUndefined();
+    expect(parsed.mcpServers.context7).toBeUndefined();
+    expect(parsed.mcpServers['chrome-devtools']).toBeUndefined();
+    expect(parsed.mcpServers.tavily).toBeUndefined();
   });
 
   it('does not inline project MCP config to preserve native Claude precedence', async () => {
@@ -682,6 +770,30 @@ describe('TeamMcpConfigBuilder', () => {
 
     expect(readGeneratedServer(configPath)?.env).toMatchObject({
       AGENT_TEAMS_MCP_CLAUDE_DIR: claudeRoot,
+    });
+  });
+
+  it('passes the published control API URL to the MCP server', async () => {
+    process.env.CLAUDE_TEAM_CONTROL_URL = 'http://127.0.0.1:43123';
+
+    const builder = new TeamMcpConfigBuilder();
+    const configPath = await builder.writeConfigFile();
+    createdPaths.push(configPath);
+
+    expect(readGeneratedServer(configPath)?.env).toMatchObject({
+      CLAUDE_TEAM_CONTROL_URL: 'http://127.0.0.1:43123',
+    });
+  });
+
+  it('allows an explicit control API URL when no MCP policy is provided', async () => {
+    const builder = new TeamMcpConfigBuilder();
+    const configPath = await builder.writeConfigFile(undefined, {
+      controlApiBaseUrl: 'http://127.0.0.1:43124',
+    });
+    createdPaths.push(configPath);
+
+    expect(readGeneratedServer(configPath)?.env).toMatchObject({
+      CLAUDE_TEAM_CONTROL_URL: 'http://127.0.0.1:43124',
     });
   });
 

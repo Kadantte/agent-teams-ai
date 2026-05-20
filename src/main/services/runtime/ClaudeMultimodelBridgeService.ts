@@ -18,6 +18,7 @@ import type {
   CliProviderReasoningEffort,
   CliProviderStatus,
   CliProviderSubscriptionRateLimitSnapshot,
+  OpenCodeModelRouteMetadata,
 } from '@shared/types';
 
 const logger = createLogger('ClaudeMultimodelBridgeService');
@@ -483,6 +484,61 @@ function collectRuntimeReasoningEfforts(values?: string[]): CliProviderReasoning
   );
 }
 
+const OPENCODE_ACCESS_KINDS = new Set([
+  'no_model',
+  'unknown_model',
+  'credentialed',
+  'builtin_free',
+  'configured_authless',
+  'verified',
+  'not_authenticated',
+  'execution_failed',
+]);
+
+const OPENCODE_ROUTE_KINDS = new Set([
+  'connected_provider',
+  'builtin_free',
+  'configured_local',
+  'catalog_provider',
+]);
+
+const OPENCODE_PROOF_STATES = new Set(['not_required', 'needs_probe', 'verified', 'failed']);
+
+function asStringOrNull(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function mapOpenCodeModelRouteMetadata(value: unknown): OpenCodeModelRouteMetadata | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const accessKind = record.accessKind;
+  const routeKind = record.routeKind;
+  const proofState = record.proofState;
+  if (
+    typeof accessKind !== 'string' ||
+    typeof routeKind !== 'string' ||
+    typeof proofState !== 'string' ||
+    !OPENCODE_ACCESS_KINDS.has(accessKind) ||
+    !OPENCODE_ROUTE_KINDS.has(routeKind) ||
+    !OPENCODE_PROOF_STATES.has(proofState)
+  ) {
+    return null;
+  }
+
+  return {
+    providerId: asStringOrNull(record.providerId),
+    modelId: asStringOrNull(record.modelId),
+    sourceLabel: asStringOrNull(record.sourceLabel),
+    accessKind: accessKind as OpenCodeModelRouteMetadata['accessKind'],
+    routeKind: routeKind as OpenCodeModelRouteMetadata['routeKind'],
+    proofState: proofState as OpenCodeModelRouteMetadata['proofState'],
+    requiresExecutionProof: record.requiresExecutionProof === true,
+    reason: asStringOrNull(record.reason),
+  };
+}
+
 function mapRuntimeProviderModelMetadata(
   metadata?: Record<string, unknown> | null
 ): NonNullable<CliProviderStatus['modelCatalog']>['models'][number]['metadata'] {
@@ -490,11 +546,13 @@ function mapRuntimeProviderModelMetadata(
     return null;
   }
   const context = metadata.context;
+  const opencode = mapOpenCodeModelRouteMetadata(metadata.opencode);
   return {
     cost: metadata.cost ?? null,
     context: typeof context === 'number' && Number.isFinite(context) ? context : null,
     limits: metadata.limits ?? null,
     free: metadata.free === true,
+    ...(opencode ? { opencode } : {}),
   };
 }
 

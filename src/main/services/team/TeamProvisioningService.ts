@@ -4502,7 +4502,8 @@ function buildAgentToolArgsSuffix(
   member: Pick<
     TeamCreateRequest['members'][number],
     'providerId' | 'model' | 'effort' | 'isolation'
-  >
+  >,
+  mcpLaunchConfig?: RuntimeBootstrapMemberMcpLaunchConfig | null
 ): string {
   const providerPart =
     member.providerId && member.providerId !== 'anthropic'
@@ -4511,7 +4512,17 @@ function buildAgentToolArgsSuffix(
   const modelPart = member.model?.trim() ? `, model="${member.model.trim()}"` : '';
   const effortPart = member.effort ? `, effort="${member.effort}"` : '';
   const isolationPart = member.isolation === 'worktree' ? ', isolation="worktree"' : '';
-  return `${providerPart}${modelPart}${effortPart}${isolationPart}`;
+  const mcpConfigPart = mcpLaunchConfig?.mcpConfigPath
+    ? `, mcp_config="${mcpLaunchConfig.mcpConfigPath}"`
+    : '';
+  const mcpSettingSourcesPart = mcpLaunchConfig?.mcpSettingSources
+    ? `, mcp_setting_sources="${mcpLaunchConfig.mcpSettingSources}"`
+    : '';
+  const strictMcpConfigPart =
+    mcpLaunchConfig?.strictMcpConfig === undefined
+      ? ''
+      : `, strict_mcp_config=${mcpLaunchConfig.strictMcpConfig ? 'true' : 'false'}`;
+  return `${providerPart}${modelPart}${effortPart}${isolationPart}${mcpConfigPart}${mcpSettingSourcesPart}${strictMcpConfigPart}`;
 }
 
 export function buildAddMemberSpawnMessage(
@@ -4521,7 +4532,8 @@ export function buildAddMemberSpawnMessage(
   member: Pick<
     TeamCreateRequest['members'][number],
     'name' | 'role' | 'workflow' | 'providerId' | 'model' | 'effort' | 'isolation'
-  >
+  >,
+  mcpLaunchConfig?: RuntimeBootstrapMemberMcpLaunchConfig | null
 ): string {
   const roleHint =
     typeof member.role === 'string' && member.role.trim()
@@ -4545,7 +4557,7 @@ export function buildAddMemberSpawnMessage(
     teamName,
     leadName
   );
-  const agentArgs = buildAgentToolArgsSuffix(member);
+  const agentArgs = buildAgentToolArgsSuffix(member, mcpLaunchConfig);
 
   return (
     `A new teammate "${member.name}"${roleHint} has been added to the team. ` +
@@ -4561,7 +4573,8 @@ export function buildRestartMemberSpawnMessage(
   member: Pick<
     TeamCreateRequest['members'][number],
     'name' | 'role' | 'workflow' | 'providerId' | 'model' | 'effort' | 'isolation'
-  >
+  >,
+  mcpLaunchConfig?: RuntimeBootstrapMemberMcpLaunchConfig | null
 ): string {
   const roleHint =
     typeof member.role === 'string' && member.role.trim()
@@ -4585,7 +4598,7 @@ export function buildRestartMemberSpawnMessage(
     teamName,
     leadName
   );
-  const agentArgs = buildAgentToolArgsSuffix(member);
+  const agentArgs = buildAgentToolArgsSuffix(member, mcpLaunchConfig);
 
   return (
     `Teammate "${member.name}"${roleHint} was restarted from the UI. ` +
@@ -4615,7 +4628,7 @@ interface RuntimeBootstrapMemberSpec {
   nativeAppManagedBootstrap?: NativeAppManagedBootstrapSpec;
 }
 
-interface RuntimeBootstrapMemberMcpLaunchConfig {
+export interface RuntimeBootstrapMemberMcpLaunchConfig {
   mcpConfigPath: string;
   mcpSettingSources: string;
   strictMcpConfig: boolean;
@@ -9074,6 +9087,15 @@ export class TeamProvisioningService {
         taskRefs: input.ledgerRecord.taskRefs,
         visibleReply: visibleReplyForProof,
       }) && taskRefsSatisfied;
+    const previousTerminalSuccess =
+      input.ledgerRecord.status === 'responded' &&
+      Boolean(input.ledgerRecord.inboxReadCommittedAt || input.ledgerRecord.visibleReplyMessageId);
+    const shouldEmitRecoveryAdvisoryRefresh =
+      semantic &&
+      (!previousTerminalSuccess ||
+        input.ledgerRecord.status === 'failed_terminal' ||
+        Boolean(input.ledgerRecord.failedAt) ||
+        Boolean(input.ledgerRecord.lastReason?.trim()));
     const ledgerRecord = await input.ledger.applyDestinationProof({
       id: input.ledgerRecord.id,
       visibleReplyInbox: visibleReplyForProof.inboxName,
@@ -9089,6 +9111,9 @@ export class TeamProvisioningService {
       ],
       observedAt: nowIso(),
     });
+    if (shouldEmitRecoveryAdvisoryRefresh) {
+      this.emitRuntimeDeliveryReplyAdvisoryRefresh(input.teamName, visibleReplyForProof.message);
+    }
     return { ledgerRecord, visibleReply: visibleReplyForProof };
   }
 
@@ -12213,6 +12238,7 @@ export class TeamProvisioningService {
     cwd: string;
     members: TeamCreateRequest['members'];
     run: ProvisioningRun;
+    controlApiBaseUrl?: string | null;
   }): Promise<Map<string, RuntimeBootstrapMemberMcpLaunchConfig>> {
     const configs = new Map<string, RuntimeBootstrapMemberMcpLaunchConfig>();
     for (const member of input.members) {
@@ -12222,8 +12248,11 @@ export class TeamProvisioningService {
       }
 
       const memberCwd = member.cwd?.trim() || input.cwd;
-      const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(memberCwd, mcpPolicy);
-      input.run.memberMcpConfigPaths.push(mcpConfigPath);
+      const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(memberCwd, {
+        mcpPolicy,
+        controlApiBaseUrl: input.controlApiBaseUrl,
+      });
+      (input.run.memberMcpConfigPaths ??= []).push(mcpConfigPath);
       configs.set(member.name, {
         mcpConfigPath,
         mcpSettingSources: buildTeamMemberMcpSettingSources(mcpPolicy),
@@ -12231,6 +12260,89 @@ export class TeamProvisioningService {
       });
     }
     return configs;
+  }
+
+  private async buildTrackedMemberMcpLaunchConfig(input: {
+    cwd: string;
+    mcpPolicy: unknown;
+    run: ProvisioningRun;
+    controlApiBaseUrl?: string | null;
+  }): Promise<RuntimeBootstrapMemberMcpLaunchConfig | null> {
+    const mcpPolicy = normalizeTeamMemberMcpPolicy(input.mcpPolicy);
+    if (!mcpPolicy) {
+      return null;
+    }
+
+    const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(input.cwd, {
+      mcpPolicy,
+      controlApiBaseUrl: input.controlApiBaseUrl,
+    });
+    (input.run.memberMcpConfigPaths ??= []).push(mcpConfigPath);
+    return {
+      mcpConfigPath,
+      mcpSettingSources: buildTeamMemberMcpSettingSources(mcpPolicy),
+      strictMcpConfig: requiresStrictTeamMemberMcpConfig(mcpPolicy),
+    };
+  }
+
+  private async removeTrackedMemberMcpLaunchConfig(
+    run: ProvisioningRun,
+    mcpLaunchConfig: RuntimeBootstrapMemberMcpLaunchConfig | null | undefined
+  ): Promise<void> {
+    if (!mcpLaunchConfig?.mcpConfigPath) {
+      return;
+    }
+    const memberMcpConfigPaths = (run.memberMcpConfigPaths ??= []);
+    const index = memberMcpConfigPaths.indexOf(mcpLaunchConfig.mcpConfigPath);
+    if (index >= 0) {
+      memberMcpConfigPaths.splice(index, 1);
+    }
+    await this.mcpConfigBuilder.removeConfigFile(mcpLaunchConfig.mcpConfigPath);
+  }
+
+  async prepareLiveMemberMcpLaunchConfig(input: {
+    teamName: string;
+    cwd?: string;
+    mcpPolicy?: unknown;
+  }): Promise<RuntimeBootstrapMemberMcpLaunchConfig | null> {
+    const mcpPolicy = normalizeTeamMemberMcpPolicy(input.mcpPolicy);
+    if (!mcpPolicy) {
+      return null;
+    }
+
+    const runId = this.getAliveRunId(input.teamName);
+    const run = runId ? this.runs.get(runId) : undefined;
+    if (!run || run.processKilled || run.cancelRequested) {
+      throw new Error(`Team "${input.teamName}" is not currently running`);
+    }
+
+    const cwd = input.cwd?.trim() || run.request.cwd?.trim();
+    if (!cwd) {
+      throw new Error(`Team "${input.teamName}" project path is not available`);
+    }
+    await ensureCwdExists(cwd);
+
+    return this.buildTrackedMemberMcpLaunchConfig({
+      cwd,
+      mcpPolicy,
+      run,
+      controlApiBaseUrl: await this.resolveControlApiBaseUrl().catch(() => null),
+    });
+  }
+
+  async discardLiveMemberMcpLaunchConfig(input: {
+    teamName: string;
+    mcpLaunchConfig: RuntimeBootstrapMemberMcpLaunchConfig | null | undefined;
+  }): Promise<void> {
+    const runId = this.getAliveRunId(input.teamName);
+    const run = runId ? this.runs.get(runId) : undefined;
+    if (!run) {
+      if (input.mcpLaunchConfig?.mcpConfigPath) {
+        await this.mcpConfigBuilder.removeConfigFile(input.mcpLaunchConfig.mcpConfigPath);
+      }
+      return;
+    }
+    await this.removeTrackedMemberMcpLaunchConfig(run, input.mcpLaunchConfig);
   }
 
   private async removeRunMemberMcpConfigFiles(run: ProvisioningRun): Promise<void> {
@@ -16873,7 +16985,11 @@ export class TeamProvisioningService {
     }
 
     const memberMcpPolicy = normalizeTeamMemberMcpPolicy(input.configuredMember.mcpPolicy);
-    const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(cwd, memberMcpPolicy);
+    const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(cwd, {
+      mcpPolicy: memberMcpPolicy,
+      controlApiBaseUrl: provisioningEnv.env.CLAUDE_TEAM_CONTROL_URL,
+    });
+    (input.run.memberMcpConfigPaths ??= []).push(mcpConfigPath);
     const memberMcpSettingSources = buildTeamMemberMcpSettingSources(memberMcpPolicy);
     const strictMemberMcpConfig = requiresStrictTeamMemberMcpConfig(memberMcpPolicy);
     const agentId = `${input.configuredMember.name}@${input.teamName}`;
@@ -17020,7 +17136,11 @@ export class TeamProvisioningService {
     }
 
     const memberMcpPolicy = normalizeTeamMemberMcpPolicy(input.configuredMember.mcpPolicy);
-    const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(cwd, memberMcpPolicy);
+    const mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(cwd, {
+      mcpPolicy: memberMcpPolicy,
+      controlApiBaseUrl: provisioningEnv.env.CLAUDE_TEAM_CONTROL_URL,
+    });
+    (input.run.memberMcpConfigPaths ??= []).push(mcpConfigPath);
     const memberMcpSettingSources = buildTeamMemberMcpSettingSources(memberMcpPolicy);
     const strictMemberMcpConfig = requiresStrictTeamMemberMcpConfig(memberMcpPolicy);
     const agentId = `${input.configuredMember.name}@${input.teamName}`;
@@ -17755,24 +17875,31 @@ export class TeamProvisioningService {
       }
     }
 
-    const restartMessage = buildRestartMemberSpawnMessage(
-      teamName,
-      config?.name?.trim() || teamName,
-      leadName,
-      {
-        name: configuredMember.name,
-        role: configuredMember.role,
-        workflow: configuredMember.workflow,
-        isolation: configuredMember.isolation === 'worktree' ? ('worktree' as const) : undefined,
-        providerId: configuredMember.providerId,
-        model: configuredMember.model,
-        effort: configuredMember.effort,
-      }
-    );
-
+    let restartMcpLaunchConfig: RuntimeBootstrapMemberMcpLaunchConfig | null = null;
     try {
+      restartMcpLaunchConfig = await this.buildTrackedMemberMcpLaunchConfig({
+        cwd: configuredMember.cwd?.trim() || config.projectPath?.trim() || run.request.cwd,
+        mcpPolicy: configuredMember.mcpPolicy,
+        run,
+      });
+      const restartMessage = buildRestartMemberSpawnMessage(
+        teamName,
+        config?.name?.trim() || teamName,
+        leadName,
+        {
+          name: configuredMember.name,
+          role: configuredMember.role,
+          workflow: configuredMember.workflow,
+          isolation: configuredMember.isolation === 'worktree' ? ('worktree' as const) : undefined,
+          providerId: configuredMember.providerId,
+          model: configuredMember.model,
+          effort: configuredMember.effort,
+        },
+        restartMcpLaunchConfig
+      );
       await this.sendMessageToRun(run, restartMessage);
     } catch (error) {
+      await this.removeTrackedMemberMcpLaunchConfig(run, restartMcpLaunchConfig).catch(() => {});
       run.pendingMemberRestarts.delete(memberName);
       this.setMemberSpawnStatus(
         run,
@@ -21405,7 +21532,9 @@ export class TeamProvisioningService {
       } catch {
         logger.warn(`[${run.teamName}] MCP config ${existingConfigPath} missing, regenerating`);
         try {
-          const newConfigPath = await this.mcpConfigBuilder.writeConfigFile(ctx.cwd);
+          const newConfigPath = await this.mcpConfigBuilder.writeConfigFile(ctx.cwd, {
+            controlApiBaseUrl: ctx.env.CLAUDE_TEAM_CONTROL_URL,
+          });
           ctx.args[mcpFlagIdx + 1] = newConfigPath;
           run.mcpConfigPath = newConfigPath;
           logger.info(`[${run.teamName}] Regenerated MCP config at ${newConfigPath}`);
@@ -22170,6 +22299,7 @@ export class TeamProvisioningService {
           members: effectiveMemberSpecs,
         });
         const memberMcpLaunchConfigs = await this.buildRuntimeBootstrapMemberMcpLaunchConfigs({
+          controlApiBaseUrl: provisioningEnv.env.CLAUDE_TEAM_CONTROL_URL,
           cwd: request.cwd,
           members: effectiveMemberSpecs,
           run,
@@ -22210,7 +22340,9 @@ export class TeamProvisioningService {
           run.requiresFirstRealTurnSuccess = true;
         }
         emitProvisioningCheckpoint(run, 'Writing MCP config file');
-        mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
+        mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd, {
+          controlApiBaseUrl: provisioningEnv.env.CLAUDE_TEAM_CONTROL_URL,
+        });
         run.mcpConfigPath = mcpConfigPath;
         emitProvisioningCheckpoint(run, 'Validating agent-teams MCP runtime');
         await this.validateAgentTeamsMcpRuntime(claudePath, request.cwd, shellEnv, mcpConfigPath, {
@@ -23464,6 +23596,7 @@ export class TeamProvisioningService {
           members: effectiveMemberSpecs,
         });
         const memberMcpLaunchConfigs = await this.buildRuntimeBootstrapMemberMcpLaunchConfigs({
+          controlApiBaseUrl: provisioningEnv.env.CLAUDE_TEAM_CONTROL_URL,
           cwd: request.cwd,
           members: effectiveMemberSpecs,
           run,
@@ -23501,7 +23634,9 @@ export class TeamProvisioningService {
         run.bootstrapUserPromptPath = bootstrapUserPromptPath;
         run.requiresFirstRealTurnSuccess = true;
         emitProvisioningCheckpoint(run, 'Writing MCP config file');
-        mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd);
+        mcpConfigPath = await this.mcpConfigBuilder.writeConfigFile(request.cwd, {
+          controlApiBaseUrl: provisioningEnv.env.CLAUDE_TEAM_CONTROL_URL,
+        });
         run.mcpConfigPath = mcpConfigPath;
         emitProvisioningCheckpoint(run, 'Validating agent-teams MCP runtime');
         await this.validateAgentTeamsMcpRuntime(claudePath, request.cwd, shellEnv, mcpConfigPath, {
@@ -24228,6 +24363,7 @@ export class TeamProvisioningService {
           [
             `CRITICAL: Do NOT send any message to="user" for this relay turn. The ONLY valid destination is to="${memberName}".`,
             getCanonicalSendMessageToolRule(memberName),
+            `If an inbox item has Message kind: member_work_sync_nudge, a member_work_sync_status call alone is incomplete; the recipient must also call member_work_sync_report with the returned agendaFingerprint/reportToken.`,
             getCanonicalSendMessageFieldRule(),
             `Preserve task IDs and critical instructions. Do NOT add extra narration outside the SendMessage calls.`,
             `If an inbox item is marked Source: system_notification, forward that notification exactly once without paraphrasing.`,
@@ -24257,6 +24393,12 @@ export class TeamProvisioningService {
             `   Timestamp: ${m.timestamp}`,
             `   MessageId: ${m.messageId}`,
             ...(summaryLine ? [`   ${summaryLine}`] : []),
+            ...(typeof m.messageKind === 'string' && m.messageKind.trim()
+              ? [`   Message kind: ${m.messageKind.trim()}`]
+              : []),
+            ...(typeof m.workSyncIntent === 'string' && m.workSyncIntent.trim()
+              ? [`   Work-sync intent: ${m.workSyncIntent.trim()}`]
+              : []),
             ...(typeof m.source === 'string' && m.source.trim()
               ? [`   Source: ${m.source.trim()}`]
               : []),
@@ -25465,6 +25607,7 @@ export class TeamProvisioningService {
           [
             `Internal note: for task assignments, prefer task_create and rely on the board/runtime notification path instead of sending a separate SendMessage for the same assignment.`,
             `For any MCP board tool call in this turn, teamName MUST be "${teamName}". Never use the lead/member name "${leadName}" as teamName.`,
+            `A member_work_sync_status call alone is incomplete for Message kind: member_work_sync_nudge. Do not stop until member_work_sync_report succeeds or a real blocker is recorded.`,
             `Use task_create_from_message only for messages below that explicitly say "Eligible for task_create_from_message: yes" and provide a User MessageId. Never use task_create_from_message for teammate messages, system notifications, cross-team messages, or any inbox row that is not explicitly marked eligible.`,
             `If a message below is marked Source: system_notification and its summary looks like "Comment on #...", reply via task_add_comment only when you have a substantive board update (decision, blocker, clarification answer, review result, or concrete next-step change).`,
             `If a message below has Message kind: member_work_sync_nudge, it is actionable work-sync control traffic, not routine notification noise. Do NOT ignore it as a pure system notification. Call member_work_sync_status with teamName="${teamName}", memberName="${leadName}"${workSyncControlUrlClause}, then call member_work_sync_report with the same teamName/memberName${workSyncControlUrlClause}, the returned agendaFingerprint/reportToken, and taskIds from the nudge task refs. Do not use provider names, runtime names, or team names as memberName. If the agenda still has actionable work you are continuing, use state "still_working"; if blocked, use state "blocked" and record the blocker on the task.`,
@@ -25505,6 +25648,12 @@ export class TeamProvisioningService {
             `${idx + 1}) From: ${m.from || 'unknown'}`,
             `   Timestamp: ${m.timestamp}`,
             ...(summaryLine ? [`   ${summaryLine}`] : []),
+            ...(typeof m.messageKind === 'string' && m.messageKind.trim()
+              ? [`   Message kind: ${m.messageKind.trim()}`]
+              : []),
+            ...(typeof m.workSyncIntent === 'string' && m.workSyncIntent.trim()
+              ? [`   Work-sync intent: ${m.workSyncIntent.trim()}`]
+              : []),
             ...(typeof m.source === 'string' && m.source.trim()
               ? [`   Source: ${m.source.trim()}`]
               : []),
@@ -36541,6 +36690,7 @@ export class TeamProvisioningService {
       if (!baseUrl) {
         throw new Error('Team control API resolver returned no base URL after startup.');
       }
+      process.env.CLAUDE_TEAM_CONTROL_URL = baseUrl;
       return baseUrl;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -1,24 +1,25 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  useRuntimeProviderManagement,
   type RuntimeProviderManagementActions,
   type RuntimeProviderManagementState,
+  useRuntimeProviderManagement,
 } from '../../../../src/features/runtime-provider-management/renderer/hooks/useRuntimeProviderManagement';
 import {
   getStoredCreateTeamModel,
   getStoredCreateTeamProvider,
 } from '../../../../src/renderer/services/createTeamPreferences';
 
-import type { ElectronAPI } from '../../../../src/shared/types/api';
 import type {
   RuntimeProviderConnectionDto,
   RuntimeProviderDirectoryEntryDto,
   RuntimeProviderManagementModelTestResponse,
   RuntimeProviderManagementViewDto,
 } from '../../../../src/features/runtime-provider-management/contracts';
+import type { ElectronAPI } from '../../../../src/shared/types/api';
 
 function installRuntimeProviderManagementApi(
   response: RuntimeProviderManagementModelTestResponse
@@ -79,6 +80,7 @@ function createOpenAiLocalDirectoryEntry(): RuntimeProviderDirectoryEntryDto {
       hasKnownModels: true,
       requiresManualConfig: false,
       supportedInlineAuth: false,
+      configuredAuthless: false,
     },
   };
 }
@@ -613,6 +615,7 @@ describe('useRuntimeProviderManagement', () => {
               hasKnownModels: true,
               requiresManualConfig: false,
               supportedInlineAuth: false,
+              configuredAuthless: false,
             },
           },
         ],
@@ -696,6 +699,7 @@ describe('useRuntimeProviderManagement', () => {
                 hasKnownModels: true,
                 requiresManualConfig: false,
                 supportedInlineAuth: true,
+                configuredAuthless: false,
               },
             },
           ],
@@ -1228,5 +1232,74 @@ describe('useRuntimeProviderManagement', () => {
     expect(state?.error).toBeNull();
     expect(state?.modelResults[modelId]?.ok).toBe(true);
     expect(state?.modelResults[modelId]?.message).toBe('Model probe passed');
+  });
+
+  it('keeps a successful set-default probe visible as verified model state', async () => {
+    const modelId = 'llama.cpp/qwen-test:0.5b';
+    const setDefaultModel = vi.fn(() =>
+      Promise.resolve({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        view: {
+          ...createRuntimeView(),
+          defaultModel: modelId,
+          configuredModels: [
+            {
+              providerId: 'llama.cpp',
+              modelId,
+              displayName: 'qwen-test:0.5b',
+              sourceLabel: 'llama.cpp',
+              free: false,
+              default: true,
+              availability: 'untested',
+              accessKind: 'configured_authless',
+              routeKind: 'configured_local',
+              proofState: 'needs_probe',
+              requiresExecutionProof: true,
+              accessReason: 'Execution proof required',
+            },
+          ],
+        },
+      })
+    );
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        runtimeProviderManagement: {
+          setDefaultModel,
+        },
+      } as unknown as ElectronAPI,
+    });
+
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(React.createElement(Harness));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await actions?.setDefaultModel('llama.cpp', modelId);
+    });
+
+    expect(setDefaultModel).toHaveBeenCalledWith({
+      runtimeId: 'opencode',
+      providerId: 'llama.cpp',
+      modelId,
+      probe: true,
+      projectPath: null,
+    });
+    expect(state?.view?.configuredModels?.[0]).toMatchObject({
+      modelId,
+      default: true,
+      availability: 'available',
+      accessKind: 'verified',
+      proofState: 'verified',
+      requiresExecutionProof: false,
+    });
+    expect(state?.modelResults[modelId]).toMatchObject({
+      ok: true,
+      availability: 'available',
+      message: 'Model probe passed',
+    });
   });
 });

@@ -16246,6 +16246,63 @@ describe('TeamProvisioningService', () => {
       await svc.cancelProvisioning(runId);
     });
 
+    it('preserves Agent Teams MCP only from members meta when relaunch config has no mcpPolicy', async () => {
+      allowConsoleLogs();
+      const teamName = 'safe-member-mcp-policy-meta-relaunch';
+      const leadSessionId = 'safe-member-mcp-policy-meta-session';
+      writeLaunchConfig(teamName, tempClaudeRoot, leadSessionId, ['alice']);
+      vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');
+      vi.mocked(spawnCli).mockReturnValue(createRunningChild() as any);
+
+      const { svc, mcpConfigBuilder, membersMetaStore } = createSafeLaunchService();
+      membersMetaStore.getMembers.mockResolvedValue([
+        {
+          name: 'alice',
+          providerId: 'codex',
+          model: 'gpt-5.4-mini',
+          mcpPolicy: { mode: 'appOnly' },
+        },
+      ] as never);
+      mcpConfigBuilder.writeConfigFile.mockImplementation(async (_projectPath, policy) => {
+        const mode =
+          policy && typeof policy === 'object' && 'mode' in policy
+            ? (policy as { mode?: unknown }).mode
+            : undefined;
+        return mode === 'appOnly'
+          ? '/mock/member-mcp-app-only.json'
+          : '/mock/lead-mcp-config.json';
+      });
+
+      const { runId } = await svc.launchTeam(
+        {
+          teamName,
+          cwd: tempClaudeRoot,
+          providerId: 'codex',
+          providerBackendId: 'codex-native',
+          model: 'gpt-5.4',
+        },
+        () => {}
+      );
+
+      const spawnArgs = vi.mocked(spawnCli).mock.calls[0]?.[1] as string[];
+      const bootstrapSpec = readBootstrapSpecFromSpawnArgs(spawnArgs);
+      expect(bootstrapSpec.members).toEqual([
+        expect.objectContaining({
+          name: 'alice',
+          provider: 'codex',
+          model: 'gpt-5.4-mini',
+          mcpConfigPath: '/mock/member-mcp-app-only.json',
+          mcpSettingSources: 'user,project,local',
+          strictMcpConfig: true,
+        }),
+      ]);
+      expect(mcpConfigBuilder.writeConfigFile).toHaveBeenCalledWith(tempClaudeRoot, {
+        mode: 'appOnly',
+      });
+
+      await svc.cancelProvisioning(runId);
+    });
+
     it('starts an Anthropic team without injecting lead effort into explicit teammate models', async () => {
       allowConsoleLogs();
       vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/claude');

@@ -1,5 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RuntimeProviderManagementPanelView } from '../../../../src/features/runtime-provider-management/renderer/ui/RuntimeProviderManagementPanelView';
@@ -153,6 +154,173 @@ describe('RuntimeProviderManagementPanelView', () => {
       button.textContent?.includes('Checking...')
     );
     expect(refreshButton?.disabled).toBe(true);
+  });
+
+  it('renders configured OpenCode model routes with local proof actions', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const actions = createActions();
+    const configuredModel = {
+      providerId: 'llama.cpp',
+      modelId: 'llama.cpp/qwen-test:0.5b',
+      displayName: 'qwen-test:0.5b',
+      sourceLabel: 'llama.cpp',
+      free: false,
+      default: false,
+      availability: 'untested' as const,
+      accessKind: 'configured_authless' as const,
+      routeKind: 'configured_local' as const,
+      proofState: 'needs_probe' as const,
+      requiresExecutionProof: true,
+      accessReason: 'Execution proof required',
+    };
+
+    await act(async () => {
+      root.render(
+        React.createElement(RuntimeProviderManagementPanelView, {
+          state: createState({
+            view: {
+              ...createState().view!,
+              configuredModels: [configuredModel],
+            },
+            selectedModelId: 'llama.cpp/qwen-test:0.5b',
+          }),
+          actions,
+          disabled: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const row = host.querySelector<HTMLElement>(
+      '[data-testid="configured-opencode-model-row-llama.cpp/qwen-test:0.5b"]'
+    );
+    expect(host.textContent).toContain('Configured OpenCode models');
+    expect(row?.textContent).toContain('local');
+    expect(row?.textContent).toContain('configured');
+    expect(row?.textContent).toContain('needs test');
+
+    const buttons = Array.from(row?.querySelectorAll('button') ?? []);
+    await act(async () => {
+      buttons.find((button) => button.textContent?.includes('Test'))?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      buttons.find((button) => button.textContent?.includes('Use for new teams'))?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      buttons.find((button) => button.textContent?.includes('Set OpenCode default'))?.click();
+      await Promise.resolve();
+    });
+
+    expect(actions.testModel).toHaveBeenCalledWith(
+      'llama.cpp',
+      'llama.cpp/qwen-test:0.5b'
+    );
+    expect(actions.useModelForNewTeams).toHaveBeenCalledWith('llama.cpp/qwen-test:0.5b');
+    expect(actions.setDefaultModel).toHaveBeenCalledWith(
+      'llama.cpp',
+      'llama.cpp/qwen-test:0.5b'
+    );
+  });
+
+  it('shows unknown OpenCode defaults without enabling launch actions', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const actions = createActions();
+    const unknownDefaultModel = {
+      providerId: 'openrouter',
+      modelId: 'openrouter/moonshotai/kimi-k2',
+      displayName: 'moonshotai/kimi-k2',
+      sourceLabel: 'OpenRouter',
+      free: false,
+      default: true,
+      availability: 'untested' as const,
+      accessKind: 'unknown_model' as const,
+      routeKind: 'catalog_provider' as const,
+      proofState: 'not_required' as const,
+      requiresExecutionProof: false,
+      accessReason: 'Model was not found in the live catalog',
+    };
+
+    await act(async () => {
+      root.render(
+        React.createElement(RuntimeProviderManagementPanelView, {
+          state: createState({
+            view: {
+              ...createState().view!,
+              configuredModels: [unknownDefaultModel],
+            },
+          }),
+          actions,
+          disabled: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const row = host.querySelector<HTMLElement>(
+      '[data-testid="configured-opencode-model-row-openrouter/moonshotai/kimi-k2"]'
+    );
+    expect(row?.textContent).toContain('unknown');
+    expect(row?.textContent).toContain('default');
+
+    const buttons = Array.from(row?.querySelectorAll('button') ?? []);
+    expect(buttons.map((button) => button.disabled)).toEqual([true, true, true]);
+    await act(async () => {
+      buttons.forEach((button) => button.click());
+      await Promise.resolve();
+    });
+    expect(actions.testModel).not.toHaveBeenCalled();
+    expect(actions.useModelForNewTeams).not.toHaveBeenCalled();
+    expect(actions.setDefaultModel).not.toHaveBeenCalled();
+  });
+
+  it('renders duplicate runtime diagnostics without React key warnings', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const actions = createActions();
+    const baseState = createState();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await act(async () => {
+      root.render(
+        React.createElement(RuntimeProviderManagementPanelView, {
+          state: createState({
+            view: {
+              ...baseState.view!,
+              diagnostics: [
+                'Unable to connect. Is the computer able to access the url?',
+                'Unable to connect. Is the computer able to access the url?',
+              ],
+            },
+            providers: baseState.view?.providers ?? [],
+          }),
+          actions,
+          disabled: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const duplicateDiagnostics = host.textContent?.match(
+      /Unable to connect\. Is the computer able to access the url\?/g
+    );
+    const duplicateKeyWarnings = consoleError.mock.calls.filter((call) =>
+      call.some(
+        (argument) =>
+          typeof argument === 'string' &&
+          argument.includes('Encountered two children with the same key')
+      )
+    );
+    consoleError.mockRestore();
+
+    expect(duplicateDiagnostics).toHaveLength(2);
+    expect(duplicateKeyWarnings).toHaveLength(0);
   });
 
   it('renders provider actions and opens API-key form state without exposing a raw secret', async () => {
@@ -517,6 +685,7 @@ describe('RuntimeProviderManagementPanelView', () => {
                   hasKnownModels: true,
                   requiresManualConfig: false,
                   supportedInlineAuth: false,
+                  configuredAuthless: false,
                 },
               },
               {
@@ -547,6 +716,7 @@ describe('RuntimeProviderManagementPanelView', () => {
                   hasKnownModels: true,
                   requiresManualConfig: false,
                   supportedInlineAuth: true,
+                  configuredAuthless: false,
                 },
               },
             ],
@@ -685,6 +855,7 @@ describe('RuntimeProviderManagementPanelView', () => {
                   hasKnownModels: true,
                   requiresManualConfig: true,
                   supportedInlineAuth: true,
+                  configuredAuthless: false,
                 },
               },
             ],
@@ -705,6 +876,72 @@ describe('RuntimeProviderManagementPanelView', () => {
 
     expect(actionLabels).toContain('Connect');
     expect(actionLabels).toContain('Configure manually');
+  });
+
+  it('opens model list for configured authless local directory providers', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const actions = createActions();
+
+    await act(async () => {
+      root.render(
+        React.createElement(RuntimeProviderManagementPanelView, {
+          state: createState({
+            directoryLoaded: true,
+            directoryTotalCount: 1,
+            directoryEntries: [
+              {
+                providerId: 'llama.cpp',
+                displayName: 'llama.cpp',
+                state: 'available',
+                setupKind: 'available-readonly',
+                ownership: [],
+                recommended: false,
+                modelCount: 1,
+                defaultModelId: null,
+                authMethods: [],
+                actions: [
+                  {
+                    id: 'test',
+                    label: 'Test',
+                    enabled: true,
+                    disabledReason: null,
+                    requiresSecret: false,
+                    ownershipScope: 'runtime',
+                  },
+                ],
+                sources: ['config-provider'],
+                sourceLabel: 'configured',
+                providerSource: null,
+                detail: 'Configured local OpenCode model route is available',
+                metadata: {
+                  hasKnownModels: true,
+                  requiresManualConfig: false,
+                  supportedInlineAuth: false,
+                  configuredAuthless: true,
+                },
+              },
+            ],
+          }),
+          actions,
+          disabled: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const row = host.querySelector<HTMLElement>(
+      '[data-testid="runtime-provider-directory-row-llama.cpp"]'
+    );
+    expect(row?.textContent).toContain('Configured local');
+
+    await act(async () => {
+      row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(actions.selectDirectoryProvider).toHaveBeenCalledWith('llama.cpp');
   });
 
   it('uses the unified provider search when compact search has no matches', async () => {
@@ -743,6 +980,7 @@ describe('RuntimeProviderManagementPanelView', () => {
                   hasKnownModels: true,
                   requiresManualConfig: false,
                   supportedInlineAuth: false,
+                  configuredAuthless: false,
                 },
               },
             ],
@@ -1131,6 +1369,7 @@ describe('RuntimeProviderManagementPanelView', () => {
         hasKnownModels: true,
         requiresManualConfig: false,
         supportedInlineAuth: true,
+        configuredAuthless: false,
       },
     };
     const state = createState({
