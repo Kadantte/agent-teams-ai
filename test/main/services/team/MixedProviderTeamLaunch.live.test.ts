@@ -40,7 +40,7 @@ const liveDescribe =
 const DEFAULT_ORCHESTRATOR_CLI = '/Users/belief/dev/projects/claude/agent_teams_orchestrator/cli-source';
 const DEFAULT_ANTHROPIC_MODEL = 'haiku';
 const DEFAULT_CODEX_MODEL = 'gpt-5.4-mini';
-const DEFAULT_OPENCODE_MODEL = 'openai/gpt-5.4-mini';
+const DEFAULT_OPENCODE_MODEL = 'opencode/big-pickle';
 
 liveDescribe('Mixed provider team launch live e2e', () => {
   let tempDir: string;

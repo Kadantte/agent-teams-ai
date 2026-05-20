@@ -2850,6 +2850,34 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     expect(result.env.ANTHROPIC_API_KEY).toBe('real-key');
   });
 
+  it('does not leak Vitest NODE_ENV into real team runtime children', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'test';
+    try {
+      const svc = new TeamProvisioningService();
+      const buildProvisioningEnv = (
+        svc as unknown as {
+          buildProvisioningEnv(): Promise<{ env: NodeJS.ProcessEnv }>;
+        }
+      ).buildProvisioningEnv.bind(svc);
+
+      const result = await buildProvisioningEnv();
+
+      expect(result.env.NODE_ENV).toBe('development');
+      expect(buildProviderAwareCliEnvMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          env: expect.objectContaining({ NODE_ENV: 'development' }),
+        })
+      );
+    } finally {
+      if (previousNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+  });
+
   it('adds member-work-sync turn-settled spool env for Codex provisioning', async () => {
     const svc = new TeamProvisioningService();
     svc.setRuntimeTurnSettledEnvironmentProvider(async ({ provider }) =>
@@ -2862,6 +2890,42 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
 
     expect(result.authSource).toBe('codex_runtime');
     expect(result.env.AGENT_TEAMS_RUNTIME_TURN_SETTLED_SPOOL_ROOT).toBe('/tmp/runtime-hooks');
+  });
+
+  it('materializes Anthropic turn-settled hook settings instead of passing inline JSON', async () => {
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeTurnSettledHookSettingsProvider(async ({ provider }) =>
+      provider === 'claude'
+        ? {
+            hooks: {
+              Stop: [
+                {
+                  matcher: '',
+                  hooks: [{ type: 'command', command: '/bin/true # test-hook' }],
+                },
+              ],
+            },
+          }
+        : null
+    );
+
+    const result = await (svc as any).buildTeamRuntimeLaunchArgsPlan({
+      teamName: 'anthropic-hook-settings-team',
+      providerId: 'anthropic',
+      launchIdentity: null,
+      envResolution: { providerArgs: [] },
+      extraArgs: [],
+      includeAnthropicHelper: false,
+      contextLabel: 'Team launch',
+    });
+
+    expect(result.fastModeArgs).toEqual([]);
+    expect(result.runtimeTurnSettledHookArgs).toEqual([]);
+    expect(result.settingsArgs[0]).toBe('--settings');
+    const settingsPath = result.settingsArgs[1];
+    expect(settingsPath).toContain('agent-teams-runtime-settings');
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    expect(settings.hooks.Stop[0].hooks[0].command).toBe('/bin/true # test-hook');
   });
 
   it('adds Codex turn-settled env when Codex is only a secondary member provider', async () => {
