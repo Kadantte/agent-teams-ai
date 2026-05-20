@@ -12252,7 +12252,9 @@ export class TeamProvisioningService {
         mcpPolicy,
         controlApiBaseUrl: input.controlApiBaseUrl,
       });
-      (input.run.memberMcpConfigPaths ??= []).push(mcpConfigPath);
+      const memberMcpConfigPaths = input.run.memberMcpConfigPaths ?? [];
+      input.run.memberMcpConfigPaths = memberMcpConfigPaths;
+      memberMcpConfigPaths.push(mcpConfigPath);
       configs.set(member.name, {
         mcpConfigPath,
         mcpSettingSources: buildTeamMemberMcpSettingSources(mcpPolicy),
@@ -12277,7 +12279,9 @@ export class TeamProvisioningService {
       mcpPolicy,
       controlApiBaseUrl: input.controlApiBaseUrl,
     });
-    (input.run.memberMcpConfigPaths ??= []).push(mcpConfigPath);
+    const memberMcpConfigPaths = input.run.memberMcpConfigPaths ?? [];
+    input.run.memberMcpConfigPaths = memberMcpConfigPaths;
+    memberMcpConfigPaths.push(mcpConfigPath);
     return {
       mcpConfigPath,
       mcpSettingSources: buildTeamMemberMcpSettingSources(mcpPolicy),
@@ -16989,7 +16993,9 @@ export class TeamProvisioningService {
       mcpPolicy: memberMcpPolicy,
       controlApiBaseUrl: provisioningEnv.env.CLAUDE_TEAM_CONTROL_URL,
     });
-    (input.run.memberMcpConfigPaths ??= []).push(mcpConfigPath);
+    const memberMcpConfigPaths = input.run.memberMcpConfigPaths ?? [];
+    input.run.memberMcpConfigPaths = memberMcpConfigPaths;
+    memberMcpConfigPaths.push(mcpConfigPath);
     const memberMcpSettingSources = buildTeamMemberMcpSettingSources(memberMcpPolicy);
     const strictMemberMcpConfig = requiresStrictTeamMemberMcpConfig(memberMcpPolicy);
     const agentId = `${input.configuredMember.name}@${input.teamName}`;
@@ -17140,7 +17146,9 @@ export class TeamProvisioningService {
       mcpPolicy: memberMcpPolicy,
       controlApiBaseUrl: provisioningEnv.env.CLAUDE_TEAM_CONTROL_URL,
     });
-    (input.run.memberMcpConfigPaths ??= []).push(mcpConfigPath);
+    const memberMcpConfigPaths = input.run.memberMcpConfigPaths ?? [];
+    input.run.memberMcpConfigPaths = memberMcpConfigPaths;
+    memberMcpConfigPaths.push(mcpConfigPath);
     const memberMcpSettingSources = buildTeamMemberMcpSettingSources(memberMcpPolicy);
     const strictMemberMcpConfig = requiresStrictTeamMemberMcpConfig(memberMcpPolicy);
     const agentId = `${input.configuredMember.name}@${input.teamName}`;

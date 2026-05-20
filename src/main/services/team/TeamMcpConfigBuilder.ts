@@ -453,7 +453,7 @@ export class TeamMcpConfigBuilder {
     const options = isWriteMcpConfigOptions(optionsOrPolicy)
       ? optionsOrPolicy
       : ({
-          mcpPolicy: optionsOrPolicy as TeamMemberMcpPolicy | undefined,
+          mcpPolicy: optionsOrPolicy,
         } satisfies WriteMcpConfigOptions);
     const mcpPolicy = options.mcpPolicy;
     const controlApiBaseUrl =

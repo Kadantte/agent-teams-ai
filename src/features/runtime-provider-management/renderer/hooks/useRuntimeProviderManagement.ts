@@ -860,7 +860,7 @@ export function useRuntimeProviderManagement(
         );
         if (response.error) {
           if (shouldRecordProbeResult()) {
-            const result = buildFailedModelTestResult(providerId, modelId, response.error!.message);
+            const result = buildFailedModelTestResult(providerId, modelId, response.error.message);
             setModelResults((current) => ({
               ...current,
               [modelId]: result,
