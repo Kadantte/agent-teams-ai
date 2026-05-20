@@ -494,6 +494,21 @@ function isRuntimeHiddenTeamModel(
   );
 }
 
+function getRuntimeCatalogLaunchModels(
+  providerId: SupportedProviderId,
+  providerStatus?: RuntimeAwareProviderStatus | null
+): string[] | null {
+  if (providerStatus?.modelCatalog?.providerId !== providerId) {
+    return null;
+  }
+
+  const models = providerStatus.modelCatalog.models
+    .filter((model) => !model.hidden)
+    .map((model) => model.launchModel.trim() || model.id.trim())
+    .filter(Boolean);
+  return models.length > 0 ? models : null;
+}
+
 function getSupplementalVisibleModels(
   providerId: SupportedProviderId,
   models: readonly string[]
@@ -510,11 +525,16 @@ export function getVisibleTeamProviderModels(
   models: readonly string[],
   providerStatus?: RuntimeAwareProviderStatus | null
 ): string[] {
+  const sourceModels =
+    providerId === 'opencode' && models.length === 0
+      ? (getRuntimeCatalogLaunchModels(providerId, providerStatus) ?? models)
+      : models;
+
   return sortTeamProviderModels(
     providerId,
     filterVisibleProviderRuntimeModels(
       providerId,
-      getSupplementalVisibleModels(providerId, models)
+      getSupplementalVisibleModels(providerId, sourceModels)
     ),
     providerStatus
   ).filter((model) => !isRuntimeHiddenTeamModel(providerId, model, providerStatus));

@@ -1,5 +1,3 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   getAvailableTeamProviderModelOptions,
   getAvailableTeamProviderModels,
@@ -10,6 +8,7 @@ import {
   normalizeTeamModelForUi,
   type TeamModelRuntimeProviderStatus,
 } from '@renderer/utils/teamModelAvailability';
+import { describe, expect, it } from 'vitest';
 
 function createCodexProviderStatus(
   models: string[],
@@ -244,6 +243,91 @@ describe('teamModelAvailability', () => {
     expect(
       normalizeTeamModelForUi('opencode', 'openrouter/moonshotai/kimi-k2', providerStatus)
     ).toBe('openrouter/moonshotai/kimi-k2');
+  });
+
+  it('uses the OpenCode model catalog when runtime models are missing', () => {
+    const providerStatus = createOpenCodeProviderStatus([], {
+      modelCatalog: {
+        schemaVersion: 1,
+        providerId: 'opencode',
+        source: 'app-server',
+        status: 'ready',
+        fetchedAt: '2026-05-12T00:00:00.000Z',
+        staleAt: '2026-05-12T00:10:00.000Z',
+        defaultModelId: 'opencode/big-pickle',
+        defaultLaunchModel: 'opencode/big-pickle',
+        models: [
+          {
+            id: 'openai/gpt-5.4',
+            launchModel: 'openai/gpt-5.4',
+            displayName: 'openai/gpt-5.4',
+            hidden: false,
+            supportedReasoningEfforts: [],
+            defaultReasoningEffort: null,
+            inputModalities: ['text'],
+            supportsPersonality: true,
+            isDefault: false,
+            upgrade: false,
+            source: 'app-server',
+            badgeLabel: null,
+          },
+          {
+            id: 'opencode/big-pickle',
+            launchModel: 'opencode/big-pickle',
+            displayName: 'opencode/big-pickle',
+            hidden: false,
+            supportedReasoningEfforts: [],
+            defaultReasoningEffort: null,
+            inputModalities: ['text'],
+            supportsPersonality: true,
+            isDefault: true,
+            upgrade: false,
+            source: 'app-server',
+            badgeLabel: 'Free',
+          },
+          {
+            id: 'openrouter/hidden-model',
+            launchModel: 'openrouter/hidden-model',
+            displayName: 'openrouter/hidden-model',
+            hidden: true,
+            supportedReasoningEfforts: [],
+            defaultReasoningEffort: null,
+            inputModalities: ['text'],
+            supportsPersonality: true,
+            isDefault: false,
+            upgrade: false,
+            source: 'app-server',
+            badgeLabel: null,
+          },
+        ],
+        diagnostics: {
+          configReadState: 'ready',
+          appServerState: 'healthy',
+        },
+      },
+    });
+
+    expect(getAvailableTeamProviderModels('opencode', providerStatus)).toEqual([
+      'opencode/big-pickle',
+      'openai/gpt-5.4',
+    ]);
+    expect(getAvailableTeamProviderModelOptions('opencode', providerStatus)).toEqual([
+      { value: '', label: 'Default', badgeLabel: 'Default' },
+      {
+        value: 'opencode/big-pickle',
+        label: 'big-pickle',
+        badgeLabel: 'OpenCode',
+        availabilityStatus: 'available',
+        availabilityReason: null,
+      },
+      {
+        value: 'openai/gpt-5.4',
+        label: 'GPT-5.4',
+        badgeLabel: 'OpenAI',
+        availabilityStatus: 'available',
+        availabilityReason: null,
+      },
+    ]);
   });
 
   it('reports OpenCode openai routes unavailable when OpenAI auth is invalid', () => {

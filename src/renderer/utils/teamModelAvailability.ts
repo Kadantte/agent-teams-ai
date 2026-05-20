@@ -235,13 +235,16 @@ function getRuntimeCatalogModels(
     return null;
   }
 
-  if (providerId !== 'codex' || providerStatus?.modelCatalog?.providerId !== 'codex') {
+  if (
+    (providerId !== 'codex' && providerId !== 'opencode') ||
+    providerStatus?.modelCatalog?.providerId !== providerId
+  ) {
     return null;
   }
 
   const models = providerStatus.modelCatalog.models
     .filter((model) => !model.hidden)
-    .map((model) => model.launchModel.trim())
+    .map((model) => model.launchModel.trim() || model.id.trim())
     .filter(Boolean);
   return models.length > 0 ? models : null;
 }

@@ -221,6 +221,74 @@ describe('teamModelCatalog', () => {
     ]);
   });
 
+  it('uses the OpenCode model catalog when the runtime model list is empty', () => {
+    expect(
+      getVisibleTeamProviderModels('opencode', [], {
+        providerId: 'opencode',
+        authMethod: 'opencode_managed',
+        backend: { kind: 'opencode-cli', label: 'OpenCode CLI' },
+        modelCatalog: {
+          schemaVersion: 1,
+          providerId: 'opencode',
+          source: 'app-server',
+          status: 'ready',
+          fetchedAt: '2026-05-12T00:00:00.000Z',
+          staleAt: '2026-05-12T00:10:00.000Z',
+          defaultModelId: 'opencode/big-pickle',
+          defaultLaunchModel: 'opencode/big-pickle',
+          models: [
+            {
+              id: 'openai/gpt-5.4',
+              launchModel: 'openai/gpt-5.4',
+              displayName: 'openai/gpt-5.4',
+              hidden: false,
+              supportedReasoningEfforts: [],
+              defaultReasoningEffort: null,
+              inputModalities: ['text'],
+              supportsPersonality: true,
+              isDefault: false,
+              upgrade: false,
+              source: 'app-server',
+              badgeLabel: null,
+            },
+            {
+              id: 'opencode/big-pickle',
+              launchModel: 'opencode/big-pickle',
+              displayName: 'opencode/big-pickle',
+              hidden: false,
+              supportedReasoningEfforts: [],
+              defaultReasoningEffort: null,
+              inputModalities: ['text'],
+              supportsPersonality: true,
+              isDefault: true,
+              upgrade: false,
+              source: 'app-server',
+              badgeLabel: 'Free',
+            },
+            {
+              id: 'openrouter/hidden-model',
+              launchModel: 'openrouter/hidden-model',
+              displayName: 'openrouter/hidden-model',
+              hidden: true,
+              supportedReasoningEfforts: [],
+              defaultReasoningEffort: null,
+              inputModalities: ['text'],
+              supportsPersonality: true,
+              isDefault: false,
+              upgrade: false,
+              source: 'app-server',
+              badgeLabel: null,
+            },
+          ],
+          diagnostics: {
+            configReadState: 'ready',
+            appServerState: 'healthy',
+          },
+        },
+      })
+    ).toEqual(['opencode/big-pickle', 'openai/gpt-5.4']);
+  });
+
   it('detects Sonnet aliases with or without 1M suffix', () => {
     expect(isAnthropicSonnetTeamModel('sonnet')).toBe(true);
     expect(isAnthropicSonnetTeamModel('sonnet[1m]')).toBe(true);
