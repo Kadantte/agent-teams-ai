@@ -172,10 +172,22 @@ export interface RuntimeProviderManagementViewDto {
   runtime: RuntimeProviderManagementRuntimeDto;
   providers: readonly RuntimeProviderConnectionDto[];
   configuredModels?: readonly RuntimeProviderModelDto[];
+  projectPath?: string | null;
+  projectDefaultModel?: string | null;
+  allProjectsDefaultModel?: string | null;
+  defaultModelSource?: RuntimeProviderDefaultModelSourceDto | null;
   defaultModel: string | null;
   fallbackModel: string | null;
   diagnostics: readonly string[];
 }
+
+export type RuntimeProviderDefaultModelSourceDto =
+  | 'project'
+  | 'all_projects'
+  | 'opencode_config'
+  | 'fallback';
+
+export type RuntimeProviderDefaultScopeDto = 'project' | 'all_projects';
 
 export type RuntimeProviderManagementErrorCodeDto =
   | 'unsupported-runtime'
@@ -361,5 +373,6 @@ export interface RuntimeProviderManagementSetDefaultModelInput {
   providerId: string;
   modelId: string;
   probe?: boolean;
+  scope?: RuntimeProviderDefaultScopeDto;
   projectPath?: string | null;
 }

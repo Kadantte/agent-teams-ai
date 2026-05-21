@@ -1,9 +1,10 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { CliProviderStatus } from '@shared/types';
 import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts';
+import type { CliProviderStatus } from '@shared/types';
 
 interface StoreState {
   appConfig: {
@@ -1588,6 +1589,9 @@ describe('ProviderRuntimeSettingsDialog', () => {
     expect(panel?.getAttribute('data-open')).toBe('true');
     expect(panel?.getAttribute('data-project-path')).toBe('/tmp/project-a');
     expect(host.textContent).toContain('Runtime provider management: opencode');
+    expect(host.textContent).toContain('version 1.4.0 - live resolved-fin');
+    expect(host.textContent).not.toContain('managed teammate agent');
+    expect(host.textContent).not.toContain('behavior abc123');
     expect(host.textContent).not.toContain('Desktop currently exposes status only.');
   });
 });

@@ -156,6 +156,31 @@ describe('RuntimeProviderManagementPanelView', () => {
     expect(refreshButton?.disabled).toBe(true);
   });
 
+  it('shows the project as a compact operation context, not a selected global profile', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(RuntimeProviderManagementPanelView, {
+          state: createState(),
+          actions: createActions(),
+          disabled: false,
+          projectPath: '/Users/belief/dev/projects/321',
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Project context: 321');
+    expect(host.textContent).not.toContain('Managing selected project profile');
+    expect(host.textContent).not.toContain('/Users/belief/dev/projects/321');
+    expect(
+      host.querySelector('[title="Current project context: /Users/belief/dev/projects/321"]')
+    ).not.toBeNull();
+  });
+
   it('renders configured OpenCode model routes with local proof actions', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -188,6 +213,7 @@ describe('RuntimeProviderManagementPanelView', () => {
           }),
           actions,
           disabled: false,
+          projectPath: '/tmp/project',
         })
       );
       await Promise.resolve();
@@ -196,7 +222,7 @@ describe('RuntimeProviderManagementPanelView', () => {
     const row = host.querySelector<HTMLElement>(
       '[data-testid="configured-opencode-model-row-llama.cpp/qwen-test:0.5b"]'
     );
-    expect(host.textContent).toContain('Configured OpenCode models');
+    expect(host.textContent).toContain('Launchable OpenCode models');
     expect(row?.textContent).toContain('local');
     expect(row?.textContent).toContain('configured');
     expect(row?.textContent).toContain('needs test');
@@ -207,23 +233,122 @@ describe('RuntimeProviderManagementPanelView', () => {
       await Promise.resolve();
     });
     await act(async () => {
-      buttons.find((button) => button.textContent?.includes('Use for new teams'))?.click();
+      buttons.find((button) => button.textContent?.includes('Use in team picker'))?.click();
       await Promise.resolve();
     });
     await act(async () => {
-      buttons.find((button) => button.textContent?.includes('Set OpenCode default'))?.click();
+      buttons.find((button) => button.textContent?.includes('Set project default'))?.click();
       await Promise.resolve();
     });
 
-    expect(actions.testModel).toHaveBeenCalledWith(
-      'llama.cpp',
-      'llama.cpp/qwen-test:0.5b'
-    );
+    expect(actions.testModel).toHaveBeenCalledWith('llama.cpp', 'llama.cpp/qwen-test:0.5b');
     expect(actions.useModelForNewTeams).toHaveBeenCalledWith('llama.cpp/qwen-test:0.5b');
     expect(actions.setDefaultModel).toHaveBeenCalledWith(
       'llama.cpp',
-      'llama.cpp/qwen-test:0.5b'
+      'llama.cpp/qwen-test:0.5b',
+      'project'
     );
+  });
+
+  it('can set an all-projects OpenCode default from the model scope controls', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const actions = createActions();
+    const configuredModel = {
+      providerId: 'llama.cpp',
+      modelId: 'llama.cpp/qwen-test:0.5b',
+      displayName: 'qwen-test:0.5b',
+      sourceLabel: 'llama.cpp',
+      free: false,
+      default: false,
+      availability: 'available' as const,
+      accessKind: 'verified' as const,
+      routeKind: 'configured_local' as const,
+      proofState: 'verified' as const,
+      requiresExecutionProof: false,
+      accessReason: null,
+    };
+
+    await act(async () => {
+      root.render(
+        React.createElement(RuntimeProviderManagementPanelView, {
+          state: createState({
+            view: {
+              ...createState().view!,
+              configuredModels: [configuredModel],
+            },
+          }),
+          actions,
+          disabled: false,
+          projectPath: '/tmp/project-a',
+        })
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      Array.from(host.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('All projects'))
+        ?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      Array.from(host.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Set all-projects default'))
+        ?.click();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Used by project contexts without their own OpenCode default');
+    expect(actions.setDefaultModel).toHaveBeenCalledWith(
+      'llama.cpp',
+      'llama.cpp/qwen-test:0.5b',
+      'all_projects'
+    );
+  });
+
+  it('opens launchable routes first when they exist and keeps providers in a separate tab', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const baseState = createState();
+    const configuredModel = {
+      providerId: 'llama.cpp',
+      modelId: 'llama.cpp/qwen-test:0.5b',
+      displayName: 'qwen-test:0.5b',
+      sourceLabel: 'llama.cpp',
+      free: false,
+      default: false,
+      availability: 'untested' as const,
+      accessKind: 'configured_authless' as const,
+      routeKind: 'configured_local' as const,
+      proofState: 'needs_probe' as const,
+      requiresExecutionProof: true,
+      accessReason: 'Execution proof required',
+    };
+
+    await act(async () => {
+      root.render(
+        React.createElement(RuntimeProviderManagementPanelView, {
+          state: createState({
+            view: {
+              ...baseState.view!,
+              configuredModels: [configuredModel],
+            },
+            providers: baseState.view?.providers ?? [],
+          }),
+          actions: createActions(),
+          disabled: false,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Launchable OpenCode models');
+    expect(host.textContent).toContain('llama.cpp/qwen-test:0.5b');
+    expect(host.textContent).toContain('Providers');
+    expect(host.querySelector('[data-testid="runtime-provider-row-openrouter"]')).toBeNull();
   });
 
   it('shows unknown OpenCode defaults without enabling launch actions', async () => {
@@ -1122,13 +1247,14 @@ describe('RuntimeProviderManagementPanelView', () => {
           state,
           actions,
           disabled: false,
+          projectPath: '/tmp/project',
         })
       );
       await Promise.resolve();
     });
 
     expect(host.textContent).toContain('openrouter/openai/gpt-oss-20b:free');
-    expect(host.textContent).toContain('Used for new teams');
+    expect(host.textContent).toContain('Used in team picker');
     expect(host.textContent).toContain('Model probe passed');
     expect(host.textContent).toContain('Recommended');
     expect(host.textContent).toContain('Not recommended');
@@ -1139,7 +1265,7 @@ describe('RuntimeProviderManagementPanelView', () => {
     expect(host.textContent).not.toContain('Set OpenCode default');
     expect(
       Array.from(host.querySelectorAll('button')).some(
-        (button) => button.textContent?.trim() === 'Use for new teams'
+        (button) => button.textContent?.trim() === 'Use in team picker'
       )
     ).toBe(false);
     expect(

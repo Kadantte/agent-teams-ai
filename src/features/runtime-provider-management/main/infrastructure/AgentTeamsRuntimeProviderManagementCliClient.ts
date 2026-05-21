@@ -638,6 +638,8 @@ export class AgentTeamsRuntimeProviderManagementCliClient implements RuntimeProv
             input.providerId,
             '--model',
             input.modelId,
+            '--scope',
+            input.scope === 'all_projects' ? 'all-projects' : 'project',
             '--probe',
             '--compact',
             '--json',

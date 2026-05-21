@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@renderer/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
 import {
   compareOpenCodeTeamModelRecommendations,
   getOpenCodeTeamModelRecommendation,
@@ -43,11 +44,13 @@ import type {
 } from '../hooks/useRuntimeProviderManagement';
 import type {
   RuntimeProviderConnectionDto,
+  RuntimeProviderDefaultScopeDto,
   RuntimeProviderDirectoryEntryDto,
   RuntimeProviderModelDto,
   RuntimeProviderModelTestResultDto,
   RuntimeProviderSetupPromptDto,
 } from '@features/runtime-provider-management/contracts';
+import type { ProjectPathProject } from '@renderer/components/team/dialogs/projectPathProjects';
 import type { CSSProperties, JSX, KeyboardEvent } from 'react';
 
 interface RuntimeProviderManagementPanelViewProps {
@@ -55,6 +58,10 @@ interface RuntimeProviderManagementPanelViewProps {
   readonly actions: RuntimeProviderManagementActions;
   readonly disabled: boolean;
   readonly projectPath?: string | null;
+  readonly projectContextProjects?: readonly ProjectPathProject[];
+  readonly projectContextLoading?: boolean;
+  readonly projectContextError?: string | null;
+  readonly onProjectContextChange?: (projectPath: string | null) => void;
 }
 
 interface ProviderActionsProps {
@@ -72,8 +79,13 @@ interface ProviderRowProps {
   readonly formOpen: boolean;
   readonly busy: boolean;
   readonly disabled: boolean;
+  readonly hasProjectContext: boolean;
   readonly actions: RuntimeProviderManagementActions;
 }
+
+type OpenCodeSettingsSection = 'models' | 'providers';
+
+const NO_PROJECT_CONTEXT_VALUE = '__runtime-provider-no-project-context__';
 
 function getDirectoryAction(
   provider: RuntimeProviderDirectoryEntryDto,
@@ -114,6 +126,38 @@ function getDirectoryModelsLabel(provider: RuntimeProviderDirectoryEntryDto): st
 
 function formatOpenCodeProviderCount(count: number): string {
   return `${count} OpenCode provider${count === 1 ? '' : 's'}`;
+}
+
+function getProjectContextName(projectPath: string | null | undefined): string | null {
+  const trimmed = projectPath?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.replace(/[\\/]+$/, '');
+  const name = normalized.split(/[\\/]/).pop()?.trim();
+  return name || normalized;
+}
+
+function getDefaultScopeDescription(scope: RuntimeProviderDefaultScopeDto): string {
+  return scope === 'all_projects'
+    ? 'Used by project contexts without their own OpenCode default. Local models are tested per project.'
+    : 'Applies only to the selected project context.';
+}
+
+function getDefaultScopeButtonLabel(scope: RuntimeProviderDefaultScopeDto): string {
+  return scope === 'all_projects' ? 'Set all-projects default' : 'Set project default';
+}
+
+function isDefaultForScope(
+  model: RuntimeProviderModelDto,
+  state: RuntimeProviderManagementState,
+  scope: RuntimeProviderDefaultScopeDto
+): boolean {
+  const scopedDefault =
+    scope === 'all_projects'
+      ? state.view?.allProjectsDefaultModel
+      : state.view?.projectDefaultModel;
+  return scopedDefault === model.modelId;
 }
 
 function directoryEntryMatchesQuery(
@@ -442,11 +486,15 @@ function RuntimeSummary({
           <div
             className="mt-1 truncate text-[11px]"
             style={{ color: 'var(--color-text-muted)' }}
-            title={projectPath ?? undefined}
+            title={
+              projectPath
+                ? `Current project context: ${projectPath}`
+                : 'No project context selected; using the fallback OpenCode management context.'
+            }
           >
             {projectPath
-              ? `Managing selected project profile: ${projectPath}`
-              : 'Managing fallback OpenCode profile. Select a project to manage launch credentials for that project.'}
+              ? `Project context: ${getProjectContextName(projectPath) ?? 'current project'}`
+              : 'No project context selected'}
           </div>
           {state.loading ? (
             <div
@@ -713,6 +761,7 @@ function ProviderRow({
   formOpen,
   busy,
   disabled,
+  hasProjectContext,
   actions,
 }: ProviderRowProps): JSX.Element {
   const connect = getProviderAction(provider, 'connect');
@@ -827,6 +876,7 @@ function ProviderRow({
           actions={actions}
           provider={provider}
           disabled={disabled || busy}
+          hasProjectContext={hasProjectContext}
         />
       ) : null}
     </div>
@@ -840,6 +890,7 @@ function DirectoryProviderRow({
   formOpen,
   disabled,
   busy,
+  hasProjectContext,
   actions,
 }: {
   readonly provider: RuntimeProviderDirectoryEntryDto;
@@ -848,6 +899,7 @@ function DirectoryProviderRow({
   readonly formOpen: boolean;
   readonly disabled: boolean;
   readonly busy: boolean;
+  readonly hasProjectContext: boolean;
   readonly actions: RuntimeProviderManagementActions;
 }): JSX.Element {
   const connect = getDirectoryAction(provider, 'connect');
@@ -1003,6 +1055,7 @@ function DirectoryProviderRow({
           actions={actions}
           provider={directoryEntryToProviderConnection(provider)}
           disabled={disabled || busy}
+          hasProjectContext={hasProjectContext}
         />
       ) : null}
     </div>
@@ -1082,7 +1135,7 @@ function ModelBadges({
       {usedForNewTeams ? (
         <Badge className="bg-sky-400/15 px-1.5 py-0 text-[10px] text-sky-100">
           <Star className="mr-1 size-3" />
-          Used for new teams
+          Used in team picker
         </Badge>
       ) : null}
       {model.free ? (
@@ -1140,10 +1193,6 @@ function canUseOpenCodeModelRoute(model: RuntimeProviderModelDto): boolean {
   );
 }
 
-function canSetOpenCodeDefaultModelRoute(model: RuntimeProviderModelDto): boolean {
-  return canUseOpenCodeModelRoute(model) && !model.default;
-}
-
 function getOpenCodeRouteUnavailableTitle(model: RuntimeProviderModelDto): string | undefined {
   if (isUnknownOpenCodeModelRoute(model)) {
     return 'This model is the current OpenCode default, but it is not available in the live catalog yet.';
@@ -1183,6 +1232,7 @@ function ModelRow({
   model,
   selected,
   disabled,
+  hasProjectContext,
   testing,
   result,
   actions,
@@ -1191,6 +1241,7 @@ function ModelRow({
   readonly model: RuntimeProviderModelDto;
   readonly selected: boolean;
   readonly disabled: boolean;
+  readonly hasProjectContext: boolean;
   readonly testing: boolean;
   readonly result: RuntimeProviderModelTestResultDto | undefined;
   readonly actions: RuntimeProviderManagementActions;
@@ -1254,9 +1305,13 @@ function ModelRow({
             size="sm"
             variant="outline"
             className="h-8 min-w-20 justify-center"
-            disabled={disabled || testing}
+            disabled={disabled || !hasProjectContext || testing}
+            title={
+              hasProjectContext ? undefined : 'Select a project context before testing models.'
+            }
             onClick={(event) => {
               event.stopPropagation();
+              if (!hasProjectContext) return;
               void actions.testModel(provider.providerId, model.modelId);
             }}
           >
@@ -1274,14 +1329,139 @@ function ModelRow({
   );
 }
 
+function OpenCodeModelScopeControls({
+  defaultScope,
+  onDefaultScopeChange,
+  projectPath,
+  projects,
+  loading,
+  error,
+  onProjectContextChange,
+}: {
+  readonly defaultScope: RuntimeProviderDefaultScopeDto;
+  readonly onDefaultScopeChange: (scope: RuntimeProviderDefaultScopeDto) => void;
+  readonly projectPath: string | null | undefined;
+  readonly projects: readonly ProjectPathProject[];
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly onProjectContextChange?: (projectPath: string | null) => void;
+}): JSX.Element {
+  const selectedValue = projectPath?.trim() || NO_PROJECT_CONTEXT_VALUE;
+  const projectOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options = projects.filter((project) => {
+      const normalized = project.path.trim();
+      if (!normalized || seen.has(normalized) || project.filesystemState === 'deleted') {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    });
+    const currentPath = projectPath?.trim();
+    if (currentPath && !seen.has(currentPath)) {
+      options.unshift({
+        id: currentPath,
+        path: currentPath,
+        name: getProjectContextName(currentPath) ?? currentPath,
+        sessions: [],
+        totalSessions: 0,
+        createdAt: 0,
+      });
+    }
+    return options;
+  }, [projectPath, projects]);
+
+  return (
+    <div
+      className="rounded-lg border p-3"
+      style={{
+        borderColor: 'var(--color-border-subtle)',
+        backgroundColor: 'rgba(255,255,255,0.02)',
+      }}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-[var(--color-text)]">OpenCode model scope</div>
+          <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+            {getDefaultScopeDescription(defaultScope)}
+          </div>
+        </div>
+        <div className="inline-flex shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
+          {(['project', 'all_projects'] as const).map((scope) => (
+            <button
+              key={scope}
+              type="button"
+              className={`rounded-[3px] px-3 py-1 text-xs font-medium transition-colors ${
+                defaultScope === scope
+                  ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+              }`}
+              onClick={() => onDefaultScopeChange(scope)}
+            >
+              {scope === 'all_projects' ? 'All projects' : 'This project'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+        <div className="min-w-0">
+          <Label className="text-xs text-[var(--color-text-secondary)]">Project context</Label>
+          <div className="mt-1">
+            <Select
+              value={selectedValue}
+              disabled={loading || !onProjectContextChange}
+              onValueChange={(value) => {
+                onProjectContextChange?.(value === NO_PROJECT_CONTEXT_VALUE ? null : value);
+              }}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue
+                  placeholder={loading ? 'Loading project contexts...' : 'Select project context'}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_PROJECT_CONTEXT_VALUE}>Select project context</SelectItem>
+                {projectOptions.map((project) => (
+                  <SelectItem key={project.path} value={project.path}>
+                    {project.name || getProjectContextName(project.path) || project.path}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div
+          className="min-w-0 truncate text-[11px] text-[var(--color-text-muted)] md:max-w-[280px]"
+          title={projectPath?.trim() || undefined}
+        >
+          {projectPath
+            ? `Current context: ${getProjectContextName(projectPath) ?? projectPath}`
+            : 'Select a project before testing or saving OpenCode defaults.'}
+        </div>
+      </div>
+
+      {error ? (
+        <div className="mt-2 rounded-md border border-red-400/25 bg-red-400/10 px-2 py-1.5 text-xs text-red-200">
+          {error}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ConfiguredOpenCodeModelsPanel({
   state,
   actions,
   disabled,
+  defaultScope,
+  hasProjectContext,
 }: {
   readonly state: RuntimeProviderManagementState;
   readonly actions: RuntimeProviderManagementActions;
   readonly disabled: boolean;
+  readonly defaultScope: RuntimeProviderDefaultScopeDto;
+  readonly hasProjectContext: boolean;
 }): JSX.Element | null {
   const models = state.view?.configuredModels ?? [];
   if (models.length === 0) {
@@ -1299,10 +1479,11 @@ function ConfiguredOpenCodeModelsPanel({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-sm font-medium text-[var(--color-text)]">
-            Configured OpenCode models
+            Launchable OpenCode models
           </div>
           <div className="text-xs text-[var(--color-text-muted)]">
-            Ready model routes from OpenCode config, built-in free models, and the current default.
+            Routes you can test or use in the team picker: local config, free built-in models, and
+            current default.
           </div>
         </div>
       </div>
@@ -1314,10 +1495,19 @@ function ConfiguredOpenCodeModelsPanel({
           const savingDefault = state.savingDefaultModelId === model.modelId;
           const result = state.modelResults[model.modelId];
           const unavailableTitle = getOpenCodeRouteUnavailableTitle(model);
-          const canTest = !disabled && !testing && canTestOpenCodeModelRoute(model);
+          const contextRequiredTitle = hasProjectContext
+            ? undefined
+            : 'Select a project context before testing or saving OpenCode defaults.';
+          const alreadyDefaultForScope = isDefaultForScope(model, state, defaultScope);
+          const canTest =
+            !disabled && hasProjectContext && !testing && canTestOpenCodeModelRoute(model);
           const canUse = !disabled && canUseOpenCodeModelRoute(model);
           const canSetDefault =
-            !disabled && !savingDefault && canSetOpenCodeDefaultModelRoute(model);
+            !disabled &&
+            hasProjectContext &&
+            !savingDefault &&
+            !alreadyDefaultForScope &&
+            canUseOpenCodeModelRoute(model);
           return (
             <div
               key={model.modelId}
@@ -1349,7 +1539,7 @@ function ConfiguredOpenCodeModelsPanel({
                     variant="outline"
                     className="h-8"
                     disabled={!canTest}
-                    title={canTest ? undefined : unavailableTitle}
+                    title={canTest ? undefined : (contextRequiredTitle ?? unavailableTitle)}
                     onClick={() => {
                       if (!canTest) return;
                       void actions.testModel(model.providerId, model.modelId);
@@ -1374,7 +1564,7 @@ function ConfiguredOpenCodeModelsPanel({
                       actions.useModelForNewTeams(model.modelId);
                     }}
                   >
-                    Use for new teams
+                    Use in team picker
                   </Button>
                   <Button
                     type="button"
@@ -1385,17 +1575,18 @@ function ConfiguredOpenCodeModelsPanel({
                     title={
                       canSetDefault
                         ? undefined
-                        : model.default
-                          ? 'This is already the OpenCode default.'
-                          : unavailableTitle
+                        : (contextRequiredTitle ??
+                          (alreadyDefaultForScope
+                            ? 'This is already the selected OpenCode default.'
+                            : unavailableTitle))
                     }
                     onClick={() => {
                       if (!canSetDefault) return;
-                      void actions.setDefaultModel(model.providerId, model.modelId);
+                      void actions.setDefaultModel(model.providerId, model.modelId, defaultScope);
                     }}
                   >
                     {savingDefault ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null}
-                    Set OpenCode default
+                    {getDefaultScopeButtonLabel(defaultScope)}
                   </Button>
                 </div>
               </div>
@@ -1413,11 +1604,13 @@ function ProviderModelList({
   actions,
   provider,
   disabled,
+  hasProjectContext,
 }: {
   readonly state: RuntimeProviderManagementState;
   readonly actions: RuntimeProviderManagementActions;
   readonly provider: RuntimeProviderConnectionDto;
   readonly disabled: boolean;
+  readonly hasProjectContext: boolean;
 }): JSX.Element {
   const pickerOpen = state.modelPickerProviderId === provider.providerId;
   const [recommendedOnly, setRecommendedOnly] = useState(false);
@@ -1513,6 +1706,7 @@ function ProviderModelList({
                 model={model}
                 selected={state.selectedModelId === model.modelId}
                 disabled={disabled}
+                hasProjectContext={hasProjectContext}
                 testing={state.testingModelIds.includes(model.modelId)}
                 result={state.modelResults[model.modelId]}
                 actions={actions}
@@ -1529,7 +1723,13 @@ export function RuntimeProviderManagementPanelView({
   actions,
   disabled,
   projectPath = null,
+  projectContextProjects = [],
+  projectContextLoading = false,
+  projectContextError = null,
+  onProjectContextChange,
 }: RuntimeProviderManagementPanelViewProps): JSX.Element {
+  const [selectedSection, setSelectedSection] = useState<OpenCodeSettingsSection | null>(null);
+  const [defaultScope, setDefaultScope] = useState<RuntimeProviderDefaultScopeDto>('project');
   const providerQuery = state.providerQuery.trim().toLowerCase();
   const filteredProviders = providerQuery
     ? state.providers.filter((provider) =>
@@ -1558,6 +1758,9 @@ export function RuntimeProviderManagementPanelView({
       : state.directorySupported
         ? 'OpenCode provider catalog'
         : 'OpenCode providers';
+  const launchableModelCount = state.view?.configuredModels?.length ?? 0;
+  const activeSection = selectedSection ?? (launchableModelCount > 0 ? 'models' : 'providers');
+  const hasProjectContext = Boolean(projectPath?.trim());
 
   return (
     <div className="space-y-3">
@@ -1596,156 +1799,215 @@ export function RuntimeProviderManagementPanelView({
         </div>
       ) : null}
 
-      <ConfiguredOpenCodeModelsPanel state={state} actions={actions} disabled={disabled} />
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-[var(--color-text)]">Providers</div>
-          <div className="text-xs text-[var(--color-text-muted)]">
-            {providerCountLabel}. Connected and recommended providers are shown first.
-          </div>
+      <Tabs
+        value={activeSection}
+        onValueChange={(value) => setSelectedSection(value as OpenCodeSettingsSection)}
+      >
+        <div className="border-b border-white/10">
+          <TabsList className="gap-1 rounded-b-none">
+            <TabsTrigger
+              value="models"
+              className="rounded-b-none data-[state=active]:bg-[var(--color-surface)]"
+            >
+              Models
+              {launchableModelCount > 0 ? (
+                <span className="ml-2 rounded-full bg-white/10 px-1.5 py-0 text-[10px]">
+                  {launchableModelCount}
+                </span>
+              ) : null}
+            </TabsTrigger>
+            <TabsTrigger
+              value="providers"
+              className="rounded-b-none data-[state=active]:bg-[var(--color-surface)]"
+            >
+              Providers
+              {state.directoryTotalCount !== null ? (
+                <span className="ml-2 rounded-full bg-white/10 px-1.5 py-0 text-[10px]">
+                  {state.directoryTotalCount}
+                </span>
+              ) : null}
+            </TabsTrigger>
+          </TabsList>
         </div>
-        {state.directorySupported ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={disabled || state.directoryLoading || state.directoryRefreshing}
-            onClick={() => void actions.refreshDirectory()}
-          >
-            {state.directoryRefreshing ? (
-              <Loader2 className="mr-1 size-3.5 animate-spin" />
-            ) : (
-              <RefreshCcw className="mr-1 size-3.5" />
-            )}
-            Refresh catalog
-          </Button>
-        ) : null}
-      </div>
 
-      {state.providers.length > 0 || state.directorySupported ? (
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
-          <Input
-            data-testid="runtime-provider-search"
-            value={state.providerQuery}
-            disabled={disabled || state.loading}
-            onChange={(event) => actions.setProviderQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && state.providerQuery.trim().length >= 2) {
-                actions.searchAllProviders(state.providerQuery.trim());
-              }
-            }}
-            placeholder="Search providers"
-            className="h-9 pr-3 text-sm"
-            style={{ paddingLeft: 40 }}
+        <TabsContent value="models" className="mt-3 space-y-3">
+          <OpenCodeModelScopeControls
+            defaultScope={defaultScope}
+            onDefaultScopeChange={setDefaultScope}
+            projectPath={projectPath}
+            projects={projectContextProjects}
+            loading={projectContextLoading}
+            error={projectContextError}
+            onProjectContextChange={onProjectContextChange}
           />
-        </div>
-      ) : null}
+          <ConfiguredOpenCodeModelsPanel
+            state={state}
+            actions={actions}
+            disabled={disabled}
+            defaultScope={defaultScope}
+            hasProjectContext={hasProjectContext}
+          />
+          {launchableModelCount === 0 ? (
+            <div className="rounded-lg border border-dashed border-white/10 p-4 text-sm text-[var(--color-text-muted)]">
+              No launchable OpenCode model routes were reported yet. Configure a local route in
+              OpenCode or use the Providers tab to inspect catalog providers.
+            </div>
+          ) : null}
+        </TabsContent>
 
-      {state.directoryError ? (
-        <div className="rounded-md border border-red-400/25 bg-red-400/10 px-3 py-2 text-xs text-red-200">
-          {state.directoryError}
-        </div>
-      ) : null}
-
-      <div className="max-h-[min(52vh,640px)] space-y-2 overflow-y-auto pr-1">
-        {useDirectoryRows ? (
-          <>
-            {state.directoryLoading && state.directoryEntries.length === 0 ? (
-              <RuntimeProviderLoadingPlaceholder />
-            ) : null}
-            {visibleDirectoryRows.map((provider) => (
-              <DirectoryProviderRow
-                key={provider.providerId}
-                provider={provider}
-                state={state}
-                active={provider.providerId === state.selectedProviderId}
-                formOpen={state.activeFormProviderId === provider.providerId}
-                busy={state.savingProviderId === provider.providerId}
-                disabled={disabled || state.directoryLoading}
-                actions={actions}
-              />
-            ))}
-            {state.directoryNextCursor ? (
-              <div className="flex justify-center py-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled || state.directoryRefreshing}
-                  onClick={() => void actions.loadMoreDirectory()}
-                >
-                  {state.directoryRefreshing ? (
-                    <Loader2 className="mr-1 size-3.5 animate-spin" />
-                  ) : null}
-                  Load more providers
-                </Button>
+        <TabsContent value="providers" className="mt-3 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-[var(--color-text)]">Providers</div>
+              <div className="text-xs text-[var(--color-text-muted)]">
+                {providerCountLabel}. Connected and recommended providers are shown first.
               </div>
+            </div>
+            {state.directorySupported ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={disabled || state.directoryLoading || state.directoryRefreshing}
+                onClick={() => void actions.refreshDirectory()}
+              >
+                {state.directoryRefreshing ? (
+                  <Loader2 className="mr-1 size-3.5 animate-spin" />
+                ) : (
+                  <RefreshCcw className="mr-1 size-3.5" />
+                )}
+                Refresh catalog
+              </Button>
             ) : null}
-          </>
-        ) : (
-          <>
-            {state.loading && state.providers.length === 0 ? (
-              <RuntimeProviderLoadingPlaceholder />
-            ) : null}
-            {filteredProviders.map((provider) => (
-              <ProviderRow
-                key={provider.providerId}
-                provider={provider}
-                state={state}
-                active={provider.providerId === state.selectedProviderId}
-                formOpen={state.activeFormProviderId === provider.providerId}
-                busy={state.savingProviderId === provider.providerId}
+          </div>
+
+          {state.providers.length > 0 || state.directorySupported ? (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
+              <Input
+                data-testid="runtime-provider-search"
+                value={state.providerQuery}
                 disabled={disabled || state.loading}
-                actions={actions}
+                onChange={(event) => actions.setProviderQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && state.providerQuery.trim().length >= 2) {
+                    actions.searchAllProviders(state.providerQuery.trim());
+                  }
+                }}
+                placeholder="Search providers"
+                className="h-9 pr-3 text-sm"
+                style={{ paddingLeft: 40 }}
               />
-            ))}
-          </>
-        )}
-      </div>
+            </div>
+          ) : null}
 
-      {useDirectoryRows &&
-      !state.directoryLoading &&
-      visibleDirectoryRows.length === 0 &&
-      !state.directoryError ? (
-        <div
-          className="rounded-lg border p-3 text-sm"
-          style={{
-            borderColor: 'var(--color-border-subtle)',
-            color: 'var(--color-text-secondary)',
-          }}
-        >
-          No providers match that search.
-        </div>
-      ) : null}
+          {state.directoryError ? (
+            <div className="rounded-md border border-red-400/25 bg-red-400/10 px-3 py-2 text-xs text-red-200">
+              {state.directoryError}
+            </div>
+          ) : null}
 
-      {!useDirectoryRows &&
-      !state.loading &&
-      state.providers.length > 0 &&
-      filteredProviders.length === 0 ? (
-        <div
-          className="rounded-lg border p-3 text-sm"
-          style={{
-            borderColor: 'var(--color-border-subtle)',
-            color: 'var(--color-text-secondary)',
-          }}
-        >
-          No providers match that search.
-        </div>
-      ) : null}
+          <div className="max-h-[min(52vh,640px)] space-y-2 overflow-y-auto pr-1">
+            {useDirectoryRows ? (
+              <>
+                {state.directoryLoading && state.directoryEntries.length === 0 ? (
+                  <RuntimeProviderLoadingPlaceholder />
+                ) : null}
+                {visibleDirectoryRows.map((provider) => (
+                  <DirectoryProviderRow
+                    key={provider.providerId}
+                    provider={provider}
+                    state={state}
+                    active={provider.providerId === state.selectedProviderId}
+                    formOpen={state.activeFormProviderId === provider.providerId}
+                    busy={state.savingProviderId === provider.providerId}
+                    disabled={disabled || state.directoryLoading}
+                    hasProjectContext={hasProjectContext}
+                    actions={actions}
+                  />
+                ))}
+                {state.directoryNextCursor ? (
+                  <div className="flex justify-center py-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={disabled || state.directoryRefreshing}
+                      onClick={() => void actions.loadMoreDirectory()}
+                    >
+                      {state.directoryRefreshing ? (
+                        <Loader2 className="mr-1 size-3.5 animate-spin" />
+                      ) : null}
+                      Load more providers
+                    </Button>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                {state.loading && state.providers.length === 0 ? (
+                  <RuntimeProviderLoadingPlaceholder />
+                ) : null}
+                {filteredProviders.map((provider) => (
+                  <ProviderRow
+                    key={provider.providerId}
+                    provider={provider}
+                    state={state}
+                    active={provider.providerId === state.selectedProviderId}
+                    formOpen={state.activeFormProviderId === provider.providerId}
+                    busy={state.savingProviderId === provider.providerId}
+                    disabled={disabled || state.loading}
+                    hasProjectContext={hasProjectContext}
+                    actions={actions}
+                  />
+                ))}
+              </>
+            )}
+          </div>
 
-      {!useDirectoryRows && !state.loading && state.providers.length === 0 ? (
-        <div
-          className="rounded-lg border p-3 text-sm"
-          style={{
-            borderColor: 'var(--color-border-subtle)',
-            color: 'var(--color-text-secondary)',
-          }}
-        >
-          No OpenCode providers reported by the managed runtime.
-        </div>
-      ) : null}
+          {useDirectoryRows &&
+          !state.directoryLoading &&
+          visibleDirectoryRows.length === 0 &&
+          !state.directoryError ? (
+            <div
+              className="rounded-lg border p-3 text-sm"
+              style={{
+                borderColor: 'var(--color-border-subtle)',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              No providers match that search.
+            </div>
+          ) : null}
+
+          {!useDirectoryRows &&
+          !state.loading &&
+          state.providers.length > 0 &&
+          filteredProviders.length === 0 ? (
+            <div
+              className="rounded-lg border p-3 text-sm"
+              style={{
+                borderColor: 'var(--color-border-subtle)',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              No providers match that search.
+            </div>
+          ) : null}
+
+          {!useDirectoryRows && !state.loading && state.providers.length === 0 ? (
+            <div
+              className="rounded-lg border p-3 text-sm"
+              style={{
+                borderColor: 'var(--color-border-subtle)',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              No OpenCode providers reported by the managed runtime.
+            </div>
+          ) : null}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

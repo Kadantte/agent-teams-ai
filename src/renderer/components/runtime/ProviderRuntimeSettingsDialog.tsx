@@ -78,6 +78,8 @@ interface Props {
   readonly onOpenChange: (open: boolean) => void;
   readonly providers: CliProviderStatus[];
   readonly initialProviderId: CliProviderId;
+  readonly initialRuntimeProviderId?: string | null;
+  readonly initialRuntimeProviderAction?: 'connect' | 'select' | null;
   readonly projectPath?: string | null;
   readonly providerStatusLoading?: Partial<Record<CliProviderId, boolean>>;
   readonly disabled?: boolean;
@@ -312,6 +314,24 @@ function getProviderUsageLabel(provider: CliProviderStatus): string {
   return provider.authenticated
     ? `Using ${formatProviderAuthMethodLabelForProvider(provider.providerId, provider.authMethod)}`
     : provider.statusMessage || 'Not connected';
+}
+
+function getCompactOpenCodeProviderDetailMessage(detailMessage?: string | null): string | null {
+  const trimmed = detailMessage?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const firstInternalDetailIndex = [' - auth ', ' - behavior ', ' - managed ']
+    .map((marker) => trimmed.indexOf(marker))
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right)[0];
+
+  const compact =
+    typeof firstInternalDetailIndex === 'number'
+      ? trimmed.slice(0, firstInternalDetailIndex).trim()
+      : trimmed;
+  return compact || null;
 }
 
 function getCodexAccountPanelHint(
@@ -593,6 +613,8 @@ export const ProviderRuntimeSettingsDialog = ({
   onOpenChange,
   providers,
   initialProviderId,
+  initialRuntimeProviderId = null,
+  initialRuntimeProviderAction = null,
   projectPath = null,
   providerStatusLoading = {},
   disabled = false,
@@ -887,6 +909,14 @@ export const ProviderRuntimeSettingsDialog = ({
     }
   }
   const showSelectedProviderSummary = Boolean(selectedProvider) && !connectionManagedRuntime;
+  const selectedProviderDetailMessage =
+    selectedProvider?.providerId === 'opencode'
+      ? getCompactOpenCodeProviderDetailMessage(selectedProvider.detailMessage)
+      : (selectedProvider?.detailMessage ?? null);
+  const selectedProviderDiagnostics =
+    selectedProvider?.providerId === 'opencode'
+      ? []
+      : (selectedProvider?.externalRuntimeDiagnostics ?? []);
 
   const connectionProgressMessage = useMemo(() => {
     if (!connectionLoading || !selectedProvider) {
@@ -1208,18 +1238,17 @@ export const ProviderRuntimeSettingsDialog = ({
                   </span>
                 ) : null}
               </div>
-              {selectedProvider.detailMessage ? (
+              {selectedProviderDetailMessage ? (
                 <div className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {selectedProvider.detailMessage}
+                  {selectedProviderDetailMessage}
                 </div>
               ) : null}
-              {selectedProvider.externalRuntimeDiagnostics &&
-              selectedProvider.externalRuntimeDiagnostics.length > 0 ? (
+              {selectedProviderDiagnostics.length > 0 ? (
                 <div
                   className="mt-2 space-y-1 text-[11px]"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
-                  {selectedProvider.externalRuntimeDiagnostics.slice(0, 3).map((diagnostic) => (
+                  {selectedProviderDiagnostics.slice(0, 3).map((diagnostic) => (
                     <div key={diagnostic.id}>
                       {diagnostic.label}:{' '}
                       {diagnostic.statusMessage ?? (diagnostic.detected ? 'detected' : 'missing')}
@@ -1237,6 +1266,8 @@ export const ProviderRuntimeSettingsDialog = ({
                 runtimeId="opencode"
                 open={open}
                 projectPath={projectPath}
+                initialProviderId={initialRuntimeProviderId}
+                initialProviderAction={initialRuntimeProviderAction}
                 disabled={disabled || selectedProviderLoading}
                 onProviderChanged={() => onRefreshProvider?.('opencode')}
               />
