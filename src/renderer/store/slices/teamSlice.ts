@@ -11,7 +11,6 @@ import {
   canDisplayTaskChangesForOptions,
   type TaskChangeRequestOptions,
 } from '@renderer/utils/taskChangeRequest';
-import { toMessageKey } from '@renderer/utils/teamMessageKey';
 import { extractProviderScopedBaseModel } from '@renderer/utils/teamModelContext';
 import { IpcError, unwrapIpc } from '@renderer/utils/unwrapIpc';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
@@ -30,9 +29,24 @@ import {
   isTeamTaskNeedsFixActionable,
 } from '@shared/utils/teamTaskState';
 
+import {
+  areInboxMessageArraysEquivalent,
+  clearTeamMessageSelectorCaches,
+  clearTeamMessageSelectorCachesForTeam,
+  extractRetainedCanonicalOlderTail,
+  getCanonicalHeadSlice,
+  getTeamMessagesCacheEntry,
+  getTeamMessageSelectorCacheSnapshotForTeam,
+  pruneOptimisticMessages,
+  upsertOptimisticTeamMessage,
+} from '../team/teamMessagesCache';
 import { noteTeamRefreshFanout } from '../teamRefreshFanoutDiagnostics';
 import { getWorktreeNavigationState } from '../utils/stateResetHelpers';
 
+import type {
+  RefreshTeamMessagesHeadResult,
+  TeamMessagesCacheEntry,
+} from '../team/teamMessagesCache';
 import type { AppState } from '../types';
 import type { GraphLayoutMode, GraphOwnerSlotAssignment } from '@claude-teams/agent-graph';
 import type { AppConfig } from '@renderer/types/data';
@@ -80,6 +94,12 @@ import type {
   UpdateKanbanPatch,
 } from '@shared/types';
 import type { StateCreator } from 'zustand';
+
+export type {
+  RefreshTeamMessagesHeadResult,
+  TeamMessagesCacheEntry,
+} from '../team/teamMessagesCache';
+export { selectMemberMessagesForTeamMember, selectTeamMessages } from '../team/teamMessagesCache';
 
 const GRAPH_STABLE_SLOT_LAYOUT_VERSION = 'stable-slots-v1' as const;
 const DISABLE_PERSISTED_TEAM_GRAPH_SLOT_ASSIGNMENTS = true;
@@ -240,23 +260,17 @@ export function __resetTeamSliceModuleStateForTests(): void {
   memberSpawnUiEqualLastWarnAtByTeam.clear();
   resolvedMembersSelectorCache.clear();
   resolvedMemberSelectorCache.clear();
-  mergedMessagesSelectorCache.clear();
-  memberMessagesSelectorCache.clear();
+  clearTeamMessageSelectorCaches();
 }
 
 function clearTeamScopedSelectorCaches(teamName: string): void {
   resolvedMembersSelectorCache.delete(teamName);
-  mergedMessagesSelectorCache.delete(teamName);
+  clearTeamMessageSelectorCachesForTeam(teamName);
 
   const teamScopedPrefix = `${teamName}:`;
   for (const key of resolvedMemberSelectorCache.keys()) {
     if (key.startsWith(teamScopedPrefix)) {
       resolvedMemberSelectorCache.delete(key);
-    }
-  }
-  for (const key of memberMessagesSelectorCache.keys()) {
-    if (key.startsWith(teamScopedPrefix)) {
-      memberMessagesSelectorCache.delete(key);
     }
   }
 }
@@ -649,25 +663,20 @@ export function __getTeamScopedTransientStateForTests(teamName: string): {
   hasMemberSpawnUiEqualLastWarn: boolean;
 } {
   const teamScopedPrefix = `${teamName}:`;
+  const messageSelectorCache = getTeamMessageSelectorCacheSnapshotForTeam(teamName);
   let resolvedMemberSelectorCount = 0;
-  let memberMessagesSelectorCount = 0;
 
   for (const key of resolvedMemberSelectorCache.keys()) {
     if (key.startsWith(teamScopedPrefix)) {
       resolvedMemberSelectorCount += 1;
     }
   }
-  for (const key of memberMessagesSelectorCache.keys()) {
-    if (key.startsWith(teamScopedPrefix)) {
-      memberMessagesSelectorCount += 1;
-    }
-  }
 
   return {
     hasResolvedMembersSelector: resolvedMembersSelectorCache.has(teamName),
     resolvedMemberSelectorCount,
-    hasMergedMessagesSelector: mergedMessagesSelectorCache.has(teamName),
-    memberMessagesSelectorCount,
+    hasMergedMessagesSelector: messageSelectorCache.hasMergedMessagesSelector,
+    memberMessagesSelectorCount: messageSelectorCache.memberMessagesSelectorCount,
     hasPendingFreshTeamDataRefresh: pendingFreshTeamDataRefreshes.has(teamName),
     hasQueuedFullTeamDataRefreshAfterThin: queuedFullTeamDataRefreshesAfterThin.has(teamName),
     hasPostPaintTeamEnrichmentTimer: postPaintTeamEnrichmentTimers.has(teamName),
@@ -1082,153 +1091,6 @@ function areTeamAgentRuntimeSnapshotsEqual(
   return true;
 }
 
-function compareInboxMessagesByTimestamp(a: InboxMessage, b: InboxMessage): number {
-  const aTime = Date.parse(a.timestamp);
-  const bTime = Date.parse(b.timestamp);
-  const aValid = Number.isFinite(aTime);
-  const bValid = Number.isFinite(bTime);
-  if (aValid && bValid && aTime !== bTime) {
-    return aTime - bTime;
-  }
-  if (aValid !== bValid) {
-    return aValid ? -1 : 1;
-  }
-  const aId = typeof a.messageId === 'string' ? a.messageId : '';
-  const bId = typeof b.messageId === 'string' ? b.messageId : '';
-  return aId.localeCompare(bId);
-}
-
-export interface TeamMessagesCacheEntry {
-  canonicalMessages: InboxMessage[];
-  optimisticMessages: InboxMessage[];
-  feedRevision: string | null;
-  nextCursor: string | null;
-  hasMore: boolean;
-  lastFetchedAt: number | null;
-  loadingHead: boolean;
-  loadingOlder: boolean;
-  headHydrated: boolean;
-}
-
-export interface RefreshTeamMessagesHeadResult {
-  feedChanged: boolean;
-  headChanged: boolean;
-  feedRevision: string | null;
-}
-
-const EMPTY_TEAM_MESSAGES_CACHE_ENTRY: TeamMessagesCacheEntry = {
-  canonicalMessages: [],
-  optimisticMessages: [],
-  feedRevision: null,
-  nextCursor: null,
-  hasMore: false,
-  lastFetchedAt: null,
-  loadingHead: false,
-  loadingOlder: false,
-  headHydrated: false,
-};
-
-function createEmptyTeamMessagesCacheEntry(): TeamMessagesCacheEntry {
-  return {
-    canonicalMessages: [],
-    optimisticMessages: [],
-    feedRevision: null,
-    nextCursor: null,
-    hasMore: false,
-    lastFetchedAt: null,
-    loadingHead: false,
-    loadingOlder: false,
-    headHydrated: false,
-  };
-}
-
-function getTeamMessagesCacheEntry(
-  state: Pick<TeamSlice, 'teamMessagesByName'>,
-  teamName: string
-): TeamMessagesCacheEntry {
-  return state.teamMessagesByName[teamName] ?? EMPTY_TEAM_MESSAGES_CACHE_ENTRY;
-}
-
-function upsertOptimisticTeamMessage(
-  entry: TeamMessagesCacheEntry,
-  message: InboxMessage
-): TeamMessagesCacheEntry {
-  const nextOptimistic = [...entry.optimisticMessages];
-  const messageId = typeof message.messageId === 'string' ? message.messageId.trim() : '';
-  if (messageId.length > 0) {
-    const existingIndex = nextOptimistic.findIndex(
-      (candidate) =>
-        typeof candidate.messageId === 'string' && candidate.messageId.trim() === messageId
-    );
-    if (existingIndex >= 0) {
-      nextOptimistic[existingIndex] = {
-        ...nextOptimistic[existingIndex],
-        ...message,
-      };
-    } else {
-      nextOptimistic.push(message);
-    }
-  } else {
-    nextOptimistic.push(message);
-  }
-  nextOptimistic.sort(compareInboxMessagesByTimestamp);
-  return {
-    ...entry,
-    optimisticMessages: nextOptimistic,
-  };
-}
-
-function areInboxMessageArraysEquivalent(
-  left: readonly InboxMessage[],
-  right: readonly InboxMessage[]
-): boolean {
-  if (left === right) return true;
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    const leftItem = left[index];
-    const rightItem = right[index];
-    if (
-      leftItem.messageId !== rightItem.messageId ||
-      leftItem.timestamp !== rightItem.timestamp ||
-      leftItem.from !== rightItem.from ||
-      leftItem.to !== rightItem.to ||
-      leftItem.text !== rightItem.text ||
-      leftItem.summary !== rightItem.summary ||
-      leftItem.read !== rightItem.read ||
-      leftItem.actionMode !== rightItem.actionMode ||
-      leftItem.commentId !== rightItem.commentId ||
-      leftItem.relayOfMessageId !== rightItem.relayOfMessageId ||
-      leftItem.source !== rightItem.source ||
-      leftItem.leadSessionId !== rightItem.leadSessionId ||
-      leftItem.messageKind !== rightItem.messageKind ||
-      JSON.stringify(leftItem.taskRefs ?? null) !== JSON.stringify(rightItem.taskRefs ?? null)
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function pruneOptimisticMessages(
-  optimistic: readonly InboxMessage[],
-  canonical: readonly InboxMessage[]
-): InboxMessage[] {
-  if (optimistic.length === 0) {
-    return [];
-  }
-
-  const canonicalIds = new Set(
-    canonical
-      .map((message) => (typeof message.messageId === 'string' ? message.messageId.trim() : ''))
-      .filter((messageId) => messageId.length > 0)
-  );
-
-  return optimistic.filter((message) => {
-    const messageId = typeof message.messageId === 'string' ? message.messageId.trim() : '';
-    return !messageId || !canonicalIds.has(messageId);
-  });
-}
-
 function clearPendingReplyRefreshTimer(teamName: string): void {
   const existingTimer = pendingTeamPendingReplyRefreshTimers.get(teamName);
   if (existingTimer == null) {
@@ -1264,50 +1126,6 @@ function setPendingReplyRefreshEnabled(
     return false;
   }
   return true;
-}
-
-function getCanonicalHeadSlice(
-  canonicalMessages: readonly InboxMessage[],
-  headLength: number
-): readonly InboxMessage[] {
-  if (headLength <= 0) {
-    return [];
-  }
-  return canonicalMessages.slice(0, headLength);
-}
-
-function extractRetainedCanonicalOlderTail(
-  canonicalMessages: readonly InboxMessage[],
-  freshHeadMessages: readonly InboxMessage[]
-): InboxMessage[] | null {
-  if (canonicalMessages.length === 0) {
-    return [];
-  }
-  if (freshHeadMessages.length === 0) {
-    return null;
-  }
-
-  const freshHeadKeys = new Set(freshHeadMessages.map((message) => toMessageKey(message)));
-  let hasMessagesOutsideFreshHead = false;
-  for (const message of canonicalMessages) {
-    if (!freshHeadKeys.has(toMessageKey(message))) {
-      hasMessagesOutsideFreshHead = true;
-      break;
-    }
-  }
-  if (!hasMessagesOutsideFreshHead) {
-    return [];
-  }
-
-  const anchorKey = toMessageKey(freshHeadMessages[freshHeadMessages.length - 1]);
-  const anchorIndex = canonicalMessages.findIndex((message) => toMessageKey(message) === anchorKey);
-  if (anchorIndex < 0) {
-    return null;
-  }
-
-  return canonicalMessages
-    .slice(anchorIndex + 1)
-    .filter((message) => !freshHeadKeys.has(toMessageKey(message)));
 }
 
 async function refreshTaskChangePresenceForUpdatedTask(
@@ -1945,23 +1763,8 @@ const resolvedMemberSelectorCache = new Map<
     result: ResolvedTeamMember | null;
   }
 >();
-const mergedMessagesSelectorCache = new Map<
-  string,
-  {
-    canonicalRef: InboxMessage[];
-    optimisticRef: InboxMessage[];
-    result: InboxMessage[];
-  }
->();
 const EMPTY_TEAM_MEMBER_SNAPSHOTS: TeamMemberSnapshot[] = [];
 const EMPTY_TEAM_TASKS: TeamViewSnapshot['tasks'] = [];
-const memberMessagesSelectorCache = new Map<
-  string,
-  {
-    messagesRef: InboxMessage[];
-    result: InboxMessage[];
-  }
->();
 
 function resolveMemberStatus(
   snapshot: TeamMemberSnapshot,
@@ -2532,58 +2335,6 @@ export function selectTeamIsAliveForName(
   teamName: string | null | undefined
 ): boolean | undefined {
   return selectTeamDataForName(state, teamName)?.isAlive;
-}
-
-export function selectTeamMessages(
-  state: Pick<TeamSlice, 'teamMessagesByName'>,
-  teamName: string | null | undefined
-): InboxMessage[] {
-  if (!teamName) {
-    return [];
-  }
-
-  const entry = getTeamMessagesCacheEntry(state, teamName);
-  const cached = mergedMessagesSelectorCache.get(teamName);
-  if (
-    cached?.canonicalRef === entry.canonicalMessages &&
-    cached.optimisticRef === entry.optimisticMessages
-  ) {
-    return cached.result;
-  }
-
-  const result = mergeTeamMessages(entry.canonicalMessages, entry.optimisticMessages);
-  mergedMessagesSelectorCache.set(teamName, {
-    canonicalRef: entry.canonicalMessages,
-    optimisticRef: entry.optimisticMessages,
-    result,
-  });
-  return result;
-}
-
-export function selectMemberMessagesForTeamMember(
-  state: Pick<TeamSlice, 'teamMessagesByName'>,
-  teamName: string | null | undefined,
-  memberName: string | null | undefined
-): InboxMessage[] {
-  if (!teamName || !memberName) {
-    return [];
-  }
-
-  const messages = selectTeamMessages(state, teamName);
-  const cacheKey = `${teamName}:${memberName}`;
-  const cached = memberMessagesSelectorCache.get(cacheKey);
-  if (cached?.messagesRef === messages) {
-    return cached.result;
-  }
-
-  const result = messages.filter(
-    (message) => message.from === memberName || message.to === memberName
-  );
-  memberMessagesSelectorCache.set(cacheKey, {
-    messagesRef: messages,
-    result,
-  });
-  return result;
 }
 
 function isMemberActivityMetaStale(
