@@ -107,6 +107,10 @@ type AnthropicApiKeyVerifier = (
   baseUrl?: string | null
 ) => Promise<AnthropicApiKeyVerificationResult>;
 
+type CodexAccountSnapshotReader = Pick<CodexAccountFeatureFacade, 'getSnapshot'> & {
+  refreshSnapshot?: CodexAccountFeatureFacade['refreshSnapshot'];
+};
+
 interface ProviderStatusEnrichmentOptions {
   hydrateModelCatalog?: boolean;
 }
@@ -307,7 +311,7 @@ async function checkCodexCliLoginStatus({
 
 export class ProviderConnectionService {
   private static instance: ProviderConnectionService | null = null;
-  private codexAccountFeature: Pick<CodexAccountFeatureFacade, 'getSnapshot'> | null = null;
+  private codexAccountFeature: CodexAccountSnapshotReader | null = null;
   private codexModelCatalogFeature: Pick<CodexModelCatalogFeatureFacade, 'getCatalog'> | null =
     null;
   private readonly anthropicApiKeyVerificationCache = new Map<
@@ -327,7 +331,7 @@ export class ProviderConnectionService {
     return ProviderConnectionService.instance;
   }
 
-  setCodexAccountFeature(feature: Pick<CodexAccountFeatureFacade, 'getSnapshot'> | null): void {
+  setCodexAccountFeature(feature: CodexAccountSnapshotReader | null): void {
     this.codexAccountFeature = feature;
   }
 
@@ -427,7 +431,9 @@ export class ProviderConnectionService {
       return env;
     }
 
-    const snapshot = this.mergeCodexApiKeyAvailability(await this.getCodexAccountSnapshot(), env);
+    const snapshot = await this.getCodexLaunchSnapshot(env, {
+      refreshRuntimeMissing: true,
+    });
     applyCodexRuntimeContextEnv(env, snapshot);
     const readiness = evaluateCodexLaunchReadiness({
       preferredAuthMode: snapshot.preferredAuthMode,
@@ -503,7 +509,9 @@ export class ProviderConnectionService {
       return env;
     }
 
-    const snapshot = this.mergeCodexApiKeyAvailability(await this.getCodexAccountSnapshot(), env);
+    const snapshot = await this.getCodexLaunchSnapshot(env, {
+      refreshRuntimeMissing: true,
+    });
     applyCodexRuntimeContextEnv(env, snapshot);
     const readiness = evaluateCodexLaunchReadiness({
       preferredAuthMode: snapshot.preferredAuthMode,
@@ -572,7 +580,9 @@ export class ProviderConnectionService {
       return null;
     }
 
-    const snapshot = this.mergeCodexApiKeyAvailability(await this.getCodexAccountSnapshot(), env);
+    const snapshot = await this.getCodexLaunchSnapshot(env, {
+      refreshRuntimeMissing: true,
+    });
     const runtimeEnv = { ...env };
     applyCodexRuntimeContextEnv(runtimeEnv, snapshot);
     const readiness = evaluateCodexLaunchReadiness({
@@ -681,7 +691,9 @@ export class ProviderConnectionService {
       return [];
     }
 
-    const snapshot = this.mergeCodexApiKeyAvailability(await this.getCodexAccountSnapshot(), env);
+    const snapshot = await this.getCodexLaunchSnapshot(env, {
+      refreshRuntimeMissing: true,
+    });
     const readiness = evaluateCodexLaunchReadiness({
       preferredAuthMode: snapshot.preferredAuthMode,
       managedAccount: snapshot.managedAccount,
@@ -985,8 +997,13 @@ export class ProviderConnectionService {
     return CODEX_NATIVE_BACKEND_ID;
   }
 
-  private async getCodexAccountSnapshot(): Promise<CodexAccountSnapshotDto> {
+  private async getCodexAccountSnapshot(options?: {
+    forceRefresh?: boolean;
+  }): Promise<CodexAccountSnapshotDto> {
     if (this.codexAccountFeature) {
+      if (options?.forceRefresh && this.codexAccountFeature.refreshSnapshot) {
+        return this.codexAccountFeature.refreshSnapshot({ forceRefreshToken: true });
+      }
       return this.codexAccountFeature.getSnapshot();
     }
 
@@ -1040,6 +1057,27 @@ export class ProviderConnectionService {
       rateLimits: null,
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  private async getCodexLaunchSnapshot(
+    env: NodeJS.ProcessEnv,
+    options?: { refreshRuntimeMissing?: boolean }
+  ): Promise<CodexAccountSnapshotDto> {
+    let snapshot = this.mergeCodexApiKeyAvailability(await this.getCodexAccountSnapshot(), env);
+    if (!options?.refreshRuntimeMissing || snapshot.appServerState !== 'runtime-missing') {
+      return snapshot;
+    }
+
+    try {
+      snapshot = this.mergeCodexApiKeyAvailability(
+        await this.getCodexAccountSnapshot({ forceRefresh: true }),
+        env
+      );
+    } catch {
+      // Keep the original runtime-missing snapshot so callers still report the concrete issue.
+    }
+
+    return snapshot;
   }
 
   private async resolveCodexApiKeyValue(

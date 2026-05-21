@@ -232,9 +232,11 @@ export class CodexBinaryResolver {
 
   private static async runResolve(): Promise<string | null> {
     const override = process.env.CODEX_CLI_PATH?.trim();
+    const shellOverride = getCachedShellEnv()?.CODEX_CLI_PATH?.trim();
     const appManagedBinaryPath = await resolveVerifiedAppManagedCodexRuntimeBinaryPath();
     const candidates = [
       ...(override ? [override] : []),
+      ...(shellOverride && shellOverride !== override ? [shellOverride] : []),
       ...(appManagedBinaryPath ? [appManagedBinaryPath] : []),
       'codex',
     ];
