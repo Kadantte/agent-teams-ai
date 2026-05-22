@@ -26094,7 +26094,7 @@ describe('TeamProvisioningService', () => {
     const snapshot = await (
       svc as unknown as {
         persistLaunchStateSnapshot: (
-          run: typeof run,
+          run: ReturnType<typeof createMemberSpawnRun>,
           phase: 'finished'
         ) => Promise<unknown>;
       }
