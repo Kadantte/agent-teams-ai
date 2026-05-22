@@ -16,7 +16,10 @@ import {
 import type {
   RuntimeProviderConnectionDto,
   RuntimeProviderDirectoryEntryDto,
+  RuntimeProviderManagementDirectoryResponse,
   RuntimeProviderManagementModelTestResponse,
+  RuntimeProviderManagementProviderResponse,
+  RuntimeProviderManagementSetupFormResponse,
   RuntimeProviderManagementViewDto,
   RuntimeProviderManagementViewResponse,
 } from '../../../../src/features/runtime-provider-management/contracts';
@@ -112,6 +115,20 @@ describe('useRuntimeProviderManagement', () => {
     return React.createElement('div');
   }
 
+  function ConfigurableHarness(props: {
+    enabled: boolean;
+    projectPath?: string | null;
+  }): React.ReactElement {
+    const hook = useRuntimeProviderManagement({
+      runtimeId: 'opencode',
+      enabled: props.enabled,
+      projectPath: props.projectPath,
+    });
+    state = hook[0];
+    actions = hook[1];
+    return React.createElement('div');
+  }
+
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     host = document.createElement('div');
@@ -172,6 +189,174 @@ describe('useRuntimeProviderManagement', () => {
       runtimeId: 'opencode',
       projectPath: '/tmp/project-a',
     });
+  });
+
+  it('clears structured errors and stale provider state when disabled', async () => {
+    const loadView = vi.fn(() =>
+      Promise.resolve({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        error: {
+          code: 'runtime-misconfigured',
+          message: 'OpenCode provider settings are using the wrong runtime binary.',
+          recoverable: true,
+          diagnostics: {
+            summary: 'OpenCode provider settings are using the wrong runtime binary.',
+            likelyCause:
+              'The app resolved the OpenCode CLI itself as the Agent Teams runtime binary.',
+            binaryPath: '/opt/homebrew/bin/opencode',
+            command:
+              '/opt/homebrew/bin/opencode runtime providers view --runtime opencode --json --compact',
+            projectPath: null,
+            exitCode: null,
+            stderrPreview: null,
+            stdoutPreview: null,
+            hints: ['Those environment variables must not point to opencode.'],
+          },
+        },
+      })
+    );
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        runtimeProviderManagement: {
+          loadView,
+        },
+      } as unknown as ElectronAPI,
+    });
+
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(React.createElement(ConfigurableHarness, { enabled: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(state?.error).toContain('wrong runtime binary');
+    expect(state?.errorDiagnostics?.binaryPath).toBe('/opt/homebrew/bin/opencode');
+
+    await act(async () => {
+      root.render(React.createElement(ConfigurableHarness, { enabled: false }));
+      await Promise.resolve();
+    });
+
+    expect(state?.view).toBeNull();
+    expect(state?.selectedProviderId).toBeNull();
+    expect(state?.error).toBeNull();
+    expect(state?.errorDiagnostics).toBeNull();
+    expect(state?.loading).toBe(false);
+  });
+
+  it('ignores pending directory and setup-form responses after being disabled', async () => {
+    let resolveDirectory:
+      | ((response: RuntimeProviderManagementDirectoryResponse) => void)
+      | null = null;
+    let resolveSetupForm:
+      | ((response: RuntimeProviderManagementSetupFormResponse) => void)
+      | null = null;
+    const directoryResponse = new Promise<RuntimeProviderManagementDirectoryResponse>(
+      (resolve) => {
+        resolveDirectory = resolve;
+      }
+    );
+    const setupFormResponse = new Promise<RuntimeProviderManagementSetupFormResponse>(
+      (resolve) => {
+        resolveSetupForm = resolve;
+      }
+    );
+    const loadView = vi.fn(() =>
+      Promise.resolve({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        view: createRuntimeView(),
+      })
+    );
+    const loadProviderDirectory = vi.fn(() => directoryResponse);
+    const loadSetupForm = vi.fn(() => setupFormResponse);
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        runtimeProviderManagement: {
+          loadView,
+          loadProviderDirectory,
+          loadSetupForm,
+        },
+      } as unknown as ElectronAPI,
+    });
+
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(React.createElement(ConfigurableHarness, { enabled: true }));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(loadProviderDirectory).toHaveBeenCalled();
+      });
+      actions?.startConnect('openrouter');
+    });
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(loadSetupForm).toHaveBeenCalled();
+      });
+    });
+
+    await act(async () => {
+      root.render(React.createElement(ConfigurableHarness, { enabled: false }));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      resolveDirectory?.({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        directory: {
+          runtimeId: 'opencode',
+          totalCount: 1,
+          returnedCount: 1,
+          query: null,
+          filter: 'all',
+          limit: 50,
+          cursor: null,
+          nextCursor: null,
+          entries: [createOpenAiLocalDirectoryEntry()],
+          diagnostics: [],
+          fetchedAt: '2026-05-22T00:00:00.000Z',
+        },
+      });
+      resolveSetupForm?.({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        setupForm: {
+          runtimeId: 'opencode',
+          providerId: 'openrouter',
+          displayName: 'OpenRouter',
+          method: 'api',
+          supported: true,
+          title: 'Connect OpenRouter',
+          description: null,
+          submitLabel: 'Connect',
+          disabledReason: null,
+          source: 'curated',
+          secret: {
+            key: 'key',
+            label: 'API key',
+            placeholder: 'Paste API key',
+            required: true,
+          },
+          prompts: [],
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(state?.directoryEntries).toEqual([]);
+    expect(state?.directoryLoaded).toBe(false);
+    expect(state?.setupForm).toBeNull();
+    expect(state?.activeFormProviderId).toBeNull();
+    expect(state?.setupFormLoading).toBe(false);
   });
 
   it('ignores stale provider views after project context changes', async () => {
@@ -239,6 +424,143 @@ describe('useRuntimeProviderManagement', () => {
 
     expect(state?.view?.projectPath).toBe('/tmp/project-b');
     expect(state?.view?.defaultModel).toBe('opencode/project-b');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('restarts provider directory loading when project context changes while loading', async () => {
+    let resolveProjectADirectory:
+      | ((response: RuntimeProviderManagementDirectoryResponse) => void)
+      | null = null;
+    let resolveProjectBDirectory:
+      | ((response: RuntimeProviderManagementDirectoryResponse) => void)
+      | null = null;
+    const projectBEntry: RuntimeProviderDirectoryEntryDto = {
+      ...createOpenAiLocalDirectoryEntry(),
+      providerId: 'project-b-provider',
+      displayName: 'Project B Provider',
+    };
+    const loadView = vi.fn((input: { projectPath?: string | null }) =>
+      Promise.resolve({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        view: {
+          ...createRuntimeView(),
+          projectPath: input.projectPath ?? null,
+        },
+      })
+    );
+    const loadProviderDirectory = vi.fn((input: { projectPath?: string | null }) => {
+      if (input.projectPath === '/tmp/project-a') {
+        return new Promise<RuntimeProviderManagementDirectoryResponse>((resolve) => {
+          resolveProjectADirectory = resolve;
+        });
+      }
+      return new Promise<RuntimeProviderManagementDirectoryResponse>((resolve) => {
+        resolveProjectBDirectory = resolve;
+      });
+    });
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        runtimeProviderManagement: {
+          loadView,
+          loadProviderDirectory,
+        },
+      } as unknown as ElectronAPI,
+    });
+
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(React.createElement(EnabledHarness, { projectPath: '/tmp/project-a' }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+      await vi.waitFor(() => {
+        expect(loadProviderDirectory).toHaveBeenCalledWith({
+          runtimeId: 'opencode',
+          projectPath: '/tmp/project-a',
+          query: null,
+          filter: 'all',
+          limit: 50,
+          cursor: null,
+          refresh: false,
+        });
+      });
+    });
+
+    await act(async () => {
+      root.render(React.createElement(EnabledHarness, { projectPath: '/tmp/project-b' }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+      await vi.waitFor(() => {
+        expect(loadProviderDirectory).toHaveBeenCalledWith({
+          runtimeId: 'opencode',
+          projectPath: '/tmp/project-b',
+          query: null,
+          filter: 'all',
+          limit: 50,
+          cursor: null,
+          refresh: false,
+        });
+      });
+    });
+
+    await act(async () => {
+      resolveProjectBDirectory?.({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        directory: {
+          runtimeId: 'opencode',
+          totalCount: 1,
+          returnedCount: 1,
+          query: null,
+          filter: 'all',
+          limit: 50,
+          cursor: null,
+          nextCursor: null,
+          fetchedAt: '2026-05-22T00:00:00.000Z',
+          entries: [projectBEntry],
+          diagnostics: [],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(state?.directoryEntries.map((entry) => entry.providerId)).toEqual([
+      'project-b-provider',
+    ]);
+
+    await act(async () => {
+      resolveProjectADirectory?.({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        directory: {
+          runtimeId: 'opencode',
+          totalCount: 1,
+          returnedCount: 1,
+          query: null,
+          filter: 'all',
+          limit: 50,
+          cursor: null,
+          nextCursor: null,
+          fetchedAt: '2026-05-22T00:00:00.000Z',
+          entries: [createOpenAiLocalDirectoryEntry()],
+          diagnostics: [],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(state?.directoryEntries.map((entry) => entry.providerId)).toEqual([
+      'project-b-provider',
+    ]);
 
     await act(async () => {
       root.unmount();
@@ -406,6 +728,153 @@ describe('useRuntimeProviderManagement', () => {
     expect(state?.view?.defaultModel).toBe('opencode/project-b');
     expect(state?.selectedModelId).toBeNull();
     expect(state?.successMessage).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('clears pending provider save state after project context changes', async () => {
+    const connectedProvider: RuntimeProviderConnectionDto = {
+      ...createOpenAiLocalProvider(),
+      ownership: ['managed'],
+      detail: 'Connected via managed OpenCode credential',
+    };
+    let resolveConnect: ((value: RuntimeProviderManagementProviderResponse) => void) | null =
+      null;
+    const loadView = vi.fn((input: { projectPath?: string | null }) =>
+      Promise.resolve({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        view: {
+          ...createRuntimeView(),
+          projectPath: input.projectPath ?? null,
+          defaultModel: input.projectPath === '/tmp/project-b' ? 'opencode/project-b' : null,
+        },
+      })
+    );
+    const loadProviderDirectory = vi.fn(() =>
+      Promise.resolve({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        directory: {
+          runtimeId: 'opencode',
+          totalCount: 1,
+          returnedCount: 1,
+          query: null,
+          filter: 'all',
+          limit: 50,
+          cursor: null,
+          nextCursor: null,
+          fetchedAt: '2026-04-25T00:00:00.000Z',
+          entries: [createOpenAiLocalDirectoryEntry()],
+          diagnostics: [],
+        },
+      })
+    );
+    const loadSetupForm = vi.fn(() =>
+      Promise.resolve({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        setupForm: {
+          runtimeId: 'opencode',
+          providerId: 'openai',
+          displayName: 'OpenAI',
+          method: 'api',
+          supported: true,
+          title: 'Connect OpenAI',
+          description: null,
+          submitLabel: 'Connect',
+          disabledReason: null,
+          source: 'curated',
+          secret: {
+            key: 'key',
+            label: 'API key',
+            placeholder: 'Paste API key',
+            required: true,
+          },
+          prompts: [],
+        },
+      })
+    );
+    const connectProvider = vi.fn(
+      () =>
+        new Promise<RuntimeProviderManagementProviderResponse>((resolve) => {
+          resolveConnect = resolve;
+        })
+    );
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        runtimeProviderManagement: {
+          loadView,
+          loadProviderDirectory,
+          loadSetupForm,
+          connectProvider,
+        },
+      } as unknown as ElectronAPI,
+    });
+
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(React.createElement(EnabledHarness, { projectPath: '/tmp/project-a' }));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      actions?.startConnect('openai');
+      actions?.setApiKeyValue('sk-project-a');
+      await vi.waitFor(() => {
+        expect(loadSetupForm).toHaveBeenCalled();
+      });
+    });
+
+    let submitPromise: Promise<void> | null = null;
+    await act(async () => {
+      submitPromise = actions?.submitConnect('openai') ?? null;
+      await vi.waitFor(() => {
+        expect(connectProvider).toHaveBeenCalledWith({
+          runtimeId: 'opencode',
+          providerId: 'openai',
+          method: 'api',
+          apiKey: 'sk-project-a',
+          metadata: {},
+          projectPath: '/tmp/project-a',
+        });
+      });
+      await Promise.resolve();
+    });
+
+    expect(state?.savingProviderId).toBe('openai');
+
+    await act(async () => {
+      root.render(React.createElement(EnabledHarness, { projectPath: '/tmp/project-b' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(loadView).toHaveBeenCalledWith({
+        runtimeId: 'opencode',
+        projectPath: '/tmp/project-b',
+      });
+    });
+
+    expect(state?.savingProviderId).toBeNull();
+    expect(state?.activeFormProviderId).toBeNull();
+
+    await act(async () => {
+      resolveConnect?.({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        provider: connectedProvider,
+      });
+      await submitPromise;
+    });
+
+    expect(state?.view?.providers).toEqual([]);
+    expect(state?.savingProviderId).toBeNull();
+    expect(state?.setupSubmitError).toBeNull();
 
     await act(async () => {
       root.unmount();
@@ -1040,6 +1509,68 @@ describe('useRuntimeProviderManagement', () => {
     expect(state?.apiKeyValue).toBe('sk-bad-value');
   });
 
+  it('keeps setup form diagnostics available when submit is attempted after form load failure', async () => {
+    const loadSetupForm = vi.fn(() =>
+      Promise.resolve({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        error: {
+          code: 'runtime-misconfigured',
+          message: 'OpenCode provider settings are using the wrong runtime binary.',
+          recoverable: true,
+          diagnostics: {
+            summary: 'OpenCode provider settings are using the wrong runtime binary.',
+            likelyCause: 'The app resolved the OpenCode CLI itself as the runtime binary.',
+            binaryPath: '/opt/homebrew/bin/opencode',
+            command: '/opt/homebrew/bin/opencode runtime providers setup-form',
+            projectPath: null,
+            exitCode: null,
+            stderrPreview: null,
+            stdoutPreview: null,
+            hints: ['Those environment variables must not point to opencode.'],
+          },
+        },
+      })
+    );
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        runtimeProviderManagement: {
+          loadSetupForm,
+        },
+      } as unknown as ElectronAPI,
+    });
+
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(React.createElement(Harness));
+      await Promise.resolve();
+    });
+
+    act(() => {
+      actions?.startConnect('openrouter');
+    });
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(loadSetupForm).toHaveBeenCalled();
+      });
+    });
+
+    expect(state?.setupFormError).toBe(
+      'OpenCode provider settings are using the wrong runtime binary.'
+    );
+    expect(state?.setupFormErrorDiagnostics?.binaryPath).toBe('/opt/homebrew/bin/opencode');
+
+    await act(async () => {
+      await actions?.submitConnect('openrouter');
+    });
+
+    expect(state?.setupSubmitError).toBe(
+      'OpenCode provider settings are using the wrong runtime binary.'
+    );
+    expect(state?.setupSubmitErrorDiagnostics?.binaryPath).toBe('/opt/homebrew/bin/opencode');
+  });
+
   it('submits a supported setup form without a secret as a null API key', async () => {
     const loadSetupForm = vi.fn(() =>
       Promise.resolve({
@@ -1441,6 +1972,47 @@ describe('useRuntimeProviderManagement', () => {
     expect(state?.error).toBeNull();
     expect(state?.modelResults[modelId]?.ok).toBe(false);
     expect(state?.modelResults[modelId]?.message).toBe(message);
+  });
+
+  it('promotes structured model probe failures to the global diagnostics alert state', async () => {
+    const modelId = 'openrouter/anthropic/claude-3.5-haiku';
+    installRuntimeProviderManagementApi({
+      schemaVersion: 1,
+      runtimeId: 'opencode',
+      error: {
+        code: 'runtime-misconfigured',
+        message: 'OpenCode provider settings are using the wrong runtime binary.',
+        recoverable: true,
+        diagnostics: {
+          summary: 'OpenCode provider settings are using the wrong runtime binary.',
+          likelyCause: 'The app resolved the OpenCode CLI itself as the runtime binary.',
+          binaryPath: '/opt/homebrew/bin/opencode',
+          command: '/opt/homebrew/bin/opencode runtime providers test-model',
+          projectPath: null,
+          exitCode: null,
+          stderrPreview: null,
+          stdoutPreview: null,
+          hints: ['Those environment variables must not point to opencode.'],
+        },
+      },
+    });
+
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(React.createElement(Harness));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await actions?.testModel('openrouter', modelId);
+    });
+
+    expect(state?.error).toBe('OpenCode provider settings are using the wrong runtime binary.');
+    expect(state?.errorDiagnostics?.binaryPath).toBe('/opt/homebrew/bin/opencode');
+    expect(state?.modelResults[modelId]).toMatchObject({
+      ok: false,
+      message: 'OpenCode provider settings are using the wrong runtime binary.',
+    });
   });
 
   it('keeps successful model probes scoped to the model card instead of a global success banner', async () => {

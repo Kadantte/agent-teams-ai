@@ -193,6 +193,7 @@ export type RuntimeProviderManagementErrorCodeDto =
   | 'unsupported-runtime'
   | 'unsupported-action'
   | 'runtime-missing'
+  | 'runtime-misconfigured'
   | 'runtime-unhealthy'
   | 'provider-missing'
   | 'auth-required'
@@ -201,10 +202,24 @@ export type RuntimeProviderManagementErrorCodeDto =
   | 'model-test-failed'
   | 'unsupported-auth-method';
 
+export interface RuntimeProviderManagementErrorDiagnosticsDto {
+  errorCode?: RuntimeProviderManagementErrorCodeDto | null;
+  summary: string | null;
+  likelyCause: string | null;
+  binaryPath: string | null;
+  command: string | null;
+  projectPath: string | null;
+  exitCode: number | null;
+  stderrPreview: string | null;
+  stdoutPreview: string | null;
+  hints: readonly string[];
+}
+
 export interface RuntimeProviderManagementErrorDto {
   code: RuntimeProviderManagementErrorCodeDto;
   message: string;
   recoverable: boolean;
+  diagnostics?: RuntimeProviderManagementErrorDiagnosticsDto | null;
 }
 
 export interface RuntimeProviderManagementViewResponse {
