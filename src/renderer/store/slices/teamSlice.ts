@@ -52,6 +52,13 @@ import {
   isTeamLocalStateEpochCurrent,
 } from '../team/teamLocalStateEpoch';
 import {
+  clearAllMemberSpawnStatusesIpcBackoffs,
+  clearMemberSpawnStatusesIpcBackoff,
+  hasMemberSpawnStatusesIpcBackoff,
+  isMemberSpawnStatusesIpcBackoffActive,
+  recordMemberSpawnStatusesIpcRetryBackoff,
+} from '../team/teamMemberSpawnStatusBackoff';
+import {
   areInboxMessageArraysEquivalent,
   clearTeamMessageSelectorCaches,
   clearTeamMessageSelectorCachesForTeam,
@@ -173,7 +180,6 @@ const pendingFreshTeamMemberActivityMetaRefreshes = new Set<string>();
 const pendingTeamPendingReplyRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let inFlightGlobalTasksRefresh: Promise<void> | null = null;
 let pendingFreshGlobalTasksRefresh = false;
-const memberSpawnStatusesIpcBackoffUntilByTeam = new Map<string, number>();
 const teamRefreshBurstDiagnostics = new Map<
   string,
   { windowStartedAt: number; count: number; lastWarnAt: number }
@@ -241,7 +247,7 @@ export function __resetTeamSliceModuleStateForTests(): void {
   clearAllPendingReplyRefreshWaits();
   clearAllLastResolvedTeamDataRefreshes();
   clearAllTeamLocalStateEpochs();
-  memberSpawnStatusesIpcBackoffUntilByTeam.clear();
+  clearAllMemberSpawnStatusesIpcBackoffs();
   teamRefreshBurstDiagnostics.clear();
   memberSpawnUiEqualLastWarnAtByTeam.clear();
   resolvedMembersSelectorCache.clear();
@@ -274,7 +280,7 @@ function clearTeamScopedTransientState(teamName: string): void {
   inFlightTeamMemberActivityMetaRequests.delete(teamName);
   pendingFreshTeamMemberActivityMetaRefreshes.delete(teamName);
   clearLastResolvedTeamDataRefreshAt(teamName);
-  memberSpawnStatusesIpcBackoffUntilByTeam.delete(teamName);
+  clearMemberSpawnStatusesIpcBackoff(teamName);
   teamRefreshBurstDiagnostics.delete(teamName);
   memberSpawnUiEqualLastWarnAtByTeam.delete(teamName);
   clearTeamScopedSelectorCaches(teamName);
@@ -660,7 +666,7 @@ export function __getTeamScopedTransientStateForTests(teamName: string): {
       pendingFreshTeamMemberActivityMetaRefreshes.has(teamName),
     hasLastResolvedTeamDataRefresh: hasLastResolvedTeamDataRefreshAt(teamName),
     hasCurrentLocalStateEpoch: hasTeamLocalStateEpoch(teamName),
-    hasMemberSpawnStatusesIpcBackoff: memberSpawnStatusesIpcBackoffUntilByTeam.has(teamName),
+    hasMemberSpawnStatusesIpcBackoff: hasMemberSpawnStatusesIpcBackoff(teamName),
     hasTeamRefreshBurstDiagnostics: teamRefreshBurstDiagnostics.has(teamName),
     hasMemberSpawnUiEqualLastWarn: memberSpawnUiEqualLastWarnAtByTeam.has(teamName),
   };
@@ -2987,13 +2993,12 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
   launchParamsByTeam: loadAllLaunchParams(),
   fetchMemberSpawnStatuses: async (teamName: string) => {
     if (!api.teams?.getMemberSpawnStatuses) return;
-    const backoffUntil = memberSpawnStatusesIpcBackoffUntilByTeam.get(teamName) ?? 0;
-    if (backoffUntil > Date.now()) {
+    if (isMemberSpawnStatusesIpcBackoffActive(teamName)) {
       return;
     }
     try {
       const snapshot = await api.teams.getMemberSpawnStatuses(teamName);
-      memberSpawnStatusesIpcBackoffUntilByTeam.delete(teamName);
+      clearMemberSpawnStatusesIpcBackoff(teamName);
       set((prev) => {
         if (snapshot.runId != null && prev.ignoredRuntimeRunIds[snapshot.runId] === teamName) {
           return {};
@@ -3057,9 +3062,9 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("No handler registered for 'team:memberSpawnStatuses'")) {
-        memberSpawnStatusesIpcBackoffUntilByTeam.set(
+        recordMemberSpawnStatusesIpcRetryBackoff(
           teamName,
-          Date.now() + MEMBER_SPAWN_STATUSES_IPC_RETRY_BACKOFF_MS
+          MEMBER_SPAWN_STATUSES_IPC_RETRY_BACKOFF_MS
         );
       }
       // ignore — spawn statuses are best-effort
