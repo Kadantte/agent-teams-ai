@@ -73,11 +73,20 @@ vi.mock('@renderer/components/ui/tooltip', () => ({
     React.createElement(React.Fragment, null, children),
   TooltipContent: ({
     children,
+    side,
+    align,
     className,
   }: {
     children: React.ReactNode;
+    side?: string;
+    align?: string;
     className?: string;
-  }) => React.createElement('div', { className, 'data-testid': 'tooltip-content' }, children),
+  }) =>
+    React.createElement(
+      'div',
+      { className, 'data-align': align, 'data-side': side, 'data-testid': 'tooltip-content' },
+      children
+    ),
 }));
 
 vi.mock('@renderer/hooks/useTheme', () => ({
@@ -866,6 +875,10 @@ describe('MemberCard starting-state visuals', () => {
     expect(
       host.querySelector('[data-testid="tooltip-root"][data-delay-duration="0"]')
     ).not.toBeNull();
+    const runtimeTooltipContent = Array.from(
+      host.querySelectorAll('[data-testid="tooltip-content"]')
+    ).find((content) => content.className.includes('border-blue-400/20'));
+    expect(runtimeTooltipContent?.getAttribute('data-side')).toBe('left');
     expect(host.querySelector('[data-testid="tooltip-root"]')?.getAttribute('data-open')).toBe(
       'false'
     );
@@ -1148,6 +1161,7 @@ describe('MemberCard starting-state visuals', () => {
 
     const button = host.querySelector('[aria-label="Copy diagnostics"]') as HTMLButtonElement;
     expect(button).not.toBeNull();
+    expect(button.className).toContain('member-launch-diagnostics-pulse');
 
     await act(async () => {
       button.click();
@@ -1163,6 +1177,7 @@ describe('MemberCard starting-state visuals', () => {
     expect(payload.runId).toBe('run-42');
     expect(payload.livenessKind).toBe('not_found');
     expect(payload.processCommand).toContain('--token [redacted]');
+    expect(button.className).not.toContain('member-launch-diagnostics-pulse');
 
     await act(async () => {
       root.unmount();
@@ -1233,6 +1248,8 @@ describe('MemberCard starting-state visuals', () => {
     });
 
     const failureReason = host.querySelector('[data-testid="member-launch-failure-reason"]');
+    expect(failureReason?.className).toContain('col-start-2');
+    expect(failureReason?.className).toContain('col-span-2');
     expect(failureReason?.textContent).toContain('Insufficient credits');
     expect(failureReason?.textContent).toContain('OpenRouter credits');
     expect(failureReason?.textContent).not.toContain('Latest assistant message');

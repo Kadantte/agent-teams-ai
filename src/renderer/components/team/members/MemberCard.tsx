@@ -1043,7 +1043,7 @@ export const MemberCard = memo(function MemberCard({
           <MemberRuntimeTelemetryStrip runtimeEntry={runtimeEntry} scale={runtimeTelemetryScale} />
         ) : null}
         <div className="pointer-events-none absolute inset-0 z-10 rounded transition-colors group-hover:bg-white/5" />
-        <div className="relative z-20 flex items-center gap-2.5">
+        <div className="relative z-20 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1">
           <div className="relative shrink-0">
             <div
               className="rounded-full border-2 p-px"
@@ -1166,6 +1166,7 @@ export const MemberCard = memo(function MemberCard({
                     <MemberLaunchDiagnosticsButton
                       payload={launchDiagnosticsPayload}
                       className="size-auto rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+                      attention
                     />
                   ) : null}
                 </>
@@ -1201,336 +1202,348 @@ export const MemberCard = memo(function MemberCard({
                 ) : null}
               </div>
             ) : null}
-            {launchFailureReason ? (
-              <div
-                data-testid="member-launch-failure-reason"
-                className="mt-1 min-w-0 whitespace-pre-wrap break-words text-[10px] font-medium leading-snug text-red-300/90"
-                title={rawLaunchFailureReason}
+          </div>
+          <div className="flex shrink-0 items-center gap-2.5 justify-self-end">
+            {showLaunchBadge ? (
+              <span
+                className="flex shrink-0 items-center gap-1"
+                title={runtimeEntry?.runtimeDiagnostic}
               >
-                <span>
-                  {renderLinkifiedText(launchFailureReason, {
-                    linkClassName: 'underline underline-offset-2 hover:text-red-200',
-                    stopPropagation: true,
-                    getLinkLabel: getLaunchFailureLinkLabel,
-                  })}
-                </span>
+                {launchVisualState === 'starting_stale' ? (
+                  <AlertTriangle
+                    className="size-3.5 shrink-0 text-amber-400"
+                    aria-label={launchBadgeLabel}
+                  />
+                ) : (
+                  <SyncedLoader2
+                    className="size-3.5 shrink-0 text-[var(--color-text-muted)]"
+                    aria-label={launchBadgeLabel}
+                  />
+                )}
+                <Badge
+                  variant="secondary"
+                  className="shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--color-text-muted)]"
+                >
+                  {launchBadgeLabel}
+                </Badge>
+                {canRelaunchOpenCode ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={
+                          retryingLaunch ? restartActionBusyLabel : restartActionIdleLabel
+                        }
+                        className="rounded p-1 text-amber-300 transition-colors hover:bg-amber-500/10 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={retryingLaunch}
+                        onClick={handleRestartMember}
+                      >
+                        {retryingLaunch ? (
+                          <SyncedLoader2 className="size-3.5" />
+                        ) : (
+                          <RotateCcw className="size-3.5" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {retryLaunchError ??
+                        (retryingLaunch ? restartActionBusyLabel : restartActionIdleLabel)}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </span>
+            ) : showFailedLaunchBadge ? (
+              <span className="flex shrink-0 items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <AlertTriangle className="size-3.5 shrink-0 text-red-400" />
+                      <Badge
+                        variant="secondary"
+                        className="shrink-0 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-normal leading-none text-red-400"
+                      >
+                        {displayPresenceLabel}
+                      </Badge>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{spawnError ?? 'Spawn failed'}</TooltipContent>
+                </Tooltip>
+                {showCopyDiagnostics ? (
+                  <MemberLaunchDiagnosticsButton
+                    payload={launchDiagnosticsPayload}
+                    className="size-auto rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+                    attention
+                  />
+                ) : null}
+                {canSkipFailedLaunch ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={skippingLaunch ? 'Skipping teammate' : 'Skip for this launch'}
+                        className="rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={skippingLaunch || retryingLaunch}
+                        onClick={handleSkipFailedLaunch}
+                      >
+                        {skippingLaunch ? (
+                          <SyncedLoader2 className="size-3.5" />
+                        ) : (
+                          <Ban className="size-3.5" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {skipLaunchError ??
+                        (skippingLaunch ? 'Skipping teammate...' : 'Skip for this launch')}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+                {canRetryLaunch ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={
+                          retryingLaunch ? restartActionBusyLabel : restartActionIdleLabel
+                        }
+                        className="rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={retryingLaunch || skippingLaunch}
+                        onClick={handleRestartMember}
+                      >
+                        {retryingLaunch ? (
+                          <SyncedLoader2 className="size-3.5" />
+                        ) : (
+                          <RotateCcw className="size-3.5" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {retryLaunchError ??
+                        (retryingLaunch ? `${restartActionBusyLabel}...` : restartActionIdleLabel)}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </span>
+            ) : showSkippedLaunchBadge ? (
+              <span className="flex shrink-0 items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <Ban className="size-3.5 shrink-0 text-zinc-400" />
+                      <Badge
+                        variant="secondary"
+                        className="shrink-0 bg-zinc-500/15 px-1.5 py-0.5 text-[10px] font-normal leading-none text-zinc-300"
+                      >
+                        {displayPresenceLabel}
+                      </Badge>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {spawnEntry?.skipReason ?? 'Skipped for this launch'}
+                  </TooltipContent>
+                </Tooltip>
+                {canRetryLaunch ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={
+                          retryingLaunch ? restartActionBusyLabel : restartActionIdleLabel
+                        }
+                        className="rounded p-1 text-zinc-300 transition-colors hover:bg-zinc-500/10 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={retryingLaunch}
+                        onClick={handleRestartMember}
+                      >
+                        {retryingLaunch ? (
+                          <SyncedLoader2 className="size-3.5" />
+                        ) : (
+                          <RotateCcw className="size-3.5" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {retryLaunchError ??
+                        (retryingLaunch ? `${restartActionBusyLabel}...` : restartActionIdleLabel)}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </span>
+            ) : showRuntimeAdvisoryBadge ? (
+              <span className="flex shrink-0 items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <AlertTriangle
+                        className={`size-3.5 shrink-0 ${
+                          runtimeAdvisoryTone === 'error' ? 'text-red-400' : 'text-amber-400'
+                        }`}
+                      />
+                      <Badge
+                        variant="secondary"
+                        className={`shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none ${
+                          runtimeAdvisoryTone === 'error'
+                            ? 'bg-red-500/15 text-red-300'
+                            : 'bg-amber-500/15 text-amber-300'
+                        }`}
+                        title={runtimeAdvisoryTitle}
+                      >
+                        {runtimeAdvisoryLabel}
+                      </Badge>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {runtimeAdvisoryTitle ?? runtimeAdvisoryLabel}
+                  </TooltipContent>
+                </Tooltip>
+                {canRelaunchRuntimeAdvisoryOpenCode ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={
+                          retryingLaunch ? restartActionBusyLabel : restartActionIdleLabel
+                        }
+                        className="rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={retryingLaunch}
+                        onClick={handleRestartMember}
+                      >
+                        {retryingLaunch ? (
+                          <SyncedLoader2 className="size-3.5" />
+                        ) : (
+                          <RotateCcw className="size-3.5" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {retryLaunchError ??
+                        (retryingLaunch ? `${restartActionBusyLabel}...` : restartActionIdleLabel)}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+                {showRuntimeAdvisoryDiagnostics ? (
+                  <MemberLaunchDiagnosticsButton
+                    payload={launchDiagnosticsPayload}
+                    className="size-auto rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+                    attention
+                  />
+                ) : null}
+              </span>
+            ) : !activityTask ? (
+              <Badge
+                variant="secondary"
+                className={`shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none ${isRemoved ? 'bg-zinc-600 text-zinc-300' : 'text-[var(--color-text-muted)]'}`}
+                title={isRemoved ? 'This member has been removed' : activityTitle}
+              >
+                {isRemoved ? 'removed' : displayPresenceLabel}
+              </Badge>
+            ) : null}
+            {showStartingSkeleton ? (
+              <div className="shrink-0" aria-hidden="true">
+                <div
+                  className="skeleton-shimmer h-[18px] w-[62px] rounded-full border"
+                  style={{
+                    backgroundColor: 'var(--skeleton-base-dim)',
+                    borderColor: 'var(--color-border)',
+                  }}
+                />
+                <div
+                  className="skeleton-shimmer mx-1 mt-1 h-[2px] w-10 rounded-full"
+                  style={{ backgroundColor: 'var(--skeleton-base)' }}
+                />
               </div>
+            ) : (
+              <div
+                className="shrink-0"
+                title={totalTasks > 0 ? `${completed}/${totalTasks} completed` : undefined}
+              >
+                <Badge
+                  variant="secondary"
+                  className="shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none"
+                >
+                  {member.taskCount} {member.taskCount === 1 ? 'task' : 'tasks'}
+                </Badge>
+                {totalTasks > 0 && (
+                  <div className="mx-0.5 mt-0.5 h-[2px] rounded-full bg-[var(--color-border)]">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                )}
+                {/* NOTE: lead context bar disabled — usage formula is inaccurate */}
+              </div>
+            )}
+            {!isRemoved && (
+              <div className="flex shrink-0 items-center gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSendMessage?.();
+                      }}
+                    >
+                      <MessageSquare size={13} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Send message</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAssignTask?.();
+                      }}
+                    >
+                      <Plus size={13} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Assign task</TooltipContent>
+                </Tooltip>
+              </div>
+            )}
+            {canRestoreMember ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={restoringMember ? 'Restoring teammate' : 'Restore teammate'}
+                    className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={restoringMember}
+                    onClick={handleRestoreMember}
+                  >
+                    {restoringMember ? (
+                      <SyncedLoader2 className="size-3.5" />
+                    ) : (
+                      <Undo2 className="size-3.5" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {restoreMemberError ?? (restoringMember ? 'Restoring teammate...' : 'Restore')}
+                </TooltipContent>
+              </Tooltip>
             ) : null}
           </div>
-          {showLaunchBadge ? (
-            <span
-              className="flex shrink-0 items-center gap-1"
-              title={runtimeEntry?.runtimeDiagnostic}
-            >
-              {launchVisualState === 'starting_stale' ? (
-                <AlertTriangle
-                  className="size-3.5 shrink-0 text-amber-400"
-                  aria-label={launchBadgeLabel}
-                />
-              ) : (
-                <SyncedLoader2
-                  className="size-3.5 shrink-0 text-[var(--color-text-muted)]"
-                  aria-label={launchBadgeLabel}
-                />
-              )}
-              <Badge
-                variant="secondary"
-                className="shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--color-text-muted)]"
-              >
-                {launchBadgeLabel}
-              </Badge>
-              {canRelaunchOpenCode ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={retryingLaunch ? restartActionBusyLabel : restartActionIdleLabel}
-                      className="rounded p-1 text-amber-300 transition-colors hover:bg-amber-500/10 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={retryingLaunch}
-                      onClick={handleRestartMember}
-                    >
-                      {retryingLaunch ? (
-                        <SyncedLoader2 className="size-3.5" />
-                      ) : (
-                        <RotateCcw className="size-3.5" />
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    {retryLaunchError ??
-                      (retryingLaunch ? restartActionBusyLabel : restartActionIdleLabel)}
-                  </TooltipContent>
-                </Tooltip>
-              ) : null}
-            </span>
-          ) : showFailedLaunchBadge ? (
-            <span className="flex shrink-0 items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="flex shrink-0 items-center gap-1">
-                    <AlertTriangle className="size-3.5 shrink-0 text-red-400" />
-                    <Badge
-                      variant="secondary"
-                      className="shrink-0 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-normal leading-none text-red-400"
-                    >
-                      {displayPresenceLabel}
-                    </Badge>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{spawnError ?? 'Spawn failed'}</TooltipContent>
-              </Tooltip>
-              {showCopyDiagnostics ? (
-                <MemberLaunchDiagnosticsButton
-                  payload={launchDiagnosticsPayload}
-                  className="size-auto rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
-                />
-              ) : null}
-              {canSkipFailedLaunch ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={skippingLaunch ? 'Skipping teammate' : 'Skip for this launch'}
-                      className="rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={skippingLaunch || retryingLaunch}
-                      onClick={handleSkipFailedLaunch}
-                    >
-                      {skippingLaunch ? (
-                        <SyncedLoader2 className="size-3.5" />
-                      ) : (
-                        <Ban className="size-3.5" />
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    {skipLaunchError ??
-                      (skippingLaunch ? 'Skipping teammate...' : 'Skip for this launch')}
-                  </TooltipContent>
-                </Tooltip>
-              ) : null}
-              {canRetryLaunch ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={retryingLaunch ? restartActionBusyLabel : restartActionIdleLabel}
-                      className="rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={retryingLaunch || skippingLaunch}
-                      onClick={handleRestartMember}
-                    >
-                      {retryingLaunch ? (
-                        <SyncedLoader2 className="size-3.5" />
-                      ) : (
-                        <RotateCcw className="size-3.5" />
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    {retryLaunchError ??
-                      (retryingLaunch ? `${restartActionBusyLabel}...` : restartActionIdleLabel)}
-                  </TooltipContent>
-                </Tooltip>
-              ) : null}
-            </span>
-          ) : showSkippedLaunchBadge ? (
-            <span className="flex shrink-0 items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="flex shrink-0 items-center gap-1">
-                    <Ban className="size-3.5 shrink-0 text-zinc-400" />
-                    <Badge
-                      variant="secondary"
-                      className="shrink-0 bg-zinc-500/15 px-1.5 py-0.5 text-[10px] font-normal leading-none text-zinc-300"
-                    >
-                      {displayPresenceLabel}
-                    </Badge>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {spawnEntry?.skipReason ?? 'Skipped for this launch'}
-                </TooltipContent>
-              </Tooltip>
-              {canRetryLaunch ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={retryingLaunch ? restartActionBusyLabel : restartActionIdleLabel}
-                      className="rounded p-1 text-zinc-300 transition-colors hover:bg-zinc-500/10 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={retryingLaunch}
-                      onClick={handleRestartMember}
-                    >
-                      {retryingLaunch ? (
-                        <SyncedLoader2 className="size-3.5" />
-                      ) : (
-                        <RotateCcw className="size-3.5" />
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    {retryLaunchError ??
-                      (retryingLaunch ? `${restartActionBusyLabel}...` : restartActionIdleLabel)}
-                  </TooltipContent>
-                </Tooltip>
-              ) : null}
-            </span>
-          ) : showRuntimeAdvisoryBadge ? (
-            <span className="flex shrink-0 items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="flex shrink-0 items-center gap-1">
-                    <AlertTriangle
-                      className={`size-3.5 shrink-0 ${
-                        runtimeAdvisoryTone === 'error' ? 'text-red-400' : 'text-amber-400'
-                      }`}
-                    />
-                    <Badge
-                      variant="secondary"
-                      className={`shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none ${
-                        runtimeAdvisoryTone === 'error'
-                          ? 'bg-red-500/15 text-red-300'
-                          : 'bg-amber-500/15 text-amber-300'
-                      }`}
-                      title={runtimeAdvisoryTitle}
-                    >
-                      {runtimeAdvisoryLabel}
-                    </Badge>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {runtimeAdvisoryTitle ?? runtimeAdvisoryLabel}
-                </TooltipContent>
-              </Tooltip>
-              {canRelaunchRuntimeAdvisoryOpenCode ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={retryingLaunch ? restartActionBusyLabel : restartActionIdleLabel}
-                      className="rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={retryingLaunch}
-                      onClick={handleRestartMember}
-                    >
-                      {retryingLaunch ? (
-                        <SyncedLoader2 className="size-3.5" />
-                      ) : (
-                        <RotateCcw className="size-3.5" />
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    {retryLaunchError ??
-                      (retryingLaunch ? `${restartActionBusyLabel}...` : restartActionIdleLabel)}
-                  </TooltipContent>
-                </Tooltip>
-              ) : null}
-              {showRuntimeAdvisoryDiagnostics ? (
-                <MemberLaunchDiagnosticsButton
-                  payload={launchDiagnosticsPayload}
-                  className="size-auto rounded p-1 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
-                />
-              ) : null}
-            </span>
-          ) : !activityTask ? (
-            <Badge
-              variant="secondary"
-              className={`shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none ${isRemoved ? 'bg-zinc-600 text-zinc-300' : 'text-[var(--color-text-muted)]'}`}
-              title={isRemoved ? 'This member has been removed' : activityTitle}
-            >
-              {isRemoved ? 'removed' : displayPresenceLabel}
-            </Badge>
-          ) : null}
-          {showStartingSkeleton ? (
-            <div className="shrink-0" aria-hidden="true">
-              <div
-                className="skeleton-shimmer h-[18px] w-[62px] rounded-full border"
-                style={{
-                  backgroundColor: 'var(--skeleton-base-dim)',
-                  borderColor: 'var(--color-border)',
-                }}
-              />
-              <div
-                className="skeleton-shimmer mx-1 mt-1 h-[2px] w-10 rounded-full"
-                style={{ backgroundColor: 'var(--skeleton-base)' }}
-              />
-            </div>
-          ) : (
+          {launchFailureReason ? (
             <div
-              className="shrink-0"
-              title={totalTasks > 0 ? `${completed}/${totalTasks} completed` : undefined}
+              data-testid="member-launch-failure-reason"
+              className="col-span-2 col-start-2 min-w-0 whitespace-pre-wrap break-words text-[10px] font-medium leading-snug text-red-300/90"
+              title={rawLaunchFailureReason}
             >
-              <Badge
-                variant="secondary"
-                className="shrink-0 px-1.5 py-0.5 text-[10px] font-normal leading-none"
-              >
-                {member.taskCount} {member.taskCount === 1 ? 'task' : 'tasks'}
-              </Badge>
-              {totalTasks > 0 && (
-                <div className="mx-0.5 mt-0.5 h-[2px] rounded-full bg-[var(--color-border)]">
-                  <div
-                    className="h-full rounded-full bg-emerald-500 transition-all duration-500"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-              )}
-              {/* NOTE: lead context bar disabled — usage formula is inaccurate */}
+              <span>
+                {renderLinkifiedText(launchFailureReason, {
+                  linkClassName: 'underline underline-offset-2 hover:text-red-200',
+                  stopPropagation: true,
+                  getLinkLabel: getLaunchFailureLinkLabel,
+                })}
+              </span>
             </div>
-          )}
-          {!isRemoved && (
-            <div className="flex shrink-0 items-center gap-0.5">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSendMessage?.();
-                    }}
-                  >
-                    <MessageSquare size={13} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Send message</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAssignTask?.();
-                    }}
-                  >
-                    <Plus size={13} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Assign task</TooltipContent>
-              </Tooltip>
-            </div>
-          )}
-          {canRestoreMember ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={restoringMember ? 'Restoring teammate' : 'Restore teammate'}
-                  className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={restoringMember}
-                  onClick={handleRestoreMember}
-                >
-                  {restoringMember ? (
-                    <SyncedLoader2 className="size-3.5" />
-                  ) : (
-                    <Undo2 className="size-3.5" />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {restoreMemberError ?? (restoringMember ? 'Restoring teammate...' : 'Restore')}
-              </TooltipContent>
-            </Tooltip>
           ) : null}
         </div>
       </div>
@@ -1549,7 +1562,7 @@ export const MemberCard = memo(function MemberCard({
     >
       <TooltipTrigger asChild>{cardContent}</TooltipTrigger>
       <TooltipContent
-        side="top"
+        side="left"
         align="start"
         sideOffset={8}
         className="border-blue-400/20 bg-[var(--color-surface)] p-3 shadow-xl shadow-black/30"

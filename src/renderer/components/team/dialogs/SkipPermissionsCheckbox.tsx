@@ -41,8 +41,8 @@ export const SkipPermissionsCheckbox: React.FC<SkipPermissionsCheckboxProps> = (
         <div className="flex items-start gap-2">
           <Info className="mt-0.5 size-3.5 shrink-0 text-blue-400" />
           <p>
-            Unleash Claude&apos;s full power — no interruptions asking for permission. Autonomous
-            mode — all tools execute without confirmation. Be cautious with untrusted code.
+            Autonomous mode: team tools execute without confirmation. Be cautious with untrusted
+            code.
           </p>
         </div>
       </div>
@@ -57,7 +57,7 @@ export const SkipPermissionsCheckbox: React.FC<SkipPermissionsCheckboxProps> = (
       >
         <div className="flex items-start gap-2">
           <Info className="mt-0.5 size-3.5 shrink-0 text-blue-400" />
-          <p>Manual mode — you&apos;ll approve or deny each tool call in real-time.</p>
+          <p>Manual mode: you&apos;ll approve or deny each tool call in real time.</p>
         </div>
       </div>
     )}

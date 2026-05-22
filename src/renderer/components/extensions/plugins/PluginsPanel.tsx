@@ -206,10 +206,8 @@ export const PluginsPanel = ({
 
           return (
             <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-300">
-              In the multimodel runtime, plugins are currently guaranteed only for Anthropic
-              sessions. We are actively building broader plugin support for all agents, including
-              both universal plugins and agent-specific plugins.
-              {capability.reason ? ` ${capability.reason}` : ''}
+              Plugin support is currently guaranteed for Anthropic (Claude) sessions only.
+              We&apos;re working to support plugins across all agents.
             </div>
           );
         })()}
