@@ -13,14 +13,11 @@ import {
 } from '@renderer/utils/taskChangeRequest';
 import { IpcError, unwrapIpc } from '@renderer/utils/unwrapIpc';
 import { stripAgentBlocks } from '@shared/constants/agentBlocks';
-import { getMemberColorByName } from '@shared/constants/memberColors';
 import { DEFAULT_TEAM_GRAPH_LAYOUT_MODE } from '@shared/constants/teamGraphLayoutMode';
 import { DEFAULT_TOOL_APPROVAL_SETTINGS } from '@shared/types/team';
-import { isLeadMember } from '@shared/utils/leadDetection';
 import { createLogger } from '@shared/utils/logger';
 import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
 import { buildTeamGraphDefaultLayoutSeed } from '@shared/utils/teamGraphDefaultLayout';
-import { getStableTeamOwnerId } from '@shared/utils/teamStableOwnerId';
 import {
   getTeamTaskWorkflowColumn,
   isTeamTaskFinalForCompletionNotification,
@@ -48,6 +45,19 @@ import {
   mapSendMessageError,
   shouldInvalidateCachedTeamDataForError,
 } from '../team/teamErrorPolicies';
+import {
+  areTeamGraphSlotAssignmentsEqual,
+  DISABLE_PERSISTED_TEAM_GRAPH_SLOT_ASSIGNMENTS,
+  GRAPH_STABLE_SLOT_LAYOUT_VERSION,
+  migrateStableSlotAssignmentsForMembers,
+  normalizeTeamGraphGridOwnerOrder,
+  pruneTeamGraphSlotAssignmentsForVisibleOwners,
+  seedStableSlotAssignmentsForMembers,
+  type TeamGraphConfigMemberSeedInput,
+  type TeamGraphLayoutSessionState,
+  type TeamGraphMemberSeedInput,
+  type TeamGraphSlotAssignments,
+} from '../team/teamGraphLayout';
 import {
   areTeamLaunchParamsEqual,
   buildLaunchParamsFromRuntimeRequest,
@@ -110,6 +120,12 @@ import {
   noteTeamRefreshBurst,
 } from '../team/teamRefreshBurstDiagnostics';
 import {
+  clearResolvedMemberSelectorCaches,
+  clearResolvedMemberSelectorCachesForTeam,
+  getResolvedMemberSelectorCacheSnapshotForTeam,
+  shouldPreserveSelectedTeamSnapshot,
+} from '../team/teamResolvedMembers';
+import {
   buildTeamScopedProgressTombstones,
   collectTeamScopedStateRemovals,
   collectTeamScopedVisibleLoadingResets,
@@ -139,11 +155,9 @@ import type {
   KanbanColumnId,
   LeadActivityState,
   LeadContextUsage,
-  MemberActivityMetaEntry,
   MemberSpawnStatusEntry,
   MemberSpawnStatusesSnapshot,
   NotificationTarget,
-  ResolvedTeamMember,
   RetryFailedOpenCodeSecondaryLanesResult,
   SendMessageRequest,
   SendMessageResult,
@@ -154,7 +168,6 @@ import type {
   TeamGetDataOptions,
   TeamLaunchRequest,
   TeamMemberActivityMeta,
-  TeamMemberSnapshot,
   TeamProvisioningProgress,
   TeamSummary,
   TeamTask,
@@ -173,6 +186,10 @@ export {
   selectTeamMemberSnapshotsForName,
   selectTeamTasksForName,
 } from '../team/teamDataSelectors';
+export {
+  getDefaultTeamGraphSlotAssignmentsForMembers,
+  isTeamGraphSlotPersistenceDisabled,
+} from '../team/teamGraphLayout';
 export type { TeamLaunchParams } from '../team/teamLaunchParams';
 export type {
   RefreshTeamMessagesHeadResult,
@@ -187,9 +204,11 @@ export {
   getActiveTeamPendingReplyWaits,
   hasActiveTeamPendingReplyWait,
 } from '../team/teamPendingReplyWaits';
+export {
+  selectResolvedMemberForTeamName,
+  selectResolvedMembersForTeamName,
+} from '../team/teamResolvedMembers';
 
-const GRAPH_STABLE_SLOT_LAYOUT_VERSION = 'stable-slots-v1' as const;
-const DISABLE_PERSISTED_TEAM_GRAPH_SLOT_ASSIGNMENTS = true;
 const logger = createLogger('teamSlice');
 
 const TEAM_GET_DATA_TIMEOUT_MS = 30_000;
@@ -242,17 +261,6 @@ function clearTeamDataRequestsForTeam(teamName: string): void {
   }
 }
 
-type TeamGraphSlotAssignments = Record<string, GraphOwnerSlotAssignment>;
-type TeamGraphMemberSeedInput = Pick<TeamMemberSnapshot, 'name' | 'agentId' | 'removedAt'>;
-type TeamGraphConfigMemberSeedInput = Pick<
-  NonNullable<TeamViewSnapshot['config']['members']>[number],
-  'name' | 'agentId' | 'removedAt'
->;
-interface TeamGraphLayoutSessionState {
-  mode: 'default' | 'manual';
-  signature: string | null;
-}
-
 export function isTeamDataRefreshPending(teamName: string): boolean {
   return (
     hasFullTeamDataRequestForTeam(teamName) ||
@@ -287,21 +295,13 @@ export function __resetTeamSliceModuleStateForTests(): void {
   clearAllMemberSpawnStatusesIpcBackoffs();
   clearAllTeamRefreshBurstDiagnostics();
   clearAllMemberSpawnUiEqualLastWarns();
-  resolvedMembersSelectorCache.clear();
-  resolvedMemberSelectorCache.clear();
+  clearResolvedMemberSelectorCaches();
   clearTeamMessageSelectorCaches();
 }
 
 function clearTeamScopedSelectorCaches(teamName: string): void {
-  resolvedMembersSelectorCache.delete(teamName);
+  clearResolvedMemberSelectorCachesForTeam(teamName);
   clearTeamMessageSelectorCachesForTeam(teamName);
-
-  const teamScopedPrefix = `${teamName}:`;
-  for (const key of resolvedMemberSelectorCache.keys()) {
-    if (key.startsWith(teamScopedPrefix)) {
-      resolvedMemberSelectorCache.delete(key);
-    }
-  }
 }
 
 function clearTeamScopedTransientState(teamName: string): void {
@@ -519,19 +519,15 @@ export function __getTeamScopedTransientStateForTests(teamName: string): {
   hasTeamRefreshBurstDiagnostics: boolean;
   hasMemberSpawnUiEqualLastWarn: boolean;
 } {
-  const teamScopedPrefix = `${teamName}:`;
   const messageSelectorCache = getTeamMessageSelectorCacheSnapshotForTeam(teamName);
-  let resolvedMemberSelectorCount = 0;
-
-  for (const key of resolvedMemberSelectorCache.keys()) {
-    if (key.startsWith(teamScopedPrefix)) {
-      resolvedMemberSelectorCount += 1;
-    }
-  }
+  const resolvedMemberSelectorCacheSnapshot =
+    getResolvedMemberSelectorCacheSnapshotForTeam(teamName);
 
   return {
-    hasResolvedMembersSelector: resolvedMembersSelectorCache.has(teamName),
-    resolvedMemberSelectorCount,
+    hasResolvedMembersSelector:
+      resolvedMemberSelectorCacheSnapshot.hasResolvedMembersSelector,
+    resolvedMemberSelectorCount:
+      resolvedMemberSelectorCacheSnapshot.resolvedMemberSelectorCount,
     hasMergedMessagesSelector: messageSelectorCache.hasMergedMessagesSelector,
     memberMessagesSelectorCount: messageSelectorCache.memberMessagesSelectorCount,
     hasPendingFreshTeamDataRefresh: pendingFreshTeamDataRefreshes.has(teamName),
@@ -1235,682 +1231,6 @@ type TeamSectionTarget = NonNullable<Extract<NotificationTarget, { kind: 'team' 
 export interface PendingTeamSectionFocusState {
   teamName: string;
   section: TeamSectionTarget;
-}
-
-const resolvedMembersSelectorCache = new Map<
-  string,
-  {
-    snapshotRef: TeamViewSnapshot['members'];
-    configMembersRef: TeamViewSnapshot['config']['members'] | undefined;
-    summaryRef: TeamSummary | undefined;
-    tasksRef: TeamViewSnapshot['tasks'] | undefined;
-    metaMembersRef: TeamMemberActivityMeta['members'] | undefined;
-    result: ResolvedTeamMember[];
-  }
->();
-const resolvedMemberSelectorCache = new Map<
-  string,
-  {
-    snapshotMemberRef: TeamMemberSnapshot | undefined;
-    metaEntryRef: MemberActivityMetaEntry | undefined;
-    result: ResolvedTeamMember | null;
-  }
->();
-function resolveMemberStatus(
-  snapshot: TeamMemberSnapshot,
-  activity: MemberActivityMetaEntry | undefined
-): ResolvedTeamMember['status'] {
-  if (activity?.latestAuthoredMessageSignalsTermination) {
-    return 'terminated';
-  }
-
-  if (!activity?.lastAuthoredMessageAt) {
-    return snapshot.currentTaskId ? 'active' : 'idle';
-  }
-
-  const ageMs = Date.now() - Date.parse(activity.lastAuthoredMessageAt);
-  if (Number.isNaN(ageMs)) {
-    return 'unknown';
-  }
-  if (ageMs < 5 * 60 * 1000) {
-    return 'active';
-  }
-  return 'idle';
-}
-
-function buildResolvedMembers(
-  snapshots: readonly TeamMemberSnapshot[],
-  meta: TeamMemberActivityMeta | undefined
-): ResolvedTeamMember[] {
-  return snapshots.map((member) => buildResolvedMember(member, meta?.members[member.name]));
-}
-
-function isDisplayableFallbackCurrentTask(task: TeamViewSnapshot['tasks'][number]): boolean {
-  return (
-    task.status === 'in_progress' &&
-    getTeamTaskWorkflowColumn(task) !== 'review' &&
-    !isTeamTaskFinalForCompletionNotification(task)
-  );
-}
-
-function buildConfigFallbackMemberSnapshots(snapshot: TeamViewSnapshot): TeamMemberSnapshot[] {
-  const configMembers = snapshot.config.members ?? [];
-  const hasConfiguredTeammate = configMembers.some((member) => {
-    const name = member.name?.trim();
-    return Boolean(name) && !member.removedAt && !isLeadMember(member);
-  });
-  if (!hasConfiguredTeammate) {
-    return [];
-  }
-
-  const seenNames = new Set<string>();
-  const fallbackMembers: TeamMemberSnapshot[] = [];
-  for (const member of configMembers) {
-    const name = member.name?.trim();
-    if (!name) continue;
-    const key = name.toLowerCase();
-    if (seenNames.has(key)) continue;
-    seenNames.add(key);
-
-    const ownedTasks = snapshot.tasks.filter((task) => task.owner === name);
-    const currentTask = ownedTasks.find(isDisplayableFallbackCurrentTask);
-    fallbackMembers.push({
-      name,
-      agentId: member.agentId,
-      currentTaskId: currentTask?.id ?? null,
-      taskCount: ownedTasks.length,
-      color: member.color ?? getMemberColorByName(name),
-      agentType: member.agentType,
-      role: member.role,
-      workflow: member.workflow,
-      isolation: member.isolation,
-      providerId: member.providerId,
-      providerBackendId: member.providerBackendId,
-      model: member.model,
-      effort: member.effort,
-      mcpPolicy: member.mcpPolicy,
-      selectedFastMode: member.fastMode,
-      cwd: member.cwd,
-      removedAt: member.removedAt,
-    });
-  }
-
-  return fallbackMembers;
-}
-
-function getActiveRawTeammateNameKeys(snapshot: TeamViewSnapshot | null | undefined): string[] {
-  if (!snapshot) {
-    return [];
-  }
-  const names = new Set<string>();
-  for (const member of snapshot.members) {
-    const name = member.name.trim();
-    const key = name.toLowerCase();
-    if (!name || key === 'user' || member.removedAt || isLeadMember(member)) {
-      continue;
-    }
-    names.add(key);
-  }
-  return Array.from(names).sort((left, right) => left.localeCompare(right));
-}
-
-function hasActiveRawTeammateRoster(snapshot: TeamViewSnapshot | null | undefined): boolean {
-  return getActiveRawTeammateNameKeys(snapshot).length > 0;
-}
-
-function hasRemovedRawMemberRoster(snapshot: TeamViewSnapshot | null | undefined): boolean {
-  return Boolean(snapshot?.members.some((member) => member.removedAt));
-}
-
-function hasConfigTeammateRoster(snapshot: TeamViewSnapshot | null | undefined): boolean {
-  return Boolean(
-    snapshot?.config.members?.some((member) => {
-      const name = member.name?.trim();
-      return Boolean(name) && !member.removedAt && !isLeadMember(member);
-    })
-  );
-}
-
-interface SummaryFallbackMemberSource {
-  name: string;
-  agentId?: string;
-  role?: string;
-  color?: string;
-  mcpPolicy?: TeamMemberSnapshot['mcpPolicy'];
-}
-
-function normalizeSummaryTeammateName(
-  name: string | undefined | null,
-  leadName?: string
-): string | null {
-  const trimmed = name?.trim();
-  const normalizedName = trimmed?.toLowerCase();
-  const normalizedLeadName = leadName?.trim().toLowerCase();
-  if (
-    !trimmed ||
-    normalizedName === 'user' ||
-    isLeadMember({ name: trimmed }) ||
-    (normalizedLeadName && normalizedName === normalizedLeadName)
-  ) {
-    return null;
-  }
-  return trimmed;
-}
-
-function getSummaryRosterTeammateSources(summary: TeamSummary): SummaryFallbackMemberSource[] {
-  const seenNames = new Set<string>();
-  const sources: SummaryFallbackMemberSource[] = [];
-  for (const member of summary.members ?? []) {
-    const name = normalizeSummaryTeammateName(member.name, summary.leadName);
-    if (!name) {
-      continue;
-    }
-    const key = name.toLowerCase();
-    if (seenNames.has(key)) {
-      continue;
-    }
-    seenNames.add(key);
-    sources.push({
-      name,
-      agentId: member.agentId,
-      role: member.role,
-      color: member.color,
-      mcpPolicy: member.mcpPolicy,
-    });
-  }
-  return sources;
-}
-
-function shouldUseSummaryLaunchTeammateSources(summary: TeamSummary): boolean {
-  return (
-    summary.partialLaunchFailure === true ||
-    summary.teamLaunchState === 'partial_failure' ||
-    summary.teamLaunchState === 'partial_pending' ||
-    summary.teamLaunchState === 'partial_skipped'
-  );
-}
-
-function getSummaryLaunchTeammateSources(summary: TeamSummary): SummaryFallbackMemberSource[] {
-  if (!shouldUseSummaryLaunchTeammateSources(summary)) {
-    return [];
-  }
-
-  const seenNames = new Set<string>();
-  const sources: SummaryFallbackMemberSource[] = [];
-  for (const rawName of [...(summary.missingMembers ?? []), ...(summary.skippedMembers ?? [])]) {
-    const name = normalizeSummaryTeammateName(rawName, summary.leadName);
-    if (!name) {
-      continue;
-    }
-    const key = name.toLowerCase();
-    if (seenNames.has(key)) {
-      continue;
-    }
-    seenNames.add(key);
-    sources.push({ name });
-  }
-  return sources;
-}
-
-function getSummaryLaunchTeammateNameKeys(summary: TeamSummary): string[] {
-  return getSummaryLaunchTeammateSources(summary)
-    .map((member) => member.name.toLowerCase())
-    .sort((left, right) => left.localeCompare(right));
-}
-
-function getSummaryTeammateNameKeys(summary: TeamSummary): string[] {
-  const rosterNames = getSummaryRosterTeammateSources(summary)
-    .map((member) => member.name.toLowerCase())
-    .sort((left, right) => left.localeCompare(right));
-  if (rosterNames.length > 0) {
-    return rosterNames;
-  }
-
-  const launchNames = getSummaryLaunchTeammateNameKeys(summary);
-  const expectedCount = summary.expectedMemberCount ?? summary.memberCount;
-  if (expectedCount > 0 && launchNames.length === expectedCount) {
-    return launchNames;
-  }
-  return [];
-}
-
-function getSummaryFallbackTeammateSources(summary: TeamSummary): SummaryFallbackMemberSource[] {
-  return getSummaryRosterTeammateSources(summary);
-}
-
-function areNameKeyListsEqual(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((name, index) => name === right[index]);
-}
-
-function summaryConfirmsActiveTeammateRoster(
-  current: TeamViewSnapshot,
-  summary: TeamSummary
-): boolean {
-  if ((summary.expectedMemberCount ?? summary.memberCount) <= 0) {
-    return false;
-  }
-
-  const currentNames = getActiveRawTeammateNameKeys(current);
-  const summaryNames = getSummaryTeammateNameKeys(summary);
-  if (summaryNames.length === 0 || summaryNames.length !== currentNames.length) {
-    return false;
-  }
-
-  return areNameKeyListsEqual(summaryNames, currentNames);
-}
-
-function buildSummaryFallbackMemberSnapshots(
-  snapshot: TeamViewSnapshot,
-  summary: TeamSummary | undefined
-): TeamMemberSnapshot[] {
-  if (!summary) {
-    return [];
-  }
-  const summaryMembers = getSummaryFallbackTeammateSources(summary);
-  if (summaryMembers.length === 0) {
-    return [];
-  }
-
-  const seenNames = new Set<string>();
-  const buildSnapshot = (
-    name: string,
-    source?: Omit<SummaryFallbackMemberSource, 'name'>,
-    lead = false
-  ): TeamMemberSnapshot | null => {
-    const trimmed = name.trim();
-    if (!trimmed) return null;
-    const key = trimmed.toLowerCase();
-    if (seenNames.has(key)) return null;
-    seenNames.add(key);
-
-    const ownedTasks = snapshot.tasks.filter((task) => task.owner === trimmed);
-    const currentTask = ownedTasks.find(isDisplayableFallbackCurrentTask);
-    return {
-      name: trimmed,
-      agentId: source?.agentId,
-      currentTaskId: currentTask?.id ?? null,
-      taskCount: ownedTasks.length,
-      color: source?.color ?? getMemberColorByName(trimmed),
-      agentType: lead ? 'team-lead' : undefined,
-      role: source?.role ?? (lead ? 'Team Lead' : undefined),
-      mcpPolicy: source?.mcpPolicy,
-    };
-  };
-
-  const teammates = summaryMembers.flatMap((member) => {
-    const item = buildSnapshot(member.name, member);
-    return item ? [item] : [];
-  });
-  if (teammates.length === 0) {
-    return [];
-  }
-
-  const existingLead = snapshot.members.find((member) => !member.removedAt && isLeadMember(member));
-  if (existingLead) {
-    return [existingLead, ...teammates];
-  }
-
-  const configuredLead = snapshot.config.members?.find(
-    (member) => !member.removedAt && isLeadMember(member)
-  );
-  const leadName = configuredLead?.name?.trim() || summary.leadName?.trim();
-  const lead = leadName
-    ? buildSnapshot(
-        leadName,
-        {
-          agentId: configuredLead?.agentId,
-          role: configuredLead?.role,
-          color: configuredLead?.color ?? summary.leadColor,
-        },
-        true
-      )
-    : null;
-
-  return lead ? [lead, ...teammates] : teammates;
-}
-
-function getResolvableMemberSnapshots(
-  snapshot: TeamViewSnapshot,
-  summary?: TeamSummary
-): readonly TeamMemberSnapshot[] {
-  if (
-    snapshot.members.length > 0 &&
-    (hasActiveRawTeammateRoster(snapshot) || hasRemovedRawMemberRoster(snapshot))
-  ) {
-    return snapshot.members;
-  }
-
-  const configFallbackMembers = buildConfigFallbackMemberSnapshots(snapshot);
-  if (configFallbackMembers.length > 0) {
-    return configFallbackMembers;
-  }
-
-  const summaryFallbackMembers = buildSummaryFallbackMemberSnapshots(snapshot, summary);
-  if (summaryFallbackMembers.length > 0) {
-    return summaryFallbackMembers;
-  }
-
-  return snapshot.members;
-}
-
-function shouldPreserveSelectedTeamSnapshot(
-  current: TeamViewSnapshot | null,
-  baseline: TeamViewSnapshot | null | undefined,
-  incoming: TeamViewSnapshot,
-  summary: TeamSummary | undefined
-): boolean {
-  if (!current || !hasActiveRawTeammateRoster(current)) {
-    return false;
-  }
-  if (
-    hasActiveRawTeammateRoster(incoming) ||
-    hasRemovedRawMemberRoster(incoming) ||
-    hasConfigTeammateRoster(incoming)
-  ) {
-    return false;
-  }
-  const currentNames = getActiveRawTeammateNameKeys(current);
-  if (
-    current !== baseline &&
-    !areNameKeyListsEqual(currentNames, getActiveRawTeammateNameKeys(baseline))
-  ) {
-    return true;
-  }
-  if (summary) {
-    return summaryConfirmsActiveTeammateRoster(current, summary);
-  }
-
-  return false;
-}
-
-function buildResolvedMember(
-  snapshot: TeamMemberSnapshot,
-  activity: MemberActivityMetaEntry | undefined
-): ResolvedTeamMember {
-  return {
-    ...snapshot,
-    status: resolveMemberStatus(snapshot, activity),
-    messageCount: activity?.messageCountExact ?? 0,
-    lastActiveAt: activity?.lastAuthoredMessageAt ?? null,
-  };
-}
-
-type ResolvedMemberSelectorState = Pick<
-  TeamSlice,
-  'teamDataCacheByName' | 'selectedTeamName' | 'selectedTeamData' | 'memberActivityMetaByTeam'
-> &
-  Partial<Pick<TeamSlice, 'teamByName'>>;
-
-function migrateStableSlotAssignmentsForMembers(
-  assignments: TeamGraphSlotAssignments | undefined,
-  members: readonly TeamGraphMemberSeedInput[]
-): { assignments: TeamGraphSlotAssignments; changed: boolean } {
-  const nextAssignments: TeamGraphSlotAssignments = { ...(assignments ?? {}) };
-  let changed = false;
-
-  for (const member of members) {
-    const fallbackKey = member.name.trim();
-    const stableOwnerId = getStableTeamOwnerId(member);
-    const fallbackAssignment = nextAssignments[fallbackKey];
-    const stableAssignment = nextAssignments[stableOwnerId];
-
-    if (stableOwnerId !== fallbackKey && fallbackAssignment && !stableAssignment) {
-      nextAssignments[stableOwnerId] = fallbackAssignment;
-      delete nextAssignments[fallbackKey];
-      changed = true;
-      continue;
-    }
-
-    if (stableOwnerId !== fallbackKey && fallbackAssignment && stableAssignment) {
-      delete nextAssignments[fallbackKey];
-      changed = true;
-    }
-  }
-
-  return { assignments: nextAssignments, changed };
-}
-
-export function selectResolvedMembersForTeamName(
-  state: ResolvedMemberSelectorState,
-  teamName: string | null | undefined
-): ResolvedTeamMember[] {
-  const snapshot = selectTeamDataForName(state, teamName);
-  if (!snapshot || !teamName) {
-    return [];
-  }
-
-  const meta = state.memberActivityMetaByTeam[teamName];
-  const metaMembers = meta?.members;
-  const shouldUseMemberFallback =
-    snapshot.members.length === 0 ||
-    (!hasActiveRawTeammateRoster(snapshot) && !hasRemovedRawMemberRoster(snapshot));
-  const configMembersRef = shouldUseMemberFallback ? snapshot.config.members : undefined;
-  const summaryRef = shouldUseMemberFallback ? state.teamByName?.[teamName] : undefined;
-  const tasksRef = shouldUseMemberFallback ? snapshot.tasks : undefined;
-  const cached = resolvedMembersSelectorCache.get(teamName);
-  if (
-    cached?.snapshotRef === snapshot.members &&
-    cached.configMembersRef === configMembersRef &&
-    cached.summaryRef === summaryRef &&
-    cached.tasksRef === tasksRef &&
-    cached.metaMembersRef === metaMembers
-  ) {
-    return cached.result;
-  }
-
-  const result = buildResolvedMembers(getResolvableMemberSnapshots(snapshot, summaryRef), meta);
-  resolvedMembersSelectorCache.set(teamName, {
-    snapshotRef: snapshot.members,
-    configMembersRef,
-    summaryRef,
-    tasksRef,
-    metaMembersRef: metaMembers,
-    result,
-  });
-  return result;
-}
-
-export function selectResolvedMemberForTeamName(
-  state: ResolvedMemberSelectorState,
-  teamName: string | null | undefined,
-  memberName: string | null | undefined
-): ResolvedTeamMember | null {
-  const snapshot = selectTeamDataForName(state, teamName);
-  if (!snapshot || !teamName || !memberName) {
-    return null;
-  }
-
-  const snapshotMember = getResolvableMemberSnapshots(snapshot, state.teamByName?.[teamName]).find(
-    (member) => member.name === memberName
-  );
-  if (!snapshotMember) {
-    return null;
-  }
-
-  const metaEntry = state.memberActivityMetaByTeam[teamName]?.members[memberName];
-  const cacheKey = `${teamName}:${memberName}`;
-  const cached = resolvedMemberSelectorCache.get(cacheKey);
-  if (cached?.snapshotMemberRef === snapshotMember && cached.metaEntryRef === metaEntry) {
-    return cached.result;
-  }
-
-  const result = buildResolvedMember(snapshotMember, metaEntry);
-  resolvedMemberSelectorCache.set(cacheKey, {
-    snapshotMemberRef: snapshotMember,
-    metaEntryRef: metaEntry,
-    result,
-  });
-  return result;
-}
-
-function seedStableSlotAssignmentsForMembers(
-  assignments: TeamGraphSlotAssignments,
-  members: readonly TeamGraphMemberSeedInput[],
-  configMembers: readonly TeamGraphConfigMemberSeedInput[] = []
-): { assignments: TeamGraphSlotAssignments; changed: boolean } {
-  const defaultSeed = buildTeamGraphDefaultLayoutSeed(members, configMembers);
-  if (
-    defaultSeed.orderedVisibleOwnerIds.length === 0 ||
-    Object.keys(defaultSeed.assignments).length === 0
-  ) {
-    return { assignments, changed: false };
-  }
-
-  const visibleStableOwnerIds = defaultSeed.orderedVisibleOwnerIds;
-  const hasAnyVisibleAssignments = visibleStableOwnerIds.some(
-    (stableOwnerId) => assignments[stableOwnerId] != null
-  );
-  if (hasAnyVisibleAssignments) {
-    return { assignments, changed: false };
-  }
-
-  const nextAssignments: TeamGraphSlotAssignments = { ...assignments };
-  visibleStableOwnerIds.forEach((stableOwnerId) => {
-    nextAssignments[stableOwnerId] = defaultSeed.assignments[stableOwnerId]!;
-  });
-
-  return { assignments: nextAssignments, changed: true };
-}
-
-function areTeamGraphSlotAssignmentsEqual(
-  left: TeamGraphSlotAssignments | undefined,
-  right: TeamGraphSlotAssignments | undefined
-): boolean {
-  const leftEntries = Object.entries(left ?? {});
-  const rightEntries = Object.entries(right ?? {});
-  if (leftEntries.length !== rightEntries.length) {
-    return false;
-  }
-
-  for (const [stableOwnerId, leftAssignment] of leftEntries) {
-    const rightAssignment = right?.[stableOwnerId];
-    if (
-      rightAssignment?.ringIndex !== leftAssignment.ringIndex ||
-      rightAssignment.sectorIndex !== leftAssignment.sectorIndex
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function normalizeTeamGraphSlotAssignmentsForVisibleOwners(
-  assignments: TeamGraphSlotAssignments | undefined,
-  visibleOwnerIds: readonly string[]
-): TeamGraphSlotAssignments {
-  if (visibleOwnerIds.length === 0 || !assignments) {
-    return {};
-  }
-
-  const normalizedAssignments: TeamGraphSlotAssignments = {};
-  for (const stableOwnerId of visibleOwnerIds) {
-    const assignment = assignments[stableOwnerId];
-    if (!assignment) {
-      continue;
-    }
-    normalizedAssignments[stableOwnerId] = assignment;
-  }
-  return normalizeLegacySixRowOrbitAssignments(normalizedAssignments, visibleOwnerIds);
-}
-
-function normalizeLegacySixRowOrbitAssignments(
-  assignments: TeamGraphSlotAssignments,
-  visibleOwnerIds: readonly string[]
-): TeamGraphSlotAssignments {
-  if (visibleOwnerIds.length !== 6) {
-    return assignments;
-  }
-
-  const visibleAssignments = visibleOwnerIds.flatMap((stableOwnerId) => {
-    const assignment = assignments[stableOwnerId];
-    return assignment ? [assignment] : [];
-  });
-  const hasLegacyTwoRowBottomMarker = visibleAssignments.some(
-    (assignment) => assignment.ringIndex === 1 && assignment.sectorIndex === 2
-  );
-  let changed = false;
-  const normalizedAssignments: TeamGraphSlotAssignments = { ...assignments };
-
-  for (const stableOwnerId of visibleOwnerIds) {
-    const assignment = normalizedAssignments[stableOwnerId];
-    if (!assignment) {
-      continue;
-    }
-
-    if (
-      hasLegacyTwoRowBottomMarker &&
-      assignment.ringIndex === 1 &&
-      assignment.sectorIndex >= 0 &&
-      assignment.sectorIndex < 3
-    ) {
-      normalizedAssignments[stableOwnerId] = {
-        ringIndex: 2,
-        sectorIndex: assignment.sectorIndex,
-      };
-      changed = true;
-      continue;
-    }
-
-    if (assignment.ringIndex === 0 && assignment.sectorIndex >= 3 && assignment.sectorIndex < 6) {
-      normalizedAssignments[stableOwnerId] = {
-        ringIndex: 2,
-        sectorIndex: assignment.sectorIndex - 3,
-      };
-      changed = true;
-    }
-  }
-
-  return changed ? normalizedAssignments : assignments;
-}
-
-function pruneTeamGraphSlotAssignmentsForVisibleOwners(
-  assignments: TeamGraphSlotAssignments | undefined,
-  visibleOwnerIds: readonly string[]
-): TeamGraphSlotAssignments | undefined {
-  const normalizedAssignments = normalizeTeamGraphSlotAssignmentsForVisibleOwners(
-    assignments,
-    visibleOwnerIds
-  );
-  return Object.keys(normalizedAssignments).length > 0 ? normalizedAssignments : undefined;
-}
-
-function normalizeTeamGraphGridOwnerOrder(
-  order: readonly string[] | undefined,
-  visibleOwnerIds: readonly string[]
-): string[] {
-  const visibleOwnerIdSet = new Set(visibleOwnerIds);
-  const normalizedOrder: string[] = [];
-  const seenOwnerIds = new Set<string>();
-
-  for (const stableOwnerId of order ?? []) {
-    if (!visibleOwnerIdSet.has(stableOwnerId) || seenOwnerIds.has(stableOwnerId)) {
-      continue;
-    }
-    normalizedOrder.push(stableOwnerId);
-    seenOwnerIds.add(stableOwnerId);
-  }
-
-  for (const stableOwnerId of visibleOwnerIds) {
-    if (seenOwnerIds.has(stableOwnerId)) {
-      continue;
-    }
-    normalizedOrder.push(stableOwnerId);
-    seenOwnerIds.add(stableOwnerId);
-  }
-
-  return normalizedOrder;
-}
-
-export function getDefaultTeamGraphSlotAssignmentsForMembers(
-  members: readonly TeamGraphMemberSeedInput[],
-  configMembers: readonly TeamGraphConfigMemberSeedInput[] = []
-): TeamGraphSlotAssignments {
-  return buildTeamGraphDefaultLayoutSeed(members, configMembers).assignments;
-}
-
-export function isTeamGraphSlotPersistenceDisabled(): boolean {
-  return DISABLE_PERSISTED_TEAM_GRAPH_SLOT_ASSIGNMENTS;
 }
 
 function isVisibleInActiveTeamSurface(
