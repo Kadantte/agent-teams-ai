@@ -3513,6 +3513,36 @@ function isRegisteredRuntimeMetadataFailureReason(reason?: string): boolean {
   return reason?.trim() === 'registered runtime metadata without live process';
 }
 
+function isProcessTableUnavailableFailureReason(reason?: string): boolean {
+  const text = reason?.trim();
+  if (!text || !mentionsProcessTableUnavailable(text)) {
+    return false;
+  }
+  return (
+    /^process table (?:is )?unavailable$/i.test(text) ||
+    /^runtime pid could not be verified because process table (?:is )?unavailable$/i.test(text)
+  );
+}
+
+function stripProcessTableUnavailableDiagnosticSuffix(reason: string): string | null {
+  const match = /^(.*?);\s*process table (?:is )?unavailable$/i.exec(reason.trim());
+  const baseReason = match?.[1]?.trim();
+  return baseReason && baseReason.length > 0 ? baseReason : null;
+}
+
+function isBaseAutoClearableLaunchFailureReason(reason?: string): boolean {
+  return (
+    isNeverSpawnedDuringLaunchReason(reason) ||
+    isLaunchGraceWindowFailureReason(reason) ||
+    isConfigRegistrationFailureReason(reason) ||
+    isRegisteredRuntimeMetadataFailureReason(reason) ||
+    isOpenCodeBridgeLaunchFailureReason(reason) ||
+    isBootstrapMcpResourceReadFailureReason(reason) ||
+    isBootstrapCheckInTimeoutFailureReason(reason) ||
+    isBootstrapInstructionPromptFailureReason(reason)
+  );
+}
+
 function isBootstrapMcpResourceReadFailureReason(reason?: string): boolean {
   const text = reason?.trim().toLowerCase() ?? '';
   return (
@@ -3539,15 +3569,15 @@ function isTmuxNoServerRunningError(error: unknown): boolean {
 }
 
 function isAutoClearableLaunchFailureReason(reason?: string): boolean {
+  const text = reason?.trim();
+  if (!text) {
+    return false;
+  }
+  const baseReason = stripProcessTableUnavailableDiagnosticSuffix(text);
   return (
-    isNeverSpawnedDuringLaunchReason(reason) ||
-    isLaunchGraceWindowFailureReason(reason) ||
-    isConfigRegistrationFailureReason(reason) ||
-    isRegisteredRuntimeMetadataFailureReason(reason) ||
-    isOpenCodeBridgeLaunchFailureReason(reason) ||
-    isBootstrapMcpResourceReadFailureReason(reason) ||
-    isBootstrapCheckInTimeoutFailureReason(reason) ||
-    isBootstrapInstructionPromptFailureReason(reason)
+    isBaseAutoClearableLaunchFailureReason(text) ||
+    isProcessTableUnavailableFailureReason(text) ||
+    (baseReason != null && isBaseAutoClearableLaunchFailureReason(baseReason))
   );
 }
 

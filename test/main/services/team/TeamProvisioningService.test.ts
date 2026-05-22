@@ -583,6 +583,26 @@ function createMemberSpawnStatusEntry(
   };
 }
 
+type TeamProvisioningServicePrivateHarness = {
+  getLiveTeamAgentRuntimeMetadata: (
+    teamName: string
+  ) => Promise<Map<string, Record<string, unknown>>>;
+  attachLiveRuntimeMetadataToStatuses: (
+    teamName: string,
+    statuses: Record<string, Record<string, unknown>>,
+    options?: Record<string, unknown>
+  ) => Promise<Record<string, Record<string, unknown>>>;
+  applyBootstrapTranscriptEvidenceOverlay: (
+    snapshot: ReturnType<typeof createPersistedLaunchSnapshot> | null
+  ) => Promise<ReturnType<typeof createPersistedLaunchSnapshot> | null>;
+};
+
+function privateHarness(
+  svc: TeamProvisioningService
+): TeamProvisioningServicePrivateHarness {
+  return svc as unknown as TeamProvisioningServicePrivateHarness;
+}
+
 function createMemberSpawnRun(params?: {
   runId?: string;
   teamName?: string;
@@ -19594,6 +19614,95 @@ describe('TeamProvisioningService', () => {
     });
   });
 
+  it('heals process-table unavailable launch-state failures from runtime bootstrap proof', async () => {
+    allowConsoleLogs();
+    const teamName = 'zz-unit-process-table-unavailable-proof-heals';
+    const leadSessionId = 'lead-session';
+    const projectPath = '/Users/test/proj';
+    const acceptedAt = new Date(Date.now() - 90_000).toISOString();
+    const proofAt = new Date(Date.now() - 60_000).toISOString();
+    const proofToken = 'proof-token-alice';
+    const bootstrapRunId = 'run-process-table-unavailable';
+    const runtimePid = 35906;
+    const runtimeEventsPath = path.join(tempTeamsBase, teamName, 'runtime', 'alice.runtime.jsonl');
+    const processTableReason =
+      'runtime pid could not be verified because process table is unavailable';
+
+    writeLaunchConfig(teamName, projectPath, leadSessionId, ['alice']);
+    const configPath = path.join(tempTeamsBase, teamName, 'config.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
+      members: Array<Record<string, unknown>>;
+    };
+    config.members = config.members.map((member) =>
+      member.name === 'alice'
+        ? {
+            ...member,
+            agentId: `alice@${teamName}`,
+            backendType: 'process',
+            tmuxPaneId: `process:${runtimePid}`,
+            runtimePid,
+            bootstrapExpectedAfter: acceptedAt,
+            bootstrapProofToken: proofToken,
+            bootstrapRunId,
+            bootstrapRuntimeEventsPath: runtimeEventsPath,
+          }
+        : member
+    );
+    fs.writeFileSync(configPath, JSON.stringify(config), 'utf8');
+    const snapshot = createPersistedLaunchSnapshot({
+      teamName,
+      leadSessionId,
+      launchPhase: 'finished',
+      expectedMembers: ['alice'],
+      members: {
+        alice: {
+          name: 'alice',
+          launchState: 'failed_to_start',
+          agentToolAccepted: true,
+          runtimeAlive: false,
+          runtimePid,
+          runtimeRunId: bootstrapRunId,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: processTableReason,
+          livenessKind: 'registered_only',
+          runtimeDiagnostic: processTableReason,
+          runtimeDiagnosticSeverity: 'warning',
+          firstSpawnAcceptedAt: acceptedAt,
+          lastEvaluatedAt: acceptedAt,
+        },
+      },
+    });
+    fs.mkdirSync(path.dirname(runtimeEventsPath), { recursive: true });
+    fs.writeFileSync(
+      runtimeEventsPath,
+      `${JSON.stringify({
+        version: 1,
+        type: 'bootstrap_confirmed',
+        timestamp: proofAt,
+        pid: runtimePid,
+        teamName,
+        agentName: 'alice',
+        agentId: `alice@${teamName}`,
+        bootstrapRunId,
+        source: 'member_briefing_tool_success',
+        bootstrapProofToken: proofToken,
+      })}\n`,
+      'utf8'
+    );
+
+    const svc = new TeamProvisioningService();
+    const result = await privateHarness(svc).applyBootstrapTranscriptEvidenceOverlay(snapshot);
+
+    expect(result?.members.alice).toMatchObject({
+      launchState: 'confirmed_alive',
+      bootstrapConfirmed: true,
+      runtimeAlive: true,
+      hardFailure: false,
+      hardFailureReason: undefined,
+    });
+  });
+
   it('does not heal terminal bootstrap-state failures from native app-managed proof with mismatched hashes', async () => {
     allowConsoleLogs();
     const teamName = 'zz-unit-bootstrap-state-native-runtime-proof-hash-mismatch';
@@ -22418,6 +22527,141 @@ describe('TeamProvisioningService', () => {
     });
   });
 
+  it('clears registered-only stale failure with process-table diagnostic suffix', async () => {
+    const svc = new TeamProvisioningService();
+    const harness = privateHarness(svc);
+    harness.getLiveTeamAgentRuntimeMetadata = vi.fn(
+      async () =>
+        new Map([
+          [
+            'tom',
+            {
+              alive: true,
+              model: 'gpt-5.4',
+              livenessKind: 'runtime_process',
+              runtimeDiagnostic: 'verified runtime process detected',
+            },
+          ],
+        ])
+    );
+
+    const reason = 'registered runtime metadata without live process; process table unavailable';
+    const result = await harness.attachLiveRuntimeMetadataToStatuses('forge-labs-10', {
+      tom: createMemberSpawnStatusEntry({
+        status: 'error',
+        launchState: 'failed_to_start',
+        error: reason,
+        hardFailure: true,
+        hardFailureReason: reason,
+        livenessKind: 'registered_only',
+        runtimeDiagnostic: reason,
+      }),
+    });
+
+    expect(result.tom).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_bootstrap',
+      runtimeAlive: true,
+      hardFailure: false,
+      hardFailureReason: undefined,
+      error: undefined,
+      runtimeModel: 'gpt-5.4',
+      livenessKind: 'runtime_process',
+      runtimeDiagnostic: 'verified runtime process detected',
+      livenessSource: 'process',
+    });
+  });
+
+  it('clears process-table unavailable failure when a verified runtime process appears later', async () => {
+    const svc = new TeamProvisioningService();
+    const harness = privateHarness(svc);
+    harness.getLiveTeamAgentRuntimeMetadata = vi.fn(
+      async () =>
+        new Map([
+          [
+            'alice',
+            {
+              alive: true,
+              model: 'gpt-5.3-codex',
+              livenessKind: 'runtime_process',
+              runtimeDiagnostic: 'verified runtime process detected',
+            },
+          ],
+        ])
+    );
+
+    const result = await harness.attachLiveRuntimeMetadataToStatuses('signal-ops-10', {
+      alice: createMemberSpawnStatusEntry({
+        status: 'error',
+        launchState: 'failed_to_start',
+        error: 'runtime pid could not be verified because process table is unavailable',
+        hardFailure: true,
+        hardFailureReason: 'runtime pid could not be verified because process table is unavailable',
+        livenessKind: 'registered_only',
+        runtimeDiagnostic: 'runtime pid could not be verified because process table is unavailable',
+        runtimeDiagnosticSeverity: 'warning',
+      }),
+    });
+
+    expect(result.alice).toMatchObject({
+      status: 'online',
+      launchState: 'runtime_pending_bootstrap',
+      runtimeAlive: true,
+      hardFailure: false,
+      hardFailureReason: undefined,
+      error: undefined,
+      runtimeModel: 'gpt-5.3-codex',
+      livenessKind: 'runtime_process',
+      runtimeDiagnostic: 'verified runtime process detected',
+      livenessSource: 'process',
+    });
+  });
+
+  it('keeps process-table unavailable failure failed when only weak metadata is available', async () => {
+    const svc = new TeamProvisioningService();
+    const harness = privateHarness(svc);
+    harness.getLiveTeamAgentRuntimeMetadata = vi.fn(
+      async () =>
+        new Map([
+          [
+            'alice',
+            {
+              alive: false,
+              livenessKind: 'registered_only',
+              runtimeDiagnostic: 'runtime pid could not be verified because process table is unavailable',
+              runtimeDiagnosticSeverity: 'warning',
+            },
+          ],
+        ])
+    );
+
+    const result = await harness.attachLiveRuntimeMetadataToStatuses('signal-ops-10', {
+      alice: createMemberSpawnStatusEntry({
+        status: 'error',
+        launchState: 'failed_to_start',
+        error: 'runtime pid could not be verified because process table is unavailable',
+        hardFailure: true,
+        hardFailureReason: 'runtime pid could not be verified because process table is unavailable',
+        livenessKind: 'registered_only',
+        runtimeDiagnostic: 'runtime pid could not be verified because process table is unavailable',
+        runtimeDiagnosticSeverity: 'warning',
+      }),
+    });
+
+    expect(result.alice).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      runtimeAlive: false,
+      hardFailure: true,
+      hardFailureReason: 'runtime pid could not be verified because process table is unavailable',
+      error: 'runtime pid could not be verified because process table is unavailable',
+      livenessKind: 'registered_only',
+      runtimeDiagnostic: 'runtime pid could not be verified because process table is unavailable',
+      runtimeDiagnosticSeverity: 'warning',
+      livenessSource: undefined,
+    });
+  });
+
   it('does not clear OpenCode bridge launch failure from process-only liveness', async () => {
     const svc = new TeamProvisioningService();
     (svc as any).getLiveTeamAgentRuntimeMetadata = vi.fn(
@@ -22460,6 +22704,53 @@ describe('TeamProvisioningService', () => {
       runtimeDiagnostic:
         'OpenCode runtime process detected, but teammate bootstrap is not confirmed',
       runtimeDiagnosticSeverity: 'warning',
+      livenessSource: undefined,
+    });
+  });
+
+  it('does not clear concrete OpenCode bridge failures even when a process is visible', async () => {
+    const svc = new TeamProvisioningService();
+    const harness = privateHarness(svc);
+    harness.getLiveTeamAgentRuntimeMetadata = vi.fn(
+      async () =>
+        new Map([
+          [
+            'bob',
+            {
+              alive: true,
+              model: 'openrouter/minimax/minimax-m2.5',
+              livenessKind: 'runtime_process',
+              providerId: 'opencode',
+              runtimeDiagnostic: 'OpenCode runtime process detected',
+              runtimeDiagnosticSeverity: 'info',
+            },
+          ],
+        ])
+    );
+
+    const reason =
+      'OpenCode bridge failed: OpenCode app-managed bootstrap launch requires a fresh capability snapshot before state-changing launch; process table unavailable';
+    const result = await harness.attachLiveRuntimeMetadataToStatuses('signal-ops-10', {
+      bob: createMemberSpawnStatusEntry({
+        status: 'error',
+        launchState: 'failed_to_start',
+        error: reason,
+        hardFailure: true,
+        hardFailureReason: reason,
+      }),
+    });
+
+    expect(result.bob).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      runtimeAlive: false,
+      hardFailure: true,
+      hardFailureReason: reason,
+      error: reason,
+      runtimeModel: 'openrouter/minimax/minimax-m2.5',
+      livenessKind: 'runtime_process',
+      runtimeDiagnostic: 'OpenCode runtime process detected',
+      runtimeDiagnosticSeverity: 'info',
       livenessSource: undefined,
     });
   });
