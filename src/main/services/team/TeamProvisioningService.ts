@@ -3597,7 +3597,8 @@ function isBaseAutoClearableLaunchFailureReason(reason?: string): boolean {
     isOpenCodeBridgeLaunchFailureReason(reason) ||
     isBootstrapMcpResourceReadFailureReason(reason) ||
     isBootstrapCheckInTimeoutFailureReason(reason) ||
-    isBootstrapInstructionPromptFailureReason(reason)
+    isBootstrapInstructionPromptFailureReason(reason) ||
+    isLaunchCleanupBootstrapIncompleteFailureReason(reason)
   );
 }
 
@@ -3616,6 +3617,58 @@ function isBootstrapCheckInTimeoutFailureReason(reason?: string): boolean {
 
 function isBootstrapInstructionPromptFailureReason(reason?: string): boolean {
   return typeof reason === 'string' && isBootstrapInstructionPrompt(reason);
+}
+
+function isLaunchCleanupBootstrapIncompleteFailureReason(reason?: string): boolean {
+  const text = reason?.trim();
+  if (!text) {
+    return false;
+  }
+  if (
+    text === 'Launch ended before teammate bootstrap completed.' ||
+    text === 'Deterministic bootstrap failed before teammate check-in.'
+  ) {
+    return true;
+  }
+  return (
+    text.startsWith('Launch ended before teammate bootstrap completed. ') &&
+    text.includes('Runtime process was alive after bootstrap failure')
+  );
+}
+
+function isBootstrapMemberEvidenceCurrentForMember(
+  current: { firstSpawnAcceptedAt?: string; lastEvaluatedAt?: string },
+  bootstrapMember: Pick<
+    PersistedTeamLaunchMemberState,
+    'firstSpawnAcceptedAt' | 'lastHeartbeatAt' | 'lastRuntimeAliveAt' | 'lastEvaluatedAt'
+  >,
+  evidenceKind: 'acceptance' | 'confirmation'
+): boolean {
+  const bootstrapFirstSpawnAcceptedMs = Date.parse(bootstrapMember.firstSpawnAcceptedAt ?? '');
+  const bootstrapLastEvaluatedMs = Date.parse(bootstrapMember.lastEvaluatedAt ?? '');
+  const hasDurableBootstrapSpawnAcceptedAt =
+    Number.isFinite(bootstrapFirstSpawnAcceptedMs) &&
+    (!Number.isFinite(bootstrapLastEvaluatedMs) ||
+      bootstrapFirstSpawnAcceptedMs <= bootstrapLastEvaluatedMs);
+  const evidenceAt =
+    evidenceKind === 'confirmation'
+      ? (bootstrapMember.lastHeartbeatAt ??
+        bootstrapMember.lastRuntimeAliveAt ??
+        bootstrapMember.lastEvaluatedAt)
+      : hasDurableBootstrapSpawnAcceptedAt
+        ? bootstrapMember.firstSpawnAcceptedAt
+        : bootstrapMember.lastEvaluatedAt;
+  const evidenceMs = Date.parse(evidenceAt ?? '');
+  if (!Number.isFinite(evidenceMs)) {
+    return false;
+  }
+  const firstSpawnAcceptedMs = Date.parse(current.firstSpawnAcceptedAt ?? '');
+  const lastEvaluatedMs = Date.parse(current.lastEvaluatedAt ?? '');
+  const hasDurableSpawnBoundary =
+    Number.isFinite(firstSpawnAcceptedMs) &&
+    (!Number.isFinite(lastEvaluatedMs) || firstSpawnAcceptedMs <= lastEvaluatedMs);
+  const boundaryMs = hasDurableSpawnBoundary ? firstSpawnAcceptedMs : NaN;
+  return !Number.isFinite(boundaryMs) || evidenceMs >= boundaryMs;
 }
 
 function isTmuxNoServerRunningError(error: unknown): boolean {
@@ -27655,11 +27708,7 @@ export class TeamProvisioningService {
   private async overlayPrimaryBootstrapTruthIntoRunStatusesFromBootstrapState(
     run: ProvisioningRun
   ): Promise<void> {
-    if (
-      !run.isLaunch ||
-      !Array.isArray(run.mixedSecondaryLanes) ||
-      run.mixedSecondaryLanes.length === 0
-    ) {
+    if (!run.isLaunch) {
       return;
     }
 
@@ -27684,7 +27733,7 @@ export class TeamProvisioningService {
     }
 
     const primaryMemberNames = new Set(
-      (run.effectiveMembers ?? [])
+      [...(run.effectiveMembers ?? []), ...(run.expectedMembers ?? []).map((name) => ({ name }))]
         .map((member) => member.name?.trim())
         .filter((name): name is string => Boolean(name))
     );
@@ -27703,6 +27752,9 @@ export class TeamProvisioningService {
       }
       const current =
         run.memberSpawnStatuses.get(memberName) ?? createInitialMemberSpawnStatusEntry();
+      if (!isBootstrapMemberEvidenceCurrentForMember(current, bootstrapMember, 'confirmation')) {
+        continue;
+      }
       if (current.launchState === 'skipped_for_launch' || current.skippedForLaunch === true) {
         continue;
       }
@@ -27791,6 +27843,9 @@ export class TeamProvisioningService {
       const current = nextMembers[memberName];
       const bootstrapMember = bootstrapSnapshot.members[memberName];
       if (!current || bootstrapMember?.bootstrapConfirmed !== true) {
+        continue;
+      }
+      if (!isBootstrapMemberEvidenceCurrentForMember(current, bootstrapMember, 'confirmation')) {
         continue;
       }
       if (
@@ -30114,9 +30169,25 @@ export class TeamProvisioningService {
       if (!current || !bootstrapMember) {
         continue;
       }
+      if (
+        bootstrapMember.bootstrapConfirmed === true &&
+        !isPersistedOpenCodeSecondaryLaneMember(current) &&
+        isBootstrapMemberEvidenceCurrentForMember(current, bootstrapMember, 'confirmation')
+      ) {
+        const currentConfirmed =
+          current.bootstrapConfirmed === true || current.launchState === 'confirmed_alive';
+        const failureReason = current.hardFailureReason ?? current.runtimeDiagnostic;
+        const hasAutoClearableFailure =
+          (current.launchState === 'failed_to_start' || current.hardFailure === true) &&
+          isAutoClearableLaunchFailureReason(failureReason);
+        if (!currentConfirmed || hasAutoClearableFailure) {
+          return true;
+        }
+      }
       const bootstrapProvesSpawnAcceptance =
-        bootstrapMember.agentToolAccepted === true ||
-        typeof bootstrapMember.firstSpawnAcceptedAt === 'string';
+        (bootstrapMember.agentToolAccepted === true ||
+          typeof bootstrapMember.firstSpawnAcceptedAt === 'string') &&
+        isBootstrapMemberEvidenceCurrentForMember(current, bootstrapMember, 'acceptance');
       if (!bootstrapProvesSpawnAcceptance) {
         continue;
       }
@@ -30327,7 +30398,11 @@ export class TeamProvisioningService {
         lastEvaluatedAt: now,
       };
       const isOpenCodeSecondaryLaneMember = isPersistedOpenCodeSecondaryLaneMember(current);
-      if (bootstrapMember?.agentToolAccepted && !current.agentToolAccepted) {
+      if (
+        bootstrapMember?.agentToolAccepted &&
+        !current.agentToolAccepted &&
+        isBootstrapMemberEvidenceCurrentForMember(current, bootstrapMember, 'acceptance')
+      ) {
         current.agentToolAccepted = true;
         current.firstSpawnAcceptedAt =
           current.firstSpawnAcceptedAt ?? bootstrapMember.firstSpawnAcceptedAt;
@@ -30335,7 +30410,8 @@ export class TeamProvisioningService {
       if (
         bootstrapMember?.bootstrapConfirmed &&
         !current.bootstrapConfirmed &&
-        !isOpenCodeSecondaryLaneMember
+        !isOpenCodeSecondaryLaneMember &&
+        isBootstrapMemberEvidenceCurrentForMember(current, bootstrapMember, 'confirmation')
       ) {
         current.bootstrapConfirmed = true;
         current.lastHeartbeatAt = current.lastHeartbeatAt ?? bootstrapMember.lastHeartbeatAt;
