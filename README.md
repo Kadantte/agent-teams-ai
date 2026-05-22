@@ -29,6 +29,8 @@
 <!--
 <img width="1304" height="820" alt="image" src="https://github.com/user-attachments/assets/dea53a01-68b3-4c36-bcf6-e4d1ad4cdb31" />
 -->
+
+<a href="https://777genius.github.io/agent-teams-ai/">Watch demo on the site or here:</a>
 https://github.com/user-attachments/assets/d1a85fe5-fb49-4009-b2c1-79ae8818e8c4
 
 <table>
