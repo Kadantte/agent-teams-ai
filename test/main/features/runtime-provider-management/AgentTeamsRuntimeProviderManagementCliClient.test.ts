@@ -275,6 +275,181 @@ describe('AgentTeamsRuntimeProviderManagementCliClient', () => {
     );
   });
 
+  it('returns structured diagnostics when provider directory loading times out', async () => {
+    const error = new Error(
+      'Command timed out after 45000ms: /repo/cli-dev runtime providers directory --runtime opencode --json'
+    );
+    Object.assign(error, {
+      stdout: 'inventory started\n',
+      stderr: 'OpenCode provider key=sk-secret-value-123456 still probing\n',
+    });
+    execCliMock.mockRejectedValue(error);
+
+    const client = new AgentTeamsRuntimeProviderManagementCliClient();
+    const response = await client.loadProviderDirectory({
+      runtimeId: 'opencode',
+      projectPath: '/Users/test/project',
+      query: null,
+      filter: 'all',
+      limit: 50,
+      cursor: null,
+      refresh: false,
+    });
+
+    expect(response.error?.message).toContain(
+      'OpenCode provider settings timed out while waiting for the Agent Teams runtime.'
+    );
+    expect(response.error?.message).toContain(
+      'This is not enough evidence to conclude that OpenCode auth is missing.'
+    );
+    expect(response.error?.message).toContain('OpenCode provider key=...redacted');
+    expect(response.error?.message).not.toContain('sk-secret-value-123456');
+    expect(response.error?.diagnostics?.summary).toBe(
+      'OpenCode provider settings timed out while waiting for the Agent Teams runtime.'
+    );
+    expect(response.error?.diagnostics?.command).toBe(
+      '/repo/cli-dev runtime providers directory --runtime opencode --json --project-path /Users/test/project --filter all --limit 50'
+    );
+    expect(response.error?.diagnostics?.stderrPreview).toBe(
+      'OpenCode provider key=...redacted still probing'
+    );
+    expect(response.error?.diagnostics?.stdoutPreview).toBe('inventory started');
+    expect(response.error?.diagnostics?.hints).toContain(
+      'If the runtime binary is stale, update Agent Teams so the runtime can return a degraded OpenCode diagnostic instead of timing out.'
+    );
+  });
+
+  it('preserves runtime-side degraded JSON errors from rejected command output', async () => {
+    const error = new Error('Command failed after runtime returned degraded JSON');
+    Object.assign(error, {
+      stdout: '',
+      stderr: JSON.stringify({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        error: {
+          code: 'runtime-unhealthy',
+          message:
+            'OpenCode inventory probe timed out after 12000ms during opencode providers list',
+          recoverable: true,
+          diagnostics: {
+            summary: 'OpenCode inventory probe timed out',
+            likelyCause: 'OpenCode providers list did not finish before the runtime budget.',
+            command:
+              '/repo/cli-dev runtime providers view --runtime opencode --json --compact',
+            stderrPreview: 'provider api_key: sk-secret-value-123456',
+            hints: ['Check OpenCode CLI startup and local OpenCode plugins.'],
+          },
+        },
+      }),
+    });
+    execCliMock.mockRejectedValue(error);
+
+    const client = new AgentTeamsRuntimeProviderManagementCliClient();
+    const response = await client.loadView({
+      runtimeId: 'opencode',
+    });
+
+    expect(response.error?.message).toBe(
+      'OpenCode inventory probe timed out after 12000ms during opencode providers list'
+    );
+    expect(response.error?.diagnostics?.summary).toBe('OpenCode inventory probe timed out');
+    expect(response.error?.diagnostics?.likelyCause).toBe(
+      'OpenCode providers list did not finish before the runtime budget.'
+    );
+    expect(response.error?.diagnostics?.stderrPreview).toBe(
+      'provider api_key: ...redacted'
+    );
+    expect(response.error?.diagnostics?.stderrPreview).not.toContain('sk-secret-value-123456');
+    expect(response.error?.diagnostics?.hints).toContain(
+      'Check OpenCode CLI startup and local OpenCode plugins.'
+    );
+  });
+
+  it('preserves degraded JSON from stderr when stdout contains noisy logs', async () => {
+    const error = new Error('Command failed after mixed runtime output');
+    Object.assign(error, {
+      stdout: 'runtime preflight log {not json}\n',
+      stderr: JSON.stringify({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        error: {
+          code: 'runtime-unhealthy',
+          message:
+            'OpenCode inventory probe timed out after 12000ms during opencode agent list',
+          recoverable: true,
+          diagnostics: {
+            summary: 'OpenCode inventory probe timed out',
+            likelyCause: 'OpenCode agent inventory did not finish before the runtime budget.',
+            stderrPreview: 'agent token=sk-secret-value-123456',
+            hints: ['Check OpenCode agent listing and local OpenCode plugins.'],
+          },
+        },
+      }),
+    });
+    execCliMock.mockRejectedValue(error);
+
+    const client = new AgentTeamsRuntimeProviderManagementCliClient();
+    const response = await client.loadView({
+      runtimeId: 'opencode',
+    });
+
+    expect(response.error?.message).toBe(
+      'OpenCode inventory probe timed out after 12000ms during opencode agent list'
+    );
+    expect(response.error?.diagnostics?.likelyCause).toBe(
+      'OpenCode agent inventory did not finish before the runtime budget.'
+    );
+    expect(response.error?.diagnostics?.stderrPreview).toBe(
+      'agent token=...redacted'
+    );
+    expect(JSON.stringify(response.error?.diagnostics)).not.toContain('sk-secret-value-123456');
+  });
+
+  it('preserves degraded JSON printed to stdout before a desktop timeout', async () => {
+    const error = new Error(
+      'Command timed out after 45000ms: /repo/cli-dev runtime providers view --runtime opencode --json --compact'
+    );
+    Object.assign(error, {
+      stdout: JSON.stringify({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        error: {
+          code: 'runtime-unhealthy',
+          message:
+            'OpenCode inventory probe timed out after 12000ms during opencode models --verbose',
+          recoverable: true,
+          diagnostics: {
+            summary: 'OpenCode inventory probe timed out',
+            likelyCause: 'OpenCode model inventory did not finish before the runtime budget.',
+            command:
+              '/repo/cli-dev runtime providers view --runtime opencode --json --compact',
+            stdoutPreview: 'model api_key: sk-secret-value-123456',
+            hints: ['Check OpenCode model listing and local OpenCode plugins.'],
+          },
+        },
+      }),
+      stderr: 'outer timeout after runtime json\n',
+    });
+    execCliMock.mockRejectedValue(error);
+
+    const client = new AgentTeamsRuntimeProviderManagementCliClient();
+    const response = await client.loadView({
+      runtimeId: 'opencode',
+    });
+
+    expect(response.error?.message).toBe(
+      'OpenCode inventory probe timed out after 12000ms during opencode models --verbose'
+    );
+    expect(response.error?.diagnostics?.summary).toBe('OpenCode inventory probe timed out');
+    expect(response.error?.diagnostics?.likelyCause).toBe(
+      'OpenCode model inventory did not finish before the runtime budget.'
+    );
+    expect(response.error?.diagnostics?.stdoutPreview).toBe(
+      'model api_key: ...redacted'
+    );
+    expect(JSON.stringify(response.error?.diagnostics)).not.toContain('sk-secret-value-123456');
+  });
+
   it('parses the runtime JSON response after noisy brace logs', async () => {
     const validResponse = {
       schemaVersion: 1,
