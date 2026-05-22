@@ -57,11 +57,11 @@ function sanitizeRuntimeProviderIpcErrorMessage(message: string): string {
     .replace(/\b(or-[A-Za-z0-9_-]{12,})\b/g, 'or-...redacted')
     .replace(/\b(AIza[A-Za-z0-9_-]{20,})\b/g, 'AIza...redacted')
     .replace(
-      /\b([A-Za-z0-9_.-]*(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|[_-]key)["'\s:=]+)([A-Za-z0-9._~+/=_-]{12,})/gi,
+      /\b([a-z0-9_.-]*(?:api[-_]?key|(?:access|auth)[-_]?token|token|secret|password|[-_]key)["'\s:=]+)([a-z0-9._~+/=-]{12,})/gi,
       '$1...redacted'
     )
-    .replace(/\b(key["'\s:=]+)([A-Za-z0-9._~+/=_-]{12,})/gi, '$1...redacted')
-    .replace(/\b(bearer\s+)([A-Za-z0-9._~+/=_-]{12,})/gi, '$1...redacted')
+    .replace(/\b(key["'\s:=]+)([a-z0-9._~+/=-]{12,})/gi, '$1...redacted')
+    .replace(/\b(bearer\s+)([a-z0-9._~+/=-]{12,})/gi, '$1...redacted')
     .trim();
   return truncateRuntimeProviderIpcErrorDetail(sanitized);
 }
