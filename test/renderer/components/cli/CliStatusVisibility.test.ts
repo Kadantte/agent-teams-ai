@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { CLI_PROVIDER_STATUS_DEFERRED_MESSAGE } from '@shared/types/cliInstaller';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts';
@@ -313,6 +314,30 @@ function createCodexNativeRolloutProvider(
   };
 }
 
+function createDeferredMultimodelProvider(
+  providerId: 'anthropic' | 'codex' | 'opencode',
+  displayName: string
+): Record<string, unknown> {
+  return {
+    providerId,
+    displayName,
+    supported: false,
+    authenticated: false,
+    authMethod: null,
+    verificationState: 'unknown',
+    statusMessage: CLI_PROVIDER_STATUS_DEFERRED_MESSAGE,
+    models: [],
+    modelAvailability: [],
+    canLoginFromUi: providerId !== 'opencode',
+    capabilities: {
+      teamLaunch: false,
+      oneShot: false,
+    },
+    backend: null,
+    availableBackends: [],
+  };
+}
+
 describe('CLI status visibility during completed install state', () => {
   afterEach(() => {
     document.body.innerHTML = '';
@@ -512,6 +537,49 @@ describe('CLI status visibility during completed install state', () => {
     await act(async () => {
       root.unmount();
       await flushLazyImports();
+    });
+  });
+
+  it('shows deferred multimodel provider snapshots as pending instead of disconnected', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.cliInstallerState = 'idle';
+    storeState.cliStatus = createInstalledCliStatus({
+      flavor: 'agent_teams_orchestrator',
+      displayName: 'Multimodel runtime',
+      supportsSelfUpdate: false,
+      showVersionDetails: false,
+      showBinaryPath: false,
+      authLoggedIn: false,
+      authStatusChecking: true,
+      providers: [
+        createDeferredMultimodelProvider('anthropic', 'Anthropic'),
+        createDeferredMultimodelProvider('codex', 'Codex'),
+        createDeferredMultimodelProvider('opencode', 'OpenCode'),
+      ],
+    });
+    storeState.cliProviderStatusLoading = {
+      anthropic: true,
+      codex: true,
+      opencode: true,
+    };
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(CliStatusBanner));
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Checking providers...');
+    expect(host.textContent).toContain('Checking...');
+    expect(host.textContent).not.toContain('Providers: 0/3 connected');
+    expect(host.textContent).not.toContain('Models unavailable for this runtime build');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
     });
   });
 

@@ -15,6 +15,7 @@ import {
   CLI_INSTALLER_VERIFY_PROVIDER_MODELS,
   // eslint-disable-next-line boundaries/element-types -- IPC channel constants shared between main and preload
 } from '@preload/constants/ipcChannels';
+import { CLI_PROVIDER_STATUS_DEFERRED_MESSAGE } from '@shared/types/cliInstaller';
 import { getErrorMessage } from '@shared/utils/errorHandling';
 import { createLogger } from '@shared/utils/logger';
 
@@ -44,7 +45,6 @@ const cachedStatus = new Map<
 let statusCacheGeneration = 0;
 const STATUS_CACHE_TTL_MS = 5_000;
 const FRONTEND_MULTIMODEL_PROVIDER_IDS = new Set<CliProviderId>(['anthropic', 'codex', 'opencode']);
-const DEFERRED_PROVIDER_STATUS_MESSAGE = 'Provider status will refresh when needed.';
 
 function isFrontendMultimodelProviderId(providerId: CliProviderId): boolean {
   return FRONTEND_MULTIMODEL_PROVIDER_IDS.has(providerId);
@@ -81,7 +81,7 @@ function isDeferredProviderStatusSnapshot(status: CliInstallationStatus): boolea
         provider.supported === false &&
         provider.authenticated === false &&
         provider.verificationState === 'unknown' &&
-        provider.statusMessage === DEFERRED_PROVIDER_STATUS_MESSAGE
+        provider.statusMessage === CLI_PROVIDER_STATUS_DEFERRED_MESSAGE
     )
   );
 }

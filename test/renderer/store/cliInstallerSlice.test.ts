@@ -63,10 +63,13 @@ import {
   mergeCliStatusPreservingHydratedProviders,
   reconcileMultimodelProviderLoading,
 } from '@renderer/store/slices/cliInstallerSlice';
+import {
+  CLI_PROVIDER_STATUS_DEFERRED_MESSAGE,
+  type CliProviderId,
+} from '@shared/types/cliInstaller';
 import { createDefaultCliExtensionCapabilities } from '@shared/utils/providerExtensionCapabilities';
 
 import type { CliInstallationStatus } from '@shared/types';
-import type { CliProviderId } from '@shared/types/cliInstaller';
 
 function createMultimodelProvider(
   overrides: Partial<CliInstallationStatus['providers'][number]> & {
@@ -126,6 +129,30 @@ function createMultimodelStatus(
     authMethod: authenticatedProvider?.authMethod ?? null,
     providers,
   };
+}
+
+function createDeferredProvider(
+  providerId: CliProviderId,
+  displayName: string
+): CliInstallationStatus['providers'][number] {
+  return createMultimodelProvider({
+    providerId,
+    displayName,
+    supported: false,
+    authenticated: false,
+    authMethod: null,
+    verificationState: 'unknown',
+    statusMessage: CLI_PROVIDER_STATUS_DEFERRED_MESSAGE,
+    models: [],
+    canLoginFromUi: providerId !== 'opencode',
+    capabilities: {
+      teamLaunch: false,
+      oneShot: false,
+      extensions: createDefaultCliExtensionCapabilities(),
+    },
+    backend: null,
+    availableBackends: [],
+  });
 }
 
 describe('cliInstallerSlice', () => {
@@ -344,6 +371,31 @@ describe('cliInstallerSlice', () => {
       expect(getModelOnlyFallbackProviderIds(status)).toEqual([]);
     });
 
+    it('keeps deferred startup provider snapshots incomplete until idle hydration runs', () => {
+      const status = createMultimodelStatus([
+        createDeferredProvider('anthropic', 'Anthropic'),
+        createDeferredProvider('codex', 'Codex'),
+        createDeferredProvider('opencode', 'OpenCode'),
+      ]);
+
+      expect(getIncompleteMultimodelProviderIds(status)).toEqual([
+        'anthropic',
+        'codex',
+        'opencode',
+      ]);
+      expect(
+        reconcileMultimodelProviderLoading(status, {
+          anthropic: false,
+          codex: false,
+          opencode: false,
+        })
+      ).toEqual({
+        anthropic: true,
+        codex: true,
+        opencode: true,
+      });
+    });
+
     it('clears loading for hydrated providers while keeping pending providers marked', () => {
       const status = createMultimodelStatus([
         createMultimodelProvider({
@@ -509,6 +561,57 @@ describe('cliInstallerSlice', () => {
           statusMessage: 'Runtime not found.',
         }
       );
+    });
+
+    it('does not let deferred startup snapshots overwrite hydrated provider state', () => {
+      const current = createMultimodelStatus([
+        createMultimodelProvider({
+          providerId: 'anthropic',
+          displayName: 'Anthropic',
+          authenticated: true,
+          authMethod: 'oauth_token',
+          statusMessage: 'Connected via Anthropic subscription',
+          models: ['claude-sonnet-4-5'],
+          backend: { kind: 'anthropic', label: 'Anthropic' },
+        }),
+        createMultimodelProvider({
+          providerId: 'opencode',
+          displayName: 'OpenCode',
+          authenticated: true,
+          authMethod: 'opencode_managed',
+          statusMessage: 'OpenCode ready',
+          models: ['opencode/big-pickle'],
+          canLoginFromUi: false,
+          backend: { kind: 'opencode-cli', label: 'OpenCode CLI' },
+        }),
+      ]);
+      const incoming = createMultimodelStatus([
+        createDeferredProvider('anthropic', 'Anthropic'),
+        createDeferredProvider('codex', 'Codex'),
+        createDeferredProvider('opencode', 'OpenCode'),
+      ]);
+
+      const merged = mergeCliStatusPreservingHydratedProviders(current, incoming);
+
+      expect(merged.providers.find((provider) => provider.providerId === 'anthropic')).toMatchObject(
+        {
+          authenticated: true,
+          authMethod: 'oauth_token',
+          statusMessage: 'Connected via Anthropic subscription',
+          models: ['claude-sonnet-4-5'],
+        }
+      );
+      expect(merged.providers.find((provider) => provider.providerId === 'opencode')).toMatchObject(
+        {
+          authenticated: true,
+          authMethod: 'opencode_managed',
+          statusMessage: 'OpenCode ready',
+          models: ['opencode/big-pickle'],
+        }
+      );
+      expect(merged.providers.find((provider) => provider.providerId === 'codex')).toMatchObject({
+        statusMessage: CLI_PROVIDER_STATUS_DEFERRED_MESSAGE,
+      });
     });
 
     it('drops hydrated hidden Gemini when a fresh frontend status omits it', () => {
@@ -890,43 +993,9 @@ describe('cliInstallerSlice', () => {
 
     it('does not hydrate pending providers when startup asks to defer provider status checks', async () => {
       const mockStatus = createMultimodelStatus([
-        createMultimodelProvider({
-          providerId: 'anthropic',
-          displayName: 'Anthropic',
-          supported: false,
-          authenticated: false,
-          authMethod: null,
-          verificationState: 'unknown',
-          statusMessage: 'Provider status will refresh when needed.',
-          models: [],
-          backend: null,
-          availableBackends: [],
-        }),
-        createMultimodelProvider({
-          providerId: 'codex',
-          displayName: 'Codex',
-          supported: false,
-          authenticated: false,
-          authMethod: null,
-          verificationState: 'unknown',
-          statusMessage: 'Provider status will refresh when needed.',
-          models: [],
-          backend: null,
-          availableBackends: [],
-        }),
-        createMultimodelProvider({
-          providerId: 'opencode',
-          displayName: 'OpenCode',
-          supported: false,
-          authenticated: false,
-          authMethod: null,
-          verificationState: 'unknown',
-          statusMessage: 'Provider status will refresh when needed.',
-          models: [],
-          backend: null,
-          availableBackends: [],
-          canLoginFromUi: false,
-        }),
+        createDeferredProvider('anthropic', 'Anthropic'),
+        createDeferredProvider('codex', 'Codex'),
+        createDeferredProvider('opencode', 'OpenCode'),
       ]);
       vi.mocked(api.cliInstaller.getStatus).mockResolvedValue(mockStatus);
 
@@ -938,14 +1007,65 @@ describe('cliInstallerSlice', () => {
       expect(api.cliInstaller.getProviderStatus).not.toHaveBeenCalled();
       expect(useStore.getState().cliStatusLoading).toBe(false);
       expect(useStore.getState().cliProviderStatusLoading).toEqual({
+        anthropic: true,
+        codex: true,
+        opencode: true,
+      });
+      expect(useStore.getState().cliStatus?.authStatusChecking).toBe(true);
+      expect(
+        useStore.getState().cliStatus?.providers.map((provider) => provider.statusMessage)
+      ).toEqual([
+        CLI_PROVIDER_STATUS_DEFERRED_MESSAGE,
+        CLI_PROVIDER_STATUS_DEFERRED_MESSAGE,
+        CLI_PROVIDER_STATUS_DEFERRED_MESSAGE,
+      ]);
+    });
+
+    it('preserves hydrated providers during deferred startup refreshes', async () => {
+      const currentStatus = createMultimodelStatus([
+        createMultimodelProvider({
+          providerId: 'anthropic',
+          displayName: 'Anthropic',
+          authenticated: true,
+          authMethod: 'oauth_token',
+          statusMessage: 'Connected via Anthropic subscription',
+          models: ['claude-sonnet-4-5'],
+          backend: { kind: 'anthropic', label: 'Anthropic' },
+        }),
+        createDeferredProvider('codex', 'Codex'),
+        createMultimodelProvider({
+          providerId: 'opencode',
+          displayName: 'OpenCode',
+          authenticated: true,
+          authMethod: 'opencode_managed',
+          statusMessage: 'OpenCode ready',
+          models: ['opencode/big-pickle'],
+          canLoginFromUi: false,
+          backend: { kind: 'opencode-cli', label: 'OpenCode CLI' },
+        }),
+      ]);
+      const deferredStatus = createMultimodelStatus([
+        createDeferredProvider('anthropic', 'Anthropic'),
+        createDeferredProvider('codex', 'Codex'),
+        createDeferredProvider('opencode', 'OpenCode'),
+      ]);
+      useStore.setState({ cliStatus: currentStatus });
+      vi.mocked(api.cliInstaller.getStatus).mockResolvedValue(deferredStatus);
+
+      await useStore
+        .getState()
+        .bootstrapCliStatus({ multimodelEnabled: true, providerStatusMode: 'defer' });
+
+      expect(api.cliInstaller.getProviderStatus).not.toHaveBeenCalled();
+      expect(useStore.getState().cliProviderStatusLoading).toEqual({
         anthropic: false,
-        codex: false,
+        codex: true,
         opencode: false,
       });
-      expect(useStore.getState().cliStatus?.providers.map((provider) => provider.statusMessage)).toEqual([
-        'Provider status will refresh when needed.',
-        'Provider status will refresh when needed.',
-        'Provider status will refresh when needed.',
+      expect(useStore.getState().cliStatus?.providers).toEqual([
+        currentStatus.providers[0],
+        deferredStatus.providers[1],
+        currentStatus.providers[2],
       ]);
     });
 

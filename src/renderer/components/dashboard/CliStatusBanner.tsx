@@ -53,6 +53,7 @@ import { resolveProjectPathById } from '@renderer/utils/projectLookup';
 import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
 import { getRuntimeDisplayName as getHumanRuntimeDisplayName } from '@renderer/utils/runtimeDisplayName';
 import { getVisibleTeamProviderModels } from '@renderer/utils/teamModelCatalog';
+import { CLI_PROVIDER_STATUS_DEFERRED_MESSAGE } from '@shared/types/cliInstaller';
 import {
   AlertTriangle,
   CheckCircle,
@@ -448,7 +449,8 @@ function isProviderCardLoading(provider: CliProviderStatus, providerLoading: boo
   return (
     providerLoading ||
     (!provider.authenticated &&
-      provider.statusMessage === 'Checking...' &&
+      (provider.statusMessage === 'Checking...' ||
+        provider.statusMessage === CLI_PROVIDER_STATUS_DEFERRED_MESSAGE) &&
       provider.models.length === 0 &&
       provider.backend == null)
   );
@@ -503,6 +505,14 @@ function formatRuntimeLabel(
     : runtimeLabel;
 }
 
+function isPendingMultimodelProviderStatus(provider: CliProviderStatus): boolean {
+  return (
+    !provider.authenticated &&
+    (provider.statusMessage === 'Checking...' ||
+      provider.statusMessage === CLI_PROVIDER_STATUS_DEFERRED_MESSAGE)
+  );
+}
+
 function formatRuntimeAuthSummary(
   cliStatus: NonNullable<ReturnType<typeof useCliInstaller>['cliStatus']>,
   visibleProviders: readonly CliProviderStatus[]
@@ -512,11 +522,7 @@ function formatRuntimeAuthSummary(
       return null;
     }
 
-    if (
-      visibleProviders.every(
-        (provider) => provider.statusMessage === 'Checking...' && !provider.authenticated
-      )
-    ) {
+    if (visibleProviders.every(isPendingMultimodelProviderStatus)) {
       return 'Checking providers...';
     }
     const denominator = visibleProviders.length;
@@ -543,9 +549,7 @@ function isCheckingMultimodelStatus(
   return (
     isMultimodelRuntimeStatus(cliStatus) &&
     visibleProviders.length > 0 &&
-    visibleProviders.every(
-      (provider) => provider.statusMessage === 'Checking...' && !provider.authenticated
-    )
+    visibleProviders.every(isPendingMultimodelProviderStatus)
   );
 }
 

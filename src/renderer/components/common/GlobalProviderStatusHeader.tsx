@@ -10,6 +10,7 @@ import { formatProviderStatusText } from '@renderer/components/runtime/providerC
 import { useStore } from '@renderer/store';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import { filterMainScreenCliProviders } from '@renderer/utils/geminiUiFreeze';
+import { CLI_PROVIDER_STATUS_DEFERRED_MESSAGE } from '@shared/types/cliInstaller';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -27,7 +28,8 @@ function isProviderCardLoading(provider: CliProviderStatus, providerLoading: boo
   return (
     providerLoading ||
     (!provider.authenticated &&
-      provider.statusMessage === 'Checking...' &&
+      (provider.statusMessage === 'Checking...' ||
+        provider.statusMessage === CLI_PROVIDER_STATUS_DEFERRED_MESSAGE) &&
       provider.models.length === 0 &&
       provider.backend == null)
   );

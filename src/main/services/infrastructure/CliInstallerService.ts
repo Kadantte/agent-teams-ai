@@ -28,6 +28,7 @@ import {
   getShellPreferredHome,
   resolveInteractiveShellEnvBestEffort,
 } from '@main/utils/shellEnv';
+import { CLI_PROVIDER_STATUS_DEFERRED_MESSAGE } from '@shared/types/cliInstaller';
 import { getErrorMessage } from '@shared/utils/errorHandling';
 import { createLogger } from '@shared/utils/logger';
 import { createDefaultCliExtensionCapabilities } from '@shared/utils/providerExtensionCapabilities';
@@ -173,6 +174,7 @@ function parseClaudeAuthStatusStdout(stdout: string): { loggedIn?: boolean; auth
 
 /** NDJSON: strip C0 controls (except \\t \\n \\r) so logs stay valid text and tiny. */
 function stripControlForDiag(s: string): string {
+  // eslint-disable-next-line no-control-regex -- Strip raw terminal C0 controls before diagnostic logging.
   return s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '\uFFFD');
 }
 
@@ -1214,7 +1216,7 @@ export class CliInstallerService {
       verificationState: 'unknown',
       modelVerificationState: 'idle',
       modelCatalogRefreshState: 'idle',
-      statusMessage: 'Provider status will refresh when needed.',
+      statusMessage: CLI_PROVIDER_STATUS_DEFERRED_MESSAGE,
       detailMessage: null,
       models: [],
       modelAvailability: [],

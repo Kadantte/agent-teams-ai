@@ -21,6 +21,7 @@ import { create } from 'zustand';
 import { createChangeReviewSlice } from './slices/changeReviewSlice';
 import {
   createCliInstallerSlice,
+  getIncompleteMultimodelProviderIds,
   getModelOnlyFallbackProviderIds,
   mergeCliStatusPreservingHydratedProviders,
   reconcileMultimodelProviderLoading,
@@ -96,6 +97,7 @@ const TEAM_VISIBLE_IDLE_WATCHDOG_STALE_MS = 30_000;
 const TEAM_MESSAGE_FALLBACK_POLL_MS = 10_000;
 const TASK_LOG_ACTIVITY_PULSE_MS = 3_500;
 const STARTUP_RUNTIME_STATUS_IDLE_DELAY_MS = 30_000;
+const STARTUP_PROVIDER_STATUS_IDLE_DELAY_MS = 30_000;
 const ACTIVE_PROVISIONING_STATES_FOR_PROCESS_LITE: ReadonlySet<TeamProvisioningProgress['state']> =
   new Set(['validating', 'spawning', 'configuring', 'assembling', 'finalizing', 'verifying']);
 export const TEAM_PROCESS_LITE_FANOUT_STORAGE_KEY = 'team:processLiteFanout';
@@ -211,6 +213,7 @@ export function initializeNotificationListeners(): () => void {
   cleanupFns.push(installTeamRefreshFanoutDebugBridge());
   let cliStatusTimer: ReturnType<typeof setTimeout> | null = null;
   let runtimeStatusTimer: ReturnType<typeof setTimeout> | null = null;
+  let deferredProviderStatusTimer: ReturnType<typeof setTimeout> | null = null;
   useStore.getState().subscribeProvisioningProgress();
   cleanupFns.push(() => {
     useStore.getState().unsubscribeProvisioningProgress();
@@ -242,9 +245,21 @@ export function initializeNotificationListeners(): () => void {
       cliStatusTimer = setTimeout(() => {
         const multimodelEnabled = useStore.getState().appConfig?.general?.multimodelEnabled ?? true;
         if (multimodelEnabled) {
-          void useStore
-            .getState()
-            .bootstrapCliStatus({ multimodelEnabled: true, providerStatusMode: 'defer' });
+          void (async () => {
+            await useStore
+              .getState()
+              .bootstrapCliStatus({ multimodelEnabled: true, providerStatusMode: 'defer' });
+            if (deferredProviderStatusTimer) {
+              clearTimeout(deferredProviderStatusTimer);
+            }
+            deferredProviderStatusTimer = setTimeout(() => {
+              const providerIds = getIncompleteMultimodelProviderIds(useStore.getState().cliStatus);
+              for (const providerId of providerIds) {
+                void useStore.getState().fetchCliProviderStatus(providerId, { silent: false });
+              }
+              deferredProviderStatusTimer = null;
+            }, STARTUP_PROVIDER_STATUS_IDLE_DELAY_MS);
+          })();
         } else {
           void useStore.getState().fetchCliStatus();
         }
@@ -272,6 +287,7 @@ export function initializeNotificationListeners(): () => void {
   cleanupFns.push(() => {
     if (cliStatusTimer) clearTimeout(cliStatusTimer);
     if (runtimeStatusTimer) clearTimeout(runtimeStatusTimer);
+    if (deferredProviderStatusTimer) clearTimeout(deferredProviderStatusTimer);
   });
   // TODO(task-change-presence): re-enable this only after the board uses a bounded
   // batch/priority presence pipeline. The old one-task-per-tick poll was accurate

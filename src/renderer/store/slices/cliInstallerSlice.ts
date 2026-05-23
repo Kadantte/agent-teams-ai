@@ -4,6 +4,7 @@
 
 import { api } from '@renderer/api';
 import { isGeminiUiFrozen } from '@renderer/utils/geminiUiFreeze';
+import { CLI_PROVIDER_STATUS_DEFERRED_MESSAGE } from '@shared/types/cliInstaller';
 import { createLogger } from '@shared/utils/logger';
 import { createDefaultCliExtensionCapabilities } from '@shared/utils/providerExtensionCapabilities';
 
@@ -109,8 +110,22 @@ function isOpenCodeSummaryOnlyCatalogStatus(provider: CliProviderStatus | undefi
   return provider.runtimeCapabilities?.modelCatalog?.dynamic === true;
 }
 
+function isDeferredMultimodelProviderStatus(provider: CliProviderStatus | undefined): boolean {
+  return (
+    provider?.supported === false &&
+    provider.authenticated === false &&
+    provider.authMethod === null &&
+    provider.verificationState === 'unknown' &&
+    provider.statusMessage === CLI_PROVIDER_STATUS_DEFERRED_MESSAGE
+  );
+}
+
 function isHydratedMultimodelProviderStatus(provider: CliProviderStatus | undefined): boolean {
   if (!provider) {
+    return false;
+  }
+
+  if (isDeferredMultimodelProviderStatus(provider)) {
     return false;
   }
 
@@ -221,6 +236,17 @@ function mergeProviderCatalogCache(
     runtimeCapabilities:
       incomingProvider.runtimeCapabilities ?? currentProvider.runtimeCapabilities ?? null,
   };
+}
+
+function mergePreservedHydratedProviderStatus(
+  incomingProvider: CliProviderStatus,
+  currentProvider: CliProviderStatus
+): CliProviderStatus {
+  if (isDeferredMultimodelProviderStatus(incomingProvider)) {
+    return currentProvider;
+  }
+
+  return mergeProviderCatalogCache(incomingProvider, currentProvider);
 }
 
 export function getIncompleteMultimodelProviderIds(
@@ -442,7 +468,7 @@ export function mergeCliStatusPreservingHydratedProviders(
       return incomingProvider;
     }
     if (shouldPreserveCurrentProviderStatus(currentProvider, incomingProvider)) {
-      return mergeProviderCatalogCache(incomingProvider, currentProvider);
+      return mergePreservedHydratedProviderStatus(incomingProvider, currentProvider);
     }
     // Preserve the current reference when content is identical so the
     // providers array stays reference-stable across steady-state IPC polls.
@@ -724,12 +750,25 @@ export const createCliInstallerSlice: StateCreator<AppState, [], [], CliInstalle
     }
 
     const epoch = ++cliStatusEpoch;
+    const currentStatus = get().cliStatus;
+    const initialStatus =
+      providerStatusMode === 'defer' && currentStatus?.flavor === 'agent_teams_orchestrator'
+        ? currentStatus
+        : createLoadingMultimodelCliStatus();
+    const shouldMarkIncompleteProvidersLoading = hydrateProviders || providerStatusMode === 'defer';
     const providerLoading = Object.fromEntries(
-      MULTIMODEL_PROVIDER_IDS.map((providerId) => [providerId, hydrateProviders])
+      MULTIMODEL_PROVIDER_IDS.map((providerId) => [
+        providerId,
+        shouldMarkIncompleteProvidersLoading &&
+          initialStatus.installed &&
+          !isHydratedMultimodelProviderStatus(
+            initialStatus.providers.find((provider) => provider.providerId === providerId)
+          ),
+      ])
     ) as Partial<Record<CliProviderId, boolean>>;
 
     set({
-      cliStatus: createLoadingMultimodelCliStatus(),
+      cliStatus: initialStatus,
       cliStatusLoading: true,
       cliProviderStatusLoading: providerLoading,
       cliStatusError: null,
@@ -760,18 +799,7 @@ export const createCliInstallerSlice: StateCreator<AppState, [], [], CliInstalle
         return;
       }
 
-      const nextProviderLoading = Object.fromEntries(
-        MULTIMODEL_PROVIDER_IDS.map((providerId) => [
-          providerId,
-          hydrateProviders &&
-            !isHydratedMultimodelProviderStatus(
-              metadata.providers.find((provider) => provider.providerId === providerId)
-            ),
-        ])
-      ) as Partial<Record<CliProviderId, boolean>>;
-      const pendingProviderIds = MULTIMODEL_PROVIDER_IDS.filter(
-        (providerId) => nextProviderLoading[providerId] === true
-      );
+      let pendingProviderIds: CliProviderId[] = [];
 
       set((state) => {
         if (epoch !== cliStatusEpoch || !state.cliStatus) {
@@ -779,6 +807,17 @@ export const createCliInstallerSlice: StateCreator<AppState, [], [], CliInstalle
         }
 
         const nextCliStatus = mergeCliStatusPreservingHydratedProviders(state.cliStatus, metadata);
+        const nextProviderLoading = Object.fromEntries(
+          MULTIMODEL_PROVIDER_IDS.map((providerId) => [
+            providerId,
+            !isHydratedMultimodelProviderStatus(
+              nextCliStatus.providers.find((provider) => provider.providerId === providerId)
+            ),
+          ])
+        ) as Partial<Record<CliProviderId, boolean>>;
+        pendingProviderIds = MULTIMODEL_PROVIDER_IDS.filter(
+          (providerId) => nextProviderLoading[providerId] === true
+        );
         const nextAuthState = isMultimodelCliStatus(nextCliStatus)
           ? buildMultimodelCliAuthState({
               status: nextCliStatus,

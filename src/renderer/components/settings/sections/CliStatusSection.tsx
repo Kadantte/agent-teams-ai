@@ -42,6 +42,7 @@ import { resolveProjectPathById } from '@renderer/utils/projectLookup';
 import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus';
 import { getRuntimeDisplayName } from '@renderer/utils/runtimeDisplayName';
 import { getVisibleTeamProviderModels } from '@renderer/utils/teamModelCatalog';
+import { CLI_PROVIDER_STATUS_DEFERRED_MESSAGE } from '@shared/types/cliInstaller';
 import {
   AlertTriangle,
   CheckCircle,
@@ -87,7 +88,8 @@ function isProviderCardLoading(provider: CliProviderStatus, providerLoading: boo
   return (
     providerLoading ||
     (!provider.authenticated &&
-      provider.statusMessage === 'Checking...' &&
+      (provider.statusMessage === 'Checking...' ||
+        provider.statusMessage === CLI_PROVIDER_STATUS_DEFERRED_MESSAGE) &&
       provider.models.length === 0 &&
       provider.backend == null)
   );
