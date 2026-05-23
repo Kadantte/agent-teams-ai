@@ -1,4 +1,7 @@
-export { useCodexAccountSnapshot } from './hooks/useCodexAccountSnapshot';
+export {
+  CODEX_ACCOUNT_STARTUP_IDLE_DELAY_MS,
+  useCodexAccountSnapshot,
+} from './hooks/useCodexAccountSnapshot';
 export { mergeCodexCliStatusWithSnapshot } from './mergeCodexCliStatusWithSnapshot';
 export { mergeCodexProviderStatusWithSnapshot } from './mergeCodexProviderStatusWithSnapshot';
 export {

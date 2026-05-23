@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
+  CODEX_ACCOUNT_STARTUP_IDLE_DELAY_MS,
   mergeCodexProviderStatusWithSnapshot,
   useCodexAccountSnapshot,
 } from '@features/codex-account/renderer';
@@ -176,6 +177,7 @@ export const ExtensionStoreView = (): React.JSX.Element => {
         )
       ),
     includeRateLimits: true,
+    initialRefreshDelayMs: CODEX_ACCOUNT_STARTUP_IDLE_DELAY_MS,
   });
   const codexSnapshotPending =
     codexAccount.loading &&

@@ -1030,13 +1030,17 @@ export class CliInstallerService {
     providerStatusMode: CliInstallerProviderStatusMode
   ): Promise<void> {
     resetGatherDiag(diag);
-    const shellEnvStartedAt = Date.now();
-    await resolveInteractiveShellEnvBestEffort({
-      timeoutMs: 1_500,
-      fallbackEnv: process.env,
-      background: false,
-    });
-    diag.shellEnvMs = Date.now() - shellEnvStartedAt;
+    if (providerStatusMode === 'defer') {
+      diag.shellEnvMs = 0;
+    } else {
+      const shellEnvStartedAt = Date.now();
+      await resolveInteractiveShellEnvBestEffort({
+        timeoutMs: 1_500,
+        fallbackEnv: process.env,
+        background: false,
+      });
+      diag.shellEnvMs = Date.now() - shellEnvStartedAt;
+    }
 
     const r = ref.current;
     const binaryResolveStartedAt = Date.now();

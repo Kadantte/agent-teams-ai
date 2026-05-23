@@ -243,6 +243,36 @@ describe('OpenCodeRuntimeInstallerService resolver', () => {
     });
   });
 
+  it('resolves from fast fallback PATH without spawning shell env when shell env is disabled', async () => {
+    const binaryPath = path.join(tempRoot!, 'merged-cli-path', 'bin', 'opencode');
+    await mkdir(path.dirname(binaryPath), { recursive: true });
+    await writeFile(binaryPath, 'binary', { mode: 0o755 });
+    buildMergedCliPathMock.mockReturnValue(path.dirname(binaryPath));
+
+    await expect(
+      resolveVerifiedOpenCodeRuntimeBinaryPath({ includeShellEnv: false })
+    ).resolves.toBe(binaryPath);
+    expect(resolveInteractiveShellEnvBestEffortMock).not.toHaveBeenCalled();
+    expect(execCliMock).toHaveBeenCalledWith(binaryPath, ['--version'], {
+      timeout: 10_000,
+      windowsHide: true,
+    });
+  });
+
+  it('does not spawn shell env for shell-only PATH installs when shell env is disabled', async () => {
+    const binaryPath = path.join(tempRoot!, 'custom-npm-prefix', 'bin', 'opencode');
+    await mkdir(path.dirname(binaryPath), { recursive: true });
+    await writeFile(binaryPath, 'binary', { mode: 0o755 });
+    resolveInteractiveShellEnvBestEffortMock.mockResolvedValue({
+      PATH: path.dirname(binaryPath),
+    });
+
+    await expect(
+      resolveVerifiedOpenCodeRuntimeBinaryPath({ includeShellEnv: false })
+    ).resolves.toBeNull();
+    expect(resolveInteractiveShellEnvBestEffortMock).not.toHaveBeenCalled();
+  });
+
   it('returns a verified OpenCode binary from nvm when desktop PATH misses npm globals', async () => {
     const olderBinaryPath = path.join(
       tempRoot!,

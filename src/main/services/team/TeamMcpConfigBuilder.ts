@@ -386,15 +386,6 @@ async function resolveNodePath(options?: McpLaunchSpecResolveOptions): Promise<s
   if (_resolvedNodePath) return _resolvedNodePath;
 
   emitProgress(options, 'node-runtime', 'Resolving Node.js runtime for MCP server...');
-  if (shouldPreferShellNodeProbe()) {
-    const shellProbe = await probeShellNodeRuntimePath(options);
-    if (shellProbe.ok) {
-      _resolvedNodePath = shellProbe.path;
-      emitProgress(options, 'node-runtime-found', 'Using resolved Node.js runtime...');
-      return _resolvedNodePath;
-    }
-  }
-
   const fastProbe = await probeNodeRuntimePath(buildNodeResolveEnv({}));
   if (fastProbe.ok) {
     _resolvedNodePath = fastProbe.path;
@@ -402,6 +393,9 @@ async function resolveNodePath(options?: McpLaunchSpecResolveOptions): Promise<s
     return _resolvedNodePath;
   }
 
+  if (shouldPreferShellNodeProbe()) {
+    emitProgress(options, 'node-runtime-shell-fallback', 'Trying login shell Node.js runtime...');
+  }
   const shellProbe = await probeShellNodeRuntimePath(options);
   if (shellProbe.ok) {
     _resolvedNodePath = shellProbe.path;

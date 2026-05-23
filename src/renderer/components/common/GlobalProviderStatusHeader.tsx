@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import {
+  CODEX_ACCOUNT_STARTUP_IDLE_DELAY_MS,
   mergeCodexCliStatusWithSnapshot,
   useCodexAccountSnapshot,
 } from '@features/codex-account/renderer';
@@ -123,6 +124,7 @@ export const GlobalProviderStatusHeader = (): React.JSX.Element | null => {
       loadingCliStatus?.flavor === 'agent_teams_orchestrator' &&
       Boolean(loadingCliStatus?.providers.some((provider) => provider.providerId === 'codex')),
     includeRateLimits: false,
+    initialRefreshDelayMs: CODEX_ACCOUNT_STARTUP_IDLE_DELAY_MS,
   });
 
   const effectiveCliStatus = useMemo(

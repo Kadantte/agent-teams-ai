@@ -212,8 +212,13 @@ async function probeFirstWorkingOpenCodeBinaryCandidate(
   return { ok: false, firstFailure: nextFirstFailure };
 }
 
+interface OpenCodeRuntimeBinaryResolveOptions {
+  shellEnvTimeoutMs?: number;
+  includeShellEnv?: boolean;
+}
+
 async function probeFirstWorkingPathOpenCodeBinary(
-  options: { shellEnvTimeoutMs?: number } = {}
+  options: OpenCodeRuntimeBinaryResolveOptions = {}
 ): Promise<VerifiedOpenCodeBinaryProbe> {
   const seenCandidates = new Set<string>();
   let firstFailure: { binaryPath: string; error: string } | null = null;
@@ -229,6 +234,16 @@ async function probeFirstWorkingPathOpenCodeBinary(
     return cachedProbe;
   }
   firstFailure = cachedProbe.firstFailure;
+
+  if (options.includeShellEnv === false) {
+    return probeFirstWorkingOpenCodeBinaryCandidate(
+      collectPathOpenCodeBinaryCandidates([], {
+        includeFallbackPathEntries: true,
+      }),
+      seenCandidates,
+      firstFailure
+    );
+  }
 
   const shellEnv = await resolveInteractiveShellEnvBestEffort({
     timeoutMs: options.shellEnvTimeoutMs ?? RUNTIME_PATH_SHELL_ENV_TIMEOUT_MS,
@@ -254,14 +269,14 @@ async function probeFirstWorkingPathOpenCodeBinary(
 }
 
 async function resolveVerifiedPathOpenCodeBinaryPath(
-  options: { shellEnvTimeoutMs?: number } = {}
+  options: OpenCodeRuntimeBinaryResolveOptions = {}
 ): Promise<string | null> {
   const result = await probeFirstWorkingPathOpenCodeBinary(options);
   return result.ok ? result.binaryPath : null;
 }
 
 export async function resolveVerifiedOpenCodeRuntimeBinaryPath(
-  options: { shellEnvTimeoutMs?: number } = {}
+  options: OpenCodeRuntimeBinaryResolveOptions = {}
 ): Promise<string | null> {
   return (
     (await resolveVerifiedAppManagedOpenCodeRuntimeBinaryPath()) ??

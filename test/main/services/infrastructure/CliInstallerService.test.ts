@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { realpathMock } = vi.hoisted(() => ({
+const { realpathMock, resolveInteractiveShellEnvBestEffortMock } = vi.hoisted(() => ({
   realpathMock: vi.fn(async (value: string) => value),
+  resolveInteractiveShellEnvBestEffortMock: vi.fn(
+    async (options?: { fallbackEnv?: NodeJS.ProcessEnv }) => options?.fallbackEnv ?? process.env
+  ),
 }));
 
 // Mock dependencies before importing service
@@ -83,6 +86,14 @@ vi.mock('@main/utils/cliAuthDiagLog', () => ({
   appendCliAuthDiag: vi.fn(() => Promise.resolve(null)),
 }));
 
+vi.mock('@main/utils/shellEnv', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/utils/shellEnv')>();
+  return {
+    ...actual,
+    resolveInteractiveShellEnvBestEffort: resolveInteractiveShellEnvBestEffortMock,
+  };
+});
+
 import {
   CliInstallerService,
   isVersionOlder,
@@ -148,6 +159,9 @@ describe('CliInstallerService', () => {
     vi.clearAllMocks();
     realpathMock.mockReset();
     realpathMock.mockImplementation(async (value: string) => value);
+    resolveInteractiveShellEnvBestEffortMock.mockImplementation(
+      async (options?: { fallbackEnv?: NodeJS.ProcessEnv }) => options?.fallbackEnv ?? process.env
+    );
     vi.mocked(getConfiguredCliFlavor).mockReturnValue('claude');
     vi.mocked(getCliFlavorUiOptions).mockReturnValue({
       displayName: 'Claude CLI',
@@ -169,6 +183,13 @@ describe('CliInstallerService', () => {
       expect(status.installedVersion).toBeNull();
       expect(status.binaryPath).toBeNull();
       expect(status.updateAvailable).toBe(false);
+      expect(resolveInteractiveShellEnvBestEffortMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          timeoutMs: 1_500,
+          fallbackEnv: process.env,
+          background: false,
+        })
+      );
     });
 
     it('does not block getStatus on diagnostic file writes', async () => {
@@ -356,6 +377,7 @@ describe('CliInstallerService', () => {
         .filter((event) => event.type === 'status');
 
       expect(status.installed).toBe(true);
+      expect(resolveInteractiveShellEnvBestEffortMock).not.toHaveBeenCalled();
       expect(status.authStatusChecking).toBe(false);
       expect(status.authLoggedIn).toBe(false);
       expect(status.providers).toHaveLength(3);

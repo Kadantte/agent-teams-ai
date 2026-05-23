@@ -464,6 +464,28 @@ describe('TeamMcpConfigBuilder', () => {
     }
   });
 
+  it('skips strict shell env lookup when fast Node lookup succeeds from a minimal GUI PATH', async () => {
+    mockBuiltWorkspaceEntryAvailable();
+    const previousPath = process.env.PATH;
+    process.env.PATH = ['/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(path.delimiter);
+    hoisted.execCliMock.mockResolvedValue({ stdout: '/fast/node', stderr: '' });
+
+    try {
+      const builder = new TeamMcpConfigBuilder();
+      const configPath = await builder.writeConfigFile();
+      createdPaths.push(configPath);
+
+      expect(readGeneratedServer(configPath)?.command).toBe('/fast/node');
+      expect(hoisted.resolveInteractiveShellEnvMock).not.toHaveBeenCalled();
+    } finally {
+      if (previousPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = previousPath;
+      }
+    }
+  });
+
   it('falls back to strict shell env lookup when fast Node lookup reports an empty path', async () => {
     mockBuiltWorkspaceEntryAvailable();
     hoisted.resolveInteractiveShellEnvMock.mockResolvedValue({
