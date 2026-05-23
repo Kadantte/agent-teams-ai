@@ -26,6 +26,9 @@ const MAX_CLI_LOG_CHARS = 256_000;
 const MAX_TRACE_CHARS = 128_000;
 const MAX_COPIED_FILE_BYTES = 256 * 1024;
 const MAX_DIAGNOSTICS_COPY_FILE_BYTES = 128 * 1024;
+const RUNTIME_ARTIFACT_FILE_PATTERN = /^[^/\\]+(?:\.runtime\.jsonl|\.stdout\.log|\.stderr\.log)$/;
+const RUNTIME_ARTIFACT_LABEL_PATTERN =
+  /^runtime\/[^/\\]+(?:\.runtime\.jsonl|\.stdout\.log|\.stderr\.log)$/;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -63,6 +66,7 @@ export type LaunchFailureArtifactClassificationCode =
   | 'stdin_missing'
   | 'provider_quota'
   | 'provider_auth'
+  | 'process_readiness_timeout'
   | 'model_no_bootstrap'
   | 'process_exited'
   | 'opencode_protocol'
@@ -290,6 +294,12 @@ export function classifyLaunchFailureArtifact(
         /401 unauthorized|not_logged_in|login required|auth(?:entication)? failed|api key.*(?:missing|invalid)|token refresh failed/i,
     },
     {
+      code: 'process_readiness_timeout',
+      confidence: 0.9,
+      pattern:
+        /did not become (?:runtime_ready|inbox_poller_ready)|timed out waiting for (?:runtime_ready|inbox_poller_ready)/i,
+    },
+    {
       code: 'opencode_protocol',
       confidence: 0.84,
       pattern:
@@ -431,6 +441,15 @@ function getRecord(value: unknown): JsonRecord | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonRecord) : null;
 }
 
+function getRuntimeArtifactLabels(manifestJson: JsonRecord | null): string[] {
+  const artifactFiles = manifestJson?.artifactFiles;
+  if (!Array.isArray(artifactFiles)) return [];
+  return artifactFiles
+    .filter((item): item is string => typeof item === 'string')
+    .filter((item) => RUNTIME_ARTIFACT_LABEL_PATTERN.test(item))
+    .sort();
+}
+
 function resolveArtifactManifestPath(
   teamDir: string,
   latestJson: JsonRecord | null,
@@ -487,6 +506,18 @@ export async function readTeamLaunchFailureDiagnosticsBundle(
         path.join(teamDir, ARTIFACTS_DIR_NAME, 'manifest.json'),
       issue: resolvedManifest.issue ?? 'manifest_unavailable',
     });
+  }
+
+  if (resolvedManifest.path) {
+    const artifactDirectory = path.dirname(resolvedManifest.path);
+    for (const artifactName of getRuntimeArtifactLabels(manifestJson)) {
+      files.push(
+        await readDiagnosticsCopyFile(
+          `launch-failure-artifacts/${artifactName}`,
+          path.join(artifactDirectory, artifactName)
+        )
+      );
+    }
   }
 
   files.push(
@@ -559,10 +590,32 @@ export async function readTeamLaunchFailureDiagnosticsBundle(
   };
 }
 
-function getKnownLaunchArtifactSourceFiles(teamName: string): CopiedArtifactFile[] {
+async function getRuntimeLaunchArtifactSourceFiles(teamDir: string): Promise<CopiedArtifactFile[]> {
+  const runtimeDir = path.join(teamDir, 'runtime');
+  try {
+    const entries = await fs.promises.readdir(runtimeDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && RUNTIME_ARTIFACT_FILE_PATTERN.test(entry.name))
+      .map((entry) => ({
+        sourcePath: path.join(runtimeDir, entry.name),
+        artifactName: `runtime/${entry.name}`,
+      }))
+      .sort((left, right) => left.artifactName.localeCompare(right.artifactName));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return [];
+    logger.warn('[ArtifactPack] Failed to enumerate runtime artifacts', {
+      teamDir,
+      error: String(error),
+    });
+    return [];
+  }
+}
+
+async function getKnownLaunchArtifactSourceFiles(teamName: string): Promise<CopiedArtifactFile[]> {
   const bootstrapStatePath = getTeamBootstrapStatePath(teamName);
   const teamDir = path.dirname(bootstrapStatePath);
-  return [
+  const launchFiles: CopiedArtifactFile[] = [
     {
       sourcePath: getTeamLaunchStatePath(teamName),
       artifactName: 'launch-state.json',
@@ -584,6 +637,7 @@ function getKnownLaunchArtifactSourceFiles(teamName: string): CopiedArtifactFile
       artifactName: 'bootstrap-lock-metadata.json',
     },
   ];
+  return [...launchFiles, ...(await getRuntimeLaunchArtifactSourceFiles(teamDir))];
 }
 
 async function writeArtifactTextFile(
@@ -593,6 +647,8 @@ async function writeArtifactTextFile(
   files: string[]
 ): Promise<void> {
   const targetPath = path.join(directory, artifactName);
+  assertPathWithin(directory, targetPath);
+  await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
   await atomicWriteAsync(targetPath, `${redactLaunchFailureArtifactText(rawText).trimEnd()}\n`);
   files.push(artifactName);
 }
@@ -639,7 +695,7 @@ export async function writeTeamLaunchFailureArtifactPack(
     );
   }
 
-  for (const source of getKnownLaunchArtifactSourceFiles(input.teamName)) {
+  for (const source of await getKnownLaunchArtifactSourceFiles(input.teamName)) {
     const read = await readBoundedTextFile(source.sourcePath);
     if (read.text !== undefined) {
       await writeArtifactTextFile(directory, source.artifactName, read.text, files);

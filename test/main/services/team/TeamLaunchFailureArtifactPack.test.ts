@@ -146,6 +146,80 @@ describe('TeamLaunchFailureArtifactPack', () => {
     expect(launchStateContent).not.toContain('sk-ant-');
   });
 
+  it('copies runtime process logs into the launch failure artifact pack', async () => {
+    const teamName = 'runtime-artifact-team';
+    const runId = 'run-readiness-timeout';
+    const teamDir = path.join(getTeamsBasePath(), teamName);
+    const runtimeDir = path.join(teamDir, 'runtime');
+    await fs.mkdir(runtimeDir, { recursive: true });
+    await fs.writeFile(
+      path.join(runtimeDir, 'alice.runtime.jsonl'),
+      '{"type":"runtime_ready","token":"abcdefghijklmnopqrstuvwxyz123456"}\n',
+      'utf8'
+    );
+    await fs.writeFile(
+      path.join(runtimeDir, 'alice.stdout.log'),
+      'stdout OPENAI_API_KEY=sk-proj-cccccccccccccccccccccccccccccccccccccccc\n',
+      'utf8'
+    );
+    await fs.writeFile(
+      path.join(runtimeDir, 'alice.stderr.log'),
+      'stderr Teammate process alice did not become inbox_poller_ready: timed out waiting for inbox_poller_ready\n',
+      'utf8'
+    );
+    await fs.writeFile(path.join(runtimeDir, 'ignored.txt'), 'ignore me\n', 'utf8');
+
+    const result = await writeTeamLaunchFailureArtifactPack({
+      teamName,
+      runId,
+      reason: 'launch_progress_failed',
+      memberSpawnStatuses: {
+        alice: {
+          status: 'error',
+          launchState: 'failed_to_start',
+          hardFailureReason:
+            'Teammate process alice did not become inbox_poller_ready: timed out waiting for inbox_poller_ready',
+          updatedAt: '2026-05-09T00:01:00.000Z',
+        },
+      },
+    });
+
+    const manifest = JSON.parse(await fs.readFile(result.manifestPath, 'utf8')) as {
+      artifactFiles: string[];
+      classification: { code: string };
+    };
+    expect(manifest.classification.code).toBe('process_readiness_timeout');
+    expect(manifest.artifactFiles).toContain('runtime/alice.runtime.jsonl');
+    expect(manifest.artifactFiles).toContain('runtime/alice.stdout.log');
+    expect(manifest.artifactFiles).toContain('runtime/alice.stderr.log');
+    expect(manifest.artifactFiles).not.toContain('runtime/ignored.txt');
+
+    const copiedStdout = await fs.readFile(
+      path.join(result.directory, 'runtime', 'alice.stdout.log'),
+      'utf8'
+    );
+    expect(copiedStdout).toContain('OPENAI_API_KEY=[REDACTED]');
+    expect(copiedStdout).not.toContain('sk-proj-');
+
+    const copiedEvents = await fs.readFile(
+      path.join(result.directory, 'runtime', 'alice.runtime.jsonl'),
+      'utf8'
+    );
+    expect(copiedEvents).toContain('"token":"[REDACTED]"');
+    expect(copiedEvents).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
+
+    const bundle = await readTeamLaunchFailureDiagnosticsBundle(teamName, runId);
+    const labels = bundle.files.map((file) => file.label);
+    expect(labels).toContain('launch-failure-artifacts/runtime/alice.runtime.jsonl');
+    expect(labels).toContain('launch-failure-artifacts/runtime/alice.stdout.log');
+    expect(labels).toContain('launch-failure-artifacts/runtime/alice.stderr.log');
+    expect(
+      bundle.files.find(
+        (file) => file.label === 'launch-failure-artifacts/runtime/alice.stdout.log'
+      )?.content
+    ).toContain('OPENAI_API_KEY=[REDACTED]');
+  });
+
   it('redacts common bearer and token-shaped secrets', () => {
     const redacted = redactLaunchFailureArtifactText(
       'Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456 token: abcdefghijklmnopqrstuvwxyz123456 ANTHROPIC_AUTH_TOKEN=lmstudio CODEX_API_KEY="quoted-codex-token" OPENROUTER_API_KEY=\'quoted-router-token\''
