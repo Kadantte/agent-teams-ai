@@ -29,10 +29,29 @@ const muxPlayerUrl = computed(() => {
   url.searchParams.set("video-title", muxVideoTitle.value);
   return url.toString();
 });
+const muxPosterUrl = computed(() => {
+  if (!muxPlaybackId.value) return "";
+
+  const url = new URL(`https://image.mux.com/${encodeURIComponent(muxPlaybackId.value)}/thumbnail.webp`);
+  url.searchParams.set("time", "0.1");
+  url.searchParams.set("width", "900");
+  url.searchParams.set("fit_mode", "preserve");
+  return url.toString();
+});
 const isLoaded = ref(false);
 const hasError = ref(false);
+const isMobileViewport = ref(false);
+const playerActivated = ref(false);
+const shouldShowMobilePoster = computed(() => (
+  Boolean(muxPlayerUrl.value) &&
+    !hasError.value &&
+    isMobileViewport.value &&
+    !playerActivated.value
+));
+const shouldShowPlayer = computed(() => Boolean(muxPlayerUrl.value) && !hasError.value && !shouldShowMobilePoster.value);
 
 let loadFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+let mobileQuery: MediaQueryList | null = null;
 
 function clearLoadFallback() {
   if (!loadFallbackTimer) return;
@@ -51,11 +70,25 @@ function markError() {
   clearLoadFallback();
 }
 
+function syncMobileViewport() {
+  isMobileViewport.value = Boolean(mobileQuery?.matches);
+}
+
+function activatePlayer() {
+  playerActivated.value = true;
+}
+
 onMounted(() => {
+  mobileQuery = window.matchMedia("(max-width: 700px)");
+  syncMobileViewport();
+  mobileQuery.addEventListener("change", syncMobileViewport);
   loadFallbackTimer = setTimeout(markLoaded, 2500);
 });
 
-onUnmounted(clearLoadFallback);
+onUnmounted(() => {
+  mobileQuery?.removeEventListener("change", syncMobileViewport);
+  clearLoadFallback();
+});
 </script>
 
 <template>
@@ -70,7 +103,7 @@ onUnmounted(clearLoadFallback);
 
     <ClientOnly>
       <iframe
-        v-if="muxPlayerUrl && !hasError"
+        v-if="shouldShowPlayer"
         class="hero-video__player"
         :class="{ 'hero-video__player--loaded': isLoaded }"
         :src="muxPlayerUrl"
@@ -94,7 +127,21 @@ onUnmounted(clearLoadFallback);
       </template>
     </ClientOnly>
 
-    <div v-if="!isLoaded && !hasError && muxPlayerUrl" class="hero-video__skeleton">
+    <button
+      v-if="shouldShowMobilePoster"
+      type="button"
+      class="hero-video__poster"
+      :style="{ '--hero-video-poster': muxPosterUrl ? `url(${muxPosterUrl})` : 'url(/screenshots/2.jpg)' }"
+      :aria-label="videoTitle"
+      @click="activatePlayer"
+    >
+      <span class="hero-video__poster-play">
+        <v-icon :icon="mdiPlay" size="40" />
+      </span>
+      <span class="hero-video__poster-label">{{ t("hero.watchDemo") }}</span>
+    </button>
+
+    <div v-if="!isLoaded && !hasError && shouldShowPlayer" class="hero-video__skeleton">
       <div class="hero-video__skeleton-pulse" />
       <div class="hero-video__skeleton-content">
         <div class="hero-video__skeleton-spinner" />
@@ -265,6 +312,69 @@ onUnmounted(clearLoadFallback);
   opacity: 1;
 }
 
+.hero-video__poster {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: none;
+  border-radius: 14px;
+  color: rgba(230, 251, 255, 0.94);
+  background:
+    linear-gradient(90deg, rgba(2, 6, 16, 0.18), rgba(2, 6, 16, 0.36)),
+    linear-gradient(180deg, rgba(0, 234, 255, 0.06), rgba(255, 43, 255, 0.08)),
+    var(--hero-video-poster) center / cover;
+  cursor: pointer;
+}
+
+.hero-video__poster::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(0, 240, 255, 0.16), transparent 34%),
+    repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 4px);
+  mix-blend-mode: screen;
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+.hero-video__poster-play,
+.hero-video__poster-label {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-video__poster-play {
+  display: grid;
+  width: 70px;
+  height: 70px;
+  place-items: center;
+  border: 1px solid rgba(0, 240, 255, 0.58);
+  border-radius: 50%;
+  color: #ffffff;
+  background: rgba(2, 10, 24, 0.68);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 0 24px rgba(0, 240, 255, 0.3);
+}
+
+.hero-video__poster-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(0, 240, 255, 0.9);
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-shadow: 0 0 16px rgba(0, 240, 255, 0.42);
+}
+
 .hero-video__skeleton {
   position: absolute;
   inset: 0;
@@ -395,6 +505,10 @@ onUnmounted(clearLoadFallback);
   }
 
   .hero-video__player {
+    border-radius: 10px;
+  }
+
+  .hero-video__poster {
     border-radius: 10px;
   }
 

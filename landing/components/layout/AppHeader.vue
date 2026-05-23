@@ -9,6 +9,8 @@ const menuOpen = ref(false);
 const withBase = (path: string) => `${baseURL.replace(/\/?$/, '/')}${path.replace(/^\/+/, '')}`;
 const docsHref = computed(() => withBase(locale.value === 'ru' ? 'docs/ru/' : 'docs/'));
 const isRu = computed(() => locale.value === 'ru');
+const openMenuLabel = computed(() => (isRu.value ? 'Открыть меню' : 'Open menu'));
+const closeMenuLabel = computed(() => (isRu.value ? 'Закрыть меню' : 'Close menu'));
 
 const navItems = computed(() => [
   { href: '#screenshots', label: t('nav.screenshots'), shortLabel: isRu.value ? 'Скрины' : 'Shots' },
@@ -134,7 +136,7 @@ const navItems = computed(() => [
         <ThemeToggle />
       </div>
       <div class="app-header__mobile-actions">
-        <v-btn :icon="mdiMenu" variant="text" @click="menuOpen = true" />
+        <v-btn :icon="mdiMenu" variant="text" :aria-label="openMenuLabel" @click="menuOpen = true" />
         <Teleport to="body">
           <Transition name="mobile-menu-fade">
             <div v-if="menuOpen" class="mobile-menu-overlay" @click.self="menuOpen = false">
@@ -142,7 +144,13 @@ const navItems = computed(() => [
                 <div class="mobile-menu__header">
                   <AppLogo />
                   <div style="flex: 1" />
-                  <v-btn :icon="mdiClose" variant="text" @click="menuOpen = false" />
+                  <v-btn
+                    :icon="mdiClose"
+                    variant="text"
+                    class="mobile-menu__close"
+                    :aria-label="closeMenuLabel"
+                    @click="menuOpen = false"
+                  />
                 </div>
                 <hr class="mobile-menu__divider">
                 <nav class="mobile-menu__list">
@@ -825,10 +833,43 @@ const navItems = computed(() => [
 }
 
 .mobile-menu__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding-bottom: 12px;
+  padding-bottom: 14px;
+  background: transparent;
+}
+
+.mobile-menu__close {
+  width: 52px !important;
+  min-width: 52px !important;
+  height: 52px !important;
+  color: var(--cyber-cyan) !important;
+  border: 1px solid rgba(0, 234, 255, 0.82) !important;
+  border-radius: 50% !important;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(0, 234, 255, 0.18), transparent 58%),
+    rgba(2, 10, 24, 0.94) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 0 18px rgba(0, 234, 255, 0.38),
+    0 0 36px rgba(0, 234, 255, 0.16);
+}
+
+.mobile-menu__close :deep(.v-icon) {
+  font-size: 30px;
+  filter: drop-shadow(0 0 10px rgba(0, 234, 255, 0.6));
+}
+
+.mobile-menu__close:hover {
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.86) !important;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(0, 234, 255, 0.28), transparent 62%),
+    rgba(0, 234, 255, 0.16) !important;
 }
 
 .mobile-menu__divider {

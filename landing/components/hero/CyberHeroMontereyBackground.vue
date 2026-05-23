@@ -173,6 +173,7 @@ function shouldUseBackgroundVideo() {
     backgroundPlaybackId.value &&
       isVisible &&
       !motionQuery?.matches &&
+      !mobileQuery?.matches &&
       !hasBackgroundVideoError.value,
   );
 }
@@ -248,7 +249,7 @@ onMounted(() => {
   motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
   mobileQuery = window.matchMedia("(max-width: 700px)");
   motionQuery.addEventListener("change", syncMotionState);
-  mobileQuery.addEventListener("change", syncGradient);
+  mobileQuery.addEventListener("change", syncMotionState);
 
   heroObserver = new IntersectionObserver(
     ([entry]) => {
@@ -267,7 +268,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   heroObserver?.disconnect();
   motionQuery?.removeEventListener("change", syncMotionState);
-  mobileQuery?.removeEventListener("change", syncGradient);
+  mobileQuery?.removeEventListener("change", syncMotionState);
   stopBackgroundVideo();
   destroyGradient();
 });
