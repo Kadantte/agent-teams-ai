@@ -27,6 +27,11 @@ interface MemberSelectProps {
   size?: 'sm' | 'md';
   disabled?: boolean;
   className?: string;
+  searchPlaceholder?: string;
+  emptyMessage?: string;
+  getMemberLabel?: (member: ResolvedTeamMember) => string;
+  getMemberDescription?: (member: ResolvedTeamMember) => string | null | undefined;
+  ariaLabel?: string;
 }
 
 const UNASSIGNED_VALUE = '__unassigned__';
@@ -40,6 +45,11 @@ export const MemberSelect = ({
   size = 'sm',
   disabled = false,
   className,
+  searchPlaceholder = 'Search members...',
+  emptyMessage = 'No members found.',
+  getMemberLabel,
+  getMemberDescription,
+  ariaLabel,
 }: MemberSelectProps): React.JSX.Element => {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
@@ -57,13 +67,26 @@ export const MemberSelect = ({
   const avatarClass = size === 'md' ? 'size-6' : 'size-5';
   const textSize = size === 'md' ? 'text-xs' : 'text-[10px]';
   const triggerHeight = size === 'md' ? 'h-9' : 'h-8';
+  const resolveMemberLabel = React.useCallback(
+    (member: ResolvedTeamMember): string =>
+      getMemberLabel?.(member) ?? (member.name === 'team-lead' ? 'lead' : member.name),
+    [getMemberLabel]
+  );
+  const resolveMemberDescription = React.useCallback(
+    (member: ResolvedTeamMember): string | null | undefined =>
+      getMemberDescription?.(member) ??
+      formatAgentRole(member.role) ??
+      formatAgentRole(member.agentType),
+    [getMemberDescription]
+  );
 
   // eslint-disable-next-line sonarjs/function-return-type -- option renderer returns mixed node structure
   const renderMemberInline = (member: ResolvedTeamMember): React.ReactNode => {
     const resolvedColor = colorMap.get(member.name);
     const colors = getTeamColorSet(resolvedColor ?? '');
+    const label = resolveMemberLabel(member);
     return (
-      <span className="inline-flex items-center gap-1.5">
+      <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
         <img
           src={avatarMap.get(member.name) ?? agentAvatarUrl(member.name, avatarSize)}
           alt=""
@@ -71,14 +94,14 @@ export const MemberSelect = ({
           loading="lazy"
         />
         <span
-          className={`rounded px-1.5 py-0.5 ${textSize} font-medium tracking-wide`}
+          className={`min-w-0 truncate rounded px-1.5 py-0.5 ${textSize} font-medium tracking-wide`}
           style={{
             backgroundColor: getThemedBadge(colors, isLight),
             color: colors.text,
             border: `1px solid ${colors.border}40`,
           }}
         >
-          {member.name === 'team-lead' ? 'lead' : member.name}
+          {label}
         </span>
       </span>
     );
@@ -92,6 +115,7 @@ export const MemberSelect = ({
           role="combobox"
           aria-expanded={open}
           aria-controls={listboxId}
+          aria-label={ariaLabel}
           disabled={disabled}
           className={cn(
             `flex ${triggerHeight} w-full items-center justify-between rounded-md border border-[var(--color-border)] bg-transparent px-2 py-1 text-xs shadow-sm transition-colors placeholder:text-[var(--color-text-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-border-emphasis)] disabled:cursor-not-allowed disabled:opacity-50`,
@@ -125,7 +149,7 @@ export const MemberSelect = ({
             <CommandPrimitive.Input
               value={search}
               onValueChange={setSearch}
-              placeholder="Search members..."
+              placeholder={searchPlaceholder}
               className="flex h-8 w-full border-0 bg-transparent px-2 py-1 text-xs text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)]"
             />
           </div>
@@ -135,7 +159,7 @@ export const MemberSelect = ({
             onWheel={(e) => e.stopPropagation()}
           >
             <CommandPrimitive.Empty className="py-4 pr-2 text-center text-xs text-[var(--color-text-muted)]">
-              No members found.
+              {emptyMessage}
             </CommandPrimitive.Empty>
             {allowUnassigned && !search.trim() ? (
               <CommandPrimitive.Item
@@ -157,8 +181,12 @@ export const MemberSelect = ({
               .filter((m) => {
                 if (!search.trim()) return true;
                 const q = search.toLowerCase();
+                const label = resolveMemberLabel(m);
+                const description = resolveMemberDescription(m);
                 return (
                   m.name.toLowerCase().includes(q) ||
+                  label.toLowerCase().includes(q) ||
+                  (description?.toLowerCase().includes(q) ?? false) ||
                   (m.role?.toLowerCase().includes(q) ?? false) ||
                   (m.agentType?.toLowerCase().includes(q) ?? false)
                 );
@@ -167,7 +195,8 @@ export const MemberSelect = ({
                 const isSelected = m.name === value;
                 const resolvedColor = colorMap.get(m.name);
                 const colors = getTeamColorSet(resolvedColor ?? '');
-                const role = formatAgentRole(m.role) ?? formatAgentRole(m.agentType);
+                const label = resolveMemberLabel(m);
+                const role = resolveMemberDescription(m);
 
                 return (
                   <CommandPrimitive.Item
@@ -187,7 +216,7 @@ export const MemberSelect = ({
                       loading="lazy"
                     />
                     <span className="min-w-0 truncate font-medium" style={{ color: colors.text }}>
-                      {m.name === 'team-lead' ? 'lead' : m.name}
+                      {label}
                     </span>
                     {role ? (
                       <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">

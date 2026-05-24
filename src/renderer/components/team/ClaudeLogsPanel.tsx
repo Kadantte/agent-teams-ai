@@ -29,6 +29,7 @@ interface ClaudeLogsPanelProps {
   /** Extra className for the panel wrapper. */
   className?: string;
   compactMetaInTooltip?: boolean;
+  toolbarControlsStart?: React.ReactNode;
 }
 
 // =============================================================================
@@ -41,6 +42,7 @@ export const ClaudeLogsPanel = ({
   viewerMaxHeight,
   className,
   compactMetaInTooltip = false,
+  toolbarControlsStart,
 }: ClaudeLogsPanelProps): React.JSX.Element => {
   const {
     data,
@@ -86,7 +88,10 @@ export const ClaudeLogsPanel = ({
             'Team is not running.'
           )}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center justify-end gap-2">
+          {toolbarControlsStart ? (
+            <div className="min-w-0 shrink-0">{toolbarControlsStart}</div>
+          ) : null}
           {data.total > 0 ? (
             <>
               <div className="flex w-48 items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-transparent px-2 py-1">

@@ -6,18 +6,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { Filter } from 'lucide-react';
 
-export type ClaudeLogStream = 'stdout' | 'stderr';
-export type ClaudeLogKind = 'output' | 'thinking' | 'tool';
-
-export interface ClaudeLogsFilterState {
-  streams: Set<ClaudeLogStream>;
-  kinds: Set<ClaudeLogKind>;
-}
-
-export const DEFAULT_CLAUDE_LOGS_FILTER: ClaudeLogsFilterState = {
-  streams: new Set<ClaudeLogStream>(['stdout', 'stderr']),
-  kinds: new Set<ClaudeLogKind>(['output', 'thinking', 'tool']),
-};
+import {
+  type ClaudeLogKind,
+  type ClaudeLogsFilterState,
+  type ClaudeLogStream,
+  DEFAULT_CLAUDE_LOGS_FILTER,
+} from './claudeLogsFilterState';
 
 function setEquals<T>(a: Set<T>, b: Set<T>): boolean {
   if (a.size !== b.size) return false;
@@ -108,7 +102,7 @@ export const ClaudeLogsFilterPopover = ({
               variant="ghost"
               size="sm"
               className="relative h-7 px-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              aria-label="Filter Claude logs"
+              aria-label="Filter logs"
             >
               <Filter size={14} />
               {activeCount > 0 && (
