@@ -939,6 +939,17 @@ function buildRuntimeDiagnosticForSpawn(
     : 'process table unavailable';
 }
 
+function isConfirmedBootstrapStaleRuntimeDiagnostic(reason?: string): boolean {
+  const text = reason?.trim();
+  return text === 'persisted runtime pid is not alive';
+}
+
+function shouldClearRuntimeDiagnosticAfterBootstrapConfirmation(reason?: string): boolean {
+  return (
+    isAutoClearableLaunchFailureReason(reason) || isConfirmedBootstrapStaleRuntimeDiagnostic(reason)
+  );
+}
+
 function runtimeTaskRefs(teamName: string, value: unknown): InboxMessage['taskRefs'] | undefined {
   const refs = normalizeRuntimeStringArray(value);
   return refs.length > 0
@@ -9676,9 +9687,8 @@ export class TeamProvisioningService {
   }
 
   private getRunLeadName(run: ProvisioningRun): string {
-    return (
-      run.request.members.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead'
-    );
+    const members = Array.isArray(run.request?.members) ? run.request.members : [];
+    return members.find((m) => m.role?.toLowerCase().includes('lead'))?.name || 'team-lead';
   }
 
   private rememberRecentCrossTeamLeadDeliveryMessageIds(
@@ -23396,34 +23406,62 @@ export class TeamProvisioningService {
         (current.launchState === 'runtime_pending_bootstrap' ||
           current.launchState === 'failed_to_start') &&
         isProcessBootstrapTransportDiagnostic(current.runtimeDiagnostic);
-      const runtimeDiagnostic = shouldPreserveProcessBootstrapTransportDiagnostic
-        ? current.runtimeDiagnostic
-        : buildRuntimeDiagnosticForSpawn(metadata);
-      const metadataLivenessKind =
-        current.bootstrapConfirmed === true || current.launchState === 'confirmed_alive'
-          ? metadata.livenessKind === 'runtime_process' ||
-            metadata.livenessKind === 'confirmed_bootstrap'
-            ? metadata.livenessKind
-            : current.livenessKind
-          : metadata.livenessKind;
+      const hasStrongEvidence = isStrongRuntimeEvidence(metadata);
+      const hasConfirmedBootstrap =
+        current.bootstrapConfirmed === true || current.launchState === 'confirmed_alive';
+      const shouldSuppressWeakRuntimeMetadataForConfirmedBootstrap =
+        hasConfirmedBootstrap && !hasStrongEvidence;
+      let runtimeDiagnostic: string | undefined;
+      let runtimeDiagnosticSeverity: TeamAgentRuntimeDiagnosticSeverity | undefined;
+      if (shouldPreserveProcessBootstrapTransportDiagnostic) {
+        runtimeDiagnostic = current.runtimeDiagnostic;
+        runtimeDiagnosticSeverity = current.runtimeDiagnosticSeverity;
+      } else if (shouldSuppressWeakRuntimeMetadataForConfirmedBootstrap) {
+        if (
+          current.runtimeDiagnostic &&
+          !shouldClearRuntimeDiagnosticAfterBootstrapConfirmation(current.runtimeDiagnostic)
+        ) {
+          runtimeDiagnostic = current.runtimeDiagnostic;
+          runtimeDiagnosticSeverity = current.runtimeDiagnosticSeverity;
+        } else {
+          const metadataRuntimeDiagnostic = buildRuntimeDiagnosticForSpawn(metadata);
+          if (
+            metadataRuntimeDiagnostic &&
+            !shouldClearRuntimeDiagnosticAfterBootstrapConfirmation(metadataRuntimeDiagnostic)
+          ) {
+            runtimeDiagnostic = metadataRuntimeDiagnostic;
+            runtimeDiagnosticSeverity = metadata.runtimeDiagnosticSeverity;
+          }
+        }
+      } else {
+        runtimeDiagnostic = buildRuntimeDiagnosticForSpawn(metadata);
+        runtimeDiagnosticSeverity = metadata.runtimeDiagnosticSeverity;
+      }
+      const metadataLivenessKind = hasConfirmedBootstrap
+        ? metadata.livenessKind === 'runtime_process' ||
+          metadata.livenessKind === 'confirmed_bootstrap'
+          ? metadata.livenessKind
+          : current.livenessKind === 'stale_metadata' || current.livenessKind === 'registered_only'
+            ? 'confirmed_bootstrap'
+            : (current.livenessKind ?? 'confirmed_bootstrap')
+        : metadata.livenessKind;
       const nextEntry: MemberSpawnStatusEntry = {
         ...current,
         ...(metadata.model ? { runtimeModel: metadata.model } : {}),
         ...(metadataLivenessKind ? { livenessKind: metadataLivenessKind } : {}),
-        ...(runtimeDiagnostic ? { runtimeDiagnostic } : {}),
+        ...(runtimeDiagnostic || shouldSuppressWeakRuntimeMetadataForConfirmedBootstrap
+          ? { runtimeDiagnostic }
+          : {}),
         ...(shouldPreserveProcessBootstrapTransportDiagnostic
-          ? { runtimeDiagnosticSeverity: current.runtimeDiagnosticSeverity }
-          : metadata.runtimeDiagnosticSeverity
-            ? { runtimeDiagnosticSeverity: metadata.runtimeDiagnosticSeverity }
+          ? { runtimeDiagnosticSeverity }
+          : runtimeDiagnosticSeverity || shouldSuppressWeakRuntimeMetadataForConfirmedBootstrap
+            ? { runtimeDiagnosticSeverity }
             : {}),
         livenessLastCheckedAt: nowIso(),
       };
       const failureReason = current.hardFailureReason ?? current.error;
-      const hasStrongEvidence = isStrongRuntimeEvidence(metadata);
       const hasWeakEvidence =
-        metadata.livenessKind != null &&
-        !isStrongRuntimeEvidence(metadata) &&
-        current.bootstrapConfirmed !== true;
+        metadata.livenessKind != null && !hasStrongEvidence && current.bootstrapConfirmed !== true;
       if (
         hasStrongEvidence &&
         !openCodeSecondaryBootstrapPending &&
@@ -25827,7 +25865,13 @@ export class TeamProvisioningService {
       }
       const current =
         run.memberSpawnStatuses.get(memberName) ?? createInitialMemberSpawnStatusEntry();
-      if (!isBootstrapMemberEvidenceCurrentForMember(current, bootstrapMember, 'confirmation')) {
+      if (
+        !isBootstrapMemberEvidenceCurrentForMember(
+          { ...current, runtimeRunId: run.runId },
+          bootstrapMember,
+          'confirmation'
+        )
+      ) {
         continue;
       }
       if (current.launchState === 'skipped_for_launch' || current.skippedForLaunch === true) {
@@ -25920,7 +25964,13 @@ export class TeamProvisioningService {
       if (!current || bootstrapMember?.bootstrapConfirmed !== true) {
         continue;
       }
-      if (!isBootstrapMemberEvidenceCurrentForMember(current, bootstrapMember, 'confirmation')) {
+      if (
+        !isBootstrapMemberEvidenceCurrentForMember(
+          { ...current, runtimeRunId: run.runId },
+          bootstrapMember,
+          'confirmation'
+        )
+      ) {
         continue;
       }
       if (
@@ -28278,6 +28328,105 @@ export class TeamProvisioningService {
     return false;
   }
 
+  private needsConfirmedBootstrapDiagnosticReconcile(
+    snapshot: PersistedTeamLaunchSnapshot | null
+  ): boolean {
+    if (!snapshot) {
+      return false;
+    }
+    for (const member of Object.values(snapshot.members)) {
+      if (
+        member?.bootstrapConfirmed !== true ||
+        member.hardFailure === true ||
+        isPersistedOpenCodeSecondaryLaneMember(member)
+      ) {
+        continue;
+      }
+      if (
+        member.livenessKind === 'stale_metadata' ||
+        member.livenessKind === 'registered_only' ||
+        member.pidSource === 'persisted_metadata' ||
+        shouldClearRuntimeDiagnosticAfterBootstrapConfirmation(member.runtimeDiagnostic)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private cleanConfirmedBootstrapRuntimeDiagnostics(
+    snapshot: PersistedTeamLaunchSnapshot | null
+  ): PersistedTeamLaunchSnapshot | null {
+    if (!snapshot) {
+      return null;
+    }
+
+    let changed = false;
+    const updatedAt = nowIso();
+    const members: Record<string, PersistedTeamLaunchMemberState> = { ...snapshot.members };
+    for (const memberName of this.getPersistedLaunchMemberNames(snapshot)) {
+      const current = members[memberName];
+      if (
+        !current ||
+        current.bootstrapConfirmed !== true ||
+        current.hardFailure === true ||
+        isPersistedOpenCodeSecondaryLaneMember(current)
+      ) {
+        continue;
+      }
+
+      const hasConfirmedBootstrapStaleRuntimeState =
+        current.livenessKind === 'stale_metadata' ||
+        current.livenessKind === 'registered_only' ||
+        current.pidSource === 'persisted_metadata' ||
+        shouldClearRuntimeDiagnosticAfterBootstrapConfirmation(current.runtimeDiagnostic) ||
+        current.bootstrapStalled === true;
+      if (!hasConfirmedBootstrapStaleRuntimeState) {
+        continue;
+      }
+
+      const next: PersistedTeamLaunchMemberState = {
+        ...current,
+        livenessKind:
+          current.livenessKind === 'stale_metadata' ||
+          current.livenessKind === 'registered_only' ||
+          current.livenessKind == null
+            ? 'confirmed_bootstrap'
+            : current.livenessKind,
+        pidSource:
+          current.pidSource === 'persisted_metadata' || current.pidSource == null
+            ? 'runtime_bootstrap'
+            : current.pidSource,
+        bootstrapStalled: undefined,
+        diagnostics: undefined,
+        lastEvaluatedAt: updatedAt,
+      };
+      if (shouldClearRuntimeDiagnosticAfterBootstrapConfirmation(next.runtimeDiagnostic)) {
+        next.runtimeDiagnostic = undefined;
+        next.runtimeDiagnosticSeverity = undefined;
+      } else if (!next.runtimeDiagnostic) {
+        next.runtimeDiagnosticSeverity = undefined;
+      }
+      next.launchState = deriveMemberLaunchState(next);
+      members[memberName] = next;
+      changed = true;
+    }
+
+    if (!changed) {
+      return snapshot;
+    }
+
+    return createPersistedLaunchSnapshot({
+      teamName: snapshot.teamName,
+      expectedMembers: snapshot.expectedMembers,
+      bootstrapExpectedMembers: snapshot.bootstrapExpectedMembers,
+      leadSessionId: snapshot.leadSessionId,
+      launchPhase: snapshot.launchPhase,
+      members,
+      updatedAt,
+    });
+  }
+
   private async reconcilePersistedLaunchState(teamName: string): Promise<{
     snapshot: ReturnType<typeof createPersistedLaunchSnapshot> | null;
     statuses: Record<string, MemberSpawnStatusEntry>;
@@ -28315,11 +28464,15 @@ export class TeamProvisioningService {
     const promotedRecoveredMixedSnapshot = promoteOpenCodePersistedFailureReasonsFromDiagnostics(
       stableRecoveredMixedSnapshotWithCommittedEvidence
     );
+    const cleanedRecoveredMixedSnapshot = this.cleanConfirmedBootstrapRuntimeDiagnostics(
+      promotedRecoveredMixedSnapshot
+    );
     const stableRecoveredMixedSnapshot =
-      promotedRecoveredMixedSnapshot &&
-      promotedRecoveredMixedSnapshot !== stableRecoveredMixedSnapshotWithCommittedEvidence
-        ? await this.writeLaunchStateSnapshot(teamName, promotedRecoveredMixedSnapshot)
-        : promotedRecoveredMixedSnapshot;
+      cleanedRecoveredMixedSnapshot &&
+      (promotedRecoveredMixedSnapshot !== stableRecoveredMixedSnapshotWithCommittedEvidence ||
+        cleanedRecoveredMixedSnapshot !== promotedRecoveredMixedSnapshot)
+        ? await this.writeLaunchStateSnapshot(teamName, cleanedRecoveredMixedSnapshot)
+        : cleanedRecoveredMixedSnapshot;
     const filteredBootstrapSnapshot = bootstrapSnapshot
       ? this.filterRemovedMembersFromLaunchSnapshot(bootstrapSnapshot, metaMembers)
       : null;
@@ -28331,6 +28484,7 @@ export class TeamProvisioningService {
         stableRecoveredMixedSnapshot,
         overlaidBootstrapSnapshot
       ) &&
+      !this.needsConfirmedBootstrapDiagnosticReconcile(stableRecoveredMixedSnapshot) &&
       !(await this.hasBootstrapTranscriptLaunchReconcileOutcome(stableRecoveredMixedSnapshot))
     ) {
       return {
@@ -28361,15 +28515,18 @@ export class TeamProvisioningService {
     );
     const shouldPersistFailureReasonPromotion =
       promotedPersisted !== filteredPersistedWithBootstrapStall;
+    const cleanedPersisted = this.cleanConfirmedBootstrapRuntimeDiagnostics(promotedPersisted);
+    const shouldPersistConfirmedBootstrapDiagnosticCleanup = cleanedPersisted !== promotedPersisted;
     const shouldPersistBootstrapStallOverlay =
       filteredPersistedWithBootstrapStall !== filteredPersisted;
     const persistedWithCommittedEvidence =
-      promotedPersisted &&
+      cleanedPersisted &&
       (shouldPersistCommittedEvidenceOverlay ||
         shouldPersistFailureReasonPromotion ||
+        shouldPersistConfirmedBootstrapDiagnosticCleanup ||
         shouldPersistBootstrapStallOverlay)
-        ? await this.writeLaunchStateSnapshot(teamName, promotedPersisted)
-        : promotedPersisted;
+        ? await this.writeLaunchStateSnapshot(teamName, cleanedPersisted)
+        : cleanedPersisted;
     const preferredSnapshot = choosePreferredLaunchSnapshot(
       overlaidBootstrapSnapshot,
       persistedWithCommittedEvidence
@@ -28413,6 +28570,7 @@ export class TeamProvisioningService {
 
     const configPath = path.join(getTeamsBasePath(), teamName, 'config.json');
     let configMembers = new Set<string>();
+    let configBootstrapRunIds = new Map<string, string>();
     let leadName = 'team-lead';
     try {
       const raw = await tryReadRegularFileUtf8(configPath, {
@@ -28421,13 +28579,25 @@ export class TeamProvisioningService {
       });
       if (raw) {
         const config = JSON.parse(raw) as {
-          members?: { name?: string; agentType?: string }[];
+          members?: { name?: string; agentType?: string; bootstrapRunId?: string }[];
         };
-        leadName = config.members?.find((member) => isLeadMember(member))?.name?.trim() || leadName;
+        const configuredMembers = config.members ?? [];
+        leadName =
+          configuredMembers.find((member) => isLeadMember(member))?.name?.trim() || leadName;
         configMembers = new Set(
-          (config.members ?? [])
+          configuredMembers
             .map((member) => (typeof member?.name === 'string' ? member.name.trim() : ''))
             .filter((name) => name.length > 0 && !isLeadMember({ name }))
+        );
+        configBootstrapRunIds = new Map(
+          configuredMembers.flatMap((member) => {
+            const name = typeof member?.name === 'string' ? member.name.trim() : '';
+            const runId =
+              typeof member?.bootstrapRunId === 'string' ? member.bootstrapRunId.trim() : '';
+            return name.length > 0 && runId.length > 0 && !isLeadMember({ name })
+              ? [[name, runId] as const]
+              : [];
+          })
         );
       }
     } catch {
@@ -28449,6 +28619,7 @@ export class TeamProvisioningService {
         persistedWithCommittedEvidence,
         overlaidBootstrapSnapshot
       ) &&
+      !this.needsConfirmedBootstrapDiagnosticReconcile(persistedWithCommittedEvidence) &&
       !(await this.hasBootstrapTranscriptLaunchReconcileOutcome(persistedWithCommittedEvidence))
     ) {
       return {
@@ -28473,10 +28644,23 @@ export class TeamProvisioningService {
         lastEvaluatedAt: now,
       };
       const isOpenCodeSecondaryLaneMember = isPersistedOpenCodeSecondaryLaneMember(current);
+      const matchedConfigNames = [...configMembers].filter((name) =>
+        matchesObservedMemberNameForExpected(name, expected)
+      );
+      const configBootstrapRunId = matchedConfigNames
+        .map((name) => configBootstrapRunIds.get(name))
+        .find((runId): runId is string => typeof runId === 'string' && runId.length > 0);
+      const currentBootstrapEvidenceBoundary = configBootstrapRunId
+        ? { ...current, runtimeRunId: configBootstrapRunId }
+        : current;
       if (
         bootstrapMember?.agentToolAccepted &&
         !current.agentToolAccepted &&
-        isBootstrapMemberEvidenceCurrentForMember(current, bootstrapMember, 'acceptance')
+        isBootstrapMemberEvidenceCurrentForMember(
+          currentBootstrapEvidenceBoundary,
+          bootstrapMember,
+          'acceptance'
+        )
       ) {
         current.agentToolAccepted = true;
         current.firstSpawnAcceptedAt =
@@ -28486,14 +28670,15 @@ export class TeamProvisioningService {
         bootstrapMember?.bootstrapConfirmed &&
         !current.bootstrapConfirmed &&
         !isOpenCodeSecondaryLaneMember &&
-        isBootstrapMemberEvidenceCurrentForMember(current, bootstrapMember, 'confirmation')
+        isBootstrapMemberEvidenceCurrentForMember(
+          currentBootstrapEvidenceBoundary,
+          bootstrapMember,
+          'confirmation'
+        )
       ) {
         current.bootstrapConfirmed = true;
         current.lastHeartbeatAt = current.lastHeartbeatAt ?? bootstrapMember.lastHeartbeatAt;
       }
-      const matchedConfigNames = [...configMembers].filter((name) =>
-        matchesObservedMemberNameForExpected(name, expected)
-      );
       const runtimeMetadataCandidates = [...liveRuntimeByMember.entries()].filter(([name]) =>
         matchesObservedMemberNameForExpected(name, expected)
       );
@@ -28618,6 +28803,25 @@ export class TeamProvisioningService {
           launchPhase: persistedWithCommittedEvidence.launchPhase,
           finalTimeoutReached: graceExpired,
         });
+      }
+      if (current.bootstrapConfirmed && !current.hardFailure && !isOpenCodeSecondaryLaneMember) {
+        current.livenessKind =
+          current.livenessKind === 'stale_metadata' ||
+          current.livenessKind === 'registered_only' ||
+          current.livenessKind == null
+            ? 'confirmed_bootstrap'
+            : current.livenessKind;
+        current.pidSource =
+          current.pidSource === 'persisted_metadata' || current.pidSource == null
+            ? 'runtime_bootstrap'
+            : current.pidSource;
+        if (shouldClearRuntimeDiagnosticAfterBootstrapConfirmation(current.runtimeDiagnostic)) {
+          current.runtimeDiagnostic = undefined;
+          current.runtimeDiagnosticSeverity = undefined;
+        } else if (!current.runtimeDiagnostic) {
+          current.runtimeDiagnosticSeverity = undefined;
+        }
+        current.bootstrapStalled = undefined;
       }
       if (
         isOpenCodeSecondaryLaneMember &&

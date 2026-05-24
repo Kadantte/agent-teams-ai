@@ -91,6 +91,38 @@ describe('member launch diagnostics', () => {
     expect(formatMemberLaunchDiagnosticsPayload(payload)).toContain('"memberCardError"');
   });
 
+  it('does not surface post-stop stale runtime warnings as confirmed member card errors', () => {
+    const payload = buildMemberLaunchDiagnosticsPayload({
+      teamName: 'forge-labs-11',
+      runId: 'e90c7699-54d7-449e-8a4a-6a3276396926',
+      memberName: 'tom',
+      spawnEntry: {
+        status: 'online',
+        launchState: 'confirmed_alive',
+        agentToolAccepted: true,
+        runtimeAlive: false,
+        bootstrapConfirmed: true,
+        hardFailure: false,
+        livenessKind: 'confirmed_bootstrap',
+        updatedAt: '2026-05-24T12:04:48.900Z',
+      },
+      runtimeEntry: {
+        memberName: 'tom',
+        alive: false,
+        restartable: true,
+        livenessKind: 'stale_metadata',
+        runtimeDiagnostic: 'persisted runtime pid is not alive',
+        runtimeDiagnosticSeverity: 'warning',
+        updatedAt: '2026-05-24T12:04:48.900Z',
+      },
+    });
+
+    expect(payload.memberCardError).toBeUndefined();
+    expect(hasMemberLaunchDiagnosticsError(payload)).toBe(false);
+    expect(getMemberLaunchDiagnosticsErrorMessage(payload)).toBeUndefined();
+    expect(payload.runtimeDiagnostic).toBe('persisted runtime pid is not alive');
+  });
+
   it('includes runtime advisory evidence in copy diagnostics', () => {
     const payload = buildMemberLaunchDiagnosticsPayload({
       memberName: 'alice',

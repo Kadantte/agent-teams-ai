@@ -1123,7 +1123,7 @@ export interface PersistedTeamLaunchMemberState {
   hardFailureReason?: string;
   pendingPermissionRequestIds?: string[];
   runtimePid?: number;
-  /** OpenCode runtime run id that produced the current runtimeSessionId/liveness evidence. */
+  /** Runtime/bootstrap run id that produced current liveness or bootstrap evidence. */
   runtimeRunId?: string;
   runtimeSessionId?: string;
   bootstrapEvidenceSource?: OpenCodeBootstrapEvidenceSource;
