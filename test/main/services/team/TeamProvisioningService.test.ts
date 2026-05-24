@@ -679,6 +679,8 @@ interface LeadActivityTestRun {
 interface LeadActivityServiceInternals {
   runs: Map<string, LeadActivityTestRun>;
   aliveRunByTeam: Map<string, string>;
+  runtimeAdapterProgressByRunId: Map<string, unknown>;
+  runtimeAdapterRunByTeam: Map<string, unknown>;
   setLeadActivity(run: LeadActivityTestRun, state: LeadActivityTestState): void;
 }
 
@@ -2511,6 +2513,63 @@ describe('TeamProvisioningService', () => {
   });
 
   describe('lead activity task intervals', () => {
+    it('reports runtime adapter teams as idle instead of offline when no legacy run exists', () => {
+      const svc = new TeamProvisioningService();
+      const internals = svc as unknown as LeadActivityServiceInternals;
+      const teamName = 'opencode-runtime-adapter-lead-activity-team';
+      const runId = 'opencode-runtime-adapter-run';
+
+      internals.aliveRunByTeam.set(teamName, runId);
+      internals.runtimeAdapterRunByTeam.set(teamName, {
+        runId,
+        providerId: 'opencode',
+        cwd: '/tmp/opencode-runtime-adapter-lead-activity-team',
+        members: {},
+      });
+      internals.runtimeAdapterProgressByRunId.set(runId, {
+        runId,
+        teamName,
+        state: 'ready',
+        message: 'OpenCode team launch is waiting for runtime evidence or permissions',
+        startedAt: '2026-05-02T10:00:00.000Z',
+        updatedAt: '2026-05-02T10:00:05.000Z',
+      });
+
+      expect(svc.isTeamAlive(teamName)).toBe(true);
+      expect(svc.getLeadActivityState(teamName)).toEqual({
+        state: 'idle',
+        runId,
+      });
+    });
+
+    it('keeps terminal runtime adapter progress offline without a legacy run', () => {
+      const svc = new TeamProvisioningService();
+      const internals = svc as unknown as LeadActivityServiceInternals;
+      const teamName = 'opencode-runtime-adapter-terminal-lead-activity-team';
+      const runId = 'opencode-runtime-adapter-terminal-run';
+
+      internals.aliveRunByTeam.set(teamName, runId);
+      internals.runtimeAdapterRunByTeam.set(teamName, {
+        runId,
+        providerId: 'opencode',
+        cwd: '/tmp/opencode-runtime-adapter-terminal-lead-activity-team',
+        members: {},
+      });
+      internals.runtimeAdapterProgressByRunId.set(runId, {
+        runId,
+        teamName,
+        state: 'failed',
+        message: 'OpenCode team launch failed readiness gate',
+        startedAt: '2026-05-02T10:00:00.000Z',
+        updatedAt: '2026-05-02T10:00:05.000Z',
+      });
+
+      expect(svc.getLeadActivityState(teamName)).toEqual({
+        state: 'offline',
+        runId: null,
+      });
+    });
+
     it('read-repairs active lead task intervals once when lead activity is polled', () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-05-02T10:00:00.000Z'));

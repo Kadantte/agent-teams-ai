@@ -12168,7 +12168,18 @@ export class TeamProvisioningService {
     const runId = this.getTrackedRunId(teamName);
     if (!runId) return { state: 'offline', runId: null };
     const run = this.runs.get(runId);
-    if (!run || run.processKilled || run.cancelRequested) return { state: 'offline', runId: null };
+    if (!run) {
+      const runtimeAdapterRun = this.runtimeAdapterRunByTeam.get(teamName);
+      const runtimeProgress = this.runtimeAdapterProgressByRunId.get(runId);
+      if (
+        runtimeAdapterRun?.runId === runId &&
+        !['cancelled', 'disconnected', 'failed'].includes(runtimeProgress?.state ?? '')
+      ) {
+        return { state: 'idle', runId };
+      }
+      return { state: 'offline', runId: null };
+    }
+    if (run.processKilled || run.cancelRequested) return { state: 'offline', runId: null };
     // Read-repair active lead task intervals for runs that were already active
     // before interval tracking was introduced or before the renderer polled state.
     this.syncLeadTaskActivityForState(run, run.leadActivityState, run.leadActivityState);
