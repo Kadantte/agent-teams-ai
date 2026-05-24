@@ -63,14 +63,17 @@
     "emptyMessage": "No language found.",
     "names": {
       "en": "English",
-      "es": "Spanish",
-      "hi": "Hindi",
+      "ru": "Russian",
+      "zh": "Chinese",
       "ja": "Japanese",
       "ko": "Korean",
+      "es": "Spanish",
+      "hi": "Hindi",
       "pt": "Portuguese",
-      "ru": "Russian",
-      "system": "System",
-      "zh": "Chinese"
+      "fr": "French",
+      "ar": "Arabic",
+      "bn": "Bengali",
+      "system": "System"
     },
     "searchPlaceholder": "Search language...",
     "selectPlaceholder": "Select app language...",

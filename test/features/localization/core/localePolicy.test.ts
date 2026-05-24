@@ -17,6 +17,9 @@ describe('localePolicy', () => {
     expect(normalizeAppLocalePreference('es')).toBe('es');
     expect(normalizeAppLocalePreference('hi')).toBe('hi');
     expect(normalizeAppLocalePreference('pt')).toBe('pt');
+    expect(normalizeAppLocalePreference('fr')).toBe('fr');
+    expect(normalizeAppLocalePreference('ar')).toBe('ar');
+    expect(normalizeAppLocalePreference('bn')).toBe('bn');
   });
 
   it('extracts the primary locale subtag', () => {
@@ -34,6 +37,9 @@ describe('localePolicy', () => {
     expect(resolveAppLocale({ preference: 'system', systemLocale: 'es-ES' })).toBe('es');
     expect(resolveAppLocale({ preference: 'system', systemLocale: 'hi-IN' })).toBe('hi');
     expect(resolveAppLocale({ preference: 'system', systemLocale: 'pt-BR' })).toBe('pt');
+    expect(resolveAppLocale({ preference: 'system', systemLocale: 'fr-FR' })).toBe('fr');
+    expect(resolveAppLocale({ preference: 'system', systemLocale: 'ar-SA' })).toBe('ar');
+    expect(resolveAppLocale({ preference: 'system', systemLocale: 'bn-BD' })).toBe('bn');
   });
 
   it('falls back when the system locale is not supported yet', () => {

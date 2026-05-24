@@ -8,9 +8,24 @@ export const APP_LOCALE_PREFERENCES = [
   'es',
   'hi',
   'pt',
+  'fr',
+  'ar',
+  'bn',
 ] as const;
 
-export const RESOLVED_APP_LOCALES = ['en', 'ru', 'zh', 'ja', 'ko', 'es', 'hi', 'pt'] as const;
+export const RESOLVED_APP_LOCALES = [
+  'en',
+  'ru',
+  'zh',
+  'ja',
+  'ko',
+  'es',
+  'hi',
+  'pt',
+  'fr',
+  'ar',
+  'bn',
+] as const;
 
 export type AppLocalePreference = (typeof APP_LOCALE_PREFERENCES)[number];
 

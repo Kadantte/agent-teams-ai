@@ -371,8 +371,11 @@ export default interface Resources {
     locales: {
       emptyMessage: 'No language found.';
       names: {
+        ar: 'Arabic';
+        bn: 'Bengali';
         en: 'English';
         es: 'Spanish';
+        fr: 'French';
         hi: 'Hindi';
         ja: 'Japanese';
         ko: 'Korean';

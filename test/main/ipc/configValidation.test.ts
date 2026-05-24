@@ -42,7 +42,7 @@ describe('configValidation', () => {
     }
   });
 
-  it.each(['ru', 'zh', 'ja', 'ko', 'es', 'hi', 'pt'] as const)(
+  it.each(['ru', 'zh', 'ja', 'ko', 'es', 'hi', 'pt', 'fr', 'ar', 'bn'] as const)(
     'accepts supported general.appLocale update %s',
     (appLocale) => {
       const result = validateConfigUpdatePayload('general', { appLocale });

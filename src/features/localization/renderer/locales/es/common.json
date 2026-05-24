@@ -63,14 +63,17 @@
     "emptyMessage": "No se encontró ningún idioma.",
     "names": {
       "en": "Inglés",
-      "es": "Español",
-      "hi": "Hindi",
+      "ru": "Ruso",
+      "zh": "Chino",
       "ja": "Japonés",
       "ko": "Coreano",
+      "es": "Español",
+      "hi": "Hindi",
       "pt": "Portugués",
-      "ru": "Ruso",
-      "system": "Sistema",
-      "zh": "Chino"
+      "fr": "Francés",
+      "ar": "Árabe",
+      "bn": "Bengalí",
+      "system": "Sistema"
     },
     "searchPlaceholder": "Buscar idioma...",
     "selectPlaceholder": "Seleccionar idioma de la app...",
