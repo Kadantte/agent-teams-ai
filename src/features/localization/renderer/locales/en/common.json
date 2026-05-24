@@ -510,6 +510,42 @@
     "detectedOs": "Detected OS: {{os}}",
     "runtimePath": "Runtime path: {{path}}",
     "phase": "Phase: {{phase}}",
+    "titles": {
+      "preparing": "Preparing tmux installation",
+      "pendingExternalElevation": "Waiting for an administrator step",
+      "waitingForExternalStep": "Finish the external setup step",
+      "installing": "Installing tmux",
+      "verifying": "Verifying tmux installation",
+      "needsRestart": "Restart required before tmux setup can continue",
+      "error": "tmux installation failed",
+      "needsManualStep": "tmux needs a manual step",
+      "completed": "tmux installed",
+      "cancelled": "tmux installation cancelled"
+    },
+    "installLabels": {
+      "retryInstall": "Retry install",
+      "recheckAfterRestart": "Re-check after restart",
+      "installing": "Installing...",
+      "installTmux": "Install tmux",
+      "installWsl": "Install WSL",
+      "installUbuntuInWsl": "Install Ubuntu in WSL",
+      "installTmuxInWsl": "Install tmux in WSL"
+    },
+    "platforms": {
+      "unknown": "Unknown OS"
+    },
+    "locations": {
+      "host": "Host runtime",
+      "wsl": "WSL runtime"
+    },
+    "runtimeReady": {
+      "ready": "Pane transport ready",
+      "inactive": "Installed, optional transport inactive"
+    },
+    "optionalBenefits": {
+      "default": "Optional. The app works without tmux. Install tmux only if you want pane-based terminal transport for long-running teammate sessions.",
+      "windows": "Optional. The app works without tmux. Install WSL-backed tmux only if you want pane-based terminal transport for long-running teammate sessions."
+    },
     "actions": {
       "cancel": "Cancel",
       "manualGuide": "Manual guide",

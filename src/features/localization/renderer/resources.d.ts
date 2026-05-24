@@ -861,10 +861,46 @@ export default interface Resources {
         placeholder: 'Send input to the installer';
         send: 'Send input';
       };
+      installLabels: {
+        installTmux: 'Install tmux';
+        installTmuxInWsl: 'Install tmux in WSL';
+        installUbuntuInWsl: 'Install Ubuntu in WSL';
+        installWsl: 'Install WSL';
+        installing: 'Installing...';
+        recheckAfterRestart: 'Re-check after restart';
+        retryInstall: 'Retry install';
+      };
       installerProgress: 'Installer progress';
+      locations: {
+        host: 'Host runtime';
+        wsl: 'WSL runtime';
+      };
+      optionalBenefits: {
+        default: 'Optional. The app works without tmux. Install tmux only if you want pane-based terminal transport for long-running teammate sessions.';
+        windows: 'Optional. The app works without tmux. Install WSL-backed tmux only if you want pane-based terminal transport for long-running teammate sessions.';
+      };
       phase: 'Phase: {{phase}}';
+      platforms: {
+        unknown: 'Unknown OS';
+      };
       runtimePath: 'Runtime path: {{path}}';
+      runtimeReady: {
+        inactive: 'Installed, optional transport inactive';
+        ready: 'Pane transport ready';
+      };
       summaryTitle: 'tmux is not installed';
+      titles: {
+        cancelled: 'tmux installation cancelled';
+        completed: 'tmux installed';
+        error: 'tmux installation failed';
+        installing: 'Installing tmux';
+        needsManualStep: 'tmux needs a manual step';
+        needsRestart: 'Restart required before tmux setup can continue';
+        pendingExternalElevation: 'Waiting for an administrator step';
+        preparing: 'Preparing tmux installation';
+        verifying: 'Verifying tmux installation';
+        waitingForExternalStep: 'Finish the external setup step';
+      };
     };
     tokens: {
       accumulatedWithoutDuplication: 'Accumulated across entire session without duplication';

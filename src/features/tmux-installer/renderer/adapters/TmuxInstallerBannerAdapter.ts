@@ -1,4 +1,5 @@
 import {
+  defaultTmuxInstallerT,
   formatInstallButtonLabel,
   formatTmuxInstallerProgress,
   formatTmuxInstallerTitle,
@@ -7,6 +8,7 @@ import {
   formatTmuxPlatformLabel,
 } from '@features/tmux-installer/renderer/utils/formatTmuxInstallerText';
 
+import type { useAppTranslation } from '@features/localization/renderer';
 import type {
   TmuxInstallerSnapshot,
   TmuxInstallHint,
@@ -48,6 +50,7 @@ interface AdaptInput {
   loading: boolean;
   error: string | null;
   detailsOpen: boolean;
+  t?: ReturnType<typeof useAppTranslation>['t'];
 }
 
 const RESTART_REQUIRED_PATTERNS = ['restart', 'reboot', 'перезагруз', 'требуется перезагрузка'];
@@ -60,6 +63,7 @@ export class TmuxInstallerBannerAdapter {
   adapt(input: AdaptInput): TmuxInstallerBannerViewModel {
     const status = input.status;
     const snapshot = input.snapshot;
+    const t = input.t ?? defaultTmuxInstallerT;
     const displayPhase = this.#resolveDisplayPhase(snapshot, status);
     const hasActiveInstallFlow =
       displayPhase !== 'idle' && displayPhase !== 'completed' && displayPhase !== 'cancelled';
@@ -73,7 +77,7 @@ export class TmuxInstallerBannerAdapter {
         displayPhase === 'needs_restart' ||
         displayPhase === 'needs_manual_step')
         ? snapshot.message
-        : formatTmuxInstallerTitle(displayPhase);
+        : formatTmuxInstallerTitle(displayPhase, t);
     const primaryGuideUrl =
       status?.autoInstall.manualHints.find((hint) => typeof hint.url === 'string')?.url ?? null;
     const body =
@@ -83,14 +87,14 @@ export class TmuxInstallerBannerAdapter {
       snapshot.message ??
       status?.effective.detail ??
       status?.wsl?.statusDetail ??
-      'tmux is optional. Install it only if you want pane-based terminal transport for long-running teammate sessions.';
+      t('tmuxInstaller.optionalBenefits.default');
     const benefitsBody =
-      status && !status.effective.available ? formatTmuxOptionalBenefits(status.platform) : null;
+      status && !status.effective.available ? formatTmuxOptionalBenefits(status.platform, t) : null;
     const runtimeReadyLabel = status
       ? status.effective.runtimeReady
-        ? 'Pane transport ready'
+        ? t('tmuxInstaller.runtimeReady.ready')
         : status.effective.available
-          ? 'Installed, optional transport inactive'
+          ? t('tmuxInstaller.runtimeReady.inactive')
           : null
       : null;
     const versionLabel =
@@ -103,11 +107,11 @@ export class TmuxInstallerBannerAdapter {
       status.autoInstall.strategy === 'wsl' &&
       status.autoInstall.supported
         ? !status.wsl?.wslInstalled
-          ? 'Install WSL'
+          ? t('tmuxInstaller.installLabels.installWsl')
           : !status.wsl?.distroName
-            ? 'Install Ubuntu in WSL'
-            : 'Install tmux in WSL'
-        : formatInstallButtonLabel(displayPhase);
+            ? t('tmuxInstaller.installLabels.installUbuntuInWsl')
+            : t('tmuxInstaller.installLabels.installTmuxInWsl')
+        : formatInstallButtonLabel(displayPhase, t);
     const installDisabled =
       input.loading ||
       displayPhase === 'preparing' ||
@@ -118,10 +122,11 @@ export class TmuxInstallerBannerAdapter {
       displayPhase === 'installing' ||
       displayPhase === 'verifying';
     const installButtonPrimary =
-      !installDisabled && (installLabel.startsWith('Install') || installLabel.startsWith('Retry'));
+      !installDisabled &&
+      (displayPhase === 'idle' || displayPhase === 'error' || displayPhase === 'needs_manual_step');
     const showRefreshButton =
       !(status?.autoInstall.supported ?? false) ||
-      (installLabel !== 'Re-check' && installLabel !== 'Re-check after restart');
+      (displayPhase !== 'needs_manual_step' && displayPhase !== 'needs_restart');
 
     return {
       visible,
@@ -130,8 +135,8 @@ export class TmuxInstallerBannerAdapter {
       body,
       benefitsBody,
       error: input.error ?? snapshot.error ?? status?.error ?? null,
-      platformLabel: formatTmuxPlatformLabel(status?.platform ?? null),
-      locationLabel: formatTmuxLocationLabel(status?.effective.location ?? null),
+      platformLabel: formatTmuxPlatformLabel(status?.platform ?? null, t),
+      locationLabel: formatTmuxLocationLabel(status?.effective.location ?? null, t),
       runtimeReadyLabel,
       versionLabel,
       phase: displayPhase,

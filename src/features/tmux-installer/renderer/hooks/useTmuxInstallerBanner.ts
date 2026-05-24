@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAppTranslation } from '@features/localization/renderer';
 import { api, isElectronMode } from '@renderer/api';
 
 import { TmuxInstallerBannerAdapter } from '../adapters/TmuxInstallerBannerAdapter';
@@ -37,6 +38,7 @@ export function useTmuxInstallerBanner(): {
   toggleDetails: () => void;
   openExternal: (url: string) => Promise<void>;
 } {
+  const { t } = useAppTranslation('common');
   const electronMode = isElectronMode();
   const adapter = useMemo(() => TmuxInstallerBannerAdapter.create(), []);
   const [status, setStatus] = useState<TmuxStatus | null>(null);
@@ -188,8 +190,9 @@ export function useTmuxInstallerBanner(): {
         loading,
         error,
         detailsOpen,
+        t,
       }),
-    [adapter, detailsOpen, error, loading, snapshot, status]
+    [adapter, detailsOpen, error, loading, snapshot, status, t]
   );
 
   return {

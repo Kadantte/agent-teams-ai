@@ -510,6 +510,42 @@
     "detectedOs": "Обнаруженная ОС: {{os}}",
     "runtimePath": "Путь runtime: {{path}}",
     "phase": "Фаза: {{phase}}",
+    "titles": {
+      "preparing": "Подготовка установки tmux",
+      "pendingExternalElevation": "Ожидание шага администратора",
+      "waitingForExternalStep": "Завершите внешний шаг настройки",
+      "installing": "Установка tmux",
+      "verifying": "Проверка установки tmux",
+      "needsRestart": "Для продолжения настройки tmux требуется перезапуск",
+      "error": "Установка tmux не удалась",
+      "needsManualStep": "tmux требует ручного шага",
+      "completed": "tmux установлен",
+      "cancelled": "Установка tmux отменена"
+    },
+    "installLabels": {
+      "retryInstall": "Повторить установку",
+      "recheckAfterRestart": "Проверить снова после перезапуска",
+      "installing": "Установка...",
+      "installTmux": "Установить tmux",
+      "installWsl": "Установить WSL",
+      "installUbuntuInWsl": "Установить Ubuntu в WSL",
+      "installTmuxInWsl": "Установить tmux в WSL"
+    },
+    "platforms": {
+      "unknown": "Неизвестная ОС"
+    },
+    "locations": {
+      "host": "Host runtime",
+      "wsl": "WSL runtime"
+    },
+    "runtimeReady": {
+      "ready": "Pane transport готов",
+      "inactive": "Установлено, optional transport неактивен"
+    },
+    "optionalBenefits": {
+      "default": "Необязательно. Приложение работает без tmux. Устанавливайте tmux только если нужен pane-based terminal transport для долгих сессий участников.",
+      "windows": "Необязательно. Приложение работает без tmux. Устанавливайте tmux через WSL только если нужен pane-based terminal transport для долгих сессий участников."
+    },
     "actions": {
       "cancel": "Отмена",
       "manualGuide": "Manual guide",
