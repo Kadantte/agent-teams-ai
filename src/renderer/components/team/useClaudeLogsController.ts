@@ -514,7 +514,7 @@ export function useClaudeLogsController(
     };
 
     void fetchLogs({ queueIfBusy: true });
-    const id = window.setInterval(() => void fetchLogs(), POLL_MS);
+    const id = window.setInterval(() => void fetchLogs({ queueIfBusy: true }), POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(id);

@@ -112,20 +112,16 @@ describe('MemberSelect', () => {
           searchPlaceholder="Search log sources..."
           emptyMessage="No log sources found."
           ariaLabel="Log source"
-          getMemberLabel={(candidate) =>
-            candidate.name === 'team-lead'
-              ? 'Lead'
-              : candidate.removedAt
-                ? `${candidate.name} (removed)`
-                : candidate.name
-          }
-          getMemberDescription={(candidate) =>
-            candidate.name === 'team-lead'
-              ? 'Team Lead'
-              : candidate.removedAt
-                ? 'Removed'
-                : 'Reviewer'
-          }
+          getMemberLabel={(candidate) => {
+            if (candidate.name === 'team-lead') return 'Lead';
+            if (candidate.removedAt) return `${candidate.name} (removed)`;
+            return candidate.name;
+          }}
+          getMemberDescription={(candidate) => {
+            if (candidate.name === 'team-lead') return 'Team Lead';
+            if (candidate.removedAt) return 'Removed';
+            return 'Reviewer';
+          }}
         />
       );
       await flush();

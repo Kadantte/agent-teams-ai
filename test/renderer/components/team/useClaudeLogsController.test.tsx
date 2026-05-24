@@ -92,6 +92,7 @@ describe('useClaudeLogsController enabled option', () => {
 
   afterEach(() => {
     document.body.innerHTML = '';
+    vi.useRealTimers();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
   });
@@ -148,6 +149,46 @@ describe('useClaudeLogsController enabled option', () => {
 
     await act(async () => {
       root.render(React.createElement(ControllerHarness, { enabled: true }));
+      await Promise.resolve();
+    });
+    expect(controllerState.getClaudeLogs).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstRequest.resolve(createLogsResponse('stale lead'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(controllerState.getClaudeLogs).toHaveBeenCalledTimes(2);
+    expect(controllerState.getClaudeLogs).toHaveBeenLastCalledWith('demo-team', {
+      offset: 0,
+      limit: 100,
+    });
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('queues interval-driven polls when the current request is still in flight', async () => {
+    vi.useFakeTimers();
+    const firstRequest = createDeferred<TeamClaudeLogsResponse>();
+    controllerState.getClaudeLogs
+      .mockReturnValueOnce(firstRequest.promise)
+      .mockResolvedValue(createLogsResponse('interval fresh lead'));
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(ControllerHarness, { enabled: true }));
+      await Promise.resolve();
+    });
+    expect(controllerState.getClaudeLogs).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
       await Promise.resolve();
     });
     expect(controllerState.getClaudeLogs).toHaveBeenCalledTimes(1);
