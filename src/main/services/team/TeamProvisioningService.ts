@@ -11219,7 +11219,6 @@ export class TeamProvisioningService {
       updatedAt: input.observedAt,
     });
     await this.writeLaunchStateSnapshot(input.teamName, snapshot);
-    this.invalidateRuntimeSnapshotCaches(input.teamName);
     if (shouldEmitMemberSpawnChange) {
       this.teamChangeEmitter?.({
         type: 'member-spawn',
@@ -13161,8 +13160,8 @@ export class TeamProvisioningService {
       await this.launchStateStore.read(teamName)
     );
 
-    const liveRuntimeByMember = await this.getLiveTeamAgentRuntimeMetadata(teamName);
     const spawnStatusSnapshot = await this.getMemberSpawnStatuses(teamName).catch(() => null);
+    const liveRuntimeByMember = await this.getLiveTeamAgentRuntimeMetadata(teamName);
     const activeRuntimeRunId =
       run?.runId?.trim() || currentRuntimeAdapterRun?.runId?.trim() || runId?.trim() || '';
     const spawnStatusRunId = spawnStatusSnapshot?.runId?.trim() ?? '';
@@ -13476,6 +13475,9 @@ export class TeamProvisioningService {
         launchMember?.launchState === 'confirmed_alive' ||
         spawnStatusMember?.bootstrapConfirmed === true ||
         spawnStatusMember?.launchState === 'confirmed_alive';
+      const spawnStatusConfirmsBootstrap =
+        spawnStatusMember?.bootstrapConfirmed === true ||
+        spawnStatusMember?.launchState === 'confirmed_alive';
       const hasOpenCodeRuntimeHandle =
         isOpenCodeMember &&
         (typeof liveRuntimeMember?.pid === 'number' ||
@@ -13489,22 +13491,54 @@ export class TeamProvisioningService {
         spawnStatusMember?.hardFailure !== true &&
         spawnStatusMember?.launchState !== 'failed_to_start' &&
         spawnStatusMember?.launchState !== 'runtime_pending_permission';
-      const effectiveAlive = liveRuntimeMember?.alive === true || confirmedOpenCodeRuntimeAlive;
+      const confirmedSpawnRuntimeFallback =
+        !isOpenCodeMember &&
+        spawnStatusConfirmsBootstrap &&
+        spawnStatusMember?.hardFailure !== true &&
+        spawnStatusMember?.launchState !== 'failed_to_start' &&
+        !isStrongRuntimeEvidence(liveRuntimeMember);
+      const confirmedSpawnRuntimeDiagnostic =
+        spawnStatusMember?.runtimeDiagnostic ?? liveRuntimeMember?.runtimeDiagnostic;
+      const shouldKeepConfirmedSpawnRuntimeDiagnostic =
+        !!confirmedSpawnRuntimeDiagnostic &&
+        !shouldClearRuntimeDiagnosticAfterBootstrapConfirmation(confirmedSpawnRuntimeDiagnostic);
+      const effectiveAlive =
+        liveRuntimeMember?.alive === true ||
+        confirmedOpenCodeRuntimeAlive ||
+        confirmedSpawnRuntimeFallback;
       const effectiveLivenessKind =
         confirmedOpenCodeRuntimeAlive &&
         liveRuntimeMember?.livenessKind === 'runtime_process_candidate'
           ? 'confirmed_bootstrap'
-          : liveRuntimeMember?.livenessKind;
+          : confirmedSpawnRuntimeFallback
+            ? 'confirmed_bootstrap'
+            : liveRuntimeMember?.livenessKind;
+      const effectivePidSource =
+        confirmedSpawnRuntimeFallback &&
+        (liveRuntimeMember?.pidSource === 'persisted_metadata' ||
+          liveRuntimeMember?.pidSource == null)
+          ? 'runtime_bootstrap'
+          : liveRuntimeMember?.pidSource;
       const effectiveRuntimeDiagnostic =
         confirmedOpenCodeRuntimeAlive &&
         liveRuntimeMember?.livenessKind === 'runtime_process_candidate'
           ? 'OpenCode bootstrap confirmed; runtime host/session evidence present.'
-          : liveRuntimeMember?.runtimeDiagnostic;
+          : confirmedSpawnRuntimeFallback
+            ? shouldKeepConfirmedSpawnRuntimeDiagnostic
+              ? confirmedSpawnRuntimeDiagnostic
+              : 'bootstrap confirmed'
+            : liveRuntimeMember?.runtimeDiagnostic;
       const effectiveRuntimeDiagnosticSeverity =
         confirmedOpenCodeRuntimeAlive &&
         liveRuntimeMember?.livenessKind === 'runtime_process_candidate'
           ? 'info'
-          : liveRuntimeMember?.runtimeDiagnosticSeverity;
+          : confirmedSpawnRuntimeFallback
+            ? shouldKeepConfirmedSpawnRuntimeDiagnostic
+              ? (spawnStatusMember?.runtimeDiagnosticSeverity ??
+                liveRuntimeMember?.runtimeDiagnosticSeverity ??
+                'info')
+              : 'info'
+            : liveRuntimeMember?.runtimeDiagnosticSeverity;
       if (
         rssPid &&
         !usageStatsByPid.has(rssPid) &&
@@ -13584,7 +13618,7 @@ export class TeamProvisioningService {
         ...(usageStats?.runtimeLoadTruncated ? { runtimeLoadTruncated: true } : {}),
         ...(resourceHistory && resourceHistory.length > 0 ? { resourceHistory } : {}),
         ...(effectiveLivenessKind ? { livenessKind: effectiveLivenessKind } : {}),
-        ...(liveRuntimeMember?.pidSource ? { pidSource: liveRuntimeMember.pidSource } : {}),
+        ...(effectivePidSource ? { pidSource: effectivePidSource } : {}),
         ...(liveRuntimeMember?.processCommand
           ? { processCommand: liveRuntimeMember.processCommand }
           : {}),
@@ -15486,7 +15520,6 @@ export class TeamProvisioningService {
       updatedAt,
     });
     await this.writeLaunchStateSnapshot(teamName, nextSnapshot);
-    this.invalidateRuntimeSnapshotCaches(teamName);
   }
 
   private getMutableAliveRunOrThrow(teamName: string): ProvisioningRun {
@@ -25166,6 +25199,7 @@ export class TeamProvisioningService {
     await this.launchStateStore.clear(teamName);
     this.launchStateWrittenRunIdByTeam.delete(teamName);
     await clearBootstrapState(teamName);
+    this.invalidateRuntimeSnapshotCaches(teamName);
   }
 
   private async applyOpenCodeSecondaryEvidenceOverlay(params: {
@@ -25429,9 +25463,13 @@ export class TeamProvisioningService {
     teamName: string,
     snapshot: PersistedTeamLaunchSnapshot
   ): Promise<PersistedTeamLaunchSnapshot> {
-    const result = await this.enqueueLaunchStateStoreOperation(teamName, () =>
-      this.writeLaunchStateSnapshotNow(teamName, snapshot)
-    );
+    const result = await this.enqueueLaunchStateStoreOperation(teamName, async () => {
+      const writeResult = await this.writeLaunchStateSnapshotNow(teamName, snapshot);
+      if (writeResult.wrote) {
+        this.invalidateRuntimeSnapshotCaches(teamName);
+      }
+      return writeResult;
+    });
     return result.snapshot;
   }
 
@@ -26851,7 +26889,6 @@ export class TeamProvisioningService {
 
     if (filteredSnapshot.teamLaunchState === 'clean_success' && launchPhase !== 'active') {
       await this.clearPersistedLaunchStateNow(run.teamName, { expectedRunId: run.runId });
-      this.invalidateRuntimeSnapshotCaches(run.teamName);
       return null;
     }
 

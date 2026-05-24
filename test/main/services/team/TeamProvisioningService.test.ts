@@ -2993,6 +2993,22 @@ describe('TeamProvisioningService', () => {
       ).toBe(false);
     });
 
+    it('invalidates runtime cache when launch-state is cleared', async () => {
+      const svc = new TeamProvisioningService();
+      const teamName = 'launch-state-clear-invalidates-runtime-cache';
+      (svc as any).launchStateStore = {
+        read: vi.fn(async () => null),
+        write: vi.fn(async () => {}),
+        clear: vi.fn(async () => {}),
+      };
+      const invalidateRuntime = vi.spyOn(svc as any, 'invalidateRuntimeSnapshotCaches');
+
+      await (svc as any).clearPersistedLaunchState(teamName);
+
+      expect((svc as any).launchStateStore.clear).toHaveBeenCalledWith(teamName);
+      expect(invalidateRuntime).toHaveBeenCalledTimes(1);
+    });
+
     it('does not rewrite launch-state or invalidate runtime cache for a recent semantic no-op', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-05-02T10:00:05.000Z'));
@@ -4779,6 +4795,82 @@ describe('TeamProvisioningService', () => {
       });
     });
 
+    it('reconciles persisted launch state before building runtime snapshot metadata', async () => {
+      const teamName = 'zz-runtime-snapshot-reconciles-before-live-metadata';
+      const leadSessionId = 'lead-session';
+      const projectPath = '/Users/test/proj';
+      const bootstrapAttemptAt = '2026-05-24T09:25:33.388Z';
+      const bootstrapConfirmedAt = '2026-05-24T09:25:42.904Z';
+      const appAcceptedAt = '2026-05-24T09:25:45.178Z';
+      const staleRefreshAt = '2026-05-24T11:36:58.278Z';
+      const runtimePid = 97_255;
+      const bootstrapRunId = 'run-runtime-snapshot-reconcile-first';
+      const staleDiagnostic = 'persisted runtime pid is not alive';
+
+      writeLaunchConfig(teamName, projectPath, leadSessionId, ['tom']);
+      writeMemberBootstrapRunId(teamName, 'tom', bootstrapRunId);
+      writeLaunchState(
+        teamName,
+        leadSessionId,
+        {
+          tom: {
+            providerId: 'anthropic',
+            model: 'haiku',
+            laneId: 'primary',
+            laneKind: 'primary',
+            laneOwnerProviderId: 'codex',
+            launchState: 'failed_to_start',
+            agentToolAccepted: true,
+            runtimeAlive: false,
+            runtimePid,
+            bootstrapConfirmed: false,
+            hardFailure: true,
+            hardFailureReason:
+              'runtime pid could not be verified because process table is unavailable',
+            livenessKind: 'stale_metadata',
+            runtimeDiagnostic: staleDiagnostic,
+            runtimeDiagnosticSeverity: 'warning',
+            firstSpawnAcceptedAt: appAcceptedAt,
+            runtimeLastSeenAt: staleRefreshAt,
+            lastEvaluatedAt: staleRefreshAt,
+          },
+        },
+        { launchPhase: 'finished', updatedAt: staleRefreshAt }
+      );
+      writeBootstrapState(
+        teamName,
+        [
+          {
+            name: 'tom',
+            status: 'bootstrap_confirmed',
+            lastAttemptAt: Date.parse(bootstrapAttemptAt),
+            lastObservedAt: Date.parse(bootstrapConfirmedAt),
+          },
+        ],
+        '2026-05-24T09:26:08.090Z',
+        { runId: bootstrapRunId }
+      );
+
+      const svc = new TeamProvisioningService();
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot(teamName);
+      const persisted = JSON.parse(fs.readFileSync(getTeamLaunchStatePath(teamName), 'utf8'));
+
+      expect(snapshot.members.tom).toMatchObject({
+        alive: true,
+        livenessKind: 'confirmed_bootstrap',
+        runtimeDiagnostic: 'bootstrap confirmed',
+        runtimeDiagnosticSeverity: 'info',
+      });
+      expect(snapshot.members.tom?.runtimeDiagnostic).not.toBe(staleDiagnostic);
+      expect(persisted.members.tom).toMatchObject({
+        launchState: 'confirmed_alive',
+        bootstrapConfirmed: true,
+        hardFailure: false,
+      });
+      expect(persisted.members.tom?.runtimeDiagnostic).not.toBe(staleDiagnostic);
+    });
+
     it('does not treat a reused OpenCode runtime pid as live', async () => {
       const teamName = 'pure-opencode-reused-pid-team';
       const projectPath = '/Users/test/project';
@@ -4797,7 +4889,7 @@ describe('TeamProvisioningService', () => {
           runtimeSessionId: 'session-alice',
         },
       });
-      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
         { pid: 333, ppid: 1, command: 'node unrelated-worker.js' },
       ]);
       vi.mocked(pidusage).mockResolvedValueOnce({
