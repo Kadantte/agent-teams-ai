@@ -14,6 +14,12 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@renderer/components/ui/tooltip';
 import { cn } from '@renderer/lib/utils';
 import {
   compareOpenCodeTeamModelRecommendations,
@@ -211,6 +217,33 @@ function isDefaultForScope(
       : state.view?.projectDefaultModel;
   return scopedDefault === model.modelId;
 }
+
+const DisabledActionTooltip = ({
+  reason,
+  children,
+}: {
+  readonly reason: string | undefined;
+  readonly children: JSX.Element;
+}): JSX.Element => {
+  if (!reason) {
+    return children;
+  }
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex" title={reason} aria-label={reason}>
+            {children}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-72 text-pretty text-xs leading-relaxed">
+          {reason}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
 
 function directoryEntryMatchesQuery(
   provider: RuntimeProviderDirectoryEntryDto,
@@ -1449,7 +1482,7 @@ function ModelBadges({
             {t('runtimeProvider.badges.local')}
           </Badge>
           <Badge className="bg-sky-400/15 px-1.5 py-0 text-[10px] text-sky-200">
-            {t('runtimeProvider.badges.configured')}
+            {t('runtimeProvider.badges.knownRoute')}
           </Badge>
         </>
       ) : null}
@@ -1517,17 +1550,47 @@ function canUseOpenCodeModelRoute(model: RuntimeProviderModelDto): boolean {
   );
 }
 
-function getOpenCodeRouteUnavailableTitle(model: RuntimeProviderModelDto): string | undefined {
+function getOpenCodeRouteUnavailableTitle(
+  model: RuntimeProviderModelDto,
+  t: SettingsT
+): string | undefined {
   if (isUnknownOpenCodeModelRoute(model)) {
-    return 'This model is the current OpenCode default, but it is not available in the live catalog yet.';
+    return t('runtimeProvider.models.routeUnavailableUnknown');
   }
   if (model.accessKind === 'not_authenticated') {
-    return (
-      model.accessReason ?? 'This provider requires authentication before this model can be used.'
-    );
+    return model.accessReason ?? t('runtimeProvider.models.routeUnavailableAuth');
   }
   if (model.accessKind === 'execution_failed' || model.proofState === 'failed') {
-    return model.accessReason ?? 'This model route failed its last execution test.';
+    return model.accessReason ?? t('runtimeProvider.models.routeUnavailableFailed');
+  }
+  return undefined;
+}
+
+function getDisabledActionReason(input: {
+  readonly disabled: boolean;
+  readonly contextRequiredTitle?: string;
+  readonly unavailableTitle?: string;
+  readonly busy: boolean;
+  readonly busyTitle: string;
+  readonly alreadyDefault?: boolean;
+  readonly alreadyDefaultTitle?: string;
+  readonly capabilityAvailable: boolean;
+  readonly t: SettingsT;
+}): string | undefined {
+  if (input.disabled) {
+    return input.t('runtimeProvider.models.actionsUnavailable');
+  }
+  if (input.contextRequiredTitle) {
+    return input.contextRequiredTitle;
+  }
+  if (input.busy) {
+    return input.busyTitle;
+  }
+  if (input.alreadyDefault) {
+    return input.alreadyDefaultTitle;
+  }
+  if (!input.capabilityAvailable) {
+    return input.unavailableTitle ?? input.t('runtimeProvider.models.routeUnavailableGeneric');
   }
   return undefined;
 }
@@ -1863,6 +1926,18 @@ function ConfiguredOpenCodeModelsPanel({
       </div>
 
       <div className="mt-3 space-y-2">
+        {!hasProjectContext ? (
+          <div
+            className="rounded-md border px-3 py-2 text-xs leading-5"
+            style={{
+              borderColor: 'rgba(251, 191, 36, 0.28)',
+              backgroundColor: 'rgba(251, 191, 36, 0.08)',
+              color: '#fde68a',
+            }}
+          >
+            {t('runtimeProvider.models.validationContextRequired')}
+          </div>
+        ) : null}
         {visibleModels.length === 0 ? (
           <div className="rounded-md border border-dashed border-white/10 px-3 py-3 text-sm text-[var(--color-text-muted)]">
             {t('runtimeProvider.models.noRoutesMatch', { query: query.trim() })}
@@ -1873,20 +1948,55 @@ function ConfiguredOpenCodeModelsPanel({
           const testing = state.testingModelIds.includes(model.modelId);
           const savingDefault = state.savingDefaultModelId === model.modelId;
           const result = state.modelResults[model.modelId];
-          const unavailableTitle = getOpenCodeRouteUnavailableTitle(model);
+          const unavailableTitle = getOpenCodeRouteUnavailableTitle(model, t);
           const contextRequiredTitle = hasProjectContext
             ? undefined
             : t('runtimeProvider.models.selectProjectBeforeTestingDefaults');
           const alreadyDefaultForScope = isDefaultForScope(model, state, defaultScope);
-          const canTest =
-            !disabled && hasProjectContext && !testing && canTestOpenCodeModelRoute(model);
-          const canUse = !disabled && canUseOpenCodeModelRoute(model);
+          const testCapabilityAvailable = canTestOpenCodeModelRoute(model);
+          const useCapabilityAvailable = canUseOpenCodeModelRoute(model);
+          const canTest = !disabled && hasProjectContext && !testing && testCapabilityAvailable;
+          const canUse = !disabled && useCapabilityAvailable;
           const canSetDefault =
             !disabled &&
             hasProjectContext &&
             !savingDefault &&
             !alreadyDefaultForScope &&
-            canUseOpenCodeModelRoute(model);
+            useCapabilityAvailable;
+          const testDisabledReason = canTest
+            ? undefined
+            : getDisabledActionReason({
+                disabled,
+                contextRequiredTitle,
+                unavailableTitle,
+                busy: testing,
+                busyTitle: t('runtimeProvider.models.testInProgress'),
+                capabilityAvailable: testCapabilityAvailable,
+                t,
+              });
+          const useDisabledReason = canUse
+            ? undefined
+            : getDisabledActionReason({
+                disabled,
+                unavailableTitle,
+                busy: false,
+                busyTitle: '',
+                capabilityAvailable: useCapabilityAvailable,
+                t,
+              });
+          const setDefaultDisabledReason = canSetDefault
+            ? undefined
+            : getDisabledActionReason({
+                disabled,
+                contextRequiredTitle,
+                unavailableTitle,
+                busy: savingDefault,
+                busyTitle: t('runtimeProvider.models.defaultSaveInProgress'),
+                alreadyDefault: alreadyDefaultForScope,
+                alreadyDefaultTitle: t('runtimeProvider.models.alreadyDefault'),
+                capabilityAvailable: useCapabilityAvailable,
+                t,
+              });
           return (
             <div
               key={model.modelId}
@@ -1912,61 +2022,57 @@ function ConfiguredOpenCodeModelsPanel({
                   <ModelBadges model={model} usedForNewTeams={selected} />
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-8"
-                    disabled={!canTest}
-                    title={canTest ? undefined : (contextRequiredTitle ?? unavailableTitle)}
-                    onClick={() => {
-                      if (!canTest) return;
-                      void actions.testModel(model.providerId, model.modelId);
-                    }}
-                  >
-                    {testing ? (
-                      <Loader2 className="mr-1 size-3.5 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="mr-1 size-3.5" />
-                    )}
-                    {t('runtimeProvider.actions.test')}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-8"
-                    disabled={!canUse}
-                    title={canUse ? undefined : unavailableTitle}
-                    onClick={() => {
-                      if (!canUse) return;
-                      actions.useModelForNewTeams(model.modelId);
-                    }}
-                  >
-                    {t('runtimeProvider.models.useInTeamPicker')}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-8"
-                    disabled={!canSetDefault}
-                    title={
-                      canSetDefault
-                        ? undefined
-                        : (contextRequiredTitle ??
-                          (alreadyDefaultForScope
-                            ? t('runtimeProvider.models.alreadyDefault')
-                            : unavailableTitle))
-                    }
-                    onClick={() => {
-                      if (!canSetDefault) return;
-                      void actions.setDefaultModel(model.providerId, model.modelId, defaultScope);
-                    }}
-                  >
-                    {savingDefault ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null}
-                    {getDefaultScopeButtonLabel(defaultScope, t)}
-                  </Button>
+                  <DisabledActionTooltip reason={testDisabledReason}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      disabled={!canTest}
+                      onClick={() => {
+                        if (!canTest) return;
+                        void actions.testModel(model.providerId, model.modelId);
+                      }}
+                    >
+                      {testing ? (
+                        <Loader2 className="mr-1 size-3.5 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="mr-1 size-3.5" />
+                      )}
+                      {t('runtimeProvider.actions.test')}
+                    </Button>
+                  </DisabledActionTooltip>
+                  <DisabledActionTooltip reason={useDisabledReason}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8"
+                      disabled={!canUse}
+                      onClick={() => {
+                        if (!canUse) return;
+                        actions.useModelForNewTeams(model.modelId);
+                      }}
+                    >
+                      {t('runtimeProvider.models.useInTeamPicker')}
+                    </Button>
+                  </DisabledActionTooltip>
+                  <DisabledActionTooltip reason={setDefaultDisabledReason}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8"
+                      disabled={!canSetDefault}
+                      onClick={() => {
+                        if (!canSetDefault) return;
+                        void actions.setDefaultModel(model.providerId, model.modelId, defaultScope);
+                      }}
+                    >
+                      {savingDefault ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null}
+                      {getDefaultScopeButtonLabel(defaultScope, t)}
+                    </Button>
+                  </DisabledActionTooltip>
                 </div>
               </div>
               <ModelResult result={result} />
