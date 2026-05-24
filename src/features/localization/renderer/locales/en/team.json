@@ -1606,6 +1606,23 @@
     "logPreview": {
       "logs": "Logs",
       "loading": "Loading logs",
+      "empty": {
+        "unsupportedProvider": "Unsupported provider",
+        "openCodeLogsDelayed": "OpenCode logs delayed",
+        "logsUnavailable": "Logs unavailable",
+        "noRecentLogs": "No recent logs"
+      },
+      "fallback": {
+        "toolError": "Tool error",
+        "toolResult": "Tool result",
+        "toolUse": "Tool use",
+        "thinking": "Thinking",
+        "error": "Error",
+        "logEvent": "Log event",
+        "noErrorOutput": "No error output",
+        "noOutput": "No output",
+        "noInput": "No input"
+      },
       "more": "+{{count}} more",
       "more_one": "+{{count}} more",
       "more_other": "+{{count}} more",
@@ -1774,7 +1791,12 @@
       "autoRefresh": "Auto-refresh",
       "wrapLines": "Wrap lines",
       "loadingTail": "Loading process log tail...",
-      "empty": "No process log file captured for this member yet."
+      "empty": "No process log file captured for this member yet.",
+      "emptyFile": "Process log file is empty.",
+      "showingLast": "Showing last {{size}}.",
+      "showing": "Showing {{size}}.",
+      "failedToLoad": "Failed to load process logs",
+      "failedToCopy": "Failed to copy process logs"
     },
     "tasks": {
       "empty": "No tasks assigned to this member"
@@ -2371,9 +2393,11 @@
     },
     "logs": {
       "title": "Logs",
+      "description": "Member-scoped transcript and runtime logs rendered with the same execution-log components used in Task Log Stream.",
       "loading": "Loading member log stream...",
       "emptyTitle": "No log stream entries were found for this member yet.",
-      "emptyDescription": "Member-scoped transcript or runtime logs will appear here when available."
+      "emptyDescription": "Member-scoped transcript or runtime logs will appear here when available.",
+      "boundedHistoryNote": "Showing a bounded recent member log stream."
     }
   },
   "reviewDialog": {

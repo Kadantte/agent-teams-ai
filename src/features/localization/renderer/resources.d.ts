@@ -3130,6 +3130,23 @@ export default interface Resources {
         title: 'Blocking Dependency';
       };
       logPreview: {
+        empty: {
+          logsUnavailable: 'Logs unavailable';
+          noRecentLogs: 'No recent logs';
+          openCodeLogsDelayed: 'OpenCode logs delayed';
+          unsupportedProvider: 'Unsupported provider';
+        };
+        fallback: {
+          error: 'Error';
+          logEvent: 'Log event';
+          noErrorOutput: 'No error output';
+          noInput: 'No input';
+          noOutput: 'No output';
+          thinking: 'Thinking';
+          toolError: 'Tool error';
+          toolResult: 'Tool result';
+          toolUse: 'Tool use';
+        };
         loading: 'Loading logs';
         logs: 'Logs';
         more: '+{{count}} more';
@@ -4014,6 +4031,8 @@ export default interface Resources {
         all: 'All';
       };
       logs: {
+        boundedHistoryNote: 'Showing a bounded recent member log stream.';
+        description: 'Member-scoped transcript and runtime logs rendered with the same execution-log components used in Task Log Stream.';
         emptyDescription: 'Member-scoped transcript or runtime logs will appear here when available.';
         emptyTitle: 'No log stream entries were found for this member yet.';
         loading: 'Loading member log stream...';
@@ -4146,7 +4165,12 @@ export default interface Resources {
       runtimeLogs: {
         autoRefresh: 'Auto-refresh';
         empty: 'No process log file captured for this member yet.';
+        emptyFile: 'Process log file is empty.';
+        failedToCopy: 'Failed to copy process logs';
+        failedToLoad: 'Failed to load process logs';
         loadingTail: 'Loading process log tail...';
+        showing: 'Showing {{size}}.';
+        showingLast: 'Showing last {{size}}.';
         wrapLines: 'Wrap lines';
       };
       runtimeTelemetry: {

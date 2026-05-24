@@ -19,10 +19,6 @@ interface MemberLogStreamSectionProps {
   onInitialLoadErrorChange?: (hasError: boolean) => void;
 }
 
-function describeMemberStream(): string {
-  return 'Member-scoped transcript and runtime logs rendered with the same execution-log components used in Task Log Stream.';
-}
-
 function getSegmentMetaLabel(segment: MemberLogStreamSegment): string {
   const details = [segment.source.label];
   if (segment.source.laneId) {
@@ -62,8 +58,8 @@ export function MemberLogStreamSection({
     const isBounded =
       stream.truncated ||
       stream.warnings.some((warning) => warning.code === 'large_log_window_limited');
-    return isBounded ? 'Showing a bounded recent member log stream.' : null;
-  }, [stream]);
+    return isBounded ? t('memberLogStream.logs.boundedHistoryNote') : null;
+  }, [stream, t]);
 
   useEffect(() => {
     onInitialLoadErrorChange?.(hasInitialLoadError);
@@ -99,7 +95,7 @@ export function MemberLogStreamSection({
       {selectedLogView === 'execution' ? (
         <ExecutionLogStreamView
           title={t('memberLogStream.logs.title')}
-          description={describeMemberStream()}
+          description={t('memberLogStream.logs.description')}
           stream={stream}
           loading={loading}
           error={error}

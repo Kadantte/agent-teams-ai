@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 
+import { useAppTranslation } from '@features/localization/renderer';
 import { api } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { ReviewDialog } from '@renderer/components/team/dialogs/ReviewDialog';
@@ -30,6 +31,7 @@ interface UseGraphTaskActionsResult extends GraphTaskActionHandlers {
 }
 
 export function useGraphTaskActions(teamName: string): UseGraphTaskActionsResult {
+  const { t } = useAppTranslation('common');
   const [requestChangesTaskId, setRequestChangesTaskId] = useState<string | null>(null);
   const {
     teamData,
@@ -173,10 +175,12 @@ export function useGraphTaskActions(teamName: string): UseGraphTaskActionsResult
     (taskId: string): void => {
       void (async () => {
         const confirmed = await confirm({
-          title: 'Delete task',
-          message: `Move task #${deriveTaskDisplayId(taskId)} to trash?`,
-          confirmLabel: 'Delete',
-          cancelLabel: 'Cancel',
+          title: t('tasks.deleteConfirm.title'),
+          message: t('tasks.deleteConfirm.message', {
+            taskId: deriveTaskDisplayId(taskId),
+          }),
+          confirmLabel: t('tasks.deleteConfirm.confirmLabel'),
+          cancelLabel: t('tasks.deleteConfirm.cancelLabel'),
           variant: 'danger',
         });
         if (!confirmed) return;
@@ -184,7 +188,7 @@ export function useGraphTaskActions(teamName: string): UseGraphTaskActionsResult
         await softDeleteTask(teamName, taskId).catch(() => undefined);
       })();
     },
-    [softDeleteTask, teamName]
+    [softDeleteTask, t, teamName]
   );
 
   const handleSubmitRequestChanges = useCallback(

@@ -24,6 +24,8 @@ export interface MemberRuntimeProcessLogsPanelProps {
   }) => Promise<MemberRuntimeLogTailResponse | null | undefined>;
 }
 
+type TeamT = ReturnType<typeof useAppTranslation>['t'];
+
 function formatBytes(bytes: number | undefined): string {
   if (!Number.isFinite(bytes ?? NaN)) return '--';
   const safeBytes = Math.max(0, bytes ?? 0);
@@ -34,12 +36,14 @@ function formatBytes(bytes: number | undefined): string {
   return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
 }
 
-function buildStatusText(log: MemberRuntimeLogTailResponse | null): string | null {
+function buildStatusText(log: MemberRuntimeLogTailResponse | null, t: TeamT): string | null {
   if (!log) return null;
-  if (log.missing) return 'No process log file captured for this member yet.';
-  if (!log.content) return 'Process log file is empty.';
-  if (log.truncated) return `Showing last ${formatBytes(log.bytesRead)}.`;
-  return `Showing ${formatBytes(log.bytesRead)}.`;
+  if (log.missing) return t('members.runtimeLogs.empty');
+  if (!log.content) return t('members.runtimeLogs.emptyFile');
+  if (log.truncated) {
+    return t('members.runtimeLogs.showingLast', { size: formatBytes(log.bytesRead) });
+  }
+  return t('members.runtimeLogs.showing', { size: formatBytes(log.bytesRead) });
 }
 
 function ProcessLogKindTabs({
@@ -157,14 +161,16 @@ export function MemberRuntimeProcessLogsPanel({
         if (!options?.background) {
           setLog(createEmptyMemberRuntimeLogTailResponse(kind));
         }
-        setError(loadError instanceof Error ? loadError.message : 'Failed to load process logs');
+        setError(
+          loadError instanceof Error ? loadError.message : t('members.runtimeLogs.failedToLoad')
+        );
       } finally {
         if (requestSeqRef.current === requestSeq) {
           setLoading(false);
         }
       }
     },
-    [enabled, kind, loadRuntimeLogTail]
+    [enabled, kind, loadRuntimeLogTail, t]
   );
 
   useEffect(() => {
@@ -200,11 +206,13 @@ export function MemberRuntimeProcessLogsPanel({
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1600);
     } catch (copyError) {
-      setError(copyError instanceof Error ? copyError.message : 'Failed to copy process logs');
+      setError(
+        copyError instanceof Error ? copyError.message : t('members.runtimeLogs.failedToCopy')
+      );
     }
-  }, [log?.content]);
+  }, [log?.content, t]);
 
-  const statusText = buildStatusText(log);
+  const statusText = buildStatusText(log, t);
   const hasContent = Boolean(log?.content);
 
   return (
@@ -252,7 +260,7 @@ export function MemberRuntimeProcessLogsPanel({
             disabled={!hasContent}
           >
             {copied ? <Check size={13} /> : <Clipboard size={13} />}
-            {copied ? 'Copied' : 'Copy'}
+            {copied ? tCommon('actions.copied') : tCommon('actions.copyToClipboard')}
           </button>
         </div>
       </div>
