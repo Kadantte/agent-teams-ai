@@ -111,6 +111,8 @@ export interface MembersEditorSectionProps {
   taskSuggestions?: MentionSuggestion[];
   /** Team suggestions for @@team mentions in workflow */
   teamSuggestions?: MentionSuggestion[];
+  /** Called before workflow mention suggestions are needed. */
+  onWorkflowSuggestionsNeeded?: () => void;
   /** Extra content rendered right below the "Members" label row */
   headerExtra?: React.ReactNode;
   /** When true, hides member rows and action buttons (label + headerExtra still visible) */
@@ -166,6 +168,7 @@ export const MembersEditorSection = ({
   projectPath,
   taskSuggestions,
   teamSuggestions,
+  onWorkflowSuggestionsNeeded,
   headerExtra,
   hideContent = false,
   existingMembers,
@@ -552,6 +555,7 @@ export const MembersEditorSection = ({
                   mentionSuggestions={mentionSuggestions}
                   taskSuggestions={taskSuggestions}
                   teamSuggestions={teamSuggestions}
+                  onWorkflowSuggestionsNeeded={onWorkflowSuggestionsNeeded}
                   lockProviderModel={lockProviderModel}
                   lockIdentity={lockExistingMemberIdentity && Boolean(member.originalName?.trim())}
                   identityLockReason={identityLockReason}
@@ -604,6 +608,7 @@ export const MembersEditorSection = ({
                         mentionSuggestions={mentionSuggestions}
                         taskSuggestions={taskSuggestions}
                         teamSuggestions={teamSuggestions}
+                        onWorkflowSuggestionsNeeded={onWorkflowSuggestionsNeeded}
                         lockProviderModel
                         modelLockReason="Removed members are kept for soft delete history. Restore them to edit settings."
                         isRemoved

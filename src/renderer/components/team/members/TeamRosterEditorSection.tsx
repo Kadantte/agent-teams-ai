@@ -20,6 +20,7 @@ interface TeamRosterEditorSectionProps {
   projectPath?: string | null;
   taskSuggestions?: MentionSuggestion[];
   teamSuggestions?: MentionSuggestion[];
+  onWorkflowSuggestionsNeeded?: () => void;
   hideMembersContent?: boolean;
   existingMembers?: readonly { name: string; color?: string; removedAt?: number | string | null }[];
   defaultProviderId?: TeamProviderId;
@@ -76,6 +77,7 @@ const TeamRosterEditorSectionImpl = ({
   projectPath,
   taskSuggestions,
   teamSuggestions,
+  onWorkflowSuggestionsNeeded,
   hideMembersContent = false,
   existingMembers,
   defaultProviderId = 'anthropic',
@@ -153,6 +155,7 @@ const TeamRosterEditorSectionImpl = ({
       projectPath={projectPath}
       taskSuggestions={taskSuggestions}
       teamSuggestions={teamSuggestions}
+      onWorkflowSuggestionsNeeded={onWorkflowSuggestionsNeeded}
       hideContent={hideMembersContent}
       existingMembers={existingMembers}
       defaultProviderId={defaultProviderId}

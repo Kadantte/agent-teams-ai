@@ -83,6 +83,7 @@ interface MemberDraftRowProps {
   mentionSuggestions?: MentionSuggestion[];
   taskSuggestions?: MentionSuggestion[];
   teamSuggestions?: MentionSuggestion[];
+  onWorkflowSuggestionsNeeded?: () => void;
   lockProviderModel?: boolean;
   lockRole?: boolean;
   lockedRoleLabel?: string;
@@ -144,6 +145,7 @@ export const MemberDraftRow = ({
   mentionSuggestions = [],
   taskSuggestions,
   teamSuggestions,
+  onWorkflowSuggestionsNeeded,
   lockProviderModel = false,
   lockRole = false,
   lockedRoleLabel,
@@ -428,6 +430,15 @@ export const MemberDraftRow = ({
     effectiveModel?.trim() ?? '',
     effectiveEffort
   );
+  const toggleWorkflowExpanded = useCallback(() => {
+    setWorkflowExpanded((prev) => {
+      const next = !prev;
+      if (next) {
+        onWorkflowSuggestionsNeeded?.();
+      }
+      return next;
+    });
+  }, [onWorkflowSuggestionsNeeded]);
 
   return (
     <div
@@ -604,7 +615,7 @@ export const MemberDraftRow = ({
                 aria-label={workflowTooltipText}
                 aria-expanded={workflowExpanded}
                 disabled={isRemoved}
-                onClick={() => setWorkflowExpanded((prev) => !prev)}
+                onClick={toggleWorkflowExpanded}
               >
                 <WorkflowIcon className="size-3.5" />
                 {!workflowExpanded && workflowDraft.value.trim() ? (

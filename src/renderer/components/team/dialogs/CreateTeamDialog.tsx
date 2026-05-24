@@ -46,7 +46,6 @@ import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors'
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useCreateTeamDraft } from '@renderer/hooks/useCreateTeamDraft';
 import { useDraftPersistence } from '@renderer/hooks/useDraftPersistence';
-import { useFileListCacheWarmer } from '@renderer/hooks/useFileListCacheWarmer';
 import { useTaskSuggestions } from '@renderer/hooks/useTaskSuggestions';
 import { useTeamSuggestions } from '@renderer/hooks/useTeamSuggestions';
 import { useTheme } from '@renderer/hooks/useTheme';
@@ -473,6 +472,7 @@ export const CreateTeamDialog = ({
   >({});
   const [providerSettingsProviderId, setProviderSettingsProviderId] =
     useState<TeamProviderId | null>(null);
+  const [workflowMentionSuggestionsEnabled, setWorkflowMentionSuggestionsEnabled] = useState(false);
   const prepareRequestSeqRef = useRef(0);
   const prepareIdleHandlesRef = useRef(new Set<ScheduledIdleHandle>());
   const prepareUnmountGenerationRef = useRef(0);
@@ -560,6 +560,9 @@ export const CreateTeamDialog = ({
   const setSelectedFastMode = useCallback((value: TeamFastMode): void => {
     setSelectedFastModeRaw(value);
     setStoredCreateTeamFastMode(value);
+  }, []);
+  const enableWorkflowMentionSuggestions = useCallback((): void => {
+    setWorkflowMentionSuggestionsEnabled(true);
   }, []);
 
   const setWorktreeEnabled = (value: boolean): void => {
@@ -1235,6 +1238,7 @@ export const CreateTeamDialog = ({
 
   useEffect(() => {
     if (!open) {
+      setWorkflowMentionSuggestionsEnabled(false);
       return;
     }
 
@@ -1430,10 +1434,12 @@ export const CreateTeamDialog = ({
     setSelectedProjectPath('');
   }, [open, cwdMode, projects, selectedProjectPath, setSelectedProjectPath]);
 
-  useFileListCacheWarmer(effectiveCwd || null);
-
-  const { suggestions: taskSuggestions } = useTaskSuggestions(null);
-  const { suggestions: teamMentionSuggestions } = useTeamSuggestions(null);
+  const { suggestions: taskSuggestions } = useTaskSuggestions(null, {
+    enabled: workflowMentionSuggestionsEnabled,
+  });
+  const { suggestions: teamMentionSuggestions } = useTeamSuggestions(null, {
+    enabled: workflowMentionSuggestionsEnabled,
+  });
 
   const description = descriptionDraft.value;
   const prompt = promptDraft.value;
@@ -2206,6 +2212,7 @@ export const CreateTeamDialog = ({
               projectPath={effectiveCwd || null}
               taskSuggestions={taskSuggestions}
               teamSuggestions={teamMentionSuggestions}
+              onWorkflowSuggestionsNeeded={enableWorkflowMentionSuggestions}
               defaultProviderId={selectedProviderId}
               inheritedProviderId={selectedProviderId}
               inheritedModel={selectedModel}
@@ -2297,6 +2304,11 @@ export const CreateTeamDialog = ({
                   title="Optional launch settings"
                   description="Prompt, safety, and CLI overrides live here when you need them."
                   summary={launchOptionalSummary}
+                  onOpenChange={(isOpen) => {
+                    if (isOpen) {
+                      enableWorkflowMentionSuggestions();
+                    }
+                  }}
                 >
                   <div className="space-y-4">
                     {selectedProviderId === 'anthropic' ? (
