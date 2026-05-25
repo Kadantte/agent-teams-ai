@@ -161,6 +161,47 @@ describe('OpenCodeTeamRuntimeAdapter', () => {
     );
   });
 
+  it('launches isolated worktrees with the member worktree as the OpenCode project path', async () => {
+    const worktreePath = '/tmp/generated-worktrees/alice';
+    const launchOpenCodeTeam = vi.fn<
+      NonNullable<OpenCodeTeamRuntimeBridgePort['launchOpenCodeTeam']>
+    >(async () => successfulOpenCodeLaunchData());
+    const bridge = bridgePort(readiness({ state: 'ready', launchAllowed: true }), {
+      getLastOpenCodeRuntimeSnapshot: vi.fn(() => runtimeSnapshot('cap-worktree')),
+      launchOpenCodeTeam,
+    });
+    const adapter = new OpenCodeTeamRuntimeAdapter(bridge);
+
+    const result = await adapter.launch(
+      launchInput({
+        cwd: worktreePath,
+        expectedMembers: [
+          {
+            name: 'alice',
+            providerId: 'opencode',
+            model: 'openai/gpt-5.4-mini',
+            cwd: worktreePath,
+            isolation: 'worktree',
+          },
+        ],
+      })
+    );
+
+    expect(result.teamLaunchState).toBe('clean_success');
+    expect(bridge.checkOpenCodeTeamLaunchReadiness).toHaveBeenCalledWith({
+      projectPath: worktreePath,
+      selectedModel: 'openai/gpt-5.4-mini',
+      requireExecutionProbe: true,
+    });
+    expect(launchOpenCodeTeam).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectPath: worktreePath,
+        expectedCapabilitySnapshotId: 'cap-worktree',
+        members: [expect.objectContaining({ name: 'alice' })],
+      })
+    );
+  });
+
   it('retries transient MCP readiness transport failures before prepare succeeds', async () => {
     const firstReadiness = readiness({
       state: 'mcp_unavailable',

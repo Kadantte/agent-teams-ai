@@ -1,4 +1,7 @@
-import { buildWorkspaceTrustPathCandidates } from '@features/workspace-trust/main';
+import {
+  buildWorkspaceTrustPathCandidates,
+  type WorkspaceTrustWorkspace,
+} from '@features/workspace-trust/main';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import { promises as fsPromises } from 'fs';
@@ -23093,6 +23096,42 @@ describe('TeamProvisioningService', () => {
         ],
       })
     ).toEqual(['claude', 'codex', 'gemini', 'opencode']);
+  });
+
+  it('uses the canonical repository root for workspace trust git worktree candidates', async () => {
+    const svc = new TeamProvisioningService();
+    const harness = svc as unknown as {
+      collectWorkspaceTrustWorkspaces(input: {
+        cwd: string;
+        members: Array<{ name: string; cwd: string; isolation: 'worktree' }>;
+      }): Promise<WorkspaceTrustWorkspace[]>;
+    };
+    const tempRoot = fs.realpathSync(tempClaudeRoot);
+    const repoDir = path.join(tempRoot, 'repo');
+    const worktreeDir = path.join(tempRoot, 'worktrees', 'alice');
+    const worktreeGitDir = path.join(repoDir, '.git', 'worktrees', 'alice');
+    fs.mkdirSync(worktreeDir, { recursive: true });
+    fs.mkdirSync(worktreeGitDir, { recursive: true });
+    fs.writeFileSync(path.join(worktreeDir, '.git'), `gitdir: ${worktreeGitDir}\n`, 'utf8');
+    fs.writeFileSync(path.join(worktreeGitDir, 'commondir'), '../..\n', 'utf8');
+    fs.writeFileSync(path.join(worktreeGitDir, 'gitdir'), `${path.join(worktreeDir, '.git')}\n`, 'utf8');
+
+    const workspaces = await harness.collectWorkspaceTrustWorkspaces({
+      cwd: repoDir,
+      members: [{ name: 'alice', cwd: worktreeDir, isolation: 'worktree' }],
+    });
+
+    const memberWorktrees = workspaces.filter(
+      (workspace) => workspace.source === 'member-worktree'
+    );
+    expect(memberWorktrees[0]).toMatchObject({
+      cwd: worktreeDir,
+      gitRootConfigKey: repoDir,
+      memberId: 'alice',
+    });
+    expect(memberWorktrees.every((workspace) => workspace.gitRootConfigKey === repoDir)).toBe(
+      true
+    );
   });
 
   it('degrades workspace trust planning failures without blocking launch preparation', async () => {

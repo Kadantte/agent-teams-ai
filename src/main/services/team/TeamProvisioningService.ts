@@ -36,7 +36,9 @@ import {
   budgetWorkspaceTrustDiagnosticsManifest,
   buildWorkspaceTrustPathCandidates,
   buildWorkspaceTrustPreflightEnv,
+  resolveWorkspaceTrustCanonicalGitRoot,
   resolveWorkspaceTrustFeatureFlags,
+  resolveWorkspaceTrustFilesystemGitRoot,
   type WorkspaceTrustArgsOnlyPlanRequest,
   type WorkspaceTrustArgsOnlyPlanResult,
   type WorkspaceTrustCoordinator,
@@ -3764,12 +3766,12 @@ export class TeamProvisioningService {
     return [...providers];
   }
 
-  private resolveWorkspaceTrustGitRoot(cwd: string): Promise<string | null> {
+  private async resolveWorkspaceTrustGitRoot(cwd: string): Promise<string | null> {
     const normalizedCwd = cwd.trim();
     if (!normalizedCwd) {
-      return Promise.resolve(null);
+      return null;
     }
-    return new Promise((resolve) => {
+    const gitRoot = await new Promise<string | null>((resolve) => {
       execFile(
         'git',
         ['-C', normalizedCwd, 'rev-parse', '--show-toplevel'],
@@ -3789,6 +3791,7 @@ export class TeamProvisioningService {
         }
       );
     });
+    return gitRoot ?? resolveWorkspaceTrustFilesystemGitRoot(normalizedCwd);
   }
 
   private async collectWorkspaceTrustWorkspaces(input: {
@@ -3807,9 +3810,10 @@ export class TeamProvisioningService {
       let gitRoot = gitRootCache.get(cwd);
       if (gitRoot === undefined) {
         const resolvedGitRoot = await this.resolveWorkspaceTrustGitRoot(cwd);
-        gitRoot = resolvedGitRoot
+        const realGitRoot = resolvedGitRoot
           ? await fs.promises.realpath(resolvedGitRoot).catch(() => resolvedGitRoot)
           : null;
+        gitRoot = realGitRoot ? await resolveWorkspaceTrustCanonicalGitRoot(realGitRoot) : null;
         gitRootCache.set(cwd, gitRoot);
       }
       candidates.push(
