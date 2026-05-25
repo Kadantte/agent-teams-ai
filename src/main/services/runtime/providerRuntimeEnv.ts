@@ -103,12 +103,7 @@ export function applyProviderRuntimeEnv(
 export function resolveRuntimeProviderId(
   providerId: RuntimeEnvProviderId | undefined
 ): CliProviderId {
-  if (
-    providerId === 'codex' ||
-    providerId === 'gemini' ||
-    providerId === 'opencode' ||
-    providerId === 'kilocode'
-  ) {
+  if (providerId === 'codex' || providerId === 'gemini' || providerId === 'opencode') {
     return providerId;
   }
 
@@ -116,10 +111,7 @@ export function resolveRuntimeProviderId(
 }
 
 export function resolveTeamProviderId(providerId: TeamProviderId | undefined): TeamProviderId {
-  return providerId === 'codex' ||
-    providerId === 'gemini' ||
-    providerId === 'opencode' ||
-    providerId === 'kilocode'
+  return providerId === 'codex' || providerId === 'gemini' || providerId === 'opencode'
     ? providerId
     : 'anthropic';
 }

@@ -1,10 +1,4 @@
-export type WorkspaceTrustProvider =
-  | 'claude'
-  | 'anthropic'
-  | 'codex'
-  | 'gemini'
-  | 'opencode'
-  | 'kilocode';
+export type WorkspaceTrustProvider = 'claude' | 'anthropic' | 'codex' | 'gemini' | 'opencode';
 
 export type WorkspaceTrustWorkspaceSource =
   | 'team-root'

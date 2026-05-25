@@ -1,12 +1,11 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-
-import { createDefaultCliExtensionCapabilities } from '@shared/utils/providerExtensionCapabilities';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CodexAccountSnapshotDto } from '@features/codex-account/contracts';
 import type { CliInstallationStatus } from '@shared/types';
 import type { SkillCatalogItem } from '@shared/types/extensions';
+import { createDefaultCliExtensionCapabilities } from '@shared/utils/providerExtensionCapabilities';
 
 interface StoreState {
   fetchSkillsCatalog: ReturnType<typeof vi.fn>;
@@ -560,7 +559,7 @@ describe('SkillsPanel', () => {
     });
 
     expect(host.textContent).toContain(
-      'Shared skills in `.claude`, `.cursor`, and `.agents` are available to Anthropic, Codex, OpenCode (200+ models), and KiloCode.'
+      'Shared skills in `.claude`, `.cursor`, and `.agents` are available to Anthropic, Codex, and OpenCode (200+ models).'
     );
     expect(host.textContent).toContain('Codex only');
 

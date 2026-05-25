@@ -202,7 +202,5 @@ export const ProviderBrandLogo = ({
       return <GeminiBrandLogo className={className} />;
     case 'opencode':
       return <OpenCodeBrandLogo className={className} />;
-    case 'kilocode':
-      return <OpenCodeBrandLogo className={className} />;
   }
 };
