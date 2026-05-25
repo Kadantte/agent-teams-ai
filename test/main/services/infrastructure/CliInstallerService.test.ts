@@ -426,6 +426,32 @@ describe('CliInstallerService', () => {
       expect(status.installedVersion).toBeNull();
     });
 
+    it('does not run a redundant version probe before an explicit multimodel provider refresh', async () => {
+      allowConsoleLogs();
+      vi.mocked(getConfiguredCliFlavor).mockReturnValue('agent_teams_orchestrator');
+      vi.mocked(getCliFlavorUiOptions).mockReturnValue({
+        displayName: 'agent_teams_orchestrator',
+        supportsSelfUpdate: false,
+        showVersionDetails: false,
+        showBinaryPath: false,
+      });
+      vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/agent_teams_orchestrator');
+      const providerStatus = createTestProviderStatus('codex', true, 'chatgpt');
+      const getProviderStatusSpy = vi
+        .spyOn(ClaudeMultimodelBridgeService.prototype, 'getProviderStatus')
+        .mockResolvedValue(providerStatus);
+
+      const status = await service.getProviderStatus('codex');
+
+      expect(status).toBe(providerStatus);
+      expect(execCli).not.toHaveBeenCalled();
+      expect(getProviderStatusSpy).toHaveBeenCalledWith(
+        '/mock/agent_teams_orchestrator',
+        'codex',
+        expect.any(Function)
+      );
+    });
+
     it('retries the version probe once before marking the runtime unhealthy', async () => {
       allowConsoleLogs();
       vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/usr/local/bin/claude');

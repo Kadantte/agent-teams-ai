@@ -931,11 +931,6 @@ export class CliInstallerService {
     }
 
     const generation = this.statusGatherGeneration;
-    const versionProbe = await this.probeCliVersion(binaryPath);
-    if (!versionProbe.ok) {
-      return null;
-    }
-
     const providerStatus = await this.multimodelBridgeService.getProviderStatus(
       binaryPath,
       providerId,
