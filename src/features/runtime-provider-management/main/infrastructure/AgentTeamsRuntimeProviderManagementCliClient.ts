@@ -151,13 +151,17 @@ function sanitizeRuntimeProviderError(error: unknown): RuntimeProviderManagement
       ? (rawCode as RuntimeProviderManagementErrorDto['code'])
       : 'runtime-unhealthy';
   const diagnostics = sanitizeRuntimeProviderDiagnostics(error.diagnostics);
+  const message =
+    sanitizeNullableRuntimeProviderText(error.message) ??
+    'Runtime provider management command failed';
   return {
     code,
-    message:
-      sanitizeNullableRuntimeProviderText(error.message) ??
-      'Runtime provider management command failed',
+    message,
     recoverable: typeof error.recoverable === 'boolean' ? error.recoverable : true,
-    diagnostics: withRuntimeProviderErrorCode(code, diagnostics),
+    diagnostics: withRuntimeProviderErrorCode(
+      code,
+      diagnostics ?? buildOpenCodeProfileNodeModulesLinkDiagnostics(message)
+    ),
   };
 }
 
@@ -215,6 +219,39 @@ function sanitizeRuntimeProviderDiagnostics(
 
 function sanitizeNullableRuntimeProviderText(value: unknown): string | null {
   return typeof value === 'string' ? sanitizeRuntimeProviderText(value) : null;
+}
+
+function buildOpenCodeProfileNodeModulesLinkDiagnostics(
+  message: string
+): RuntimeProviderManagementErrorDto['diagnostics'] {
+  const normalized = message.toLowerCase();
+  const isAccessDeniedLinkFailure =
+    (normalized.includes('eperm') || normalized.includes('eacces')) &&
+    normalized.includes('symlink') &&
+    normalized.includes('opencode') &&
+    normalized.includes('node_modules');
+  if (!isAccessDeniedLinkFailure) {
+    return null;
+  }
+
+  const summary = 'OpenCode managed profile node_modules link was blocked.';
+  const likelyCause =
+    'Windows denied creating the managed OpenCode profile node_modules link. Newer Agent Teams runtimes fall back to a junction or local profile directory.';
+  return {
+    summary,
+    likelyCause,
+    binaryPath: null,
+    command: null,
+    projectPath: null,
+    exitCode: null,
+    stderrPreview: message,
+    stdoutPreview: null,
+    hints: [
+      'Update the Agent Teams runtime and refresh the OpenCode provider catalog.',
+      'If you must use an older runtime, enable Windows Developer Mode or run Agent Teams AI as Administrator.',
+      'If the error persists after updating, refresh again so the runtime can rebuild the managed OpenCode profile node_modules path.',
+    ],
+  };
 }
 
 function extractJsonObject<T>(raw: string): T {

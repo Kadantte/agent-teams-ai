@@ -857,6 +857,48 @@ describe('AgentTeamsRuntimeProviderManagementCliClient', () => {
     expect(JSON.stringify(response)).not.toContain('sk-secret-value-123456');
   });
 
+  it('adds actionable diagnostics for OpenCode managed profile node_modules symlink failures', async () => {
+    const runtimeMessage = [
+      'Runtime provider management command failed unexpectedly:',
+      "EPERM: operation not permitted, symlink 'C:\\Users\\Swarog\\AppData\\Local\\claude-multimodel-nodejs\\Cache\\opencode\\shared-cache\\config-node_modules'",
+      "-> 'C:\\Users\\Swarog\\AppData\\Local\\claude-multimodel-nodejs\\Data\\opencode\\profiles\\abc123\\config\\opencode\\node_modules'",
+    ].join(' ');
+    const error = new Error('Command failed: /repo/cli-dev runtime providers view');
+    Object.assign(error, {
+      stdout: JSON.stringify({
+        schemaVersion: 1,
+        runtimeId: 'opencode',
+        error: {
+          code: 'runtime-unhealthy',
+          message: runtimeMessage,
+          recoverable: true,
+        },
+      }),
+      stderr: '',
+    });
+    execCliMock.mockRejectedValue(error);
+
+    const client = new AgentTeamsRuntimeProviderManagementCliClient();
+    const response = await client.loadView({
+      runtimeId: 'opencode',
+    });
+
+    expect(response.error?.message).toBe(runtimeMessage);
+    expect(response.error?.diagnostics?.summary).toBe(
+      'OpenCode managed profile node_modules link was blocked.'
+    );
+    expect(response.error?.diagnostics?.likelyCause).toContain(
+      'Windows denied creating the managed OpenCode profile node_modules link'
+    );
+    expect(response.error?.diagnostics?.stderrPreview).toBe(runtimeMessage);
+    expect(response.error?.diagnostics?.hints).toEqual(
+      expect.arrayContaining([
+        'Update the Agent Teams runtime and refresh the OpenCode provider catalog.',
+        'If you must use an older runtime, enable Windows Developer Mode or run Agent Teams AI as Administrator.',
+      ])
+    );
+  });
+
   it('does not let non-object error logs shadow a later valid runtime response', async () => {
     const validResponse = {
       schemaVersion: 1,
