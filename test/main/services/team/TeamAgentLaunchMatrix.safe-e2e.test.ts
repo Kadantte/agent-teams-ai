@@ -10117,7 +10117,10 @@ describe('Team agent launch matrix safe e2e', () => {
       message: { content: Array<Record<string, unknown>> };
     };
     expect(payload.message.content).toMatchObject([
-      { type: 'text', text: 'review the attached files' },
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' },
+      },
       {
         type: 'document',
         source: { type: 'text', media_type: 'text/plain', data: 'line one\nline two' },
@@ -10128,13 +10131,46 @@ describe('Team agent launch matrix safe e2e', () => {
         source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0xLjQ=' },
         title: 'brief.pdf',
       },
-      {
-        type: 'image',
-        source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' },
-      },
+      { type: 'text', text: 'review the attached files' },
     ]);
     expect(svc.isTeamAlive(firstTeamName)).toBe(true);
     expect(svc.isTeamAlive(secondTeamName)).toBe(true);
+  });
+
+  it('serializes Claude GIF and WebP attachments without marking the team offline', async () => {
+    const teamName = 'pure-anthropic-extended-image-mimes-safe-e2e';
+    await writePureAnthropicTeamConfig({ teamName, projectPath });
+    await writePureAnthropicTeamMeta(teamName, projectPath);
+    await writePureAnthropicMembersMeta(teamName);
+    const svc = new TeamProvisioningService();
+    const run = createPureAnthropicLiveRun({ teamName, projectPath });
+    const writes: string[] = [];
+    run.child = { stdin: createWritableStdin(writes) };
+    trackLiveRun(svc, run);
+
+    await svc.sendMessageToTeam(teamName, 'review these browser images', [
+      {
+        filename: 'clip.gif',
+        mimeType: 'image/gif',
+        data: 'R0lGODlhAQABAAAAACw=',
+      },
+      {
+        filename: 'clip.webp',
+        mimeType: 'image/webp',
+        data: 'UklGRiIAAABXRUJQ',
+      },
+    ]);
+
+    expect(writes).toHaveLength(1);
+    const payload = JSON.parse(writes[0].trim()) as {
+      message: { content: Array<Record<string, unknown>> };
+    };
+    expect(payload.message.content).toMatchObject([
+      { type: 'image', source: { type: 'base64', media_type: 'image/gif' } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/webp' } },
+      { type: 'text', text: 'review these browser images' },
+    ]);
+    expect(svc.isTeamAlive(teamName)).toBe(true);
   });
 
   it('routes messages to the current pure Anthropic run after same-team relaunch', async () => {

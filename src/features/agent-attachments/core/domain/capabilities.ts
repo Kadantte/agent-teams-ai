@@ -1,14 +1,29 @@
-import type { AgentAttachmentCapability, AgentAttachmentCapabilityTarget } from './types';
+import type {
+  AgentAttachmentCapability,
+  AgentAttachmentCapabilityTarget,
+  ProviderImageMimeType,
+} from './types';
 
 const DEFAULT_IMAGE_BYTES_PER_PROVIDER = 4 * 1024 * 1024;
 const DEFAULT_IMAGE_BYTES_TOTAL = 8 * 1024 * 1024;
 const DEFAULT_FILE_BYTES_PER_PROVIDER = 4 * 1024 * 1024;
 
-function supportedImagesOnly(displayText: string): AgentAttachmentCapability {
+export const NATIVE_IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export const CLAUDE_IMAGE_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+] as const;
+
+function supportedImagesOnly(
+  displayText: string,
+  supportedImageMimeTypes: readonly ProviderImageMimeType[] = NATIVE_IMAGE_MIME_TYPES
+): AgentAttachmentCapability {
   return {
     supportsImages: true,
     supportsFiles: false,
-    supportedImageMimeTypes: ['image/png', 'image/jpeg'],
+    supportedImageMimeTypes: [...supportedImageMimeTypes],
     supportedFileMimeTypes: [],
     maxImages: 5,
     maxFiles: 0,
@@ -24,7 +39,7 @@ function supportedImagesOnly(displayText: string): AgentAttachmentCapability {
 
 function supportedClaude(displayText: string): AgentAttachmentCapability {
   return {
-    ...supportedImagesOnly(displayText),
+    ...supportedImagesOnly(displayText, CLAUDE_IMAGE_MIME_TYPES),
     supportsFiles: true,
     supportedFileMimeTypes: ['application/pdf', 'text/*'],
     maxFiles: 5,

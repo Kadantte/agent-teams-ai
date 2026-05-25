@@ -85,7 +85,9 @@ vi.mock('@shared/utils/logger', () => ({
 
 // Mock pathDecoder
 vi.mock('@main/utils/pathDecoder', () => ({
+  getAppDataPath: () => path.join(os.homedir(), '.agent-teams-ai', 'data'),
   getClaudeBasePath: () => path.join(os.homedir(), '.claude'),
+  getHomeDir: () => os.homedir(),
 }));
 
 import * as fs from 'fs/promises';

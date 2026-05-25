@@ -13,10 +13,22 @@ import type {
 const AGENT_IMAGE_MIME_TYPES = new Set<AgentImageMimeType>([
   'image/png',
   'image/jpeg',
+  'image/gif',
   'image/webp',
 ]);
 
-const PROVIDER_IMAGE_MIME_TYPES = new Set<ProviderImageMimeType>(['image/png', 'image/jpeg']);
+const OPTIMIZABLE_AGENT_IMAGE_MIME_TYPES = new Set<Exclude<AgentImageMimeType, 'image/gif'>>([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+]);
+
+const PROVIDER_IMAGE_MIME_TYPES = new Set<ProviderImageMimeType>([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]);
 
 export function isAgentImageMimeType(mimeType: string): mimeType is AgentImageMimeType {
   return AGENT_IMAGE_MIME_TYPES.has(mimeType as AgentImageMimeType);
@@ -26,10 +38,25 @@ export function isProviderImageMimeType(mimeType: string): mimeType is ProviderI
   return PROVIDER_IMAGE_MIME_TYPES.has(mimeType as ProviderImageMimeType);
 }
 
+function isOptimizableAgentImageMimeType(
+  mimeType: string
+): mimeType is Exclude<AgentImageMimeType, 'image/gif'> {
+  return OPTIMIZABLE_AGENT_IMAGE_MIME_TYPES.has(
+    mimeType as Exclude<AgentImageMimeType, 'image/gif'>
+  );
+}
+
 function isProviderFileMimeType(mimeType: string, supported: readonly string[]): boolean {
   return supported.some((candidate) =>
     candidate.endsWith('/*') ? mimeType.startsWith(candidate.slice(0, -1)) : candidate === mimeType
   );
+}
+
+function isCapabilityImageMimeType(
+  mimeType: string,
+  supported: readonly ProviderImageMimeType[]
+): boolean {
+  return supported.includes(mimeType as ProviderImageMimeType);
 }
 
 export function classifyAttachmentMime(mimeType: string): AgentAttachmentKind {
@@ -48,11 +75,11 @@ export function validateImageOptimizationInput(input: {
   budget?: ImageOptimizationBudget;
 }): AttachmentValidationResult {
   const budget = input.budget ?? DEFAULT_AGENT_IMAGE_OPTIMIZATION_BUDGET;
-  if (!isAgentImageMimeType(input.mimeType)) {
+  if (!isOptimizableAgentImageMimeType(input.mimeType)) {
     return {
       ok: false,
       code: 'attachment_type_unsupported',
-      message: 'This file type is not supported for agent image delivery.',
+      message: 'This image type is not supported for optimization.',
       warnings: [],
     };
   }
@@ -139,7 +166,7 @@ export function validateAttachmentForCapability(input: {
     };
   }
 
-  if (!isProviderImageMimeType(attachment.mimeType)) {
+  if (!isCapabilityImageMimeType(attachment.mimeType, capability.supportedImageMimeTypes)) {
     return {
       ok: false,
       code: 'attachment_type_unsupported',

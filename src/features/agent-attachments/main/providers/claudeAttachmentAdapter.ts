@@ -1,4 +1,7 @@
-import { AgentAttachmentError } from '@features/agent-attachments/core/domain';
+import {
+  AgentAttachmentError,
+  CLAUDE_IMAGE_MIME_TYPES,
+} from '@features/agent-attachments/core/domain';
 
 import type { AttachmentPayload } from '@shared/types';
 
@@ -27,20 +30,25 @@ function decodeBase64Text(data: string): { ok: true; text: string } | { ok: fals
   return { ok: true, text: decoded };
 }
 
+const CLAUDE_IMAGE_MIME_TYPE_SET = new Set<string>(CLAUDE_IMAGE_MIME_TYPES);
+
 export function buildClaudeAttachmentDeliveryParts(input: {
   text: string;
   attachments?: AttachmentPayload[];
 }): ClaudeAttachmentDeliveryParts {
-  const contentBlocks: ClaudeInputBlock[] = [{ type: 'text', text: input.text }];
+  const textBlock: ClaudeInputBlock = { type: 'text', text: input.text };
   const attachments = input.attachments ?? [];
 
   if (attachments.length === 0) {
-    return { kind: 'legacy_text', blocks: contentBlocks };
+    return { kind: 'legacy_text', blocks: [textBlock] };
   }
+
+  const imageBlocks: ClaudeInputBlock[] = [];
+  const documentBlocks: ClaudeInputBlock[] = [];
 
   for (const attachment of attachments) {
     if (attachment.mimeType === 'application/pdf') {
-      contentBlocks.push({
+      documentBlocks.push({
         type: 'document',
         source: {
           type: 'base64',
@@ -54,7 +62,7 @@ export function buildClaudeAttachmentDeliveryParts(input: {
 
     if (attachment.mimeType === 'text/plain' || attachment.mimeType.startsWith('text/')) {
       const decoded = decodeBase64Text(attachment.data);
-      contentBlocks.push(
+      documentBlocks.push(
         decoded.ok
           ? {
               type: 'document',
@@ -78,8 +86,8 @@ export function buildClaudeAttachmentDeliveryParts(input: {
       continue;
     }
 
-    if (attachment.mimeType === 'image/png' || attachment.mimeType === 'image/jpeg') {
-      contentBlocks.push({
+    if (CLAUDE_IMAGE_MIME_TYPE_SET.has(attachment.mimeType)) {
+      imageBlocks.push({
         type: 'image',
         source: {
           // Claude expects image bytes inside the structured image block as base64.
@@ -99,7 +107,7 @@ export function buildClaudeAttachmentDeliveryParts(input: {
     );
   }
 
-  return { kind: 'structured_blocks', blocks: contentBlocks };
+  return { kind: 'structured_blocks', blocks: [...imageBlocks, ...documentBlocks, textBlock] };
 }
 
 export function redactClaudeBlocksForDiagnostics(blocks: ClaudeInputBlock[]): ClaudeInputBlock[] {
