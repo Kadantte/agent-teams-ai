@@ -288,7 +288,6 @@ export function getDashboardRateLimitsForProvider(
       return getAnthropicDashboardRateLimits(provider);
     case 'gemini':
     case 'opencode':
-    case 'kilocode':
       return null;
   }
 }

@@ -443,8 +443,6 @@ function getProviderLabel(providerId: CliProviderId): string {
       return 'Gemini';
     case 'opencode':
       return 'OpenCode (200+ models)';
-    case 'kilocode':
-      return 'KiloCode';
   }
 }
 

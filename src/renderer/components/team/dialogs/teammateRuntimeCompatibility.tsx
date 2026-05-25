@@ -65,7 +65,6 @@ const PROVIDER_LABELS: Record<TeamProviderId, string> = {
   codex: 'Codex',
   gemini: 'Gemini',
   opencode: 'OpenCode',
-  kilocode: 'KiloCode',
 };
 
 function getProviderLabel(providerId: TeamProviderId): string {
