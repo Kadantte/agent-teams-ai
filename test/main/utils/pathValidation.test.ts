@@ -7,11 +7,14 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { getHomeDir, setClaudeBasePathOverride } from '../../../src/main/utils/pathDecoder';
-
 import {
-  isPathWithinRoot,
+  getHomeDir,
+  setAppDataBasePath,
+  setClaudeBasePathOverride,
+} from '../../../src/main/utils/pathDecoder';
+import {
   isPathWithinAllowedDirectories,
+  isPathWithinRoot,
   isWindowsReservedFileName,
   validateFileName,
   validateFilePath,
@@ -22,14 +25,18 @@ import {
 describe('pathValidation', () => {
   const homeDir = getHomeDir();
   const claudeDir = path.join(homeDir, '.claude');
+  const appDataBasePath = path.join(homeDir, '.agent-teams-ai-test');
+  const appDataPath = path.join(appDataBasePath, 'data');
   const testProjectPath = path.resolve('/home/user/my-project');
 
   beforeEach(() => {
     setClaudeBasePathOverride(claudeDir);
+    setAppDataBasePath(appDataBasePath);
   });
 
   afterEach(() => {
     setClaudeBasePathOverride(null);
+    setAppDataBasePath(null);
   });
 
   describe('isPathWithinAllowedDirectories', () => {
@@ -43,6 +50,15 @@ describe('pathValidation', () => {
       expect(
         isPathWithinAllowedDirectories(
           path.join(testProjectPath, 'src', 'index.ts'),
+          testProjectPath
+        )
+      ).toBe(true);
+    });
+
+    it('should allow paths within app-owned data directory', () => {
+      expect(
+        isPathWithinAllowedDirectories(
+          path.join(appDataPath, 'attachments', 'team-a', 'msg-1', 'att-1--note.txt'),
           testProjectPath
         )
       ).toBe(true);

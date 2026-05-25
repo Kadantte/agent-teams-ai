@@ -591,6 +591,8 @@ export interface AttachmentFileData {
   id: string;
   data: string;
   mimeType: AttachmentMediaType;
+  /** Absolute path to the persisted attachment file when available. */
+  filePath?: string;
 }
 
 /** Lightweight metadata for a single tool call (for UI display in tooltips). */

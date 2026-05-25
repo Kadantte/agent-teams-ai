@@ -217,6 +217,7 @@ export class TeamAttachmentStore {
           id: entry.id,
           data: buffer.toString('base64'),
           mimeType,
+          filePath,
         });
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;

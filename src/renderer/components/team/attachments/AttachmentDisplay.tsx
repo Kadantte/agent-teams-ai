@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { useAppTranslation } from '@features/localization/renderer';
 import { FileIcon } from '@renderer/components/team/editor/FileIcon';
+import { useStore } from '@renderer/store';
 import { isImageMime } from '@renderer/utils/attachmentUtils';
 import { Loader2 } from 'lucide-react';
 
@@ -22,6 +23,7 @@ export const AttachmentDisplay = ({
   attachments,
 }: AttachmentDisplayProps): React.JSX.Element | null => {
   const { t } = useAppTranslation('team');
+  const revealFileInEditor = useStore((s) => s.revealFileInEditor);
   const [state, setState] = useState<{
     loaded: AttachmentFileData[];
     loading: boolean;
@@ -74,10 +76,16 @@ export const AttachmentDisplay = ({
       return {
         meta,
         dataUrl: isImage ? `data:${data.mimeType};base64,${data.data}` : undefined,
+        filePath: data.filePath ?? meta.filePath,
         isImage,
       };
     })
-    .filter(Boolean) as { meta: AttachmentMeta; dataUrl: string | undefined; isImage: boolean }[];
+    .filter(Boolean) as {
+    meta: AttachmentMeta;
+    dataUrl: string | undefined;
+    filePath: string | undefined;
+    isImage: boolean;
+  }[];
 
   if (items.length === 0) return null;
 
@@ -107,10 +115,29 @@ export const AttachmentDisplay = ({
                   : undefined
               }
             />
+          ) : item.filePath ? (
+            <button
+              key={item.meta.id}
+              type="button"
+              className="flex size-20 flex-col items-center justify-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] transition-colors hover:border-[var(--color-border-emphasis)] hover:bg-[var(--color-surface)]"
+              title={item.meta.filename}
+              aria-label={`Open ${item.meta.filename}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                revealFileInEditor(item.filePath!);
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <FileIcon fileName={item.meta.filename} className="size-5" />
+              <span className="max-w-[72px] truncate text-[9px] text-[var(--color-text-muted)]">
+                {item.meta.filename}
+              </span>
+            </button>
           ) : (
             <div
               key={item.meta.id}
               className="flex size-20 flex-col items-center justify-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)]"
+              title={item.meta.filename}
             >
               <FileIcon fileName={item.meta.filename} className="size-5" />
               <span className="max-w-[72px] truncate text-[9px] text-[var(--color-text-muted)]">
