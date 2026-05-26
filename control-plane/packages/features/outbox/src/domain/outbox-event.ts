@@ -121,8 +121,11 @@ export function validateNewOutboxEvent(event: NewOutboxEvent): SafeError | undef
 }
 
 function isNamespacedIdempotencyKey(value: string): boolean {
+  if (/\s/.test(value)) {
+    return false;
+  }
   const segments = value.split(":");
-  return segments.length >= 2 && segments.every((segment) => segment.trim().length > 0);
+  return segments.length >= 2 && segments.every((segment) => segment.length > 0);
 }
 
 export function calculateRetryDelayMs(attempts: number): number {

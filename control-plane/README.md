@@ -118,10 +118,12 @@ pnpm --dir control-plane db:generate
 pnpm --dir control-plane db:migrate
 pnpm --dir control-plane db:test:prepare
 pnpm --dir control-plane test:db
+pnpm --dir control-plane worker:smoke:db
 ```
 
-`test:db` requires `CONTROL_PLANE_TEST_DATABASE_URL`. Normal local smoke tests
-run with persistence disabled and do not require Postgres.
+`test:db` and `worker:smoke:db` require `CONTROL_PLANE_TEST_DATABASE_URL`.
+Normal local smoke tests run with persistence disabled and do not require
+Postgres.
 
 `packages/shared` remains dependency-free. Octokit, queue, messenger, and billing
 SDKs are still deferred to later connector phases.

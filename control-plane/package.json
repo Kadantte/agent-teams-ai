@@ -24,6 +24,7 @@
     "start:api:dist": "node --conditions=production apps/api/dist/main.js",
     "start:worker": "tsx apps/worker/src/main.ts",
     "worker:smoke:dist": "CONTROL_PLANE_WORKER_SMOKE=1 CONTROL_PLANE_PERSISTENCE_ENABLED=false CONTROL_PLANE_OUTBOX_WORKER_ENABLED=false node --conditions=production apps/worker/dist/main.js",
+    "worker:smoke:db": "pnpm db:test:prepare && pnpm --filter @agent-teams-control-plane/platform-database exec tsx src/prisma/smoke-worker-db.ts",
     "test": "vitest run",
     "typecheck": "pnpm db:generate && tsc --noEmit -p tsconfig.json",
     "verify:phase1": "pnpm format:check && pnpm architecture:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm worker:smoke && pnpm worker:smoke:dist && pnpm api:smoke && pnpm api:smoke:dist && pnpm config:hosted-failfast",

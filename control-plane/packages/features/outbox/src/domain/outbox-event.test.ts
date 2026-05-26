@@ -53,6 +53,27 @@ describe("outbox event domain", () => {
     ).toMatchObject({
       code: "CONTROL_PLANE_OUTBOX_IDEMPOTENCY_KEY_NOT_NAMESPACED",
     });
+    for (const idempotencyKey of [
+      " workspace:event ",
+      "workspace: event",
+      "workspace:e vent",
+      "workspace:\tevent",
+      "workspace:\nevent",
+    ]) {
+      expect(
+        validateNewOutboxEvent({
+          id: "event-1" as never,
+          idempotencyKey,
+          maxAttempts: 3,
+          nextAttemptAtMs: toUnixMilliseconds(0),
+          payload: {},
+          type: "test.event",
+          version: 1,
+        }),
+      ).toMatchObject({
+        code: "CONTROL_PLANE_OUTBOX_IDEMPOTENCY_KEY_NOT_NAMESPACED",
+      });
+    }
   });
 
   it("calculates bounded retry delays", () => {
