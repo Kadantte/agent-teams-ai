@@ -138,6 +138,17 @@ function isRuntimeTelemetryTooltipBlockedTarget(
   return Boolean(blockedTarget && blockedTarget !== currentTarget);
 }
 
+function hasStoppedRuntimeLivenessKind(
+  livenessKind: TeamAgentRuntimeEntry['livenessKind'] | undefined
+): boolean {
+  return (
+    livenessKind === 'not_found' ||
+    livenessKind === 'registered_only' ||
+    livenessKind === 'shell_only' ||
+    livenessKind === 'stale_metadata'
+  );
+}
+
 function splitRuntimeSummaryMemory(runtimeSummary: string | undefined): {
   summary: string | undefined;
   memory: string | undefined;
@@ -664,8 +675,12 @@ export const MemberCard = memo(function MemberCard({
   const avatarMap = useMemo(() => buildMemberAvatarMap(teamMembers), [teamMembers]);
   const bootstrapConfirmedProvisionedButNotAlive =
     isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry);
-  const hasBootstrapConfirmedSpawnError =
-    bootstrapConfirmedProvisionedButNotAlive && spawnEntry?.runtimeDiagnosticSeverity === 'error';
+  const hasUnsafeBootstrapConfirmedProvisionedButNotAlive =
+    bootstrapConfirmedProvisionedButNotAlive &&
+    (spawnEntry?.runtimeDiagnosticSeverity === 'error' ||
+      runtimeEntry?.runtimeDiagnosticSeverity === 'error' ||
+      hasStoppedRuntimeLivenessKind(spawnEntry?.livenessKind) ||
+      hasStoppedRuntimeLivenessKind(runtimeEntry?.livenessKind));
   const effectiveSpawnStatus = spawnStatus;
   const effectiveSpawnLaunchState = spawnLaunchState;
   const showTaskActivity = shouldDisplayMemberCurrentTask({
@@ -912,7 +927,8 @@ export const MemberCard = memo(function MemberCard({
     runtimeAdvisoryTone === 'error' &&
     hasMemberLaunchDiagnosticsDetails(launchDiagnosticsPayload);
   const isFailedLaunch =
-    (!bootstrapConfirmedProvisionedButNotAlive || hasBootstrapConfirmedSpawnError) &&
+    (!bootstrapConfirmedProvisionedButNotAlive ||
+      hasUnsafeBootstrapConfirmedProvisionedButNotAlive) &&
     (spawnStatus === 'error' || spawnLaunchState === 'failed_to_start');
   const isSkippedLaunch =
     spawnStatus === 'skipped' ||
