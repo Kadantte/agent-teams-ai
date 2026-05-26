@@ -150,6 +150,16 @@ describe('TeamProvisioningLaunchFailurePolicy', () => {
         livenessKind: 'registered_only',
       })
     ).toBe(false);
+
+    expect(
+      isBootstrapConfirmedProvisionedButNotAliveFailure({
+        status: 'error',
+        launchState: 'failed_to_start',
+        hardFailure: true,
+        runtimeDiagnostic: reason,
+        bootstrapConfirmed: true,
+      })
+    ).toBe(true);
   });
 
   it('derives member launch state by the existing precedence order', () => {

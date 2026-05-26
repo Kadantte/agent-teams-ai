@@ -10,6 +10,7 @@ export interface ProvisionedButNotAliveLaunchEntry {
   hardFailure?: boolean;
   hardFailureReason?: string;
   error?: string;
+  runtimeDiagnostic?: string;
   bootstrapConfirmed?: boolean;
   livenessKind?: TeamAgentRuntimeLivenessKind;
 }
@@ -54,7 +55,7 @@ export function isProvisionedButNotAliveLaunchFailure(
   const hardFailureReason = entry.hardFailureReason?.trim();
   const failureReasonMatches = hardFailureReason
     ? isProvisionedButNotAliveFailureReason(hardFailureReason)
-    : isProvisionedButNotAliveFailureReason(entry.error);
+    : isProvisionedButNotAliveFailureReason(entry.error ?? entry.runtimeDiagnostic);
   if (!failureReasonMatches) {
     return false;
   }
