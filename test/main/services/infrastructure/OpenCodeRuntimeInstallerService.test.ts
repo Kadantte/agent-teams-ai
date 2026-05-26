@@ -306,6 +306,30 @@ describe('OpenCodeRuntimeInstallerService resolver', () => {
     expect(resolveInteractiveShellEnvBestEffortMock).toHaveBeenCalledTimes(1);
   });
 
+  it('does not warm verified OpenCode PATH caches from a stale in-flight probe', async () => {
+    const binaryPath = path.join(tempRoot!, 'homebrew', 'bin', 'opencode');
+    await mkdir(path.dirname(binaryPath), { recursive: true });
+    await writeFile(binaryPath, 'binary', { mode: 0o755 });
+    resolveInteractiveShellEnvBestEffortMock.mockResolvedValue({
+      PATH: path.dirname(binaryPath),
+    });
+    getShellPreferredHomeMock.mockReturnValue(tempRoot!);
+    const versionProbe = deferred<{ stdout: string; stderr: string }>();
+    execCliMock.mockReturnValueOnce(versionProbe.promise);
+
+    const staleResolve = resolveVerifiedOpenCodeRuntimeBinaryPath({ shellEnvTimeoutMs: 0 });
+    await vi.waitFor(() => expect(execCliMock).toHaveBeenCalledTimes(1));
+
+    clearOpenCodeRuntimeBinaryResolverCache();
+    versionProbe.resolve({ stdout: 'opencode 1.0.0\n', stderr: '' });
+    await expect(staleResolve).resolves.toBe(binaryPath);
+
+    await expect(resolveVerifiedOpenCodeRuntimeBinaryPath({ shellEnvTimeoutMs: 0 })).resolves.toBe(
+      binaryPath
+    );
+    expect(execCliMock).toHaveBeenCalledTimes(2);
+  });
+
   it('coalesces concurrent OpenCode runtime status checks and serves a short warm cache', async () => {
     const binaryPath = path.join(tempRoot!, 'homebrew', 'bin', 'opencode');
     await mkdir(path.dirname(binaryPath), { recursive: true });
@@ -334,6 +358,42 @@ describe('OpenCodeRuntimeInstallerService resolver', () => {
       binaryPath,
     });
     expect(execCliMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not remember OpenCode runtime status from a stale in-flight check', async () => {
+    const binaryPath = path.join(tempRoot!, 'homebrew', 'bin', 'opencode');
+    await mkdir(path.dirname(binaryPath), { recursive: true });
+    await writeFile(binaryPath, 'binary', { mode: 0o755 });
+    resolveInteractiveShellEnvBestEffortMock.mockResolvedValue({
+      PATH: path.dirname(binaryPath),
+    });
+    getShellPreferredHomeMock.mockReturnValue(tempRoot!);
+    const versionProbe = deferred<{ stdout: string; stderr: string }>();
+    execCliMock.mockReturnValueOnce(versionProbe.promise).mockResolvedValue({
+      stdout: 'opencode 2.0.0\n',
+      stderr: '',
+    });
+    const service = new OpenCodeRuntimeInstallerService();
+
+    const staleStatus = service.getStatus();
+    await vi.waitFor(() => expect(execCliMock).toHaveBeenCalledTimes(1));
+
+    service.invalidateStatusCache();
+    versionProbe.resolve({ stdout: 'opencode 1.0.0\n', stderr: '' });
+    await expect(staleStatus).resolves.toMatchObject({
+      installed: true,
+      source: 'path',
+      binaryPath,
+      version: 'opencode 1.0.0',
+    });
+
+    await expect(service.getStatus()).resolves.toMatchObject({
+      installed: true,
+      source: 'path',
+      binaryPath,
+      version: 'opencode 2.0.0',
+    });
+    expect(execCliMock).toHaveBeenCalledTimes(2);
   });
 
   it('returns a verified OpenCode binary from the merged CLI PATH after zero-wait shell fallback', async () => {

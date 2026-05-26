@@ -194,6 +194,7 @@ const pathProbeCache = new Map<string, CachedPathProbe>();
 const pathProbeInFlight = new Map<string, Promise<VerifiedOpenCodeBinaryProbe>>();
 const runtimeBinaryResolveCache = new Map<string, CachedRuntimeBinaryResolve>();
 const runtimeBinaryResolveInFlight = new Map<string, Promise<string | null>>();
+let runtimeResolverCacheGeneration = 0;
 
 async function probeOpenCodeBinaryVersion(binaryPath: string): Promise<OpenCodeBinaryVersionProbe> {
   try {
@@ -230,13 +231,16 @@ async function probeOpenCodeBinaryVersionCached(
     return inFlight;
   }
 
+  const cacheGeneration = runtimeResolverCacheGeneration;
   const request = probeOpenCodeBinaryVersion(binaryPath)
     .then((result) => {
-      versionProbeCache.set(cacheKey, {
-        result,
-        cachedAt: Date.now(),
-        ttlMs: getVersionProbeTtlMs(result),
-      });
+      if (cacheGeneration === runtimeResolverCacheGeneration) {
+        versionProbeCache.set(cacheKey, {
+          result,
+          cachedAt: Date.now(),
+          ttlMs: getVersionProbeTtlMs(result),
+        });
+      }
       return result;
     })
     .finally(() => {
@@ -356,13 +360,16 @@ async function probeFirstWorkingPathOpenCodeBinaryCached(
     return inFlight;
   }
 
+  const cacheGeneration = runtimeResolverCacheGeneration;
   const request = probeFirstWorkingPathOpenCodeBinary(options)
     .then((result) => {
-      pathProbeCache.set(cacheKey, {
-        result,
-        cachedAt: Date.now(),
-        ttlMs: getPathProbeTtlMs(result),
-      });
+      if (cacheGeneration === runtimeResolverCacheGeneration) {
+        pathProbeCache.set(cacheKey, {
+          result,
+          cachedAt: Date.now(),
+          ttlMs: getPathProbeTtlMs(result),
+        });
+      }
       return result;
     })
     .finally(() => {
@@ -382,6 +389,7 @@ async function resolveVerifiedPathOpenCodeBinaryPath(
 }
 
 export function clearOpenCodeRuntimeBinaryResolverCache(): void {
+  runtimeResolverCacheGeneration += 1;
   versionProbeCache.clear();
   versionProbeInFlight.clear();
   pathProbeCache.clear();
@@ -404,15 +412,18 @@ export async function resolveVerifiedOpenCodeRuntimeBinaryPath(
     return inFlight;
   }
 
+  const cacheGeneration = runtimeResolverCacheGeneration;
   const request = (async () =>
     (await resolveVerifiedAppManagedOpenCodeRuntimeBinaryPath()) ??
     (await resolveVerifiedPathOpenCodeBinaryPath(options)))()
     .then((binaryPath) => {
-      runtimeBinaryResolveCache.set(cacheKey, {
-        binaryPath,
-        cachedAt: Date.now(),
-        ttlMs: getRuntimeBinaryResolveTtlMs(binaryPath),
-      });
+      if (cacheGeneration === runtimeResolverCacheGeneration) {
+        runtimeBinaryResolveCache.set(cacheKey, {
+          binaryPath,
+          cachedAt: Date.now(),
+          ttlMs: getRuntimeBinaryResolveTtlMs(binaryPath),
+        });
+      }
       return binaryPath;
     })
     .finally(() => {
@@ -653,12 +664,14 @@ export class OpenCodeRuntimeInstallerService {
   private latestStatus: OpenCodeRuntimeStatus | null = null;
   private latestStatusAt = 0;
   private statusPromise: Promise<OpenCodeRuntimeStatus> | null = null;
+  private statusCacheGeneration = 0;
 
   setMainWindow(win: BrowserWindow | null): void {
     this.mainWindow = win;
   }
 
   invalidateStatusCache(): void {
+    this.statusCacheGeneration += 1;
     this.latestStatus = null;
     this.latestStatusAt = 0;
     this.statusPromise = null;
@@ -681,7 +694,8 @@ export class OpenCodeRuntimeInstallerService {
       return this.statusPromise;
     }
 
-    const request = this.resolveStatus().finally(() => {
+    const statusCacheGeneration = this.statusCacheGeneration;
+    const request = this.resolveStatus(statusCacheGeneration).finally(() => {
       if (this.statusPromise === request) {
         this.statusPromise = null;
       }
@@ -690,10 +704,10 @@ export class OpenCodeRuntimeInstallerService {
     return request;
   }
 
-  private async resolveStatus(): Promise<OpenCodeRuntimeStatus> {
+  private async resolveStatus(statusCacheGeneration: number): Promise<OpenCodeRuntimeStatus> {
     const appManagedStatus = await this.getAppManagedStatus();
     if (appManagedStatus.installed) {
-      this.rememberStatus(appManagedStatus);
+      this.rememberStatusIfCurrent(appManagedStatus, statusCacheGeneration);
       return appManagedStatus;
     }
 
@@ -704,7 +718,7 @@ export class OpenCodeRuntimeInstallerService {
       appManagedStatus.state !== 'failed'
         ? pathStatus
         : appManagedStatus;
-    this.rememberStatus(status);
+    this.rememberStatusIfCurrent(status, statusCacheGeneration);
     return status;
   }
 
@@ -719,8 +733,18 @@ export class OpenCodeRuntimeInstallerService {
   }
 
   private publish(status: OpenCodeRuntimeStatus): void {
+    this.statusCacheGeneration += 1;
     this.rememberStatus(status);
     safeSendToRenderer(this.mainWindow, CHANNEL, status);
+  }
+
+  private rememberStatusIfCurrent(
+    status: OpenCodeRuntimeStatus,
+    statusCacheGeneration: number
+  ): void {
+    if (statusCacheGeneration === this.statusCacheGeneration) {
+      this.rememberStatus(status);
+    }
   }
 
   private rememberStatus(status: OpenCodeRuntimeStatus): void {
