@@ -23,6 +23,7 @@ const CODEX_SESSION_FILE_SOFT_BUDGET_MS = 6_500;
 const CODEX_SESSION_FILE_MAX_UNCACHED_READS_PER_RUN = 160;
 const CODEX_SESSION_FILE_READ_BATCH_SIZE = 24;
 const CODEX_SESSION_FILE_READ_TIMEOUT_MS = 700;
+const CODEX_SESSION_FILE_DISCOVERY_STAT_BATCH_SIZE = 64;
 const CODEX_SESSION_METADATA_READ_LIMIT_BYTES = 128 * 1024;
 const CODEX_SESSION_FILE_CACHE_SCHEMA_VERSION = 1;
 const CODEX_SESSION_FILE_CACHE_RELATIVE_PATH = path.join(
@@ -80,6 +81,11 @@ interface CodexSessionSnapshotLoadResult {
   degraded: boolean;
   stats: {
     files: number;
+    visitedFiles: number;
+    droppedOlderFiles: number;
+    statFailures: number;
+    directoriesVisited: number;
+    discoveryTimedOut: boolean;
     cached: number;
     uncachedReads: number;
     timedOutReads: number;
@@ -88,10 +94,33 @@ interface CodexSessionSnapshotLoadResult {
   };
 }
 
+interface CodexSessionFileListingResult {
+  files: CodexSessionFileEntry[];
+  visitedFiles: number;
+  statFailures: number;
+  directoriesVisited: number;
+  timedOut: boolean;
+}
+
 function emptyCache(): CodexSessionFileCacheFile {
   return {
     schemaVersion: CODEX_SESSION_FILE_CACHE_SCHEMA_VERSION,
     entries: {},
+  };
+}
+
+function captureMemoryDiagnostics(): {
+  rssBytes: number;
+  heapUsedBytes: number;
+  heapTotalBytes: number;
+  externalBytes: number;
+} {
+  const memory = process.memoryUsage();
+  return {
+    rssBytes: memory.rss,
+    heapUsedBytes: memory.heapUsed,
+    heapTotalBytes: memory.heapTotal,
+    externalBytes: memory.external,
   };
 }
 
@@ -211,45 +240,149 @@ async function readFirstLineWithTimeout(
   return result;
 }
 
-async function listJsonlFiles(root: string, maxDepth: number): Promise<CodexSessionFileEntry[]> {
-  async function walk(directory: string, depth: number): Promise<CodexSessionFileEntry[]> {
+function insertRecentSessionFile(
+  files: CodexSessionFileEntry[],
+  file: CodexSessionFileEntry,
+  limit: number
+): void {
+  if (limit <= 0) {
+    return;
+  }
+
+  if (files.length >= limit && file.mtimeMs <= files[files.length - 1].mtimeMs) {
+    return;
+  }
+
+  let low = 0;
+  let high = files.length;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (file.mtimeMs > files[mid].mtimeMs) {
+      high = mid;
+    } else {
+      low = mid + 1;
+    }
+  }
+
+  files.splice(low, 0, file);
+  if (files.length > limit) {
+    files.pop();
+  }
+}
+
+function selectMostRecentSessionFiles(
+  files: CodexSessionFileEntry[],
+  limit: number
+): CodexSessionFileEntry[] {
+  const selected: CodexSessionFileEntry[] = [];
+  for (const file of files) {
+    insertRecentSessionFile(selected, file, limit);
+  }
+  return selected;
+}
+
+async function listRecentJsonlFiles(
+  root: string,
+  maxDepth: number,
+  limit: number,
+  deadlineMs: number
+): Promise<CodexSessionFileListingResult> {
+  const selectedFiles: CodexSessionFileEntry[] = [];
+  let visitedFiles = 0;
+  let statFailures = 0;
+  let directoriesVisited = 0;
+  let timedOut = false;
+
+  const hasBudget = (): boolean => {
+    if (Date.now() < deadlineMs) {
+      return true;
+    }
+    timedOut = true;
+    return false;
+  };
+
+  async function statJsonlFile(filePath: string): Promise<CodexSessionFileEntry | null> {
+    if (!hasBudget()) {
+      return null;
+    }
+    visitedFiles += 1;
+    try {
+      const stats = await fs.stat(filePath);
+      return {
+        filePath,
+        mtimeMs: stats.mtimeMs,
+        size: stats.size,
+      };
+    } catch {
+      statFailures += 1;
+      return null;
+    }
+  }
+
+  async function collectFileStats(filePaths: string[]): Promise<void> {
+    for (
+      let offset = 0;
+      offset < filePaths.length && hasBudget();
+      offset += CODEX_SESSION_FILE_DISCOVERY_STAT_BATCH_SIZE
+    ) {
+      const batch = filePaths.slice(offset, offset + CODEX_SESSION_FILE_DISCOVERY_STAT_BATCH_SIZE);
+      const stats = await Promise.all(batch.map((filePath) => statJsonlFile(filePath)));
+      for (const file of stats) {
+        if (file) {
+          insertRecentSessionFile(selectedFiles, file, limit);
+        }
+      }
+    }
+  }
+
+  async function walk(directory: string, depth: number): Promise<void> {
+    if (!hasBudget()) {
+      return;
+    }
     let entries;
     try {
       entries = await fs.readdir(directory, { withFileTypes: true, encoding: 'utf8' });
     } catch {
-      return [];
+      return;
     }
 
-    const files = await Promise.all(
-      entries.map(async (entry): Promise<CodexSessionFileEntry[]> => {
-        const entryPath = path.join(directory, entry.name);
-        if (entry.isDirectory()) {
-          return depth < maxDepth ? walk(entryPath, depth + 1) : [];
-        }
+    directoriesVisited += 1;
+    const filePaths: string[] = [];
+    const childDirectories: string[] = [];
 
-        if (!entry.isFile() || !entry.name.endsWith('.jsonl')) {
-          return [];
+    for (const entry of entries) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (depth < maxDepth) {
+          childDirectories.push(entryPath);
         }
+        continue;
+      }
 
-        try {
-          const stats = await fs.stat(entryPath);
-          return [
-            {
-              filePath: entryPath,
-              mtimeMs: stats.mtimeMs,
-              size: stats.size,
-            },
-          ];
-        } catch {
-          return [];
-        }
-      })
-    );
+      if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        filePaths.push(entryPath);
+      }
+    }
 
-    return files.flat();
+    await collectFileStats(filePaths);
+
+    for (const childDirectory of childDirectories) {
+      if (!hasBudget()) {
+        return;
+      }
+      await walk(childDirectory, depth + 1);
+    }
   }
 
-  return walk(root, 0);
+  await walk(root, 0);
+
+  return {
+    files: selectedFiles,
+    visitedFiles,
+    statFailures,
+    directoriesVisited,
+    timedOut,
+  };
 }
 
 function parseSessionSnapshot(
@@ -294,6 +427,7 @@ export class CodexSessionFileRecentProjectsSourceAdapter implements RecentProjec
   readonly timeoutMs = CODEX_SESSION_FILE_SOURCE_TIMEOUT_MS;
   readonly #codexHome: string;
   readonly #cachePath: string;
+  #inFlightList: Promise<RecentProjectsSourceResult> | null = null;
 
   constructor(
     private readonly deps: {
@@ -313,6 +447,20 @@ export class CodexSessionFileRecentProjectsSourceAdapter implements RecentProjec
   }
 
   async list(): Promise<RecentProjectsSourceResult> {
+    if (this.#inFlightList) {
+      return this.#inFlightList;
+    }
+
+    const request = this.#listUncached().finally(() => {
+      if (this.#inFlightList === request) {
+        this.#inFlightList = null;
+      }
+    });
+    this.#inFlightList = request;
+    return request;
+  }
+
+  async #listUncached(): Promise<RecentProjectsSourceResult> {
     const activeContext = this.deps.getActiveContext();
     const localContext = this.deps.getLocalContext();
 
@@ -339,6 +487,7 @@ export class CodexSessionFileRecentProjectsSourceAdapter implements RecentProjec
         count: validCandidates.length,
         codexHome: this.#codexHome,
         degraded: snapshotResult.degraded,
+        ...captureMemoryDiagnostics(),
         ...snapshotResult.stats,
       });
 
@@ -361,16 +510,34 @@ export class CodexSessionFileRecentProjectsSourceAdapter implements RecentProjec
   async #listRecentSessionSnapshots(): Promise<CodexSessionSnapshotLoadResult> {
     const startedAt = Date.now();
     const deadline = startedAt + CODEX_SESSION_FILE_SOFT_BUDGET_MS;
-    const files = [
-      ...(await listJsonlFiles(path.join(this.#codexHome, 'sessions'), 4)),
-      ...(await listJsonlFiles(path.join(this.#codexHome, 'archived_sessions'), 1)),
-    ].sort((left, right) => right.mtimeMs - left.mtimeMs);
+    const sessionFiles = await listRecentJsonlFiles(
+      path.join(this.#codexHome, 'sessions'),
+      4,
+      CODEX_SESSION_FILE_PARSE_LIMIT,
+      deadline
+    );
+    const archivedSessionFiles = await listRecentJsonlFiles(
+      path.join(this.#codexHome, 'archived_sessions'),
+      1,
+      CODEX_SESSION_FILE_PARSE_LIMIT,
+      deadline
+    );
+    const files = selectMostRecentSessionFiles(
+      [...sessionFiles.files, ...archivedSessionFiles.files],
+      CODEX_SESSION_FILE_PARSE_LIMIT
+    );
+    const visitedFiles = sessionFiles.visitedFiles + archivedSessionFiles.visitedFiles;
+    const statFailures = sessionFiles.statFailures + archivedSessionFiles.statFailures;
+    const directoriesVisited =
+      sessionFiles.directoriesVisited + archivedSessionFiles.directoriesVisited;
+    const droppedOlderFiles = Math.max(0, visitedFiles - statFailures - files.length);
+    const discoveryTimedOut = sessionFiles.timedOut || archivedSessionFiles.timedOut;
 
     const snapshotsByCwd = new Map<string, CodexSessionProjectSnapshot>();
-    const candidateFiles = files.slice(0, CODEX_SESSION_FILE_PARSE_LIMIT);
+    const candidateFiles = files;
     const cache = await this.#readCacheSafe();
     const nextCacheEntries = new Map<string, CodexSessionFileCacheEntry>();
-    let degraded = false;
+    let degraded = discoveryTimedOut;
     let cached = 0;
     let uncachedReads = 0;
     let timedOutReads = 0;
@@ -454,6 +621,12 @@ export class CodexSessionFileRecentProjectsSourceAdapter implements RecentProjec
     if (degraded) {
       this.deps.logger.warn('codex session-file recent-projects source partial', {
         files: candidateFiles.length,
+        visitedFiles,
+        droppedOlderFiles,
+        statFailures,
+        directoriesVisited,
+        discoveryTimedOut,
+        ...captureMemoryDiagnostics(),
         cached,
         uncachedReads,
         timedOutReads,
@@ -468,6 +641,11 @@ export class CodexSessionFileRecentProjectsSourceAdapter implements RecentProjec
       degraded,
       stats: {
         files: candidateFiles.length,
+        visitedFiles,
+        droppedOlderFiles,
+        statFailures,
+        directoriesVisited,
+        discoveryTimedOut,
         cached,
         uncachedReads,
         timedOutReads,
