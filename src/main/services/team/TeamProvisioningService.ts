@@ -3153,6 +3153,45 @@ function normalizeSameTeamText(text: string): string {
   return text.trim().replace(/\r\n/g, '\n');
 }
 
+const SUPPRESSED_LEAD_RELAY_STATE_PHRASES = [
+  'open',
+  'closed',
+  'merged',
+  'approved',
+  'complete',
+  'completed',
+  'done',
+  'blocked',
+  'pending',
+  'in_progress',
+  'in progress',
+  'needsfix',
+  'needs fix',
+  'in review',
+  'clear',
+] as const;
+
+function startsWithSuppressedLeadRelayStatePhrase(text: string): boolean {
+  const lowerText = text.toLowerCase();
+  return SUPPRESSED_LEAD_RELAY_STATE_PHRASES.some((phrase) => {
+    if (!lowerText.startsWith(phrase)) {
+      return false;
+    }
+
+    const nextChar = lowerText.charAt(phrase.length);
+    return nextChar.length === 0 || !/[a-z0-9_]/i.test(nextChar);
+  });
+}
+
+function hasSuppressedLeadRelayStatePredicate(normalized: string): boolean {
+  const match = /\b(?:is|are|was|were|stays?|still|now)\s+/i.exec(normalized);
+  if (!match) {
+    return false;
+  }
+
+  return startsWithSuppressedLeadRelayStatePhrase(normalized.slice(match.index + match[0].length));
+}
+
 function shouldSuppressUnverifiedLeadRelayStateLine(text: string): boolean {
   const normalized = text.trim().replace(/\s+/g, ' ');
   if (normalized.length === 0) {
@@ -3175,9 +3214,7 @@ function shouldSuppressUnverifiedLeadRelayStateLine(text: string): boolean {
     /\b(?:done|complete(?:d)?|approved|merged|closed|blocked|resolved|failed|succeeded)\b/i.test(
       normalized
     ) ||
-    /\b(?:is|are|was|were|stays?|still|now)\s+(?:open|closed|merged|approved|complete(?:d)?|done|blocked|pending|in_progress|in progress|needsfix|needs fix|in review|clear)\b/i.test(
-      normalized
-    ) ||
+    hasSuppressedLeadRelayStatePredicate(normalized) ||
     /\b(?:mergecommit|mergedat)\s*=\s*(?:null|[^\s,;]+)/i.test(normalized) ||
     /\bqueue\b.*\bclear\b/i.test(normalized)
   );
