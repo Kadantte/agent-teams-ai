@@ -124,11 +124,21 @@ describe('TeamProvisioningLaunchFailurePolicy', () => {
         status: 'error',
         launchState: 'failed_to_start',
         hardFailure: true,
-        hardFailureReason: 'Launch state is terminal for this run',
         error: reason,
         bootstrapConfirmed: true,
       })
     ).toBe(true);
+
+    expect(
+      isBootstrapConfirmedProvisionedButNotAliveFailure({
+        status: 'error',
+        launchState: 'failed_to_start',
+        hardFailure: true,
+        hardFailureReason: 'model not found',
+        error: reason,
+        bootstrapConfirmed: true,
+      })
+    ).toBe(false);
 
     expect(
       isBootstrapConfirmedProvisionedButNotAliveFailure({

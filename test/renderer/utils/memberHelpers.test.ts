@@ -161,6 +161,24 @@ describe('memberHelpers spawn-aware presence', () => {
     ).toBe(true);
   });
 
+  it('does not show task activity for provisioned-but-not-alive entries with runtime errors', () => {
+    expect(
+      shouldDisplayMemberCurrentTask({
+        member: { ...member, currentTaskId: 'task-1' },
+        isTeamAlive: true,
+        spawnStatus: provisionedButNotAliveSpawn.status,
+        spawnLaunchState: provisionedButNotAliveSpawn.launchState,
+        spawnRuntimeAlive: provisionedButNotAliveSpawn.runtimeAlive,
+        spawnEntry: provisionedButNotAliveSpawn,
+        runtimeEntry: {
+          ...processTableUnavailableRuntime,
+          runtimeDiagnostic: 'Runtime process crashed',
+          runtimeDiagnosticSeverity: 'error',
+        },
+      })
+    ).toBe(false);
+  });
+
   it('shows process-online teammates as online with a green dot', () => {
     expect(
       getSpawnAwarePresenceLabel(
@@ -845,6 +863,39 @@ describe('memberHelpers spawn-aware presence', () => {
       presenceLabel: 'idle',
       launchVisualState: null,
       launchStatusLabel: null,
+      spawnBadgeLabel: null,
+    });
+  });
+
+  it('keeps runtime errors visible for bootstrap-confirmed provisioned-but-not-alive entries', () => {
+    expect(
+      buildMemberLaunchPresentation({
+        member,
+        spawnStatus: provisionedButNotAliveSpawn.status,
+        spawnLaunchState: provisionedButNotAliveSpawn.launchState,
+        spawnLivenessSource: provisionedButNotAliveSpawn.livenessSource,
+        spawnRuntimeAlive: provisionedButNotAliveSpawn.runtimeAlive,
+        spawnBootstrapConfirmed: provisionedButNotAliveSpawn.bootstrapConfirmed,
+        spawnBootstrapStalled: provisionedButNotAliveSpawn.bootstrapStalled,
+        spawnAgentToolAccepted: provisionedButNotAliveSpawn.agentToolAccepted,
+        spawnHardFailure: provisionedButNotAliveSpawn.hardFailure,
+        spawnHardFailureReason: provisionedButNotAliveSpawn.hardFailureReason,
+        spawnError: provisionedButNotAliveSpawn.error,
+        spawnLivenessKind: provisionedButNotAliveSpawn.livenessKind,
+        runtimeEntry: {
+          ...processTableUnavailableRuntime,
+          runtimeDiagnostic: 'Runtime process crashed',
+          runtimeDiagnosticSeverity: 'error',
+        },
+        runtimeAdvisory: undefined,
+        isLaunchSettling: false,
+        isTeamAlive: true,
+        isTeamProvisioning: false,
+      })
+    ).toMatchObject({
+      presenceLabel: 'stale runtime',
+      launchVisualState: 'stale_runtime',
+      launchStatusLabel: 'stale runtime',
       spawnBadgeLabel: null,
     });
   });

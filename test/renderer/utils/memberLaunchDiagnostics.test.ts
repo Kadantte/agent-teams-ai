@@ -167,6 +167,49 @@ describe('member launch diagnostics', () => {
     expect(getMemberLaunchDiagnosticsErrorMessage(payload)).toBeUndefined();
   });
 
+  it('keeps runtime errors visible for bootstrap-confirmed provisioned-but-not-alive entries', () => {
+    const payload = buildMemberLaunchDiagnosticsPayload({
+      teamName: 'signal-ops',
+      runId: 'bb64da3b-ed5e-4bae-813d-70e26418f9e5',
+      memberName: 'tom',
+      spawnEntry: {
+        status: 'error',
+        launchState: 'failed_to_start',
+        agentToolAccepted: true,
+        runtimeAlive: false,
+        bootstrapConfirmed: true,
+        hardFailure: true,
+        hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+        livenessKind: 'confirmed_bootstrap',
+        firstSpawnAcceptedAt: '2026-05-25T20:13:46.326Z',
+        lastHeartbeatAt: '2026-05-25T20:13:56.110Z',
+        updatedAt: '2026-05-25T20:14:02.147Z',
+      },
+      runtimeEntry: {
+        memberName: 'tom',
+        alive: false,
+        restartable: true,
+        livenessKind: 'confirmed_bootstrap',
+        runtimeDiagnostic: 'Runtime process crashed',
+        runtimeDiagnosticSeverity: 'error',
+        updatedAt: '2026-05-25T20:14:03.317Z',
+      },
+    });
+
+    expect(payload).toMatchObject({
+      launchState: 'confirmed_alive',
+      spawnStatus: 'online',
+      runtimeAlive: false,
+      bootstrapConfirmed: true,
+      hardFailure: false,
+      memberCardError: 'Runtime process crashed',
+      runtimeDiagnostic: 'Runtime process crashed',
+      runtimeDiagnosticSeverity: 'error',
+    });
+    expect(hasMemberLaunchDiagnosticsError(payload)).toBe(true);
+    expect(getMemberLaunchDiagnosticsErrorMessage(payload)).toBe('Runtime process crashed');
+  });
+
   it('includes runtime advisory evidence in copy diagnostics', () => {
     const payload = buildMemberLaunchDiagnosticsPayload({
       memberName: 'alice',

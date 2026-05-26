@@ -935,7 +935,10 @@ export const MemberList = memo(function MemberList({
           const effectiveSpawnLaunchState = bootstrapConfirmedProvisionedButNotAlive
             ? 'confirmed_alive'
             : spawnEntry?.launchState;
-          const effectiveSpawnRuntimeAlive = bootstrapConfirmedProvisionedButNotAlive
+          const useBootstrapConfirmedRuntimeAlive =
+            bootstrapConfirmedProvisionedButNotAlive &&
+            runtimeEntry?.runtimeDiagnosticSeverity !== 'error';
+          const effectiveSpawnRuntimeAlive = useBootstrapConfirmedRuntimeAlive
             ? true
             : spawnEntry?.runtimeAlive;
           const currentTaskCandidate =

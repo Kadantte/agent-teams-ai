@@ -532,15 +532,15 @@ export function buildMemberLaunchDiagnosticsPayload(params: {
   const livenessKind = spawnEntry?.livenessKind ?? runtimeEntry?.livenessKind;
   const bootstrapConfirmedProvisionedButNotAlive =
     isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry);
+  const useBootstrapConfirmedRuntimeAlive =
+    bootstrapConfirmedProvisionedButNotAlive && runtimeEntry?.runtimeDiagnosticSeverity !== 'error';
   const launchState = bootstrapConfirmedProvisionedButNotAlive
     ? 'confirmed_alive'
     : (spawnEntry?.launchState ?? params.launchState);
   const spawnStatus = bootstrapConfirmedProvisionedButNotAlive
     ? 'online'
     : (spawnEntry?.status ?? params.spawnStatus);
-  const spawnRuntimeAlive = bootstrapConfirmedProvisionedButNotAlive
-    ? true
-    : spawnEntry?.runtimeAlive;
+  const spawnRuntimeAlive = useBootstrapConfirmedRuntimeAlive ? true : spawnEntry?.runtimeAlive;
   const spawnHardFailure = bootstrapConfirmedProvisionedButNotAlive
     ? false
     : spawnEntry?.hardFailure;

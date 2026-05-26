@@ -1125,6 +1125,9 @@ export function shouldDisplayMemberCurrentTask({
   ) {
     return false;
   }
+  if (runtimeEntry?.runtimeDiagnosticSeverity === 'error') {
+    return false;
+  }
   if (runtimeEntry?.alive === false && !bootstrapConfirmedProvisionedButNotAlive) {
     return false;
   }
@@ -1344,13 +1347,13 @@ export function buildMemberLaunchPresentation({
       bootstrapConfirmed: spawnBootstrapConfirmed,
       livenessKind: spawnLivenessKind ?? runtimeEntry?.livenessKind,
     });
+  const useBootstrapConfirmedRuntimeAlive =
+    bootstrapConfirmedProvisionedButNotAlive && runtimeEntry?.runtimeDiagnosticSeverity !== 'error';
   const visualSpawnStatus = bootstrapConfirmedProvisionedButNotAlive ? 'online' : spawnStatus;
   const visualSpawnLaunchState = bootstrapConfirmedProvisionedButNotAlive
     ? 'confirmed_alive'
     : spawnLaunchState;
-  const visualSpawnRuntimeAlive = bootstrapConfirmedProvisionedButNotAlive
-    ? true
-    : spawnRuntimeAlive;
+  const visualSpawnRuntimeAlive = useBootstrapConfirmedRuntimeAlive ? true : spawnRuntimeAlive;
   const visualSpawnBootstrapConfirmed = bootstrapConfirmedProvisionedButNotAlive
     ? true
     : spawnBootstrapConfirmed;
@@ -1361,7 +1364,7 @@ export function buildMemberLaunchPresentation({
     ? 'confirmed_bootstrap'
     : spawnLivenessKind;
   const visualRuntimeEntry =
-    bootstrapConfirmedProvisionedButNotAlive && runtimeEntry
+    useBootstrapConfirmedRuntimeAlive && runtimeEntry
       ? ({
           ...runtimeEntry,
           alive: true,

@@ -611,6 +611,51 @@ describe('MemberList spawn-status memoization', () => {
     });
   });
 
+  it('hides tasks for healed provisioned-but-not-alive status when runtime has an error', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const task = activeTask();
+    const members: ResolvedTeamMember[] = [{ ...member, currentTaskId: task.id }];
+
+    await act(async () => {
+      root.render(
+        React.createElement(MemberList, {
+          members,
+          isTeamAlive: true,
+          taskMap: new Map([[task.id, task]]),
+          memberSpawnStatuses: new Map([['bob', provisionedButNotAliveSpawnStatus()]]),
+          memberRuntimeEntries: new Map<string, TeamAgentRuntimeEntry>([
+            [
+              'bob',
+              {
+                memberName: 'bob',
+                alive: false,
+                restartable: true,
+                livenessKind: 'confirmed_bootstrap',
+                runtimeDiagnostic: 'Runtime process crashed',
+                runtimeDiagnosticSeverity: 'error',
+                updatedAt: '2026-05-25T20:14:05.411Z',
+              },
+            ],
+          ]),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[data-testid="current-bob"]')).toBeNull();
+    expect(host.querySelector('[data-testid="retry-bob"]')).toBeNull();
+    expect(host.querySelector('[data-testid="skip-bob"]')).toBeNull();
+    expect(host.textContent).not.toContain('team provisioned but not alive');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('passes skip callbacks to failed member cards and rerenders when the callback changes', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const host = document.createElement('div');

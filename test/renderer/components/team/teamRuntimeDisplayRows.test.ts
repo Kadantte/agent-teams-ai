@@ -288,6 +288,40 @@ describe('buildTeamRuntimeDisplayRows', () => {
     });
   });
 
+  it('does not let stale provisioned-but-not-alive spawn evidence hide runtime errors', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      runtimeSnapshot: createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          alive: false,
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnostic: 'Runtime process crashed',
+          runtimeDiagnosticSeverity: 'error',
+        }),
+      }),
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+          livenessKind: 'confirmed_bootstrap',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'degraded',
+      source: 'mixed',
+      stateReason: 'Runtime process crashed',
+      diagnosticSeverity: 'error',
+      actionsAllowed: false,
+    });
+  });
+
   it('degrades spawn-only rows when online process evidence has stalled bootstrap', () => {
     const rows = buildTeamRuntimeDisplayRows({
       members: [{ name: 'alice' }],
