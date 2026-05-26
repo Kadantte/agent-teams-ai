@@ -70,12 +70,38 @@ function hasBootstrapConfirmationProof(
   );
 }
 
+function hasStoppedRuntimeLivenessKind(
+  livenessKind: PersistedTeamLaunchMemberState['livenessKind'] | undefined
+): boolean {
+  return (
+    livenessKind === 'not_found' ||
+    livenessKind === 'registered_only' ||
+    livenessKind === 'shell_only' ||
+    livenessKind === 'stale_metadata'
+  );
+}
+
+function hasUnsafeRuntimeFailureEvidence(
+  member: PersistedTeamLaunchMemberState | undefined
+): boolean {
+  return (
+    member?.runtimeDiagnosticSeverity === 'error' ||
+    hasStoppedRuntimeLivenessKind(member?.livenessKind)
+  );
+}
+
 function shouldProjectProvisionedButNotAliveAsConfirmed(params: {
   member: PersistedTeamLaunchMemberState | undefined;
   bootstrapMember?: PersistedTeamLaunchMemberState;
 }): params is { member: PersistedTeamLaunchMemberState } {
   const member = params.member;
   if (member?.launchState !== 'failed_to_start' || member.hardFailure !== true) {
+    return false;
+  }
+  if (
+    hasUnsafeRuntimeFailureEvidence(member) ||
+    hasUnsafeRuntimeFailureEvidence(params.bootstrapMember)
+  ) {
     return false;
   }
   return (
@@ -336,6 +362,7 @@ function reconcileSummaryProjectionWithBootstrap(
     return (
       bootstrapMember != null &&
       hasBootstrapConfirmationProofForLaunchFailure(bootstrapMember) &&
+      !hasUnsafeRuntimeFailureEvidence(bootstrapMember) &&
       isBootstrapMemberEvidenceCurrentForMember(
         { firstSpawnAcceptedAt: projectionBoundary, lastEvaluatedAt: projectionBoundary },
         bootstrapMember,
