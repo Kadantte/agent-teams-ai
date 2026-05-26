@@ -1,7 +1,7 @@
 import type {
   AgentAttachmentCapability,
   AgentAttachmentCapabilityTarget,
-  ProviderImageMimeType,
+  AgentImageMimeType,
 } from './types';
 
 const DEFAULT_IMAGE_BYTES_PER_PROVIDER = 4 * 1024 * 1024;
@@ -18,7 +18,7 @@ export const CLAUDE_IMAGE_MIME_TYPES = [
 
 function supportedImagesOnly(
   displayText: string,
-  supportedImageMimeTypes: readonly ProviderImageMimeType[] = NATIVE_IMAGE_MIME_TYPES
+  supportedImageMimeTypes: readonly AgentImageMimeType[] = NATIVE_IMAGE_MIME_TYPES
 ): AgentAttachmentCapability {
   return {
     supportsImages: true,

@@ -7,7 +7,6 @@ import type {
   AgentImageMimeType,
   AttachmentValidationResult,
   ImageOptimizationBudget,
-  ProviderImageMimeType,
 } from './types';
 
 const AGENT_IMAGE_MIME_TYPES = new Set<AgentImageMimeType>([
@@ -23,7 +22,7 @@ const OPTIMIZABLE_AGENT_IMAGE_MIME_TYPES = new Set<Exclude<AgentImageMimeType, '
   'image/webp',
 ]);
 
-const PROVIDER_IMAGE_MIME_TYPES = new Set<ProviderImageMimeType>([
+const PROVIDER_IMAGE_MIME_TYPES = new Set<AgentImageMimeType>([
   'image/png',
   'image/jpeg',
   'image/gif',
@@ -34,8 +33,8 @@ export function isAgentImageMimeType(mimeType: string): mimeType is AgentImageMi
   return AGENT_IMAGE_MIME_TYPES.has(mimeType as AgentImageMimeType);
 }
 
-export function isProviderImageMimeType(mimeType: string): mimeType is ProviderImageMimeType {
-  return PROVIDER_IMAGE_MIME_TYPES.has(mimeType as ProviderImageMimeType);
+export function isProviderImageMimeType(mimeType: string): mimeType is AgentImageMimeType {
+  return PROVIDER_IMAGE_MIME_TYPES.has(mimeType as AgentImageMimeType);
 }
 
 function isOptimizableAgentImageMimeType(
@@ -54,9 +53,9 @@ function isProviderFileMimeType(mimeType: string, supported: readonly string[]):
 
 function isCapabilityImageMimeType(
   mimeType: string,
-  supported: readonly ProviderImageMimeType[]
+  supported: readonly AgentImageMimeType[]
 ): boolean {
-  return supported.includes(mimeType as ProviderImageMimeType);
+  return supported.includes(mimeType as AgentImageMimeType);
 }
 
 export function classifyAttachmentMime(mimeType: string): AgentAttachmentKind {
