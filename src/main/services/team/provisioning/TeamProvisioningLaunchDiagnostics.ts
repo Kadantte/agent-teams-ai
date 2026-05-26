@@ -18,6 +18,15 @@ export function mentionsProcessTableUnavailable(value: string | undefined): bool
   return /\bprocess table\b.*\bunavailable\b/i.test(value ?? '');
 }
 
+function hasStoppedRuntimeLivenessKind(livenessKind: MemberSpawnStatusEntry['livenessKind']) {
+  return (
+    livenessKind === 'not_found' ||
+    livenessKind === 'registered_only' ||
+    livenessKind === 'shell_only' ||
+    livenessKind === 'stale_metadata'
+  );
+}
+
 export function buildLaunchDiagnosticsFromRun(
   run: TeamProvisioningLaunchDiagnosticsRun,
   options: LaunchDiagnosticsClockOptions = {}
@@ -32,7 +41,11 @@ export function buildLaunchDiagnosticsFromRun(
   for (const [memberName, entry] of memberSpawnStatuses.entries()) {
     const bootstrapConfirmedProvisionedButNotAlive =
       isBootstrapConfirmedProvisionedButNotAliveFailure(entry);
-    if (bootstrapConfirmedProvisionedButNotAlive && entry.runtimeDiagnosticSeverity === 'error') {
+    if (
+      bootstrapConfirmedProvisionedButNotAlive &&
+      (entry.runtimeDiagnosticSeverity === 'error' ||
+        hasStoppedRuntimeLivenessKind(entry.livenessKind))
+    ) {
       items.push({
         id: `${memberName}:bootstrap_stalled`,
         memberName,

@@ -281,6 +281,39 @@ describe('TeamProvisioningLaunchDiagnostics', () => {
     ]);
   });
 
+  it('keeps stopped liveness diagnostics for bootstrap-confirmed provisioned-but-not-alive entries', () => {
+    const diagnostics = buildLaunchDiagnosticsFromRun(
+      buildRun([
+        [
+          'tom',
+          {
+            status: 'error',
+            launchState: 'failed_to_start',
+            bootstrapConfirmed: true,
+            hardFailure: true,
+            hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+            livenessKind: 'not_found',
+            runtimeDiagnostic: 'Runtime is no longer registered',
+            runtimeDiagnosticSeverity: 'warning',
+          },
+        ],
+      ]),
+      { nowIso }
+    );
+
+    expect(diagnostics).toEqual([
+      {
+        id: 'tom:bootstrap_stalled',
+        memberName: 'tom',
+        severity: 'error',
+        code: 'bootstrap_stalled',
+        label: 'tom - launch diagnostic error',
+        detail: 'Runtime is no longer registered',
+        observedAt: NOW,
+      },
+    ]);
+  });
+
   it('uses failed launch error when hard failure reason is absent', () => {
     expect(
       buildLaunchDiagnosticsFromRun(

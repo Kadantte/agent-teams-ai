@@ -538,7 +538,9 @@ export function buildMemberLaunchDiagnosticsPayload(params: {
   const providerBackendId = runtimeEntry?.providerBackendId ?? params.member?.providerBackendId;
   const laneId = runtimeEntry?.laneId ?? params.member?.laneId;
   const laneKind = runtimeEntry?.laneKind ?? params.member?.laneKind;
-  const livenessKind = spawnEntry?.livenessKind ?? runtimeEntry?.livenessKind;
+  const livenessKind = hasStoppedRuntimeLivenessKind(runtimeEntry?.livenessKind)
+    ? runtimeEntry?.livenessKind
+    : (spawnEntry?.livenessKind ?? runtimeEntry?.livenessKind);
   const bootstrapConfirmedProvisionedButNotAlive =
     isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry);
   const hasStoppedRuntimeEvidence =
