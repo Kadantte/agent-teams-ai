@@ -63,14 +63,26 @@ export class OutboxWorkerService {
     });
     const result = await this.processBatch.execute({ batch });
 
-    this.logger.info("Outbox worker batch processed", {
+    const metadata = {
       claimed: batch.length,
       completed: result.completed,
       deadLettered: result.deadLettered,
       recovered,
       retried: result.retried,
       staleClaims: result.staleClaims,
-    });
+    };
+    if (
+      batch.length === 0 &&
+      recovered === 0 &&
+      result.completed === 0 &&
+      result.deadLettered === 0 &&
+      result.retried === 0 &&
+      result.staleClaims === 0
+    ) {
+      this.logger.debug("Outbox worker idle", metadata);
+    } else {
+      this.logger.info("Outbox worker batch processed", metadata);
+    }
 
     return {
       claimed: batch.length,

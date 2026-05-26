@@ -1,6 +1,9 @@
 import type { ControlPlaneBuildInfo } from "@agent-teams-control-plane/shared";
 
-import type { HealthControlPlaneMode } from "../../domain/health-report.js";
+import type {
+  HealthControlPlaneMode,
+  HealthDatabaseMigrationStatus,
+} from "../../domain/health-report.js";
 
 export type HealthEnvironment = Readonly<{
   build: ControlPlaneBuildInfo;
@@ -11,7 +14,7 @@ export type HealthEnvironment = Readonly<{
   database: Readonly<{
     enabled: boolean;
     status: "disabled" | "ready" | "unavailable";
-    migrationStatus: "not-checked";
+    migrationStatus: HealthDatabaseMigrationStatus;
     reasonCode?: string;
   }>;
 }>;

@@ -15,6 +15,7 @@ export {
 } from "./locks/distributed-lock.js";
 export { PrismaDistributedLockPort } from "./locks/prisma-distributed-lock.port.js";
 export {
+  type DatabaseMigrationStatus,
   type DatabaseReadinessReport,
   type DatabaseReadinessStatus,
   type DatabaseReadinessProbe,

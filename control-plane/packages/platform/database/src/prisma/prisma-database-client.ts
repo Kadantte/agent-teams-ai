@@ -24,6 +24,15 @@ export type PrismaTransactionClientLike = Omit<
 
 const readinessTimeoutErrorCode = "CONTROL_PLANE_DATABASE_READINESS_TIMEOUT";
 const readinessUnavailableErrorCode = "CONTROL_PLANE_DATABASE_UNAVAILABLE";
+const migrationsMissingErrorCode = "CONTROL_PLANE_DATABASE_MIGRATIONS_MISSING";
+const requiredMigrationTables = [
+  "audit_events",
+  "dead_letter_events",
+  "distributed_locks",
+  "external_action_content_key_refs",
+  "external_action_contents",
+  "outbox_events",
+] as const;
 
 @Injectable()
 export class PrismaDatabaseClient implements OnApplicationBootstrap, OnModuleDestroy {
@@ -100,14 +109,25 @@ export class PrismaDatabaseClient implements OnApplicationBootstrap, OnModuleDes
     }
 
     try {
+      const timeoutMs = input.timeoutMs ?? 1000;
       await withTimeout(
         this.getClient().$queryRaw<readonly { ready: number }[]>`SELECT 1 AS ready`,
-        input.timeoutMs ?? 1000,
+        timeoutMs,
       );
+      const migrationStatus = await withTimeout(this.checkMigrationStatus(), timeoutMs);
+
+      if (migrationStatus === "missing") {
+        return {
+          enabled: true,
+          migrationStatus,
+          reasonCode: migrationsMissingErrorCode,
+          status: "unavailable",
+        };
+      }
 
       return {
         enabled: true,
-        migrationStatus: "not-checked",
+        migrationStatus,
         status: "ready",
       };
     } catch (error) {
@@ -124,6 +144,31 @@ export class PrismaDatabaseClient implements OnApplicationBootstrap, OnModuleDes
         status: "unavailable",
       };
     }
+  }
+
+  private async checkMigrationStatus(): Promise<"applied" | "missing"> {
+    const rows = await this.getClient().$queryRaw<
+      readonly { table_name: string | null }[]
+    >`
+      SELECT to_regclass('public.audit_events')::text AS table_name
+      UNION ALL
+      SELECT to_regclass('public.dead_letter_events')::text AS table_name
+      UNION ALL
+      SELECT to_regclass('public.distributed_locks')::text AS table_name
+      UNION ALL
+      SELECT to_regclass('public.external_action_content_key_refs')::text AS table_name
+      UNION ALL
+      SELECT to_regclass('public.external_action_contents')::text AS table_name
+      UNION ALL
+      SELECT to_regclass('public.outbox_events')::text AS table_name
+    `;
+    const existingTables = new Set(
+      rows.flatMap((row) => (row.table_name === null ? [] : [row.table_name])),
+    );
+
+    return requiredMigrationTables.every((tableName) => existingTables.has(tableName))
+      ? "applied"
+      : "missing";
   }
 }
 

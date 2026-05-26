@@ -3,6 +3,7 @@ import type { ControlPlaneBuildInfo } from "@agent-teams-control-plane/shared";
 export type HealthStatus = "ok";
 export type ReadinessStatus = "ready" | "degraded";
 export type HealthDatabaseStatus = "disabled" | "ready" | "unavailable";
+export type HealthDatabaseMigrationStatus = "applied" | "missing" | "not-checked";
 export type HealthControlPlaneMode =
   | "local-disabled"
   | "hosted-official-app"
@@ -26,7 +27,7 @@ export type HealthReport = Readonly<{
     database: Readonly<{
       enabled: boolean;
       status: HealthDatabaseStatus;
-      migrationStatus: "not-checked";
+      migrationStatus: HealthDatabaseMigrationStatus;
       reasonCode?: string;
     }>;
   }>;

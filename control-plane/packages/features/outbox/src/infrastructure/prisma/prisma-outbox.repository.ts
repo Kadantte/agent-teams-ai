@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { Inject, Injectable } from "@nestjs/common";
 
@@ -54,22 +55,7 @@ export class PrismaOutboxRepository implements OutboxRepository {
     context: TransactionContext,
   ): Promise<OutboxEvent> {
     const client = getPrismaTransactionClient(context);
-    const existing = await client.outboxEvent.findUnique({
-      where: { idempotencyKey: event.idempotencyKey },
-    });
-
-    if (existing !== null) {
-      if (isCompatibleDuplicate(existing, event)) {
-        return mapRow(existing);
-      }
-      throw createSafeError({
-        category: "conflict",
-        code: "CONTROL_PLANE_OUTBOX_IDEMPOTENCY_CONFLICT",
-        message: "Outbox idempotency key already exists with different content.",
-      });
-    }
-
-    const created = await client.outboxEvent.create({
+    await client.outboxEvent.createMany({
       data: {
         eventType: event.type,
         eventVersion: event.version,
@@ -89,9 +75,28 @@ export class PrismaOutboxRepository implements OutboxRepository {
         ...(event.contentRefId === undefined ? {} : { contentRefId: event.contentRefId }),
         ...(event.workspaceId === undefined ? {} : { workspaceId: event.workspaceId }),
       },
+      skipDuplicates: true,
     });
 
-    return mapRow(created);
+    const existing = await client.outboxEvent.findUnique({
+      where: { idempotencyKey: event.idempotencyKey },
+    });
+
+    if (existing === null) {
+      throw createSafeError({
+        category: "internal",
+        code: "CONTROL_PLANE_OUTBOX_APPEND_FAILED",
+        message: "Outbox event could not be appended.",
+      });
+    }
+    if (isCompatibleDuplicate(existing, event)) {
+      return mapRow(existing);
+    }
+    throw createSafeError({
+      category: "conflict",
+      code: "CONTROL_PLANE_OUTBOX_IDEMPOTENCY_CONFLICT",
+      message: "Outbox idempotency key already exists with different content.",
+    });
   }
 
   public async claimNextBatch(
@@ -413,7 +418,10 @@ function isCompatibleDuplicate(existing: OutboxRow, event: NewOutboxEvent): bool
   return (
     existing.eventType === event.type &&
     existing.eventVersion === event.version &&
-    JSON.stringify(existing.payloadJson) === JSON.stringify(event.payload) &&
+    existing.aggregateKind === (event.aggregateKind ?? null) &&
+    existing.aggregateId === (event.aggregateId ?? null) &&
+    existing.workspaceId === (event.workspaceId ?? null) &&
+    isDeepStrictEqual(existing.payloadJson, event.payload) &&
     existing.contentRefId === (event.contentRefId ?? null) &&
     existing.contentIntegrityHash === (event.contentIntegrityHash ?? null)
   );

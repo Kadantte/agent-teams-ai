@@ -40,39 +40,42 @@ export class NodeCryptoEnvelopeEncryption implements EnvelopeEncryptionPort {
 
   public async encrypt(plaintext: Uint8Array): Promise<EncryptedEnvelope> {
     const dataKey = randomBytes(dataKeyLength);
-    const contentNonce = randomBytes(nonceLength);
-    const contentCipher = createCipheriv(algorithm, dataKey, contentNonce);
-    const ciphertext = Buffer.concat([
-      contentCipher.update(plaintext),
-      contentCipher.final(),
-    ]);
-    const contentAuthTag = contentCipher.getAuthTag();
+    try {
+      const contentNonce = randomBytes(nonceLength);
+      const contentCipher = createCipheriv(algorithm, dataKey, contentNonce);
+      const ciphertext = Buffer.concat([
+        contentCipher.update(plaintext),
+        contentCipher.final(),
+      ]);
+      const contentAuthTag = contentCipher.getAuthTag();
 
-    const dataKeyNonce = randomBytes(nonceLength);
-    const dataKeyCipher = createCipheriv(algorithm, this.masterKey, dataKeyNonce);
-    const encryptedDataKey = Buffer.concat([
-      dataKeyCipher.update(dataKey),
-      dataKeyCipher.final(),
-    ]);
-    const dataKeyAuthTag = dataKeyCipher.getAuthTag();
+      const dataKeyNonce = randomBytes(nonceLength);
+      const dataKeyCipher = createCipheriv(algorithm, this.masterKey, dataKeyNonce);
+      const encryptedDataKey = Buffer.concat([
+        dataKeyCipher.update(dataKey),
+        dataKeyCipher.final(),
+      ]);
+      const dataKeyAuthTag = dataKeyCipher.getAuthTag();
 
-    dataKey.fill(0);
-
-    return {
-      ciphertext,
-      ciphertextSha256: sha256Hex(ciphertext),
-      contentAuthTag,
-      contentEncryptionAlgorithm: "AES-256-GCM",
-      contentNonce,
-      dataKeyAlgorithm: "AES-256-GCM",
-      dataKeyAuthTag,
-      dataKeyNonce,
-      encryptedDataKey,
-      keyRef: this.keyRef,
-    };
+      return {
+        ciphertext,
+        ciphertextSha256: sha256Hex(ciphertext),
+        contentAuthTag,
+        contentEncryptionAlgorithm: "AES-256-GCM",
+        contentNonce,
+        dataKeyAlgorithm: "AES-256-GCM",
+        dataKeyAuthTag,
+        dataKeyNonce,
+        encryptedDataKey,
+        keyRef: this.keyRef,
+      };
+    } finally {
+      dataKey.fill(0);
+    }
   }
 
   public async decrypt(envelope: EncryptedEnvelope): Promise<DecryptedEnvelope> {
+    let dataKey: Buffer | undefined;
     try {
       const dataKeyDecipher = createDecipheriv(
         algorithm,
@@ -80,7 +83,7 @@ export class NodeCryptoEnvelopeEncryption implements EnvelopeEncryptionPort {
         envelope.dataKeyNonce,
       );
       dataKeyDecipher.setAuthTag(Buffer.from(envelope.dataKeyAuthTag));
-      const dataKey = Buffer.concat([
+      dataKey = Buffer.concat([
         dataKeyDecipher.update(envelope.encryptedDataKey),
         dataKeyDecipher.final(),
       ]);
@@ -91,7 +94,6 @@ export class NodeCryptoEnvelopeEncryption implements EnvelopeEncryptionPort {
         contentDecipher.update(envelope.ciphertext),
         contentDecipher.final(),
       ]);
-      dataKey.fill(0);
 
       return { plaintext };
     } catch {
@@ -100,6 +102,8 @@ export class NodeCryptoEnvelopeEncryption implements EnvelopeEncryptionPort {
         code: "CONTROL_PLANE_DECRYPTION_FAILED",
         message: "Encrypted content could not be decrypted.",
       });
+    } finally {
+      dataKey?.fill(0);
     }
   }
 }

@@ -58,6 +58,8 @@ export type NewOutboxEvent = Readonly<{
   nextAttemptAtMs: UnixMilliseconds;
 }>;
 
+const maxIdempotencyKeyLength = 512;
+
 export function validateNewOutboxEvent(event: NewOutboxEvent): SafeError | undefined {
   if (event.type.trim().length === 0) {
     return createSafeError({
@@ -80,6 +82,27 @@ export function validateNewOutboxEvent(event: NewOutboxEvent): SafeError | undef
       message: "Outbox max attempts must be positive.",
     });
   }
+  if (event.idempotencyKey.trim().length === 0) {
+    return createSafeError({
+      category: "validation",
+      code: "CONTROL_PLANE_OUTBOX_IDEMPOTENCY_KEY_REQUIRED",
+      message: "Outbox idempotency key is required.",
+    });
+  }
+  if (event.idempotencyKey.length > maxIdempotencyKeyLength) {
+    return createSafeError({
+      category: "validation",
+      code: "CONTROL_PLANE_OUTBOX_IDEMPOTENCY_KEY_TOO_LONG",
+      message: "Outbox idempotency key is too long.",
+    });
+  }
+  if (!isNamespacedIdempotencyKey(event.idempotencyKey)) {
+    return createSafeError({
+      category: "validation",
+      code: "CONTROL_PLANE_OUTBOX_IDEMPOTENCY_KEY_NOT_NAMESPACED",
+      message: "Outbox idempotency key must be namespaced.",
+    });
+  }
   if ((event.contentRefId === undefined) !== (event.contentIntegrityHash === undefined)) {
     return createSafeError({
       category: "validation",
@@ -95,6 +118,11 @@ export function validateNewOutboxEvent(event: NewOutboxEvent): SafeError | undef
     });
   }
   return undefined;
+}
+
+function isNamespacedIdempotencyKey(value: string): boolean {
+  const segments = value.split(":");
+  return segments.length >= 2 && segments.every((segment) => segment.trim().length > 0);
 }
 
 export function calculateRetryDelayMs(attempts: number): number {

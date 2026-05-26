@@ -1,9 +1,10 @@
 export type DatabaseReadinessStatus = "disabled" | "ready" | "unavailable";
+export type DatabaseMigrationStatus = "applied" | "missing" | "not-checked";
 
 export type DatabaseReadinessReport = Readonly<{
   enabled: boolean;
   status: DatabaseReadinessStatus;
-  migrationStatus: "not-checked";
+  migrationStatus: DatabaseMigrationStatus;
   reasonCode?: string;
 }>;
 

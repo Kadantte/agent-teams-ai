@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 
 import { PrismaClient } from "../generated/prisma/client.js";
@@ -45,4 +46,95 @@ describeDb("Phase 4 database schema", () => {
       "outbox_events",
     ]);
   });
+
+  it("deduplicates outbox writes by idempotency key without raising unique errors", async () => {
+    if (prisma === undefined) {
+      throw new Error("Prisma client was not initialized.");
+    }
+    const idempotencyKey = `db-test:${randomUUID()}`;
+
+    try {
+      await Promise.all([
+        prisma.outboxEvent.createMany({
+          data: outboxCreateData({ id: randomUUID(), idempotencyKey }),
+          skipDuplicates: true,
+        }),
+        prisma.outboxEvent.createMany({
+          data: outboxCreateData({ id: randomUUID(), idempotencyKey }),
+          skipDuplicates: true,
+        }),
+      ]);
+
+      await expect(prisma.outboxEvent.count({ where: { idempotencyKey } })).resolves.toBe(
+        1,
+      );
+    } finally {
+      await prisma.outboxEvent.deleteMany({ where: { idempotencyKey } });
+    }
+  });
+
+  it("rolls back external content and outbox rows in the same transaction", async () => {
+    if (prisma === undefined) {
+      throw new Error("Prisma client was not initialized.");
+    }
+    const contentId = randomUUID();
+    const outboxId = randomUUID();
+    const idempotencyKey = `db-test:${randomUUID()}`;
+
+    await expect(
+      prisma.$transaction(async (client) => {
+        await client.externalActionContent.create({
+          data: {
+            contentEncryptionAlgorithm: "AES-256-GCM",
+            contentKind: "github.comment.body",
+            ciphertextSha256:
+              "d95dc1813da7aee01bdc9d85c66309b390c16043b2a2f19744cbdab01c6ed1ca",
+            dataKeyAlgorithm: "AES-256-GCM",
+            expiresAt: new Date(Date.now() + 60_000),
+            id: contentId,
+            keyRef: "db-test",
+          },
+        });
+        await client.outboxEvent.create({
+          data: outboxCreateData({
+            contentIntegrityHash:
+              "d95dc1813da7aee01bdc9d85c66309b390c16043b2a2f19744cbdab01c6ed1ca",
+            contentRefId: contentId,
+            id: outboxId,
+            idempotencyKey,
+          }),
+        });
+        throw new Error("rollback");
+      }),
+    ).rejects.toThrow("rollback");
+
+    await expect(
+      prisma.externalActionContent.findUnique({ where: { id: contentId } }),
+    ).resolves.toBeNull();
+    await expect(
+      prisma.outboxEvent.findUnique({ where: { id: outboxId } }),
+    ).resolves.toBeNull();
+  });
 });
+
+function outboxCreateData(input: {
+  id: string;
+  idempotencyKey: string;
+  contentRefId?: string;
+  contentIntegrityHash?: string;
+}) {
+  return {
+    eventType: "db.test",
+    eventVersion: 1,
+    id: input.id,
+    idempotencyKey: input.idempotencyKey,
+    maxAttempts: 3,
+    nextAttemptAt: new Date(),
+    payloadJson: {},
+    status: "pending",
+    ...(input.contentRefId === undefined ? {} : { contentRefId: input.contentRefId }),
+    ...(input.contentIntegrityHash === undefined
+      ? {}
+      : { contentIntegrityHash: input.contentIntegrityHash }),
+  };
+}

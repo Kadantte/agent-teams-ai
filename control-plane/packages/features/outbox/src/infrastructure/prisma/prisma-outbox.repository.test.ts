@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { createSafeError, toUnixMilliseconds } from "@agent-teams-control-plane/shared";
-import type { PrismaDatabaseClient } from "@agent-teams-control-plane/platform-database";
+import {
+  PrismaTransactionRunner,
+  type PrismaDatabaseClient,
+} from "@agent-teams-control-plane/platform-database";
 
 import type { ClaimedOutboxEvent } from "../../application/ports/outbox.repository.js";
+import type { NewOutboxEvent } from "../../domain/outbox-event.js";
 import { PrismaOutboxRepository } from "./prisma-outbox.repository.js";
 
 describe("PrismaOutboxRepository", () => {
@@ -49,6 +53,77 @@ describe("PrismaOutboxRepository", () => {
       "transaction:commit",
     ]);
   });
+
+  it("appends with atomic insert-if-absent semantics before reading duplicates", async () => {
+    const operations: string[] = [];
+    const event = newOutboxEvent({ id: "event-2" as never });
+    const row = {
+      ...outboxRow({
+        ...event,
+        createdAt: new Date(0),
+        id: "event-1" as never,
+        updatedAt: new Date(0),
+      }),
+      maxAttempts: 10,
+      nextAttemptAt: new Date(60_000),
+    };
+    const client = {
+      outboxEvent: {
+        createMany: async () => {
+          operations.push("outbox:createMany");
+          return { count: 0 };
+        },
+        findUnique: async () => {
+          operations.push("outbox:findUnique");
+          return row;
+        },
+      },
+    };
+    const repository = new PrismaOutboxRepository(fakeDatabaseClient(client));
+    const runner = new PrismaTransactionRunner(
+      fakeDatabaseClient({
+        $transaction: async (work: (transactionClient: unknown) => Promise<unknown>) =>
+          work(client),
+      }),
+    );
+
+    const appended = await runner.runInTransaction((context) =>
+      repository.append(event, context),
+    );
+
+    expect(appended.id).toBe("event-1");
+    expect(operations).toEqual(["outbox:createMany", "outbox:findUnique"]);
+  });
+
+  it("rejects duplicate idempotency keys with different content", async () => {
+    const event = newOutboxEvent({ payload: { body: "new" } });
+    const client = {
+      outboxEvent: {
+        createMany: async () => ({ count: 0 }),
+        findUnique: async () =>
+          outboxRow({
+            ...event,
+            createdAt: new Date(0),
+            id: "event-1" as never,
+            payload: { body: "old" },
+            updatedAt: new Date(0),
+          }),
+      },
+    };
+    const repository = new PrismaOutboxRepository(fakeDatabaseClient(client));
+    const runner = new PrismaTransactionRunner(
+      fakeDatabaseClient({
+        $transaction: async (work: (transactionClient: unknown) => Promise<unknown>) =>
+          work(client),
+      }),
+    );
+
+    await expect(
+      runner.runInTransaction((context) => repository.append(event, context)),
+    ).rejects.toMatchObject({
+      code: "CONTROL_PLANE_OUTBOX_IDEMPOTENCY_CONFLICT",
+    });
+  });
 });
 
 function fakeDatabaseClient(client: unknown): PrismaDatabaseClient {
@@ -73,5 +148,48 @@ function claimedEvent(): ClaimedOutboxEvent {
     type: "test.event",
     updatedAtMs: toUnixMilliseconds(0),
     version: 1,
+  };
+}
+
+function newOutboxEvent(overrides: Partial<NewOutboxEvent> = {}): NewOutboxEvent {
+  return {
+    id: "event-1" as never,
+    idempotencyKey: "workspace:event",
+    maxAttempts: 3,
+    nextAttemptAtMs: toUnixMilliseconds(0),
+    payload: {},
+    type: "test.event",
+    version: 1,
+    ...overrides,
+  };
+}
+
+function outboxRow(input: NewOutboxEvent & { createdAt: Date; updatedAt: Date }) {
+  return {
+    aggregateId: input.aggregateId ?? null,
+    aggregateKind: input.aggregateKind ?? null,
+    attempts: 0,
+    claimToken: null,
+    completedAt: null,
+    contentIntegrityHash: input.contentIntegrityHash ?? null,
+    contentRefId: input.contentRefId ?? null,
+    createdAt: input.createdAt,
+    deadLetteredAt: null,
+    eventType: input.type,
+    eventVersion: input.version,
+    id: input.id,
+    idempotencyKey: input.idempotencyKey,
+    lastErrorCategory: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastErrorRetryable: null,
+    lockedBy: null,
+    lockedUntil: null,
+    maxAttempts: input.maxAttempts,
+    nextAttemptAt: new Date(input.nextAttemptAtMs),
+    payloadJson: input.payload,
+    status: "pending",
+    updatedAt: input.updatedAt,
+    workspaceId: input.workspaceId ?? null,
   };
 }

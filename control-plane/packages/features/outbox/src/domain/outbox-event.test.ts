@@ -26,6 +26,35 @@ describe("outbox event domain", () => {
     });
   });
 
+  it("requires namespaced idempotency keys", () => {
+    expect(
+      validateNewOutboxEvent({
+        id: "event-1" as never,
+        idempotencyKey: "   ",
+        maxAttempts: 3,
+        nextAttemptAtMs: toUnixMilliseconds(0),
+        payload: {},
+        type: "test.event",
+        version: 1,
+      }),
+    ).toMatchObject({
+      code: "CONTROL_PLANE_OUTBOX_IDEMPOTENCY_KEY_REQUIRED",
+    });
+    expect(
+      validateNewOutboxEvent({
+        id: "event-1" as never,
+        idempotencyKey: "event-only",
+        maxAttempts: 3,
+        nextAttemptAtMs: toUnixMilliseconds(0),
+        payload: {},
+        type: "test.event",
+        version: 1,
+      }),
+    ).toMatchObject({
+      code: "CONTROL_PLANE_OUTBOX_IDEMPOTENCY_KEY_NOT_NAMESPACED",
+    });
+  });
+
   it("calculates bounded retry delays", () => {
     expect(calculateRetryDelayMs(1)).toBe(0);
     expect(calculateRetryDelayMs(2)).toBe(30_000);
