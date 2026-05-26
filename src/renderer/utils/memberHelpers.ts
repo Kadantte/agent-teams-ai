@@ -1267,7 +1267,11 @@ export function isOpenCodeRelaunchActionable({
     );
   }
   if (isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry)) {
-    return false;
+    return (
+      spawnEntry.runtimeDiagnosticSeverity === 'error' ||
+      hasStoppedRuntimeLivenessKind(spawnEntry.livenessKind) ||
+      hasStoppedRuntimeLivenessKind(runtimeEntry?.livenessKind)
+    );
   }
   if (
     spawnEntry?.launchState === 'failed_to_start' ||

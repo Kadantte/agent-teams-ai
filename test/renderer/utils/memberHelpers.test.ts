@@ -731,6 +731,44 @@ describe('memberHelpers spawn-aware presence', () => {
     ).toBe(true);
   });
 
+  it('marks unsafe provisioned-but-not-alive OpenCode entries as relaunchable', () => {
+    expect(
+      isOpenCodeRelaunchActionable({
+        member: { ...member, providerId: 'opencode' },
+        spawnEntry: {
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+          livenessKind: 'not_found',
+          runtimeDiagnostic: 'Runtime is no longer registered',
+          runtimeDiagnosticSeverity: 'warning',
+          updatedAt: '2026-05-25T20:14:02.147Z',
+        },
+      })
+    ).toBe(true);
+
+    expect(
+      isOpenCodeRelaunchActionable({
+        member: { ...member, providerId: 'opencode' },
+        spawnEntry: {
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnostic: 'Runtime process crashed',
+          runtimeDiagnosticSeverity: 'error',
+          updatedAt: '2026-05-25T20:14:02.147Z',
+        },
+      })
+    ).toBe(true);
+  });
+
   it('does not mark fresh OpenCode runtime candidates as relaunchable', () => {
     expect(
       isOpenCodeRelaunchActionable({
