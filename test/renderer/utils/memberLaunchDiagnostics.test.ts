@@ -157,6 +157,7 @@ describe('member launch diagnostics', () => {
     expect(payload).toMatchObject({
       launchState: 'confirmed_alive',
       spawnStatus: 'online',
+      runtimeAlive: true,
       bootstrapConfirmed: true,
       hardFailure: false,
     });

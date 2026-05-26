@@ -325,6 +325,75 @@ describe('TeamLaunchSummaryProjection', () => {
     });
   });
 
+  it('does not project provisioned-but-not-alive from stale bootstrap proof before spawn acceptance', () => {
+    const summary = choosePreferredLaunchStateSummary({
+      bootstrapSnapshot: {
+        version: 2,
+        teamName: 'signal-ops',
+        updatedAt: '2026-05-25T20:10:10.000Z',
+        launchPhase: 'finished',
+        expectedMembers: ['tom'],
+        members: {
+          tom: {
+            name: 'tom',
+            providerId: 'anthropic',
+            launchState: 'confirmed_alive',
+            agentToolAccepted: true,
+            runtimeAlive: true,
+            bootstrapConfirmed: true,
+            hardFailure: false,
+            firstSpawnAcceptedAt: '2026-05-25T20:10:00.000Z',
+            lastHeartbeatAt: '2026-05-25T20:10:05.000Z',
+            lastEvaluatedAt: '2026-05-25T20:10:10.000Z',
+          },
+        },
+        summary: {
+          confirmedCount: 1,
+          pendingCount: 0,
+          failedCount: 0,
+          runtimeAlivePendingCount: 0,
+        },
+        teamLaunchState: 'clean_success',
+      } as never,
+      launchSnapshot: {
+        version: 2,
+        teamName: 'signal-ops',
+        updatedAt: '2026-05-25T20:14:02.147Z',
+        launchPhase: 'finished',
+        expectedMembers: ['tom'],
+        members: {
+          tom: {
+            name: 'tom',
+            providerId: 'anthropic',
+            launchState: 'failed_to_start',
+            agentToolAccepted: true,
+            runtimeAlive: false,
+            bootstrapConfirmed: false,
+            hardFailure: true,
+            hardFailureReason: 'CLI process exited (code 1) \u2014 team provisioned but not alive',
+            firstSpawnAcceptedAt: '2026-05-25T20:13:46.326Z',
+            lastEvaluatedAt: '2026-05-25T20:14:02.147Z',
+          },
+        },
+        summary: {
+          confirmedCount: 0,
+          pendingCount: 0,
+          failedCount: 1,
+          runtimeAlivePendingCount: 0,
+        },
+        teamLaunchState: 'partial_failure',
+      } as never,
+    });
+
+    expect(summary).toMatchObject({
+      partialLaunchFailure: true,
+      missingMembers: ['tom'],
+      teamLaunchState: 'partial_failure',
+      confirmedCount: 0,
+      failedCount: 1,
+    });
+  });
+
   it('prefers a mixed-aware persisted summary projection over a newer but poorer bootstrap snapshot', () => {
     const bootstrapSnapshot = {
       version: 2,

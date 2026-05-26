@@ -538,6 +538,12 @@ export function buildMemberLaunchDiagnosticsPayload(params: {
   const spawnStatus = bootstrapConfirmedProvisionedButNotAlive
     ? 'online'
     : (spawnEntry?.status ?? params.spawnStatus);
+  const spawnRuntimeAlive = bootstrapConfirmedProvisionedButNotAlive
+    ? true
+    : spawnEntry?.runtimeAlive;
+  const spawnHardFailure = bootstrapConfirmedProvisionedButNotAlive
+    ? false
+    : spawnEntry?.hardFailure;
   const runtimeAdvisoryTitle = boundedString(params.runtimeAdvisoryTitle);
   const runtimeAdvisoryLabel = boundedString(params.runtimeAdvisoryLabel ?? undefined);
   const runtimeAdvisoryMessage = boundedString(runtimeAdvisory?.message);
@@ -549,10 +555,10 @@ export function buildMemberLaunchDiagnosticsPayload(params: {
     runtimeAdvisoryMessage,
     spawnStatus,
     launchState,
-    runtimeAlive: spawnEntry?.runtimeAlive,
+    runtimeAlive: spawnRuntimeAlive,
     bootstrapConfirmed: spawnEntry?.bootstrapConfirmed,
     agentToolAccepted: spawnEntry?.agentToolAccepted,
-    hardFailure: spawnEntry?.hardFailure,
+    hardFailure: spawnHardFailure,
     livenessKind,
     runtimeEntry,
   });
@@ -666,18 +672,14 @@ export function buildMemberLaunchDiagnosticsPayload(params: {
     ...(typeof runtimeEntry?.restartable === 'boolean'
       ? { restartable: runtimeEntry.restartable }
       : {}),
-    ...(typeof spawnEntry?.runtimeAlive === 'boolean'
-      ? { runtimeAlive: spawnEntry.runtimeAlive }
-      : {}),
+    ...(typeof spawnRuntimeAlive === 'boolean' ? { runtimeAlive: spawnRuntimeAlive } : {}),
     ...(typeof spawnEntry?.bootstrapConfirmed === 'boolean'
       ? { bootstrapConfirmed: spawnEntry.bootstrapConfirmed }
       : {}),
     ...(typeof spawnEntry?.agentToolAccepted === 'boolean'
       ? { agentToolAccepted: spawnEntry.agentToolAccepted }
       : {}),
-    ...(typeof spawnEntry?.hardFailure === 'boolean'
-      ? { hardFailure: bootstrapConfirmedProvisionedButNotAlive ? false : spawnEntry.hardFailure }
-      : {}),
+    ...(typeof spawnHardFailure === 'boolean' ? { hardFailure: spawnHardFailure } : {}),
     ...(livenessKind ? { livenessKind } : {}),
     ...((spawnEntry?.livenessSource ?? params.livenessSource)
       ? { livenessSource: spawnEntry?.livenessSource ?? params.livenessSource }

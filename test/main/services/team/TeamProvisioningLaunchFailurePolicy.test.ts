@@ -15,6 +15,7 @@ import {
   isRegisteredRuntimeMetadataFailureReason,
   stripProcessTableUnavailableDiagnosticSuffix,
 } from '@main/services/team/provisioning/TeamProvisioningLaunchFailurePolicy';
+import { isBootstrapConfirmedProvisionedButNotAliveFailure } from '@shared/utils/teamLaunchFailureReason';
 import { describe, expect, it } from 'vitest';
 
 describe('TeamProvisioningLaunchFailurePolicy', () => {
@@ -112,7 +113,33 @@ describe('TeamProvisioningLaunchFailurePolicy', () => {
       )
     ).toBe(false);
     expect(isAutoClearableLaunchFailureReason('model not found')).toBe(false);
-    expect(isAutoClearableLaunchFailureReason(undefined)).toBe(false);
+    expect(isAutoClearableLaunchFailureReason()).toBe(false);
+  });
+
+  it('requires bootstrap proof before treating provisioned-but-not-alive as healed', () => {
+    const reason = 'CLI process exited (code 1) \u2014 team provisioned but not alive';
+
+    expect(
+      isBootstrapConfirmedProvisionedButNotAliveFailure({
+        status: 'error',
+        launchState: 'failed_to_start',
+        hardFailure: true,
+        hardFailureReason: 'Launch state is terminal for this run',
+        error: reason,
+        bootstrapConfirmed: true,
+      })
+    ).toBe(true);
+
+    expect(
+      isBootstrapConfirmedProvisionedButNotAliveFailure({
+        status: 'error',
+        launchState: 'failed_to_start',
+        hardFailure: true,
+        hardFailureReason: reason,
+        bootstrapConfirmed: false,
+        livenessKind: 'registered_only',
+      })
+    ).toBe(false);
   });
 
   it('derives member launch state by the existing precedence order', () => {

@@ -5,6 +5,7 @@ import {
 } from '@shared/utils/teamLaunchFailureReason';
 import { normalizeOptionalTeamProviderId } from '@shared/utils/teamProvider';
 
+import { isBootstrapMemberEvidenceCurrentForMember } from './provisioning/TeamProvisioningOpenCodeRuntimeEvidencePolicy';
 import { shouldIgnoreTerminalBootstrapOnlyPendingSnapshot } from './TeamBootstrapStateReader';
 import {
   deriveTeamLaunchAggregateState,
@@ -54,16 +55,6 @@ function getPersistedLaunchMemberNames(snapshot: PersistedTeamLaunchSnapshot): s
   return Array.from(new Set([...snapshot.expectedMembers, ...Object.keys(snapshot.members)]));
 }
 
-function hasCompatibleRuntimeRunId(
-  member: PersistedTeamLaunchMemberState,
-  bootstrapMember: PersistedTeamLaunchMemberState | undefined
-): boolean {
-  if (!member.runtimeRunId || !bootstrapMember?.runtimeRunId) {
-    return true;
-  }
-  return member.runtimeRunId === bootstrapMember.runtimeRunId;
-}
-
 function hasBootstrapConfirmationProof(
   member: PersistedTeamLaunchMemberState,
   bootstrapMember: PersistedTeamLaunchMemberState | undefined
@@ -72,8 +63,9 @@ function hasBootstrapConfirmationProof(
     return true;
   }
   return (
-    hasCompatibleRuntimeRunId(member, bootstrapMember) &&
-    hasBootstrapConfirmationProofForLaunchFailure(bootstrapMember)
+    bootstrapMember != null &&
+    hasBootstrapConfirmationProofForLaunchFailure(bootstrapMember) &&
+    isBootstrapMemberEvidenceCurrentForMember(member, bootstrapMember, 'confirmation')
   );
 }
 
@@ -82,7 +74,7 @@ function shouldProjectProvisionedButNotAliveAsConfirmed(params: {
   bootstrapMember?: PersistedTeamLaunchMemberState;
 }): params is { member: PersistedTeamLaunchMemberState } {
   const member = params.member;
-  if (!member || member.launchState !== 'failed_to_start' || member.hardFailure !== true) {
+  if (member?.launchState !== 'failed_to_start' || member.hardFailure !== true) {
     return false;
   }
   return (

@@ -51,7 +51,10 @@ export function isProvisionedButNotAliveLaunchFailure(
   if (!entry) {
     return false;
   }
-  if (!isProvisionedButNotAliveFailureReason(entry.hardFailureReason ?? entry.error)) {
+  if (
+    !isProvisionedButNotAliveFailureReason(entry.hardFailureReason) &&
+    !isProvisionedButNotAliveFailureReason(entry.error)
+  ) {
     return false;
   }
   return (
