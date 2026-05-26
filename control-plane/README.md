@@ -31,6 +31,7 @@ NestJS is an outer framework, not the business architecture. Domain and applicat
 - [Plan Review And Hardening](docs/plan-review-and-hardening.md)
 - [Edge Cases And Failure Modes](docs/edge-cases.md)
 - [Security And Privacy Model](docs/security-and-privacy.md)
+- [Public Error Contract](docs/error-contract.md)
 - [ADR-001: NestJS Modular Monolith](docs/decisions/001-nestjs-modular-monolith.md)
 
 ## Deployment Modes
@@ -76,11 +77,11 @@ control-plane/
   docs/
 ```
 
-Phase 1 provides the workspace scaffold, health feature, config/logger platform packages, and architecture guardrails. GitHub, persistence, outbox, and external side effects are intentionally deferred.
+Phase 1 provides the workspace scaffold, health feature, config/logger platform packages, and architecture guardrails. Phase 2 adds the dependency-free shared kernel, build metadata plumbing, safe error primitives, typed IDs, time helpers, validation helpers, and stricter shared-kernel guardrails. Phase 3 adds the API safe error boundary, request/correlation ids, request context, and safe request logging. GitHub, persistence, outbox, and external side effects are intentionally deferred.
 
 `control-plane/` is a nested pnpm workspace on purpose. The desktop app remains the default root workspace, while the optional backend is developed and verified with `pnpm --dir control-plane ...` commands.
 
-## Phase 1 Commands
+## Control-Plane Commands
 
 Run these commands from the repository root when working only on the control-plane:
 
@@ -106,3 +107,4 @@ pnpm --dir control-plane config:hosted-failfast
 ```
 
 Phase 1 intentionally adds no Prisma, Octokit, queue, messenger, or billing SDKs.
+Phase 2 keeps that restriction and also keeps `packages/shared` dependency-free.

@@ -529,7 +529,19 @@ Acceptance:
 - env validation
 - safe logging foundation
 
-### Phase 3 - Persistence, Outbox, Locks
+### Phase 3 - API/Error/Observability Platform Layer
+
+Implement the API boundary before persistence and external side effects.
+
+Acceptance:
+
+- public API errors use the shared safe error contract
+- unknown exceptions do not expose stack traces, provider messages, or secrets
+- request and correlation ids are generated or propagated
+- request logs contain safe method/path/status/duration metadata
+- global API adapters stay in platform packages, not feature domain/application code
+
+### Phase 4 - Persistence, Outbox, Locks
 
 Implement persistence before GitHub side effects.
 
@@ -544,7 +556,7 @@ Acceptance:
 - key rotation/rewrap is documented or gated before public rollout
 - no in-memory lock is required for correctness
 
-### Phase 4 - Identity, Pairing, Setup State
+### Phase 5 - Identity, Pairing, Setup State
 
 Implement workspace/client identity and GitHub setup state before GitHub connector side effects.
 
@@ -556,7 +568,7 @@ Acceptance:
 - installation binding requires GitHub-side authority verification
 - unclaimed and pending-claim installation flows are represented, even if UI is deferred
 
-### Phase 5 - Generic Integration And Agent Actions
+### Phase 6 - Generic Integration And Agent Actions
 
 Implement generic external action flow.
 
@@ -571,7 +583,7 @@ Acceptance:
 - allowed comment action stores encrypted ExternalActionContent, not raw body in outbox/audit
 - denied request is safe, auditable, and does not enqueue side effects
 
-### Phase 6 - GitHub Foundation
+### Phase 7 - GitHub Foundation
 
 Implement installation lifecycle and webhook normalization before posting comments.
 
@@ -589,7 +601,7 @@ Acceptance:
 - desktop setup session is resumable after restart
 - stale setup sessions cannot overwrite connected state
 
-### Phase 7 - GitHub Comments V1
+### Phase 8 - GitHub Comments V1
 
 Implement top-level issue/PR comments with attribution.
 
@@ -601,7 +613,7 @@ Acceptance:
 - update-or-create by marker
 - recovery from external success and DB failure
 
-### Phase 8 - Desktop Integration
+### Phase 9 - Desktop Integration
 
 Expose control-plane as an optional capability.
 

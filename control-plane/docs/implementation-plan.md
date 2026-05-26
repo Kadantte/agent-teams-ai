@@ -182,7 +182,7 @@ Rules:
 
 Acceptance criteria:
 
-- safe error format documented
+- safe error format documented in [Public Error Contract](error-contract.md)
 - unit tests for Result/errors/config
 - API health route includes version/build metadata without secrets
 
@@ -193,7 +193,45 @@ Approximate change size:
 ~700-1200 lines
 ```
 
-## Phase 3 - Database, Transactions, Outbox, Locks
+## Phase 3 - API/Error/Observability Platform Layer
+
+Goals:
+
+- add `packages/platform/api`
+- add framework adapter for public safe error responses
+- add request and correlation id propagation
+- add request context store for API request scope
+- add safe request logging with duration/status/method/path
+- add global Nest exception filter and request interceptor
+- keep all public errors aligned with [Public Error Contract](error-contract.md)
+
+Important rule:
+
+API adapters normalize errors and observability metadata only. They do not perform
+auth decisions, persistence, GitHub calls, queue dispatch, pairing, billing, or
+provider-specific error mapping.
+
+Acceptance criteria:
+
+- every API response receives `x-request-id` and `x-correlation-id`
+- safe incoming correlation/request ids are preserved
+- unsafe incoming ids are ignored and replaced
+- `SafeError` values serialize to the public error contract
+- unknown exceptions serialize to `CONTROL_PLANE_INTERNAL_ERROR`
+- public error responses do not expose stack traces or raw exception messages
+- health response keeps version/build metadata and no secrets
+- request logs include safe metadata only
+- global filter/interceptor are registered once through platform module wiring
+- architecture guardrails still pass
+
+Approximate change size:
+
+```text
+🎯 9   🛡️ 9   🧠 5
+~600-1100 lines
+```
+
+## Phase 4 - Database, Transactions, Outbox, Locks
 
 Goals:
 
@@ -262,7 +300,7 @@ Approximate change size:
 ~1200-2200 lines
 ```
 
-## Phase 4 - identity-access And desktop-pairing
+## Phase 5 - identity-access And desktop-pairing
 
 Goals:
 
@@ -325,7 +363,7 @@ Approximate change size:
 ~1200-2200 lines
 ```
 
-## Phase 5 - integration-registry
+## Phase 6 - integration-registry
 
 Goals:
 
@@ -380,7 +418,7 @@ Approximate change size:
 ~1000-1800 lines
 ```
 
-## Phase 6 - agent-actions
+## Phase 7 - agent-actions
 
 Goals:
 
@@ -429,7 +467,7 @@ Approximate change size:
 ~1500-2600 lines
 ```
 
-## Phase 7 - github-app Foundation
+## Phase 8 - github-app Foundation
 
 Goals:
 
@@ -505,7 +543,7 @@ Approximate change size:
 ~1800-3200 lines
 ```
 
-## Phase 8 - GitHub Agent Comments V1
+## Phase 9 - GitHub Agent Comments V1
 
 Goals:
 
@@ -571,7 +609,7 @@ Approximate change size:
 ~1600-2800 lines
 ```
 
-## Phase 9 - Desktop Integration
+## Phase 10 - Desktop Integration
 
 Goals:
 
@@ -614,7 +652,7 @@ Approximate change size:
 ~1200-2400 lines
 ```
 
-## Phase 10 - Messenger Connector Foundation
+## Phase 11 - Messenger Connector Foundation
 
 This phase validates that the architecture is not GitHub-centric.
 

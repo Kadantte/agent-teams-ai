@@ -344,13 +344,15 @@ Exact retention windows can be configured later, but adding forbidden data requi
 
 ## Public API Error Rules
 
-Public errors should use stable safe codes:
+Public errors should use the stable safe contract from
+[Public Error Contract](error-contract.md):
 
 ```json
 {
   "error": {
     "code": "GITHUB_REPOSITORY_NOT_ENABLED",
     "message": "Repository is not enabled for Agent Teams GitHub integration.",
+    "category": "authorization",
     "retryable": false,
     "correlationId": "..."
   }
