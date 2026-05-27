@@ -281,7 +281,7 @@ describe('ClaudeMultimodelBridgeService', () => {
       },
     } as const;
 
-    execCliMock.mockImplementation((_binaryPath, args) => {
+    execCliMock.mockImplementation((_binaryPath, args, _options) => {
       const normalizedArgs = Array.isArray(args) ? args.join(' ') : '';
       const providerArgIndex = Array.isArray(args) ? args.indexOf('--provider') : -1;
       const providerId =
@@ -344,15 +344,49 @@ describe('ClaudeMultimodelBridgeService', () => {
     expect(calls).not.toContain('model list --json --provider all');
   });
 
-  it('returns a scoped provider error when single-provider summary status times out', async () => {
-    execCliMock.mockImplementation((_binaryPath, args) => {
+  it('falls back to scoped legacy provider probes when single-provider summary status times out', async () => {
+    execCliMock.mockImplementation((_binaryPath, args, options) => {
       const normalizedArgs = Array.isArray(args) ? args.join(' ') : '';
       if (normalizedArgs === 'runtime status --json --provider codex --summary') {
         return Promise.reject(
           new Error(
-            'Command timed out after 30000ms: /mock/agent_teams_orchestrator runtime status --json --provider codex --summary'
+            `Command timed out after ${options?.timeout}ms: /mock/agent_teams_orchestrator runtime status --json --provider codex --summary`
           )
         );
+      }
+      if (normalizedArgs === 'auth status --json --provider codex') {
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            schemaVersion: 1,
+            provider: 'codex',
+            status: {
+              supported: true,
+              authenticated: false,
+              authMethod: null,
+              verificationState: 'unknown',
+              canLoginFromUi: false,
+              statusMessage: 'Codex native runtime unavailable',
+              capabilities: {
+                teamLaunch: true,
+                oneShot: true,
+              },
+            },
+          }),
+          stderr: '',
+        });
+      }
+      if (normalizedArgs === 'model list --json --provider codex') {
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            schemaVersion: 1,
+            providers: {
+              codex: {
+                models: [{ id: 'gpt-5.4', label: 'GPT-5.4' }],
+              },
+            },
+          }),
+          stderr: '',
+        });
       }
 
       return Promise.reject(new Error(`Unexpected execCli call: ${normalizedArgs}`));
@@ -367,16 +401,23 @@ describe('ClaudeMultimodelBridgeService', () => {
 
     expect(provider).toMatchObject({
       providerId: 'codex',
-      verificationState: 'error',
-      statusMessage: 'Provider status unavailable',
+      supported: true,
+      authenticated: false,
+      verificationState: 'unknown',
+      statusMessage: 'Codex native runtime unavailable',
+      models: ['gpt-5.4'],
     });
-    expect(provider.detailMessage).toContain('Command timed out after 30000ms');
-    expect(calls).toEqual(['runtime status --json --provider codex --summary']);
-    expect(vi.mocked(console.warn).mock.calls.map((call) => call.join(' '))).toEqual([
-      expect.stringContaining(
-        'Provider-scoped summary runtime status unavailable for codex, returning scoped error'
-      ),
+    expect(calls).toEqual([
+      'runtime status --json --provider codex --summary',
+      'auth status --json --provider codex',
+      'model list --json --provider codex',
     ]);
+    expect(execCliMock.mock.calls[0][2]?.timeout).toBe(5000);
+    expect(vi.mocked(console.warn).mock.calls.map((call) => call.join(' '))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Provider-scoped summary runtime status timed out for codex'),
+      ])
+    );
     vi.mocked(console.warn).mockClear();
   });
 
@@ -480,7 +521,7 @@ describe('ClaudeMultimodelBridgeService', () => {
     ]);
   });
 
-  it('does not cascade aggregate summary timeouts into slower fallback probes', async () => {
+  it('falls back to scoped legacy probes for Anthropic and Codex aggregate summary timeouts', async () => {
     execCliMock.mockImplementation((_binaryPath, args, options) => {
       const normalizedArgs = Array.isArray(args) ? args.join(' ') : '';
       if (
@@ -494,6 +535,73 @@ describe('ClaudeMultimodelBridgeService', () => {
           )
         );
       }
+      if (normalizedArgs === 'auth status --json --provider anthropic') {
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            schemaVersion: 1,
+            provider: 'anthropic',
+            status: {
+              supported: true,
+              authenticated: true,
+              authMethod: 'claude.ai',
+              verificationState: 'verified',
+              canLoginFromUi: true,
+              capabilities: {
+                teamLaunch: true,
+                oneShot: true,
+              },
+            },
+          }),
+          stderr: '',
+        });
+      }
+      if (normalizedArgs === 'model list --json --provider anthropic') {
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            schemaVersion: 1,
+            providers: {
+              anthropic: {
+                models: [{ id: 'opus[1m]', label: 'Opus 4.7 (1M)' }],
+              },
+            },
+          }),
+          stderr: '',
+        });
+      }
+      if (normalizedArgs === 'auth status --json --provider codex') {
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            schemaVersion: 1,
+            provider: 'codex',
+            status: {
+              supported: true,
+              authenticated: false,
+              authMethod: null,
+              verificationState: 'unknown',
+              canLoginFromUi: false,
+              statusMessage: 'Codex native runtime unavailable',
+              capabilities: {
+                teamLaunch: true,
+                oneShot: true,
+              },
+            },
+          }),
+          stderr: '',
+        });
+      }
+      if (normalizedArgs === 'model list --json --provider codex') {
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            schemaVersion: 1,
+            providers: {
+              codex: {
+                models: [{ id: 'gpt-5.4', label: 'GPT-5.4' }],
+              },
+            },
+          }),
+          stderr: '',
+        });
+      }
 
       return Promise.reject(new Error(`Unexpected execCli call: ${normalizedArgs}`));
     });
@@ -505,22 +613,46 @@ describe('ClaudeMultimodelBridgeService', () => {
     const providers = await service.getProviderStatuses('/mock/agent_teams_orchestrator');
     const calls = execCliMock.mock.calls.map((call) => call[1].join(' '));
 
-    expect(execCliMock).toHaveBeenCalledTimes(3);
-    expect(execCliMock.mock.calls.map((call) => call[2]?.timeout)).toEqual([30000, 30000, 30000]);
-    expect(calls).toEqual([
-      'runtime status --json --provider anthropic --summary',
-      'runtime status --json --provider codex --summary',
-      'runtime status --json --provider opencode --summary',
-    ]);
+    expect(execCliMock).toHaveBeenCalledTimes(7);
+    expect(
+      execCliMock.mock.calls.map((call) => call[2]?.timeout as number).sort((a, b) => a - b)
+    ).toEqual([5000, 5000, 15000, 15000, 25000, 25000, 30000]);
+    expect(calls).toEqual(
+      expect.arrayContaining([
+        'runtime status --json --provider anthropic --summary',
+        'runtime status --json --provider codex --summary',
+        'runtime status --json --provider opencode --summary',
+        'auth status --json --provider anthropic',
+        'model list --json --provider anthropic',
+        'auth status --json --provider codex',
+        'model list --json --provider codex',
+      ])
+    );
     expect(providers.map((provider) => provider.providerId)).toEqual([
       'anthropic',
       'codex',
       'opencode',
     ]);
-    expect(providers.every((provider) => provider.verificationState === 'error')).toBe(true);
-    expect(
-      providers.every((provider) => provider.statusMessage === 'Provider status unavailable')
-    ).toBe(true);
+    expect(providers[0]).toMatchObject({
+      providerId: 'anthropic',
+      supported: true,
+      authenticated: true,
+      verificationState: 'verified',
+      models: ['opus[1m]'],
+    });
+    expect(providers[1]).toMatchObject({
+      providerId: 'codex',
+      supported: true,
+      authenticated: false,
+      verificationState: 'unknown',
+      statusMessage: 'Codex native runtime unavailable',
+      models: ['gpt-5.4'],
+    });
+    expect(providers[2]).toMatchObject({
+      providerId: 'opencode',
+      verificationState: 'error',
+      statusMessage: 'Provider status unavailable',
+    });
     expect(vi.mocked(console.warn).mock.calls.map((call) => call.join(' '))).toEqual([
       expect.stringContaining(
         'Provider-scoped runtime status timed out for anthropic, codex, opencode'
@@ -1016,7 +1148,7 @@ describe('ClaudeMultimodelBridgeService', () => {
       execCliMock.mock.calls.find(
         (call) => call[1].join(' ') === 'runtime status --json --provider codex --summary'
       )?.[2]?.timeout
-    ).toBe(30_000);
+    ).toBe(5_000);
     expect(
       execCliMock.mock.calls.find(
         (call) => call[1].join(' ') === 'runtime status --json --provider codex'
