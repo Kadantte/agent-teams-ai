@@ -73,6 +73,9 @@ export class GitHubActionDispatchHandler implements OutboxEventHandler {
       return {
         error: result.safeError,
         kind: "retry",
+        ...(result.safeError.code === "CONTROL_PLANE_GITHUB_ACTIONS_WORKER_PAUSED"
+          ? { consumeAttempt: false }
+          : {}),
         ...(result.retryAfterMs === undefined
           ? {}
           : { retryAfterMs: result.retryAfterMs }),

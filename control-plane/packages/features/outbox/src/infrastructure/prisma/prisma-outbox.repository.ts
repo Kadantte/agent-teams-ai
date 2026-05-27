@@ -177,13 +177,14 @@ export class PrismaOutboxRepository implements OutboxRepository {
     input: RetryOutboxEventInput,
   ): Promise<RetryClaimMutationResult> {
     const retryAfterMs = normalizeExplicitRetryAfterMs(input.retryAfterMs);
+    const consumeAttempt = input.consumeAttempt ?? true;
     return this.databaseClient.getClient().$transaction(async (client) => {
       const rows = await client.$queryRaw<OutboxRow[]>`
         UPDATE outbox_events
         SET
-          status = CASE WHEN attempts >= max_attempts THEN 'dead-lettered' ELSE 'pending' END,
+          status = CASE WHEN ${consumeAttempt} AND attempts >= max_attempts THEN 'dead-lettered' ELSE 'pending' END,
           next_attempt_at = CASE
-            WHEN attempts >= max_attempts THEN next_attempt_at
+            WHEN ${consumeAttempt} AND attempts >= max_attempts THEN next_attempt_at
             WHEN ${retryAfterMs}::double precision IS NOT NULL
               THEN now() + (${retryAfterMs}::double precision * interval '1 millisecond')
             WHEN attempts <= 1 THEN now()
@@ -197,11 +198,12 @@ export class PrismaOutboxRepository implements OutboxRepository {
           locked_by = NULL,
           locked_until = NULL,
           claim_token = NULL,
+          attempts = CASE WHEN ${consumeAttempt} THEN attempts ELSE GREATEST(attempts - 1, 0) END,
           last_error_code = ${input.safeError.code},
           last_error_category = ${input.safeError.category},
           last_error_message = ${input.safeError.message},
           last_error_retryable = ${input.safeError.retryable},
-          dead_lettered_at = CASE WHEN attempts >= max_attempts THEN now() ELSE NULL END,
+          dead_lettered_at = CASE WHEN ${consumeAttempt} AND attempts >= max_attempts THEN now() ELSE NULL END,
           updated_at = now()
         WHERE id = ${input.eventId}::uuid
           AND status = 'processing'

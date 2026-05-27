@@ -139,6 +139,37 @@ describe("ProcessOutboxBatchUseCase", () => {
     expect(retryAfterMs).toBe(120_000);
   });
 
+  it("passes non-consuming retry metadata to the repository", async () => {
+    const repository = createRepository([]);
+    let consumeAttempt: boolean | undefined;
+    repository.markFailedForRetry = async (input) => {
+      consumeAttempt = input.consumeAttempt;
+      return "updated";
+    };
+    const handlers: OutboxHandlerRegistry = {
+      getHandler: () => ({
+        handle: async () => ({
+          consumeAttempt: false,
+          error: createSafeError({
+            category: "authorization",
+            code: "TEST_PAUSED",
+            message: "paused",
+            retryable: true,
+          }),
+          kind: "retry",
+          retryAfterMs: 60_000,
+        }),
+      }),
+    };
+    const useCase = new ProcessOutboxBatchUseCase(repository, handlers);
+
+    await expect(useCase.execute({ batch: [claimedEvent()] })).resolves.toMatchObject({
+      retried: 1,
+    });
+
+    expect(consumeAttempt).toBe(false);
+  });
+
   it("dead-letters retry results that carry non-retryable safe errors", async () => {
     const calls: string[] = [];
     const repository = createRepository(calls);

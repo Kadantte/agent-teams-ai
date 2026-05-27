@@ -166,6 +166,48 @@ describe("PrismaOutboxRepository", () => {
     expect(queryText).not.toContain("::integer");
     expect(queryValues).toContain(Number.MAX_SAFE_INTEGER);
   });
+
+  it("does not consume attempts for deferred retries", async () => {
+    let queryText = "";
+    const queryValues: unknown[] = [];
+    const repository = new PrismaOutboxRepository(
+      fakeDatabaseClient({
+        $transaction: async (work: (client: unknown) => Promise<unknown>) =>
+          work({
+            $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+              queryText = strings.join("?");
+              queryValues.push(...values);
+              return [
+                outboxRow({
+                  ...newOutboxEvent(),
+                  createdAt: new Date(0),
+                  updatedAt: new Date(0),
+                }),
+              ];
+            },
+          }),
+      }),
+    );
+
+    await expect(
+      repository.markFailedForRetry({
+        claimToken: "claim-token",
+        consumeAttempt: false,
+        eventId: "event-1" as never,
+        retryAfterMs: 60_000,
+        safeError: createSafeError({
+          category: "authorization",
+          code: "TEST_PAUSED",
+          message: "paused",
+          retryable: true,
+        }),
+        workerId: "worker-1",
+      }),
+    ).resolves.toBe("updated");
+
+    expect(queryText).toContain("GREATEST(attempts - 1, 0)");
+    expect(queryValues).toContain(false);
+  });
 });
 
 function fakeDatabaseClient(client: unknown): PrismaDatabaseClient {

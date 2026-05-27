@@ -30,6 +30,7 @@ import { decodeGitHubActionPayloadEnvelope } from "./action-content-codec.js";
 
 const defaultProviderBackoffMs = 60_000;
 const minimumPositiveProviderBackoffMs = 1_000;
+const workerPausedBackoffMs = 60_000;
 
 export type DispatchGitHubActionInput = Readonly<{
   actionRequestId: string;
@@ -62,7 +63,11 @@ export class DispatchGitHubActionUseCase {
     input: DispatchGitHubActionInput,
   ): Promise<DispatchGitHubActionResult> {
     if (!this.featureGate.isEnabled("agent-github-actions")) {
-      return { kind: "retry", safeError: agentGitHubActionsWorkerPausedError() };
+      return {
+        kind: "retry",
+        retryAfterMs: workerPausedBackoffMs,
+        safeError: agentGitHubActionsWorkerPausedError(),
+      };
     }
 
     const actionRequestId = parseAgentActionId(input.actionRequestId);

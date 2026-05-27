@@ -106,6 +106,9 @@ export class ProcessOutboxBatchUseCase {
             ...(result.retryAfterMs === undefined
               ? {}
               : { retryAfterMs: result.retryAfterMs }),
+            ...(result.consumeAttempt === undefined
+              ? {}
+              : { consumeAttempt: result.consumeAttempt }),
             safeError,
             workerId: event.lockedBy,
           }),

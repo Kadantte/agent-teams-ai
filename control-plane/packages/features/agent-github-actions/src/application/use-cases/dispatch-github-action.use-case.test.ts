@@ -39,6 +39,7 @@ describe("DispatchGitHubActionUseCase", () => {
 
     await expect(harness.useCase.execute(dispatchInput())).resolves.toMatchObject({
       kind: "retry",
+      retryAfterMs: 60_000,
       safeError: { code: "CONTROL_PLANE_GITHUB_ACTIONS_WORKER_PAUSED" },
     });
     expect(harness.operations).toEqual([]);

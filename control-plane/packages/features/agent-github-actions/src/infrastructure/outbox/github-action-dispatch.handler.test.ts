@@ -91,6 +91,27 @@ describe("GitHubActionDispatchHandler", () => {
       },
     ]);
   });
+
+  it("defers worker-paused retries without consuming outbox attempts", async () => {
+    const handler = new GitHubActionDispatchHandler({
+      execute: async () => ({
+        kind: "retry",
+        retryAfterMs: 60_000,
+        safeError: {
+          category: "authorization",
+          code: "CONTROL_PLANE_GITHUB_ACTIONS_WORKER_PAUSED",
+          message: "paused",
+          retryable: true,
+        },
+      }),
+    } as unknown as DispatchGitHubActionUseCase);
+
+    await expect(handler.handle(claimedEvent())).resolves.toMatchObject({
+      consumeAttempt: false,
+      kind: "retry",
+      retryAfterMs: 60_000,
+    });
+  });
 });
 
 function claimedEvent(
