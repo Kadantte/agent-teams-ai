@@ -58,6 +58,10 @@ export interface JsonlParseResult {
   consumedBytes: number;
 }
 
+interface JsonlStreamParseOptions {
+  collectMessages?: boolean;
+}
+
 /**
  * Parse a JSONL file line by line using streaming.
  * This avoids loading the entire file into memory.
@@ -89,13 +93,37 @@ export async function parseJsonlFileWithStats(
 }
 
 /**
+ * Count parseable JSONL messages and consumed bytes without retaining message
+ * objects. Useful for first-read baselines where old transcript contents should
+ * not be surfaced and can be too large to keep in memory.
+ */
+export async function countJsonlFileWithStats(
+  filePath: string,
+  fsProvider: FileSystemProvider = defaultProvider
+): Promise<Omit<JsonlParseResult, 'messages'>> {
+  if (!(await fsProvider.exists(filePath))) {
+    return { parsedLineCount: 0, consumedBytes: 0 };
+  }
+
+  const result = await parseJsonlStream(fsProvider.createReadStream(filePath), filePath, {
+    collectMessages: false,
+  });
+  return {
+    parsedLineCount: result.parsedLineCount,
+    consumedBytes: result.consumedBytes,
+  };
+}
+
+/**
  * Parse JSONL data from a readable stream while tracking how many bytes were
  * safely consumed as complete lines.
  */
 export async function parseJsonlStream(
   stream: Readable,
-  filePath?: string
+  filePath?: string,
+  options: JsonlStreamParseOptions = {}
 ): Promise<JsonlParseResult> {
+  const collectMessages = options.collectMessages !== false;
   const messages: ParsedMessage[] = [];
   let pending = Buffer.alloc(0);
   let parsedLineCount = 0;
@@ -122,9 +150,13 @@ export async function parseJsonlStream(
     }
 
     try {
-      const parsed = parseJsonlLine(normalized);
-      if (parsed) {
-        messages.push(parsed);
+      if (collectMessages) {
+        const parsed = parseJsonlLine(normalized);
+        if (parsed) {
+          messages.push(parsed);
+          parsedLineCount += 1;
+        }
+      } else if (isCountableJsonlEntryLine(normalized)) {
         parsedLineCount += 1;
       }
     } catch {
@@ -163,9 +195,14 @@ export async function parseJsonlStream(
       const trailingLine = pending.toString('utf8');
       const normalized = normalizeJsonlLine(trailingLine);
       if (looksLikeJsonObjectLine(normalized)) {
-        const parsed = parseJsonlLine(normalized);
-        if (parsed) {
-          messages.push(parsed);
+        if (collectMessages) {
+          const parsed = parseJsonlLine(normalized);
+          if (parsed) {
+            messages.push(parsed);
+            parsedLineCount += 1;
+            consumedBytes += pending.length;
+          }
+        } else if (isCountableJsonlEntryLine(normalized)) {
           parsedLineCount += 1;
           consumedBytes += pending.length;
         }
@@ -223,6 +260,45 @@ function looksLikeJsonObjectLine(line: string): boolean {
   return line.startsWith('{');
 }
 
+function isCountableJsonlEntryLine(line: string): boolean {
+  const entry = JSON.parse(line) as Partial<ChatHistoryEntry> & {
+    uuid?: unknown;
+    type?: unknown;
+    message?: unknown;
+  };
+
+  const type = typeof entry.type === 'string' ? parseMessageType(entry.type) : null;
+  if (typeof entry.uuid !== 'string' || entry.uuid.length === 0 || !type) {
+    return false;
+  }
+
+  if (type === 'user') {
+    if (entry.message == null) {
+      return false;
+    }
+    const content = (entry.message as { content?: unknown }).content;
+    return content == null || isParserSafeContent(content);
+  }
+
+  if (type === 'assistant') {
+    if (!isJsonObjectRecord(entry.message)) {
+      return false;
+    }
+    const content = entry.message.content;
+    return isParserSafeContent(content);
+  }
+
+  return true;
+}
+
+function isJsonObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isParserSafeContent(value: unknown): boolean {
+  return typeof value === 'string' || (Array.isArray(value) && value.every((item) => item != null));
+}
+
 // =============================================================================
 // Entry Parsing
 // =============================================================================
@@ -265,6 +341,10 @@ function parseChatHistoryEntry(entry: ChatHistoryEntry): ParsedMessage | null {
   let codexNativeExecutableVersion: string | null | undefined;
   let isSidechain = false;
   let isMeta = false;
+  let isSynthetic: boolean | undefined;
+  let isReplay: boolean | undefined;
+  let origin: { kind?: string } | undefined;
+  let protocolKind: string | undefined;
   let userType: string | undefined;
   let sourceToolUseID: string | undefined;
   let sourceToolAssistantUUID: string | undefined;
@@ -288,7 +368,11 @@ function parseChatHistoryEntry(entry: ChatHistoryEntry): ParsedMessage | null {
       content = entry.message.content ?? '';
       role = entry.message.role;
       agentId = entry.agentId;
-      isMeta = entry.isMeta ?? false;
+      isSynthetic = entry.isSynthetic;
+      isReplay = entry.isReplay;
+      origin = entry.origin;
+      protocolKind = entry.protocolKind;
+      isMeta = (entry.isMeta ?? false) || entry.isSynthetic === true;
       sourceToolUseID = entry.sourceToolUseID;
       sourceToolAssistantUUID = entry.sourceToolAssistantUUID;
       toolUseResult = entry.toolUseResult;
@@ -339,6 +423,10 @@ function parseChatHistoryEntry(entry: ChatHistoryEntry): ParsedMessage | null {
     agentName,
     isSidechain,
     isMeta,
+    isSynthetic,
+    isReplay,
+    origin,
+    protocolKind,
     userType,
     isCompactSummary,
     level,
@@ -665,8 +753,8 @@ export async function analyzeSessionFileMetadata(
       model = parsed.model ?? model;
     }
 
-    if (!firstUserMessage && entry.type === 'user') {
-      const content = entry.message?.content;
+    if (!firstUserMessage && parsed.type === 'user' && isParsedUserChunkMessage(parsed)) {
+      const content = parsed.content;
       if (typeof content === 'string') {
         if (isCommandOutputContent(content)) {
           // Skip

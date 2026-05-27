@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import { useAppTranslation } from '@features/localization/renderer';
 import { api } from '@renderer/api';
 import { AttachmentPreviewList } from '@renderer/components/team/attachments/AttachmentPreviewList';
 import { DropZoneOverlay } from '@renderer/components/team/attachments/DropZoneOverlay';
@@ -66,6 +67,7 @@ interface MessageComposerProps {
   sendWarning?: string | null;
   sendDebugDetails?: OpenCodeRuntimeDeliveryDebugDetails | null;
   lastResult?: SendMessageResult | null;
+  revisionRequest?: MessageRevisionRequest | null;
   cornerActionPrefix?: React.ReactNode;
   /** Ref to the underlying textarea element for external focus management. */
   textareaRef?: React.Ref<HTMLTextAreaElement>;
@@ -84,6 +86,16 @@ interface MessageComposerProps {
     actionMode?: ActionMode,
     taskRefs?: TaskRef[]
   ) => void;
+  onRevisionCancel?: () => void;
+  onRevisionComplete?: (requestId: string) => void;
+}
+
+export interface MessageRevisionRequest {
+  requestId: string;
+  originalMessageId: string;
+  originalText: string;
+  recipient: string;
+  actionMode?: ActionMode;
 }
 
 interface PendingSendState {
@@ -91,6 +103,7 @@ interface PendingSendState {
   snapshot: ComposerDraftContent;
   previousDebugDetails: OpenCodeRuntimeDeliveryDebugDetails | null | undefined;
   previousLastResult: SendMessageResult | null | undefined;
+  revisionRequestId?: string;
   observedSending: boolean;
   optimisticallyCleared: boolean;
 }
@@ -107,6 +120,16 @@ function createPendingSendId(): string {
   return `${Date.now()}-${pendingSendIdCounter}`;
 }
 
+function buildRevisionCorrectionText(originalMessageId: string, text: string): string {
+  return [
+    `Correction for my previous message (MessageId: ${originalMessageId}).`,
+    '',
+    'Please use this corrected version instead:',
+    '',
+    text,
+  ].join('\n');
+}
+
 export const MessageComposer = ({
   teamName,
   members,
@@ -118,11 +141,15 @@ export const MessageComposer = ({
   sendWarning,
   sendDebugDetails,
   lastResult,
+  revisionRequest,
   cornerActionPrefix,
   textareaRef: externalTextareaRef,
   onSend,
   onCrossTeamSend,
+  onRevisionCancel,
+  onRevisionComplete,
 }: MessageComposerProps): React.JSX.Element => {
+  const { t } = useAppTranslation('team');
   const internalTextareaRef = useRef<HTMLTextAreaElement>(null);
   const textareaRef = useMemo(() => {
     // Merge internal and external refs into a single callback ref
@@ -217,9 +244,7 @@ export const MessageComposer = ({
   const isCrossTeam = selectedTeam !== null;
   const selectedTarget = sortedCrossTeamTargets.find((t) => t.teamName === selectedTeam);
   const targetDisplayName = selectedTarget?.displayName ?? selectedTeam;
-  const crossTeamHintText = isCrossTeam
-    ? 'Tip: Cross-team messages go to the target team lead. If you want the reply to come back to your team lead instead of you, say that explicitly in the message.'
-    : undefined;
+  const crossTeamHintText = isCrossTeam ? t('messageComposer.crossTeam.hint') : undefined;
 
   // Members load async with team data; keep recipient stable if valid, otherwise default to lead/first.
   useEffect(() => {
@@ -247,6 +272,7 @@ export const MessageComposer = ({
   });
   const isProvisioning = useStore((s) => isTeamProvisioningActive(s, teamName));
   const draft = useComposerDraft(teamName);
+  const appliedRevisionRequestIdRef = useRef<string | null>(null);
 
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
 
@@ -314,6 +340,30 @@ export const MessageComposer = ({
 
   const { actionMode, setActionMode, isLoaded: draftLoaded } = draft;
 
+  useEffect(() => {
+    if (!revisionRequest) {
+      appliedRevisionRequestIdRef.current = null;
+      return;
+    }
+    if (appliedRevisionRequestIdRef.current === revisionRequest.requestId) {
+      return;
+    }
+
+    appliedRevisionRequestIdRef.current = revisionRequest.requestId;
+    setSelectedTeam(null);
+    setRecipient(revisionRequest.recipient);
+    draft.restoreDraft({
+      text: revisionRequest.originalText,
+      chips: [],
+      attachments: [],
+      actionMode: revisionRequest.actionMode ?? actionMode,
+    });
+    if (revisionRequest.actionMode) {
+      setActionMode(revisionRequest.actionMode);
+    }
+    focusComposerTextarea();
+  }, [actionMode, draft, focusComposerTextarea, revisionRequest, setActionMode]);
+
   // Re-focus textarea after action mode changes (Do/Ask/Delegate button clicks)
   const prevActionModeRef = useRef(actionMode);
   useEffect(() => {
@@ -370,19 +420,19 @@ export const MessageComposer = ({
   const canAttach = supportsAttachments && draft.canAddMore && !sending;
   const attachmentRestrictionReason = !supportsAttachments
     ? isCrossTeam
-      ? 'File attachments are not supported for cross-team messages'
+      ? t('messageComposer.attachments.restrictions.crossTeam')
       : !isTeamAlive
-        ? 'Team must be online to attach files'
+        ? t('messageComposer.attachments.restrictions.teamOffline')
         : !showAttachmentControl
-          ? 'Files can be sent to the team lead or OpenCode teammates'
+          ? t('messageComposer.attachments.restrictions.unsupportedRecipient')
           : (memberAttachmentUnavailableReason ??
             (isOpenCodeRecipient
-              ? 'Team must be online to attach files for OpenCode teammates'
-              : 'Team must be online to attach files'))
+              ? t('messageComposer.attachments.restrictions.openCodeOffline')
+              : t('messageComposer.attachments.restrictions.teamOffline')))
     : sending
-      ? 'Wait for current message to finish sending before adding files'
+      ? t('messageComposer.attachments.restrictions.sending')
       : !draft.canAddMore
-        ? 'Maximum attachments reached'
+        ? t('messageComposer.attachments.restrictions.maximumReached')
         : undefined;
   const attachmentPayloadRestrictionReason = validateAttachmentPayloadsForMember({
     member: selectedMember,
@@ -391,15 +441,16 @@ export const MessageComposer = ({
   const attachmentsBlocked =
     draft.attachments.length > 0 &&
     (!supportsAttachments || attachmentPayloadRestrictionReason != null);
+  const isRevisionActive = revisionRequest !== null && revisionRequest !== undefined;
   const slashCommandRestrictionReason = standaloneSlashCommand
     ? draft.attachments.length > 0
-      ? 'Slash commands require a live team lead and cannot be sent with attachments'
+      ? t('messageComposer.slash.restrictions.attachments')
       : isCrossTeam
-        ? 'Slash commands can only be run on the current team lead'
+        ? t('messageComposer.slash.restrictions.crossTeam')
         : !isLeadRecipient
-          ? 'Slash commands can only be sent to the team lead'
+          ? t('messageComposer.slash.restrictions.notLead')
           : !isTeamAlive
-            ? 'Slash commands require the team lead to be online'
+            ? t('messageComposer.slash.restrictions.leadOffline')
             : null
     : null;
   const canSend =
@@ -410,6 +461,7 @@ export const MessageComposer = ({
     !isLaunchBlocking &&
     !attachmentsBlocked &&
     !slashCommandRestrictionReason &&
+    (!isRevisionActive || !isCrossTeam) &&
     (!isCrossTeam || onCrossTeamSend !== undefined);
 
   const pendingSendRef = useRef<PendingSendState | null>(null);
@@ -435,19 +487,26 @@ export const MessageComposer = ({
       },
       previousDebugDetails: sendDebugDetails,
       previousLastResult: lastResult,
+      ...(revisionRequest ? { revisionRequestId: revisionRequest.requestId } : {}),
       observedSending: false,
       optimisticallyCleared: false,
     };
     const taskRefs = extractTaskRefsFromText(draft.text, taskSuggestions);
     const serialized = serializeChipsWithText(trimmed, draft.chips);
+    const outboundText = revisionRequest
+      ? buildRevisionCorrectionText(revisionRequest.originalMessageId, serialized)
+      : serialized;
+    const outboundSummary = revisionRequest
+      ? `Correction for MessageId: ${revisionRequest.originalMessageId}`
+      : trimmed;
     if (isCrossTeam && selectedTeam && onCrossTeamSend) {
-      onCrossTeamSend(selectedTeam, serialized, trimmed, actionMode, taskRefs);
+      onCrossTeamSend(selectedTeam, outboundText, outboundSummary, actionMode, taskRefs);
     } else {
       // Summary should stay compact (no expanded chip markdown)
       onSend(
         recipient,
-        serialized,
-        trimmed,
+        outboundText,
+        outboundSummary,
         draft.attachments.length > 0 ? draft.attachments : undefined,
         actionMode,
         taskRefs
@@ -469,6 +528,7 @@ export const MessageComposer = ({
     draft.text,
     lastResult,
     focusComposerTextarea,
+    revisionRequest,
     taskSuggestions,
     teamName,
   ]);
@@ -515,6 +575,10 @@ export const MessageComposer = ({
       return;
     }
 
+    if (pending.revisionRequestId) {
+      onRevisionComplete?.(pending.revisionRequestId);
+    }
+
     if (!isPendingCurrentTeam) {
       draft.finalizePendingSendClear(pending.teamName, pending.snapshot);
       return;
@@ -526,19 +590,19 @@ export const MessageComposer = ({
     }
 
     draft.finalizePendingSendClear(undefined, pending.snapshot);
-  }, [teamName, sending, sendError, sendDebugDetails, lastResult, draft]);
+  }, [teamName, sending, sendError, sendDebugDetails, lastResult, draft, onRevisionComplete]);
 
   const showFileRestrictionError = useCallback(() => {
     setFileRestrictionError(
       attachmentRestrictionReason ??
         attachmentPayloadRestrictionReason ??
-        'Files can only be sent to the team lead'
+        t('messageComposer.attachments.restrictions.leadOnly')
     );
     window.clearTimeout(fileRestrictionTimerRef.current);
     fileRestrictionTimerRef.current = window.setTimeout(() => {
       setFileRestrictionError(null);
     }, 4000);
-  }, [attachmentPayloadRestrictionReason, attachmentRestrictionReason]);
+  }, [attachmentPayloadRestrictionReason, attachmentRestrictionReason, t]);
 
   const validateSelectedAttachmentFiles = useCallback(
     (files: FileList | File[]): boolean => {
@@ -652,6 +716,10 @@ export const MessageComposer = ({
   );
   const handleTextareaFocus = useCallback(() => setIsTextareaFocused(true), []);
   const handleTextareaBlur = useCallback(() => setIsTextareaFocused(false), []);
+  const handleRevisionCancel = useCallback(() => {
+    onRevisionCancel?.();
+    focusComposerTextarea();
+  }, [focusComposerTextarea, onRevisionCancel]);
 
   const remaining = MAX_TEXT_LENGTH - trimmed.length;
   const hasAttachmentPreviewContent =
@@ -720,6 +788,20 @@ export const MessageComposer = ({
         maxWidth: `min(${FLOATING_COMPOSER_MAX_WIDTH}px, calc(100vw - 2rem))`,
       }
     : undefined;
+  const revisionNotice = revisionRequest ? (
+    <div className="flex items-center gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-200">
+      <span className="min-w-0 flex-1 truncate" title={t('messageComposer.revision.tooltip')}>
+        {t('messageComposer.revision.editing')}
+      </span>
+      <button
+        type="button"
+        className="shrink-0 rounded px-1.5 py-0.5 text-amber-100 transition-colors hover:bg-amber-400/15"
+        onClick={handleRevisionCancel}
+      >
+        {t('messageComposer.revision.cancel')}
+      </button>
+    </div>
+  ) : null;
   const compactFooterNotice = slashCommandRestrictionReason ? (
     <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300">
       <AlertCircle size={10} className="shrink-0" />
@@ -735,7 +817,7 @@ export const MessageComposer = ({
   ) : lastResult?.deduplicated ? (
     <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300">
       <Check size={10} className="shrink-0" />
-      Reused recent cross-team request
+      {t('messageComposer.status.reusedCrossTeamRequest')}
     </span>
   ) : null;
   const shouldShowFooterCharCount = remaining < 200;
@@ -750,11 +832,13 @@ export const MessageComposer = ({
               <span
                 className={`text-[10px] ${remaining < 100 ? 'text-yellow-400' : 'text-[var(--color-text-muted)]'}`}
               >
-                {remaining} chars left
+                {t('messageComposer.input.charsLeft', { count: remaining })}
               </span>
             ) : null}
             {shouldShowSavedIndicator ? (
-              <span className="text-[10px] text-[var(--color-text-muted)]">Saved</span>
+              <span className="text-[10px] text-[var(--color-text-muted)]">
+                {t('tasks.createTask.saved')}
+              </span>
             ) : null}
           </div>
         ) : null}
@@ -808,8 +892,8 @@ export const MessageComposer = ({
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {canAttach
-                    ? 'Attach files (paste or drag & drop)'
-                    : (attachmentRestrictionReason ?? 'Attachments are unavailable')}
+                    ? t('messageComposer.attachments.attachFiles')
+                    : (attachmentRestrictionReason ?? t('messageComposer.attachments.unavailable'))}
                 </TooltipContent>
               </Tooltip>
             </>
@@ -818,7 +902,7 @@ export const MessageComposer = ({
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {!isTeamAlive && !isLaunchBlocking && (
               <span className="text-[10px]" style={{ color: 'var(--warning-text)' }}>
-                Team offline
+                {t('messageComposer.status.teamOffline')}
               </span>
             )}
 
@@ -873,7 +957,9 @@ export const MessageComposer = ({
                             style={{ backgroundColor: currentTeamColor }}
                           />
                         ) : null}
-                        <span className="text-[var(--color-text-secondary)]">This team</span>
+                        <span className="text-[var(--color-text-secondary)]">
+                          {t('messageComposer.teamSelector.thisTeam')}
+                        </span>
                       </>
                     )}
                     <ChevronDown size={12} className="shrink-0 text-[var(--color-text-muted)]" />
@@ -900,9 +986,11 @@ export const MessageComposer = ({
                           style={{ backgroundColor: currentTeamColor }}
                         />
                       ) : null}
-                      <span className="truncate text-[var(--color-text)]">This team</span>
+                      <span className="truncate text-[var(--color-text)]">
+                        {t('messageComposer.teamSelector.thisTeam')}
+                      </span>
                       <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
-                        current
+                        {t('messageComposer.teamSelector.current')}
                       </span>
                       {!isCrossTeam ? (
                         <Check size={12} className="ml-auto shrink-0 text-blue-400" />
@@ -942,7 +1030,11 @@ export const MessageComposer = ({
                                       ? getTeamColorSet(target.color).border
                                       : nameColorSet(target.displayName).border,
                                 }}
-                                title={target.isOnline ? 'Online' : 'Offline'}
+                                title={
+                                  target.isOnline
+                                    ? t('messageComposer.teamSelector.onlineTitle')
+                                    : t('messageComposer.teamSelector.offlineTitle')
+                                }
                               />
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
@@ -957,7 +1049,9 @@ export const MessageComposer = ({
                                         : 'text-[var(--color-text-muted)]'
                                     )}
                                   >
-                                    {target.isOnline ? 'online' : 'offline'}
+                                    {target.isOnline
+                                      ? t('messageComposer.teamSelector.online')
+                                      : t('messageComposer.teamSelector.offline')}
                                   </span>
                                 </div>
                                 {target.description ? (
@@ -1005,7 +1099,9 @@ export const MessageComposer = ({
                         disableHoverCard
                       />
                     ) : (
-                      <span className="text-[var(--color-text-muted)]">Select...</span>
+                      <span className="text-[var(--color-text-muted)]">
+                        {t('messageComposer.recipient.select')}
+                      </span>
                     )}
                     <ChevronDown size={12} className="shrink-0 text-[var(--color-text-muted)]" />
                   </button>
@@ -1029,7 +1125,7 @@ export const MessageComposer = ({
                         ref={recipientSearchRef}
                         type="text"
                         className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] py-1 pl-6 pr-2 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-border-emphasis)] focus:outline-none"
-                        placeholder="Search..."
+                        placeholder={t('messageComposer.recipient.searchPlaceholder')}
                         value={recipientSearch}
                         onChange={(e) => setRecipientSearch(e.target.value)}
                       />
@@ -1045,7 +1141,7 @@ export const MessageComposer = ({
                       if (filtered.length === 0) {
                         return (
                           <div className="px-2 py-3 text-center text-xs text-[var(--color-text-muted)]">
-                            No results
+                            {t('messageComposer.recipient.noResults')}
                           </div>
                         );
                       }
@@ -1111,10 +1207,11 @@ export const MessageComposer = ({
             disabledHint={
               attachmentPayloadRestrictionReason ??
               attachmentRestrictionReason ??
-              'File attachments are supported for the online team lead and online OpenCode teammates. Remove attachments or switch recipient.'
+              t('messageComposer.attachments.disabledHint')
             }
           />
         ) : null}
+        {revisionNotice}
       </div>
 
       <div className={cn('relative', shouldDockRecipientSelector && 'z-[2]')}>
@@ -1128,10 +1225,12 @@ export const MessageComposer = ({
           id={`compose-${teamName}`}
           placeholder={
             isLaunchBlocking
-              ? 'Team is launching... message will be queued for inbox delivery.'
+              ? t('messageComposer.input.teamLaunchingPlaceholder')
               : isCrossTeam
-                ? `Cross-team message to ${targetDisplayName ?? 'team'}...`
-                : 'Write a message... (Enter to send, Shift+Enter for new line)'
+                ? t('messageComposer.input.crossTeamPlaceholder', {
+                    team: targetDisplayName ?? t('messageComposer.input.teamFallback'),
+                  })
+                : t('messageComposer.input.placeholder')
           }
           value={draft.text}
           onValueChange={draft.setText}
@@ -1148,7 +1247,7 @@ export const MessageComposer = ({
           onModEnter={handleSend}
           onShiftTab={handleCycleActionMode}
           dismissMentionsRef={dismissMentionsRef}
-          extraTips={['Tip: You can use "/" to run any Claude commands.']}
+          extraTips={[t('messageComposer.input.slashTip')]}
           surfaceClassName="message-composer-shell message-composer-orbit-surface border border-transparent bg-[var(--color-surface-raised)] shadow-[0_8px_24px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.03)]"
           surfaceDecoration="orbit-border"
           surfaceFadeColor="var(--color-surface-raised)"
@@ -1181,7 +1280,9 @@ export const MessageComposer = ({
                     <Mic size={14} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="top">Voice to text</TooltipContent>
+                <TooltipContent side="top">
+                  {t('messageComposer.actions.voiceToText')}
+                </TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1193,7 +1294,7 @@ export const MessageComposer = ({
                       onClick={handleSend}
                     >
                       <Send size={12} />
-                      Send
+                      {t('messageComposer.actions.send')}
                     </button>
                   </span>
                 </TooltipTrigger>
@@ -1201,7 +1302,7 @@ export const MessageComposer = ({
                   <TooltipContent side="top">{slashCommandRestrictionReason}</TooltipContent>
                 ) : isLaunchBlocking && !sending ? (
                   <TooltipContent side="top">
-                    Sending unavailable while team is launching
+                    {t('messageComposer.actions.sendingUnavailableLaunching')}
                   </TooltipContent>
                 ) : null}
               </Tooltip>

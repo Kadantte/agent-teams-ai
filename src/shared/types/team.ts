@@ -591,6 +591,8 @@ export interface AttachmentFileData {
   id: string;
   data: string;
   mimeType: AttachmentMediaType;
+  /** Absolute path to the persisted attachment file when available. */
+  filePath?: string;
 }
 
 /** Lightweight metadata for a single tool call (for UI display in tooltips). */
@@ -1123,7 +1125,7 @@ export interface PersistedTeamLaunchMemberState {
   hardFailureReason?: string;
   pendingPermissionRequestIds?: string[];
   runtimePid?: number;
-  /** OpenCode runtime run id that produced the current runtimeSessionId/liveness evidence. */
+  /** Runtime/bootstrap run id that produced current liveness or bootstrap evidence. */
   runtimeRunId?: string;
   runtimeSessionId?: string;
   bootstrapEvidenceSource?: OpenCodeBootstrapEvidenceSource;

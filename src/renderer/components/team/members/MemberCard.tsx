@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAppTranslation } from '@features/localization/renderer';
 import { Badge } from '@renderer/components/ui/badge';
 import { SyncedLoader2 } from '@renderer/components/ui/SyncedLoader2';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
@@ -27,6 +28,10 @@ import {
 import { getRuntimeMemorySourceLabel } from '@renderer/utils/memberRuntimeSummary';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { deriveTaskDisplayId } from '@shared/utils/taskIdentity';
+import {
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
+  isBootstrapConfirmedProvisionedButNotAliveFailure,
+} from '@shared/utils/teamLaunchFailureReason';
 import {
   Activity,
   AlertTriangle,
@@ -350,6 +355,7 @@ const RuntimeTelemetryTooltipContent = ({
 }: Readonly<{
   runtimeEntry: TeamAgentRuntimeEntry | undefined;
 }>): React.JSX.Element | null => {
+  const { t } = useAppTranslation('team');
   if (!runtimeEntry) {
     return null;
   }
@@ -377,10 +383,10 @@ const RuntimeTelemetryTooltipContent = ({
         </span>
         <div className="min-w-0">
           <div className="text-[12px] font-semibold leading-tight text-[var(--color-text)]">
-            Local runtime load
+            {t('members.runtimeTelemetry.title')}
           </div>
           <div className="mt-0.5 text-[10px] leading-snug text-[var(--color-text-muted)]">
-            Parent and child processes only. Remote LLM inference is not included.
+            {t('members.runtimeTelemetry.description')}
           </div>
         </div>
       </div>
@@ -389,7 +395,7 @@ const RuntimeTelemetryTooltipContent = ({
         <div className="rounded-md border border-blue-500/20 bg-blue-500/10 px-2 py-1.5">
           <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-blue-200/80">
             <Cpu className="size-3" />
-            CPU
+            {t('members.runtimeTelemetry.cpu')}
           </div>
           <div className="mt-1 text-[14px] font-semibold text-blue-100">
             {aggregateCpuLabel ?? 'unknown'}
@@ -404,12 +410,14 @@ const RuntimeTelemetryTooltipContent = ({
         <div className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5">
           <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-emerald-200/80">
             <HardDrive className="size-3" />
-            Memory
+            {t('members.runtimeTelemetry.memory')}
           </div>
           <div className="mt-1 text-[14px] font-semibold text-emerald-100">
             {rssLabel ?? 'unknown'}
           </div>
-          <div className="mt-0.5 text-[10px] leading-snug text-emerald-100/65">summed RSS</div>
+          <div className="mt-0.5 text-[10px] leading-snug text-emerald-100/65">
+            {t('members.runtimeTelemetry.summedRss')}
+          </div>
         </div>
       </div>
 
@@ -430,20 +438,20 @@ const RuntimeTelemetryTooltipContent = ({
       {runtimeEntry.runtimeLoadScope === 'shared-host' ? (
         <div className="flex gap-1.5 rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-100/80">
           <Server className="mt-0.5 size-3 shrink-0" />
-          Shared OpenCode host metric. It is not exclusive to this member.
+          {t('members.runtimeTelemetry.sharedHost')}
         </div>
       ) : null}
 
       {runtimeEntry.runtimeLoadTruncated ? (
         <div className="flex gap-1.5 rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-100/80">
           <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-          Process tree was capped for this sample.
+          {t('members.runtimeTelemetry.processTreeCapped')}
         </div>
       ) : null}
 
       <div className="flex gap-1.5 border-t border-[var(--color-border)] pt-2 text-[10px] leading-snug text-[var(--color-text-muted)]">
         <Info className="mt-0.5 size-3 shrink-0" />
-        RSS can include shared pages, so it is best read as a load signal, not exclusive memory.
+        {t('members.runtimeTelemetry.rssHint')}
       </div>
     </div>
   );
@@ -640,6 +648,7 @@ export const MemberCard = memo(function MemberCard({
   onSkipMemberForLaunch,
   onRestoreMember,
 }: MemberCardProps): React.JSX.Element {
+  const { t } = useAppTranslation('team');
   // NOTE: lead context display disabled — usage formula is inaccurate
   // const teamName = useStore((s) => s.selectedTeamName);
   // const leadContext = useStore((s) =>
@@ -656,12 +665,20 @@ export const MemberCard = memo(function MemberCard({
     selectedTeamName ? selectResolvedMembersForTeamName(s, selectedTeamName) : []
   );
   const avatarMap = useMemo(() => buildMemberAvatarMap(teamMembers), [teamMembers]);
+  const bootstrapConfirmedProvisionedButNotAlive =
+    isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry);
+  const hasUnsafeBootstrapConfirmedProvisionedButNotAlive =
+    bootstrapConfirmedProvisionedButNotAlive &&
+    hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(spawnEntry, runtimeEntry);
+  const effectiveSpawnStatus = spawnStatus;
+  const effectiveSpawnLaunchState = spawnLaunchState;
   const showTaskActivity = shouldDisplayMemberCurrentTask({
     member,
     isTeamAlive,
-    spawnStatus,
-    spawnLaunchState,
+    spawnStatus: effectiveSpawnStatus,
+    spawnLaunchState: effectiveSpawnLaunchState,
     spawnRuntimeAlive,
+    spawnEntry,
     runtimeEntry,
   });
   const visibleCurrentTask = showTaskActivity ? currentTask : null;
@@ -675,15 +692,19 @@ export const MemberCard = memo(function MemberCard({
       : member;
   const launchPresentation = buildMemberLaunchPresentation({
     member: presentationMember,
-    spawnStatus,
-    spawnLaunchState,
+    spawnStatus: effectiveSpawnStatus,
+    spawnLaunchState: effectiveSpawnLaunchState,
     spawnLivenessSource,
     spawnRuntimeAlive,
     spawnBootstrapConfirmed: spawnEntry?.bootstrapConfirmed,
     spawnBootstrapStalled: spawnEntry?.bootstrapStalled,
     spawnAgentToolAccepted: spawnEntry?.agentToolAccepted,
     spawnHardFailure: spawnEntry?.hardFailure,
+    spawnHardFailureReason: spawnEntry?.hardFailureReason,
+    spawnError: spawnEntry?.error,
+    spawnRuntimeDiagnostic: spawnEntry?.runtimeDiagnostic,
     spawnLivenessKind: spawnEntry?.livenessKind,
+    spawnRuntimeDiagnosticSeverity: spawnEntry?.runtimeDiagnosticSeverity,
     spawnFirstSpawnAcceptedAt: spawnEntry?.firstSpawnAcceptedAt,
     spawnUpdatedAt: spawnEntry?.updatedAt,
     runtimeEntry,
@@ -839,7 +860,7 @@ export const MemberCard = memo(function MemberCard({
   const showStartingSkeleton =
     !isRemoved &&
     presenceLabel === 'starting' &&
-    spawnLaunchState !== 'failed_to_start' &&
+    effectiveSpawnLaunchState !== 'failed_to_start' &&
     !activityTask &&
     !runtimeSummary;
   const usesLaunchSkeletonSurface = spawnCardClass.includes('member-waiting-shimmer');
@@ -864,8 +885,8 @@ export const MemberCard = memo(function MemberCard({
         runId: runtimeRunId,
         memberName: member.name,
         member,
-        spawnStatus,
-        launchState: spawnLaunchState,
+        spawnStatus: effectiveSpawnStatus,
+        launchState: effectiveSpawnLaunchState,
         livenessSource: spawnLivenessSource,
         spawnEntry,
         runtimeEntry,
@@ -881,9 +902,9 @@ export const MemberCard = memo(function MemberCard({
       runtimeRunId,
       selectedTeamName,
       spawnEntry,
-      spawnLaunchState,
+      effectiveSpawnLaunchState,
       spawnLivenessSource,
-      spawnStatus,
+      effectiveSpawnStatus,
     ]
   );
   const showCopyDiagnostics =
@@ -895,7 +916,10 @@ export const MemberCard = memo(function MemberCard({
     Boolean(runtimeAdvisoryLabel) &&
     runtimeAdvisoryTone === 'error' &&
     hasMemberLaunchDiagnosticsDetails(launchDiagnosticsPayload);
-  const isFailedLaunch = spawnStatus === 'error' || spawnLaunchState === 'failed_to_start';
+  const isFailedLaunch =
+    (!bootstrapConfirmedProvisionedButNotAlive ||
+      hasUnsafeBootstrapConfirmedProvisionedButNotAlive) &&
+    (spawnStatus === 'error' || spawnLaunchState === 'failed_to_start');
   const isSkippedLaunch =
     spawnStatus === 'skipped' ||
     spawnLaunchState === 'skipped_for_launch' ||
@@ -1079,7 +1103,7 @@ export const MemberCard = memo(function MemberCard({
                       className="shrink-0 rounded border border-emerald-400/35 bg-emerald-400/10 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-emerald-300"
                       data-runtime-telemetry-exempt="true"
                     >
-                      worktree
+                      {t('members.badges.worktree')}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
@@ -1488,7 +1512,7 @@ export const MemberCard = memo(function MemberCard({
                       <MessageSquare size={13} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom">Send message</TooltipContent>
+                  <TooltipContent side="bottom">{t('members.actions.sendMessage')}</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1503,7 +1527,7 @@ export const MemberCard = memo(function MemberCard({
                       <Plus size={13} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom">Assign task</TooltipContent>
+                  <TooltipContent side="bottom">{t('members.actions.assignTask')}</TooltipContent>
                 </Tooltip>
               </div>
             )}

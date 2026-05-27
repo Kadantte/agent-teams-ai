@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAppTranslation } from '@features/localization/renderer';
 import { useTheme } from '@renderer/hooks/useTheme';
 import {
   deriveReviewActivityTimerAnchor,
@@ -10,6 +11,10 @@ import { buildMemberColorMap, shouldDisplayMemberCurrentTask } from '@renderer/u
 import { resolveMemberRuntimeSummary } from '@renderer/utils/memberRuntimeSummary';
 import { isDisplayableCurrentTask } from '@renderer/utils/teamTaskDisplayState';
 import { isLeadMember } from '@shared/utils/leadDetection';
+import {
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
+  isBootstrapConfirmedProvisionedButNotAliveFailure,
+} from '@shared/utils/teamLaunchFailureReason';
 import { getTeamTaskWorkflowColumn } from '@shared/utils/teamTaskState';
 
 import { MemberCard, type RuntimeTelemetryScale } from './MemberCard';
@@ -614,6 +619,7 @@ const MemberListLoadingSkeleton = ({
 }: Readonly<{
   expectedTeammateCount?: number;
 }>): React.JSX.Element => {
+  const { t } = useAppTranslation('team');
   const skeletonCount = getMemberLoadingSkeletonCount(expectedTeammateCount);
   const { isLight } = useTheme();
 
@@ -621,7 +627,7 @@ const MemberListLoadingSkeleton = ({
     <div
       className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-sidebar)] p-3"
       role="status"
-      aria-label="Loading team members"
+      aria-label={t('members.list.loading')}
     >
       <div className="grid grid-cols-1 gap-1">
         {Array.from({ length: skeletonCount }, (_, index) => {
@@ -681,17 +687,14 @@ const MemberRosterUnavailableState = ({
 }: Readonly<{
   expectedTeammateCount?: number;
 }>): React.JSX.Element => {
+  const { t } = useAppTranslation('team');
   const count = Number.isFinite(expectedTeammateCount)
     ? Math.max(0, Math.floor(expectedTeammateCount ?? 0))
     : 0;
-  const teammateLabel = count === 1 ? '1 teammate is' : `${count || 'Some'} teammates are`;
-
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-sidebar)] p-4 text-sm text-[var(--color-text-muted)]">
-      <div className="font-medium text-[var(--color-text)]">Member roster unavailable</div>
-      <div className="mt-1 text-xs">
-        {teammateLabel} known from team metadata, but roster details are missing.
-      </div>
+      <div className="font-medium text-[var(--color-text)]">{t('members.list.unavailable')}</div>
+      <div className="mt-1 text-xs">{t('members.list.unavailableDescription', { count })}</div>
     </div>
   );
 };
@@ -720,6 +723,7 @@ export const MemberList = memo(function MemberList({
   onSkipMemberForLaunch,
   onRestoreMember,
 }: MemberListProps): React.JSX.Element {
+  const { t } = useAppTranslation('team');
   const containerRef = useRef<HTMLDivElement>(null);
   const [isWide, setIsWide] = useState(false);
 
@@ -785,6 +789,7 @@ export const MemberList = memo(function MemberList({
         spawnStatus: spawnEntry?.status,
         spawnLaunchState: spawnEntry?.launchState,
         spawnRuntimeAlive: spawnEntry?.runtimeAlive,
+        spawnEntry,
         runtimeEntry,
       });
     },
@@ -837,6 +842,7 @@ export const MemberList = memo(function MemberList({
               spawnStatus: spawnEntry?.status,
               spawnLaunchState: spawnEntry?.launchState,
               spawnRuntimeAlive: spawnEntry?.runtimeAlive,
+              spawnEntry,
               runtimeEntry,
             });
           syncMemberActivityTimer({
@@ -909,7 +915,7 @@ export const MemberList = memo(function MemberList({
 
     return (
       <div className="rounded-md border border-[var(--color-border)] p-4 text-sm text-[var(--color-text-muted)]">
-        Solo team - lead only
+        {t('members.list.soloLeadOnly')}
       </div>
     );
   }
@@ -924,6 +930,32 @@ export const MemberList = memo(function MemberList({
         {activeMembers.map((member) => {
           const spawnEntry = memberSpawnStatuses?.get(member.name);
           const runtimeEntry = memberRuntimeEntries?.get(member.name);
+          const bootstrapConfirmedProvisionedButNotAlive =
+            isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry);
+          const hasUnsafeProvisionedButNotAliveEvidence =
+            bootstrapConfirmedProvisionedButNotAlive &&
+            hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(
+              spawnEntry,
+              runtimeEntry
+            );
+          const canPromoteBootstrapConfirmedVisualState =
+            bootstrapConfirmedProvisionedButNotAlive &&
+            spawnEntry?.runtimeDiagnosticSeverity !== 'error' &&
+            runtimeEntry?.runtimeDiagnosticSeverity !== 'error' &&
+            !hasUnsafeProvisionedButNotAliveEvidence;
+          const effectiveSpawnStatus = canPromoteBootstrapConfirmedVisualState
+            ? 'online'
+            : spawnEntry?.status;
+          const effectiveSpawnLaunchState = canPromoteBootstrapConfirmedVisualState
+            ? 'confirmed_alive'
+            : spawnEntry?.launchState;
+          const useBootstrapConfirmedRuntimeAlive =
+            canPromoteBootstrapConfirmedVisualState &&
+            runtimeEntry?.runtimeDiagnosticSeverity !== 'error' &&
+            spawnEntry?.runtimeDiagnosticSeverity !== 'error';
+          const effectiveSpawnRuntimeAlive = useBootstrapConfirmedRuntimeAlive
+            ? true
+            : spawnEntry?.runtimeAlive;
           const currentTaskCandidate =
             member.currentTaskId && taskMap ? (taskMap.get(member.currentTaskId) ?? null) : null;
           const currentTask =
@@ -931,9 +963,10 @@ export const MemberList = memo(function MemberList({
             shouldDisplayMemberCurrentTask({
               member,
               isTeamAlive,
-              spawnStatus: spawnEntry?.status,
-              spawnLaunchState: spawnEntry?.launchState,
-              spawnRuntimeAlive: spawnEntry?.runtimeAlive,
+              spawnStatus: effectiveSpawnStatus,
+              spawnLaunchState: effectiveSpawnLaunchState,
+              spawnRuntimeAlive: effectiveSpawnRuntimeAlive,
+              spawnEntry,
               runtimeEntry,
             })
               ? currentTaskCandidate
@@ -945,9 +978,10 @@ export const MemberList = memo(function MemberList({
             shouldDisplayMemberCurrentTask({
               member,
               isTeamAlive,
-              spawnStatus: spawnEntry?.status,
-              spawnLaunchState: spawnEntry?.launchState,
-              spawnRuntimeAlive: spawnEntry?.runtimeAlive,
+              spawnStatus: effectiveSpawnStatus,
+              spawnLaunchState: effectiveSpawnLaunchState,
+              spawnRuntimeAlive: effectiveSpawnRuntimeAlive,
+              spawnEntry,
               runtimeEntry,
             })
               ? reviewCandidate
@@ -995,12 +1029,16 @@ export const MemberList = memo(function MemberList({
               runtimeSummary={buildRuntimeSummary(member, spawnEntry, runtimeEntry)}
               runtimeEntry={runtimeEntry}
               runtimeRunId={runtimeRunId}
-              spawnStatus={spawnEntry?.status}
+              spawnStatus={effectiveSpawnStatus}
               spawnEntry={spawnEntry}
-              spawnError={spawnEntry?.error ?? spawnEntry?.hardFailureReason}
+              spawnError={
+                canPromoteBootstrapConfirmedVisualState
+                  ? undefined
+                  : (spawnEntry?.error ?? spawnEntry?.hardFailureReason)
+              }
               spawnLivenessSource={spawnEntry?.livenessSource}
-              spawnLaunchState={spawnEntry?.launchState}
-              spawnRuntimeAlive={spawnEntry?.runtimeAlive}
+              spawnLaunchState={effectiveSpawnLaunchState}
+              spawnRuntimeAlive={effectiveSpawnRuntimeAlive}
               isTeamAlive={isTeamAlive}
               isTeamProvisioning={isTeamProvisioning}
               leadActivity={leadActivity}
@@ -1020,7 +1058,7 @@ export const MemberList = memo(function MemberList({
       {removedMembers.length > 0 && (
         <>
           <div className="mt-2 text-[10px] text-[var(--color-text-muted)]">
-            Removed ({removedMembers.length})
+            {t('members.list.removedCount', { count: removedMembers.length })}
           </div>
           <div className={gridClass}>
             {removedMembers.map((member) => (

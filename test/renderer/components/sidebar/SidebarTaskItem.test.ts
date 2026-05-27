@@ -1,5 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GlobalTask } from '../../../../src/shared/types';
@@ -27,6 +28,28 @@ vi.mock('../../../../src/renderer/hooks/useTheme', () => ({
     isDark: !isLightValue,
     isLight: isLightValue,
   }),
+}));
+
+vi.mock('@features/localization/renderer', () => ({
+  useAppTranslation: (namespace: string) => {
+    const catalogs: Record<string, Record<string, string>> = {
+      common: {
+        'tasks.date.updatedPrefix': 'upd',
+        'tasks.date.updatedYesterday': 'upd yesterday',
+        'tasks.date.yesterday': 'Yesterday',
+        'tasks.reviewState.needsFix': 'Needs Fixes',
+      },
+      team: {
+        'tasks.teamPrefix': 'Team:',
+        'tasks.unassigned': 'Unassigned',
+      },
+    };
+
+    return {
+      resolvedLanguage: 'en',
+      t: (key: string) => catalogs[namespace]?.[key] ?? key,
+    };
+  },
 }));
 
 vi.mock('../../../../src/renderer/components/ui/tooltip', () => ({
@@ -197,6 +220,40 @@ describe('SidebarTaskItem unread styling', () => {
 
     expect(host.textContent).not.toContain('hookplex');
     expect(host.textContent).toContain('alice');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('renders translated updated and review labels instead of i18n keys', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    const updatedAt = new Date();
+    const createdAt = new Date(updatedAt.getTime() - 5 * 60_000);
+
+    await act(async () => {
+      root.render(
+        React.createElement(SidebarTaskItem, {
+          task: makeTask({
+            createdAt: createdAt.toISOString(),
+            reviewState: 'needsFix',
+            updatedAt: updatedAt.toISOString(),
+          }),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('upd');
+    expect(host.textContent).toContain('Needs Fixes');
+    expect(host.textContent).not.toContain('tasks.date.updatedPrefix');
+    expect(host.textContent).not.toContain('tasks.reviewState.needsFix');
 
     await act(async () => {
       root.unmount();

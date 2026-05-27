@@ -46,7 +46,9 @@ describe('attachmentRecipientCapabilities', () => {
     expect(getMemberAttachmentUnavailableReason(bob)).toBe(
       'This OpenCode model is not verified for image attachments. Choose a vision-capable model or remove the image.'
     );
-    expect(validateAttachmentFilesForMember({ member: bob, files: [file('diagram.png', 'image/png')] })).toBe(
+    expect(
+      validateAttachmentFilesForMember({ member: bob, files: [file('diagram.png', 'image/png')] })
+    ).toBe(
       'This OpenCode model is not verified for image attachments. Choose a vision-capable model or remove the image.'
     );
     expect(validateAttachmentPayloadsForMember({ member: bob, attachments: [payload({})] })).toBe(
@@ -62,8 +64,56 @@ describe('attachmentRecipientCapabilities', () => {
 
     expect(getMemberAttachmentUnavailableReason(bob)).toBeNull();
     expect(getAttachmentInputAcceptForMember(bob)).toBe('image/png,image/jpeg,image/webp');
-    expect(validateAttachmentFilesForMember({ member: bob, files: [file('diagram.png', 'image/png')] })).toBeNull();
-    expect(validateAttachmentPayloadsForMember({ member: bob, attachments: [payload({})] })).toBeNull();
+    expect(
+      validateAttachmentFilesForMember({ member: bob, files: [file('diagram.png', 'image/png')] })
+    ).toBeNull();
+    expect(
+      validateAttachmentPayloadsForMember({ member: bob, attachments: [payload({})] })
+    ).toBeNull();
+  });
+
+  it('blocks image MIME types not supported by an otherwise image-capable provider', () => {
+    const codexLead = member({
+      name: 'lead',
+      agentType: 'team-lead',
+      providerId: 'codex',
+      model: 'gpt-5.5',
+    });
+
+    expect(
+      validateAttachmentFilesForMember({
+        member: codexLead,
+        files: [file('animation.gif', 'image/gif')],
+      })
+    ).toBe('This image type is not supported by the selected model.');
+    expect(
+      validateAttachmentPayloadsForMember({
+        member: codexLead,
+        attachments: [payload({ filename: 'animation.gif', mimeType: 'image/gif' })],
+      })
+    ).toBe('This image type is not supported by the selected model.');
+  });
+
+  it('allows Claude GIF and WebP image payloads', () => {
+    const anthropicLead = member({
+      name: 'lead',
+      agentType: 'team-lead',
+      providerId: 'anthropic',
+      model: 'claude-opus-4-6',
+    });
+
+    expect(
+      validateAttachmentFilesForMember({
+        member: anthropicLead,
+        files: [file('clip.gif', 'image/gif')],
+      })
+    ).toBeNull();
+    expect(
+      validateAttachmentPayloadsForMember({
+        member: anthropicLead,
+        attachments: [payload({ filename: 'clip.webp', mimeType: 'image/webp' })],
+      })
+    ).toBeNull();
   });
 
   it('blocks non-image files for image-only providers', () => {
@@ -74,7 +124,12 @@ describe('attachmentRecipientCapabilities', () => {
       model: 'gpt-5.5',
     });
 
-    expect(validateAttachmentFilesForMember({ member: codexLead, files: [file('notes.md', 'text/markdown')] })).toBe(
+    expect(
+      validateAttachmentFilesForMember({
+        member: codexLead,
+        files: [file('notes.md', 'text/markdown')],
+      })
+    ).toBe(
       'This provider path currently supports image attachments only. Non-image files are blocked before provider delivery.'
     );
     expect(
@@ -95,7 +150,12 @@ describe('attachmentRecipientCapabilities', () => {
       model: 'claude-opus-4-6',
     });
 
-    expect(validateAttachmentFilesForMember({ member: anthropicLead, files: [file('brief.pdf', 'application/pdf')] })).toBeNull();
+    expect(
+      validateAttachmentFilesForMember({
+        member: anthropicLead,
+        files: [file('brief.pdf', 'application/pdf')],
+      })
+    ).toBeNull();
     expect(
       validateAttachmentPayloadsForMember({
         member: anthropicLead,

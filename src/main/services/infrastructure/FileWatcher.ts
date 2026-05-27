@@ -11,7 +11,11 @@
  */
 
 import { type FileChangeEvent, type ParsedMessage } from '@main/types';
-import { parseJsonlFileWithStats, parseJsonlStream } from '@main/utils/jsonl';
+import {
+  countJsonlFileWithStats,
+  parseJsonlFileWithStats,
+  parseJsonlStream,
+} from '@main/utils/jsonl';
 import {
   getProjectsBasePath,
   getTasksBasePath,
@@ -29,7 +33,10 @@ import { projectPathResolver } from '../discovery/ProjectPathResolver';
 import { errorDetector } from '../error/ErrorDetector';
 
 import { ConfigManager } from './ConfigManager';
-import { CrossPlatformFileChangeSource } from './CrossPlatformFileChangeSource';
+import {
+  CrossPlatformFileChangeSource,
+  type PollSnapshotResult,
+} from './CrossPlatformFileChangeSource';
 import { type DataCache } from './DataCache';
 import { LocalFileSystemProvider } from './LocalFileSystemProvider';
 import { type NotificationManager } from './NotificationManager';
@@ -48,6 +55,10 @@ const WATCHER_RETRY_MS = 2000;
 const TEAMS_POLL_INTERVAL_MS = 1000;
 /** Poll interval for task files, which can be much larger than team metadata/inboxes */
 const TASKS_POLL_INTERVAL_MS = 3000;
+/** Bound each projects polling slice so fallback/SSH mode cannot rescan huge histories every tick. */
+const PROJECTS_POLL_PROJECT_SLICE_BUDGET = 64;
+/** Soft cap: a single large project can exceed this, but broad trees are split across ticks. */
+const PROJECTS_POLL_FILE_SOFT_BUDGET = 1024;
 /** Interval for periodic catch-up scan to detect missed fs.watch events */
 const CATCH_UP_INTERVAL_MS = 30_000;
 /** Only catch-up scan files modified within this window */
@@ -102,6 +113,10 @@ export class FileWatcher extends EventEmitter {
   private catchUpCursor = 0;
   /** Consecutive catch-up stat timeouts per file. */
   private catchUpStatFailures = new Map<string, number>();
+  /** Cursor for chunked project polling snapshots. */
+  private projectsPollCursor = 0;
+  /** Whether the current project polling cycle has already been split across ticks. */
+  private projectsPollCycleChunked = false;
   /** Polling interval for projects fallback and SSH mode. */
   private static readonly SSH_POLL_INTERVAL_MS = 3000;
   /** Files currently being processed (concurrency guard) */
@@ -298,6 +313,8 @@ export class FileWatcher extends EventEmitter {
     this.lastProcessedSize.clear();
     this.activeSessionFiles.clear();
     this.catchUpStatFailures.clear();
+    this.projectsPollCursor = 0;
+    this.projectsPollCycleChunked = false;
     this.processingInProgress.clear();
     this.pendingReprocess.clear();
 
@@ -679,15 +696,30 @@ export class FileWatcher extends EventEmitter {
     this.changeSources.projects.startPolling();
   }
 
-  private async collectProjectsPollSnapshot(): Promise<Map<string, string>> {
+  private async collectProjectsPollSnapshot(): Promise<PollSnapshotResult> {
     const snapshot = new Map<string, string>();
-    const projectDirs = await this.readProviderSnapshotDir(this.projectsPath);
+    const projectDirs = (await this.readProviderSnapshotDir(this.projectsPath))
+      .filter((entry) => entry.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name));
 
-    for (const projectDir of projectDirs) {
-      if (!projectDir.isDirectory()) {
-        continue;
-      }
+    if (projectDirs.length === 0) {
+      this.projectsPollCursor = 0;
+      this.projectsPollCycleChunked = false;
+      return { files: snapshot, cycleComplete: true, deleteSafe: true };
+    }
 
+    if (this.projectsPollCursor >= projectDirs.length) {
+      this.projectsPollCursor = 0;
+      this.projectsPollCycleChunked = false;
+    }
+
+    let index = this.projectsPollCursor;
+    let visitedProjects = 0;
+    let collectedFiles = 0;
+
+    while (visitedProjects < projectDirs.length) {
+      const projectDir = projectDirs[index];
+      const sizeBefore = snapshot.size;
       const projectPath = path.join(this.projectsPath, projectDir.name);
       const entries = await this.readProviderSnapshotDir(projectPath);
       for (const entry of entries) {
@@ -722,9 +754,31 @@ export class FileWatcher extends EventEmitter {
           );
         }
       }
+
+      collectedFiles += snapshot.size - sizeBefore;
+      visitedProjects += 1;
+      index = (index + 1) % projectDirs.length;
+
+      if (index === 0) {
+        const deleteSafe = !this.projectsPollCycleChunked;
+        this.projectsPollCursor = 0;
+        this.projectsPollCycleChunked = false;
+        return { files: snapshot, cycleComplete: true, deleteSafe };
+      }
+
+      if (
+        visitedProjects >= PROJECTS_POLL_PROJECT_SLICE_BUDGET ||
+        collectedFiles >= PROJECTS_POLL_FILE_SOFT_BUDGET
+      ) {
+        this.projectsPollCursor = index;
+        this.projectsPollCycleChunked = true;
+        return { files: snapshot, cycleComplete: false };
+      }
     }
 
-    return snapshot;
+    this.projectsPollCursor = 0;
+    this.projectsPollCycleChunked = false;
+    return { files: snapshot, cycleComplete: true, deleteSafe: true };
   }
 
   private async collectTodosPollSnapshot(): Promise<Map<string, string>> {
@@ -928,6 +982,11 @@ export class FileWatcher extends EventEmitter {
       }
 
       const isFirstRead = lastLineCount === 0 && lastSize === 0;
+      if (isFirstRead && fileStats.birthtimeMs < this.instanceCreatedAt) {
+        await this.establishPreExistingFileBaseline(filePath, currentSize);
+        return;
+      }
+
       const canUseIncrementalAppend = lastSize > 0 && currentSize > lastSize;
       let newMessages: ParsedMessage[] = [];
       let currentLineCount: number;
@@ -950,22 +1009,6 @@ export class FileWatcher extends EventEmitter {
       if (currentLineCount <= lastLineCount) {
         this.lastProcessedSize.set(filePath, processedSize);
         return;
-      }
-
-      // On first read (after app restart), establish baseline without detecting errors
-      // for files that existed BEFORE this FileWatcher started. This prevents flooding
-      // notifications with historical errors from old sessions.
-      // Files created AFTER startup are new sessions — detect errors normally.
-      if (isFirstRead) {
-        const isPreExistingFile = fileStats.birthtimeMs < this.instanceCreatedAt;
-        if (isPreExistingFile) {
-          this.lastProcessedLineCount.set(filePath, currentLineCount);
-          this.lastProcessedSize.set(filePath, processedSize);
-          logger.info(
-            `FileWatcher: Baseline established for ${filePath} (${currentLineCount} lines, ${processedSize} bytes)`
-          );
-          return;
-        }
       }
 
       // Detect errors in new messages
@@ -1007,6 +1050,18 @@ export class FileWatcher extends EventEmitter {
         });
       }
     }
+  }
+
+  private async establishPreExistingFileBaseline(
+    filePath: string,
+    currentSize: number
+  ): Promise<void> {
+    const baseline = await countJsonlFileWithStats(filePath, this.fsProvider);
+    this.lastProcessedLineCount.set(filePath, baseline.parsedLineCount);
+    this.lastProcessedSize.set(filePath, baseline.consumedBytes);
+    logger.info(
+      `FileWatcher: Baseline established for ${filePath} (${baseline.parsedLineCount} lines, ${baseline.consumedBytes}/${currentSize} bytes)`
+    );
   }
 
   /**

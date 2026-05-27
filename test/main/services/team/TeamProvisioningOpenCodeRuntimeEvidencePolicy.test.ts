@@ -316,6 +316,85 @@ describe('TeamProvisioningOpenCodeRuntimeEvidencePolicy', () => {
     expect(hasRecoverableOpenCodeBootstrapDiagnostic([])).toBe(false);
   });
 
+  it('accepts bootstrap evidence that slightly predates delayed spawn acceptance', () => {
+    expect(
+      isBootstrapMemberEvidenceCurrentForMember(
+        {
+          firstSpawnAcceptedAt: '2026-01-01T00:00:45.000Z',
+          lastEvaluatedAt: '2026-01-01T00:01:00.000Z',
+          runtimeRunId: 'run-new',
+        },
+        {
+          firstSpawnAcceptedAt: '2026-01-01T00:00:33.000Z',
+          lastHeartbeatAt: '2026-01-01T00:00:42.500Z',
+          lastEvaluatedAt: '2026-01-01T00:00:42.500Z',
+        },
+        'confirmation'
+      )
+    ).toBe(false);
+
+    expect(
+      isBootstrapMemberEvidenceCurrentForMember(
+        {
+          firstSpawnAcceptedAt: '2026-01-01T00:00:45.000Z',
+          lastEvaluatedAt: '2026-01-01T00:01:00.000Z',
+          runtimeRunId: 'run-new',
+        },
+        {
+          firstSpawnAcceptedAt: '2026-01-01T00:00:33.000Z',
+          lastHeartbeatAt: '2026-01-01T00:00:42.500Z',
+          lastEvaluatedAt: '2026-01-01T00:00:42.500Z',
+          runtimeRunId: 'run-old',
+        },
+        'confirmation'
+      )
+    ).toBe(false);
+
+    expect(
+      isBootstrapMemberEvidenceCurrentForMember(
+        {
+          firstSpawnAcceptedAt: '2026-01-01T00:00:45.000Z',
+          lastEvaluatedAt: '2026-01-01T00:01:00.000Z',
+        },
+        {
+          firstSpawnAcceptedAt: '2026-01-01T00:00:33.000Z',
+          lastHeartbeatAt: '2026-01-01T00:00:42.500Z',
+          lastEvaluatedAt: '2026-01-01T00:00:42.500Z',
+        },
+        'confirmation'
+      )
+    ).toBe(true);
+
+    expect(
+      isBootstrapMemberEvidenceCurrentForMember(
+        {
+          firstSpawnAcceptedAt: '2026-01-01T00:00:45.000Z',
+          lastEvaluatedAt: '2026-01-01T00:01:00.000Z',
+        },
+        {
+          firstSpawnAcceptedAt: '2026-01-01T00:00:20.000Z',
+          lastHeartbeatAt: '2026-01-01T00:00:20.000Z',
+          lastEvaluatedAt: '2026-01-01T00:00:20.000Z',
+        },
+        'confirmation'
+      )
+    ).toBe(false);
+
+    expect(
+      isBootstrapMemberEvidenceCurrentForMember(
+        {
+          firstSpawnAcceptedAt: '2026-01-01T00:00:45.000Z',
+          lastEvaluatedAt: '2026-01-01T00:01:00.000Z',
+        },
+        {
+          firstSpawnAcceptedAt: '2026-01-01T00:00:42.500Z',
+          lastEvaluatedAt: '2026-01-01T00:00:42.500Z',
+        },
+        'acceptance'
+      )
+    ).toBe(false);
+  });
+
   it('classifies recoverable persisted OpenCode runtime candidates', () => {
     expect(
       isRecoverablePersistedOpenCodeRuntimeCandidate(makePersisted({ runtimeSessionId: 'rt-1' }))

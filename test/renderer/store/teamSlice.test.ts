@@ -6,8 +6,8 @@ import {
   __resetTeamSliceModuleStateForTests,
   createTeamSlice,
   getActiveTeamPendingReplyWaits,
-  hasActiveTeamPendingReplyWait,
   getCurrentProvisioningProgressForTeam,
+  hasActiveTeamPendingReplyWait,
   loadPersistedMessagesPanelMode,
   savePersistedMessagesPanelMode,
   selectMemberMessagesForTeamMember,
@@ -24,6 +24,7 @@ import {
 const hoisted = vi.hoisted(() => ({
   list: vi.fn(),
   getData: vi.fn(),
+  getTaskChangePresence: vi.fn(),
   getMessagesPage: vi.fn(),
   getMemberActivityMeta: vi.fn(),
   createTeam: vi.fn(),
@@ -61,6 +62,7 @@ vi.mock('@renderer/api', () => ({
     teams: {
       list: hoisted.list,
       getData: hoisted.getData,
+      getTaskChangePresence: hoisted.getTaskChangePresence,
       getMessagesPage: hoisted.getMessagesPage,
       getMemberActivityMeta: hoisted.getMemberActivityMeta,
       createTeam: hoisted.createTeam,
@@ -302,6 +304,7 @@ describe('teamSlice actions', () => {
     __resetTeamRefreshFanoutDiagnosticsForTests();
     hoisted.list.mockResolvedValue([]);
     hoisted.getData.mockResolvedValue(createTeamSnapshot());
+    hoisted.getTaskChangePresence.mockResolvedValue({});
     hoisted.getMessagesPage.mockResolvedValue({
       messages: [],
       nextCursor: null,
@@ -416,6 +419,8 @@ describe('teamSlice actions', () => {
     expect(fetchTeams).toHaveBeenCalledTimes(1);
     expect(refreshTeamData).toHaveBeenCalledTimes(1);
     expect(refreshTeamData).toHaveBeenCalledWith('my-team', { withDedup: true });
+    expect(hoisted.getMemberSpawnStatuses).toHaveBeenCalledWith('my-team');
+    expect(hoisted.getTeamAgentRuntime).toHaveBeenCalledWith('my-team');
 
     const snapshot = getTeamRefreshFanoutSnapshotForTests(
       'my-team'
@@ -426,6 +431,16 @@ describe('teamSlice actions', () => {
     expect(
       snapshot?.counts[
         'provisioning-progress:provisioning:terminal-ready:refreshTeamData:scheduled'
+      ]
+    ).toBe(1);
+    expect(
+      snapshot?.counts[
+        'provisioning-progress:provisioning:terminal-ready:fetchMemberSpawnStatuses:scheduled'
+      ]
+    ).toBe(1);
+    expect(
+      snapshot?.counts[
+        'provisioning-progress:provisioning:terminal-ready:fetchTeamAgentRuntime:scheduled'
       ]
     ).toBe(1);
   });
@@ -5147,6 +5162,36 @@ describe('teamSlice actions', () => {
 
       expect(store.getState().selectedTeamData?.tasks[0]?.changePresence).toBe('has_changes');
     });
+
+    it('does not clear known task changePresence when presence refresh returns unknown', async () => {
+      const store = createSliceStore();
+      store.setState({
+        selectedTeamName: 'my-team',
+        selectedTeamData: createTeamSnapshot({
+          tasks: [
+            {
+              id: 'task-1',
+              subject: 'Known changes',
+              status: 'in_progress',
+              owner: 'alice',
+              createdAt: '2026-03-01T10:00:00.000Z',
+              updatedAt: '2026-03-01T10:00:00.000Z',
+              workIntervals: [{ startedAt: '2026-03-01T10:05:00.000Z' }],
+              historyEvents: [],
+              comments: [],
+              attachments: [],
+              changePresence: 'has_changes',
+            },
+          ],
+        }),
+      });
+
+      hoisted.getTaskChangePresence.mockResolvedValue({ 'task-1': 'unknown' });
+
+      await store.getState().refreshTeamChangePresence('my-team');
+
+      expect(store.getState().selectedTeamData?.tasks[0]?.changePresence).toBe('has_changes');
+    });
   });
 
   describe('provisioning run scoping', () => {
@@ -6361,6 +6406,84 @@ describe('teamSlice actions', () => {
           state: 'disconnected',
         })
       );
+    });
+
+    it('refreshes retained terminal spawn errors after disconnected progress', async () => {
+      const store = createSliceStore();
+      const startedAt = '2026-03-12T10:00:00.000Z';
+      const staleReason = 'CLI process exited (code 1) \u2014 team provisioned but not alive';
+      store.setState({
+        selectedTeamName: 'my-team',
+        selectedTeamData: createTeamSnapshot(),
+        paneLayout: {
+          focusedPaneId: 'pane-default',
+          panes: [
+            {
+              id: 'pane-default',
+              widthFraction: 1,
+              tabs: [{ id: 'team-my-team', type: 'team', teamName: 'my-team', label: 'My Team' }],
+              activeTabId: 'team-my-team',
+            },
+          ],
+        },
+        currentProvisioningRunIdByTeam: {
+          'my-team': 'run-current',
+        },
+        currentRuntimeRunIdByTeam: {
+          'my-team': 'run-current',
+        },
+        memberSpawnStatusesByTeam: {
+          'my-team': {
+            tom: createMemberSpawnStatus({
+              status: 'error',
+              launchState: 'failed_to_start',
+              error: staleReason,
+              hardFailure: true,
+              hardFailureReason: staleReason,
+              bootstrapConfirmed: true,
+              runtimeAlive: false,
+            }),
+          },
+        },
+      });
+      hoisted.getMemberSpawnStatuses.mockResolvedValue(
+        createMemberSpawnSnapshot({
+          runId: 'run-current',
+          expectedMembers: ['tom'],
+          statuses: {
+            tom: createMemberSpawnStatus({
+              status: 'online',
+              launchState: 'confirmed_alive',
+              runtimeAlive: false,
+              livenessKind: 'confirmed_bootstrap',
+              hardFailure: false,
+              hardFailureReason: undefined,
+              error: undefined,
+            }),
+          },
+        })
+      );
+
+      store.getState().onProvisioningProgress({
+        runId: 'run-current',
+        teamName: 'my-team',
+        state: 'disconnected',
+        message: 'Disconnected',
+        startedAt,
+        updatedAt: '2026-03-12T10:00:01.000Z',
+      });
+
+      await vi.waitFor(() => {
+        expect(store.getState().memberSpawnStatusesByTeam['my-team']?.tom).toMatchObject({
+          status: 'online',
+          launchState: 'confirmed_alive',
+          bootstrapConfirmed: true,
+          hardFailure: false,
+        });
+      });
+      expect(
+        store.getState().memberSpawnStatusesByTeam['my-team']?.tom?.hardFailureReason
+      ).toBeUndefined();
     });
 
     it('does not fall back to a team-wide latest run when no current run is pinned', () => {

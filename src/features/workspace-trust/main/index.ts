@@ -25,5 +25,9 @@ export { FileClaudeStateProbe } from './adapters/output/ClaudeStateProbe';
 export { NodePtyProcessAdapter } from './adapters/output/NodePtyProcessAdapter';
 export { FileTempEmptyMcpConfigStore } from './adapters/output/TempEmptyMcpConfigStore';
 export { createWorkspaceTrustCoordinator } from './composition/createWorkspaceTrustCoordinator';
+export {
+  resolveWorkspaceTrustCanonicalGitRoot,
+  resolveWorkspaceTrustFilesystemGitRoot,
+} from './infrastructure/WorkspaceTrustCanonicalGitRoot';
 export { resolveWorkspaceTrustFeatureFlags } from './infrastructure/WorkspaceTrustFeatureFlags';
 export { buildWorkspaceTrustPreflightEnv } from './infrastructure/workspaceTrustPreflightEnv';

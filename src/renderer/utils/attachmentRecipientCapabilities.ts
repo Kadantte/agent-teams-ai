@@ -31,6 +31,10 @@ function isSupportedFileMime(mimeType: string, supported: readonly string[]): bo
   );
 }
 
+function isSupportedImageMime(mimeType: string, supported: readonly string[]): boolean {
+  return supported.includes(mimeType);
+}
+
 function canReceiveAnyAttachment(capability: AgentAttachmentCapability): boolean {
   return capability.supportsImages || capability.supportsFiles;
 }
@@ -68,7 +72,7 @@ export function getAttachmentInputAcceptForMember(
   }
   const { capability } = resolveMemberAttachmentCapability(member);
   if (capability.supportsImages && !capability.supportsFiles) {
-    return 'image/png,image/jpeg,image/webp';
+    return capability.supportedImageMimeTypes.join(',');
   }
   return '*/*';
 }
@@ -98,6 +102,10 @@ export function validateAttachmentFilesForMember(input: {
     if (category === 'image') {
       if (!capability.supportsImages) {
         return capability.displayText;
+      }
+      const mimeType = getEffectiveMimeType(file);
+      if (!isSupportedImageMime(mimeType, capability.supportedImageMimeTypes)) {
+        return 'This image type is not supported by the selected model.';
       }
       continue;
     }
@@ -135,6 +143,9 @@ export function validateAttachmentPayloadsForMember(input: {
       imageCount += 1;
       if (!capability.supportsImages) {
         return capability.displayText;
+      }
+      if (!isSupportedImageMime(attachment.mimeType, capability.supportedImageMimeTypes)) {
+        return 'This image type is not supported by the selected model.';
       }
       if (attachment.size > capability.maxBytesPerImage) {
         return 'Image is too large for the selected model.';

@@ -1,3 +1,5 @@
+import { CLI_PROVIDER_STATUS_DEFERRED_MESSAGE } from '@shared/types/cliInstaller';
+
 import {
   getProviderScopedTeamModelLabel,
   getRuntimeAwareProviderScopedTeamModelLabel,
@@ -43,6 +45,7 @@ export type TeamModelRuntimeProviderStatus = Pick<
   | 'providerId'
   | 'models'
   | 'modelCatalog'
+  | 'modelCatalogRefreshState'
   | 'modelAvailability'
   | 'modelVerificationState'
   | 'runtimeCapabilities'
@@ -163,6 +166,21 @@ export function isTeamProviderModelVerificationPending(
     return true;
   }
 
+  const statusMessage = providerStatus.statusMessage?.trim().toLowerCase() ?? '';
+  const statusMessagePending =
+    statusMessage === 'checking...' ||
+    statusMessage === CLI_PROVIDER_STATUS_DEFERRED_MESSAGE.toLowerCase();
+  if (providerStatus.verificationState !== 'error' && statusMessagePending) {
+    return true;
+  }
+
+  if (
+    providerStatus.verificationState !== 'error' &&
+    providerStatus.modelCatalogRefreshState === 'loading'
+  ) {
+    return true;
+  }
+
   const hasRuntimeModelTruth =
     providerStatus.models.length > 0 ||
     (providerStatus.modelCatalog?.models.length ?? 0) > 0 ||
@@ -193,8 +211,23 @@ export function isTeamProviderModelVerificationPending(
     return false;
   }
 
-  const statusMessage = providerStatus.statusMessage?.trim().toLowerCase() ?? '';
   return statusMessage.length === 0 || statusMessage === 'checking...';
+}
+
+export function isTeamProviderRuntimeStatusLoading(
+  providerId: SupportedProviderId | undefined,
+  providerStatus?: TeamModelRuntimeProviderStatus | null,
+  providerLoading = false
+): boolean {
+  if (!providerId) {
+    return false;
+  }
+
+  if (providerLoading) {
+    return true;
+  }
+
+  return isTeamProviderModelVerificationPending(providerId, providerStatus);
 }
 
 function getFallbackTeamProviderModels(providerId: SupportedProviderId): string[] {

@@ -1,8 +1,15 @@
 import { isLeadMember } from '@shared/utils/leadDetection';
+import {
+  hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
+  isBootstrapConfirmedProvisionedButNotAliveFailure,
+  mentionsProcessTableUnavailable,
+} from '@shared/utils/teamLaunchFailureReason';
 
 import type {
   MemberSpawnStatusEntry,
   MemberSpawnStatusesSnapshot,
+  TeamAgentRuntimeEntry,
   TeamProvisioningProgress,
 } from '@shared/types';
 
@@ -13,10 +20,10 @@ interface LaunchJoinMemberLike {
 
 /** Display steps for the provisioning stepper (0-indexed). */
 export const DISPLAY_STEPS = [
-  { key: 'starting', label: 'Starting' },
-  { key: 'configuring', label: 'Team setup' },
-  { key: 'assembling', label: 'Members joining' },
-  { key: 'finalizing', label: 'Finalizing' },
+  { key: 'starting', labelKey: 'provisioning.steps.starting' },
+  { key: 'configuring', labelKey: 'provisioning.steps.configuring' },
+  { key: 'assembling', labelKey: 'provisioning.steps.assembling' },
+  { key: 'finalizing', labelKey: 'provisioning.steps.finalizing' },
 ] as const;
 
 export const DISPLAY_COMPLETE_STEP_INDEX = DISPLAY_STEPS.length;
@@ -39,6 +46,11 @@ type MemberSpawnStatusCollection =
   | Map<string, MemberSpawnStatusEntry>
   | undefined;
 
+type TeamAgentRuntimeEntryCollection =
+  | Record<string, TeamAgentRuntimeEntry>
+  | Map<string, TeamAgentRuntimeEntry>
+  | undefined;
+
 function getSpawnEntry(
   memberSpawnStatuses: MemberSpawnStatusCollection,
   memberName: string
@@ -52,6 +64,19 @@ function getSpawnEntry(
   return memberSpawnStatuses[memberName];
 }
 
+function getRuntimeEntry(
+  memberRuntimeEntries: TeamAgentRuntimeEntryCollection,
+  memberName: string
+): TeamAgentRuntimeEntry | undefined {
+  if (!memberRuntimeEntries) {
+    return undefined;
+  }
+  if (memberRuntimeEntries instanceof Map) {
+    return memberRuntimeEntries.get(memberName);
+  }
+  return memberRuntimeEntries[memberName];
+}
+
 function parseStatusUpdatedAtMs(value: string | undefined): number | null {
   if (!value) {
     return null;
@@ -61,6 +86,9 @@ function parseStatusUpdatedAtMs(value: string | undefined): number | null {
 }
 
 function isFailedSpawnEntry(entry: MemberSpawnStatusEntry | undefined): boolean {
+  if (isBootstrapConfirmedProvisionedButNotAliveFailure(entry)) {
+    return hasUnsafeProvisionedButNotAliveRuntimeEvidence(entry);
+  }
   return entry?.launchState === 'failed_to_start' || entry?.status === 'error';
 }
 
@@ -70,6 +98,65 @@ function isStrongRuntimeProcessSpawnEntry(entry: MemberSpawnStatusEntry): boolea
     entry.livenessKind === 'runtime_process' &&
     entry.bootstrapStalled !== true
   );
+}
+
+function isConfirmedSpawnEntry(entry: MemberSpawnStatusEntry): boolean {
+  if (isBootstrapConfirmedProvisionedButNotAliveFailure(entry)) {
+    return !isFailedSpawnEntry(entry);
+  }
+  return entry.launchState === 'confirmed_alive' || entry.bootstrapConfirmed === true;
+}
+
+function spawnEntryContradictsConfirmedJoin(entry: MemberSpawnStatusEntry): boolean {
+  if (!isConfirmedSpawnEntry(entry) || entry.runtimeAlive !== false) {
+    return false;
+  }
+  if (entry.runtimeDiagnosticSeverity === 'error') {
+    return true;
+  }
+  if (
+    entry.livenessKind === 'not_found' ||
+    entry.livenessKind === 'shell_only' ||
+    entry.livenessKind === 'permission_blocked' ||
+    entry.livenessKind === 'runtime_process_candidate'
+  ) {
+    return true;
+  }
+  const hasProcessTableUnavailableMarker =
+    mentionsProcessTableUnavailable(entry.runtimeDiagnostic) ||
+    mentionsProcessTableUnavailable(entry.hardFailureReason) ||
+    mentionsProcessTableUnavailable(entry.error);
+  if (!entry.livenessKind) {
+    return !hasProcessTableUnavailableMarker;
+  }
+  if (entry.livenessKind !== 'registered_only' && entry.livenessKind !== 'stale_metadata') {
+    return false;
+  }
+  return !hasProcessTableUnavailableMarker;
+}
+
+function runtimeEntryContradictsConfirmedJoin(
+  entry: MemberSpawnStatusEntry,
+  runtimeEntry: TeamAgentRuntimeEntry | undefined
+): boolean {
+  if (runtimeEntry?.alive !== false || runtimeEntry.livenessKind === 'confirmed_bootstrap') {
+    return false;
+  }
+  if (
+    isBootstrapConfirmedProvisionedButNotAliveFailure(entry) &&
+    !hasUnsafeProvisionedButNotAliveRuntimeEvidence(entry) &&
+    !hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(entry, runtimeEntry) &&
+    (runtimeEntry.livenessKind == null ||
+      runtimeEntry.livenessKind === 'registered_only' ||
+      runtimeEntry.livenessKind === 'stale_metadata') &&
+    (mentionsProcessTableUnavailable(runtimeEntry.runtimeDiagnostic) ||
+      mentionsProcessTableUnavailable(entry.runtimeDiagnostic) ||
+      mentionsProcessTableUnavailable(entry.hardFailureReason) ||
+      mentionsProcessTableUnavailable(entry.error))
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function shouldPreferSnapshotEntryOverLive(
@@ -98,6 +185,7 @@ function summarizeLiveLaunchJoinMilestones(params: {
   memberSpawnStatuses?: MemberSpawnStatusCollection;
   memberSpawnSnapshotStatuses?: MemberSpawnStatusesSnapshot['statuses'];
   memberSpawnSnapshotUpdatedAt?: string;
+  memberRuntimeEntries?: TeamAgentRuntimeEntryCollection;
 }): Omit<LaunchJoinMilestones, 'expectedTeammateCount'> & {
   observedTeammateCount: number;
 } {
@@ -129,7 +217,7 @@ function summarizeLiveLaunchJoinMilestones(params: {
       continue;
     }
     observedTeammateCount += 1;
-    if (entry.launchState === 'failed_to_start') {
+    if (isFailedSpawnEntry(entry)) {
       failedSpawnCount += 1;
       continue;
     }
@@ -137,7 +225,21 @@ function summarizeLiveLaunchJoinMilestones(params: {
       skippedSpawnCount += 1;
       continue;
     }
-    if (entry.launchState === 'confirmed_alive') {
+    if (spawnEntryContradictsConfirmedJoin(entry)) {
+      pendingSpawnCount += 1;
+      continue;
+    }
+    if (
+      isConfirmedSpawnEntry(entry) &&
+      runtimeEntryContradictsConfirmedJoin(
+        entry,
+        getRuntimeEntry(params.memberRuntimeEntries, memberName)
+      )
+    ) {
+      pendingSpawnCount += 1;
+      continue;
+    }
+    if (isConfirmedSpawnEntry(entry)) {
       heartbeatConfirmedCount += 1;
       continue;
     }
@@ -172,6 +274,7 @@ export function getLaunchJoinMilestonesFromMembers({
   members,
   memberSpawnStatuses,
   memberSpawnSnapshot,
+  memberRuntimeEntries,
 }: {
   members: readonly LaunchJoinMemberLike[];
   memberSpawnStatuses?: MemberSpawnStatusCollection;
@@ -181,6 +284,7 @@ export function getLaunchJoinMilestonesFromMembers({
   > & {
     statuses?: MemberSpawnStatusesSnapshot['statuses'];
   };
+  memberRuntimeEntries?: TeamAgentRuntimeEntryCollection;
 }): LaunchJoinMilestones {
   const removedTeammateNameSet = new Set(
     members
@@ -209,6 +313,7 @@ export function getLaunchJoinMilestonesFromMembers({
     memberSpawnStatuses,
     memberSpawnSnapshotStatuses: memberSpawnSnapshot?.statuses,
     memberSpawnSnapshotUpdatedAt: memberSpawnSnapshot?.updatedAt,
+    memberRuntimeEntries,
   });
 
   if (snapshotSummary) {

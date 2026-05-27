@@ -31,11 +31,30 @@ describe('Claude attachment adapter', () => {
     });
 
     expect(result.kind).toBe('structured_blocks');
-    expect(result.blocks[0]).toEqual({ type: 'text', text: 'What color?' });
-    expect(result.blocks[1]).toMatchObject({
+    expect(result.blocks[0]).toMatchObject({
       type: 'image',
       source: { type: 'base64', media_type: 'image/png' },
     });
+    expect(result.blocks[1]).toEqual({ type: 'text', text: 'What color?' });
+  });
+
+  it.each([
+    ['image/jpeg', 'photo.jpg'],
+    ['image/gif', 'animation.gif'],
+    ['image/webp', 'screenshot.webp'],
+  ])('serializes %s images as structured image blocks', (mimeType, filename) => {
+    const result = buildClaudeAttachmentDeliveryParts({
+      text: 'What color?',
+      attachments: [attachment({ filename, mimeType })],
+    });
+
+    expect(result.blocks).toMatchObject([
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: mimeType },
+      },
+      { type: 'text', text: 'What color?' },
+    ]);
   });
 
   it('serializes UTF-8 text files as text document blocks', () => {
@@ -50,11 +69,12 @@ describe('Claude attachment adapter', () => {
       ],
     });
 
-    expect(result.blocks[1]).toEqual({
+    expect(result.blocks[0]).toEqual({
       type: 'document',
       source: { type: 'text', media_type: 'text/plain', data: 'hello' },
       title: 'note.txt',
     });
+    expect(result.blocks[1]).toEqual({ type: 'text', text: 'Read this' });
   });
 
   it('serializes text subtypes as text document blocks', () => {
@@ -69,11 +89,12 @@ describe('Claude attachment adapter', () => {
       ],
     });
 
-    expect(result.blocks[1]).toEqual({
+    expect(result.blocks[0]).toEqual({
       type: 'document',
       source: { type: 'text', media_type: 'text/plain', data: '# hello' },
       title: 'notes.md',
     });
+    expect(result.blocks[1]).toEqual({ type: 'text', text: 'Read this' });
   });
 
   it('rejects unsupported non-image files before provider send', () => {
@@ -85,11 +106,11 @@ describe('Claude attachment adapter', () => {
     ).toThrow(/Claude attachment MIME unsupported/);
   });
 
-  it('rejects unsupported image mime types before provider send', () => {
+  it('rejects image mime types outside Claude vision support before provider send', () => {
     expect(() =>
       buildClaudeAttachmentDeliveryParts({
-        text: 'see gif',
-        attachments: [attachment({ mimeType: 'image/gif' })],
+        text: 'see avif',
+        attachments: [attachment({ mimeType: 'image/avif' })],
       })
     ).toThrow(/Claude attachment MIME unsupported/);
   });

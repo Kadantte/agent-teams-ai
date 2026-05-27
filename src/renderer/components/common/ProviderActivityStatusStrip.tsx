@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { useAppTranslation } from '@features/localization/renderer';
 import { isElectronMode } from '@renderer/api';
 import { formatProviderStatusText } from '@renderer/components/runtime/providerConnectionUi';
 import { createLoadingMultimodelCliStatus } from '@renderer/store/slices/cliInstallerSlice';
 import { filterMainScreenCliProviders } from '@renderer/utils/geminiUiFreeze';
-import { CLI_PROVIDER_STATUS_DEFERRED_MESSAGE } from '@shared/types/cliInstaller';
+import { isTeamProviderModelVerificationPending } from '@renderer/utils/teamModelAvailability';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 
 import { ProviderBrandLogo } from './ProviderBrandLogo';
@@ -27,17 +28,13 @@ interface ProviderActivityStatusStripProps {
   readonly providerIds?: readonly CliProviderId[];
   readonly className?: string;
   readonly label?: string | null;
+  readonly layout?: 'inline' | 'stacked';
+  readonly showReadyProviders?: boolean;
+  readonly readyStatusText?: string;
 }
 
 function isProviderCardLoading(provider: CliProviderStatus, providerLoading: boolean): boolean {
-  return (
-    providerLoading ||
-    (!provider.authenticated &&
-      (provider.statusMessage === 'Checking...' ||
-        provider.statusMessage === CLI_PROVIDER_STATUS_DEFERRED_MESSAGE) &&
-      provider.models.length === 0 &&
-      provider.backend == null)
-  );
+  return providerLoading || isTeamProviderModelVerificationPending(provider.providerId, provider);
 }
 
 function shouldMaskCodexNegativeBootstrapState(
@@ -97,6 +94,7 @@ function useProviderActivityDisplay({
   multimodelEnabled,
   codexSnapshotPending = false,
   providerIds,
+  showReadyProviders,
 }: Pick<
   ProviderActivityStatusStripProps,
   | 'cliStatus'
@@ -106,6 +104,7 @@ function useProviderActivityDisplay({
   | 'multimodelEnabled'
   | 'codexSnapshotPending'
   | 'providerIds'
+  | 'showReadyProviders'
 >): {
   displayProviderIds: CliProviderId[];
   providerStateMap: Map<CliProviderId, ProviderActivityState>;
@@ -201,6 +200,10 @@ function useProviderActivityDisplay({
   }, [errorProviderIds, loadingProviderIds, visibleProviderIds]);
 
   const displayProviderIds = useMemo(() => {
+    if (showReadyProviders) {
+      return visibleProviderIds;
+    }
+
     if (loadingProviderIds.length > 0) {
       const activeCycleIds = (
         cycleProviderIds.length > 0 ? cycleProviderIds : loadingProviderIds
@@ -213,7 +216,14 @@ function useProviderActivityDisplay({
     }
 
     return [];
-  }, [cycleProviderIds, errorProviderIds, loadingProviderIds, providerStateMap]);
+  }, [
+    cycleProviderIds,
+    errorProviderIds,
+    loadingProviderIds,
+    providerStateMap,
+    showReadyProviders,
+    visibleProviderIds,
+  ]);
 
   return {
     displayProviderIds,
@@ -236,8 +246,13 @@ export const ProviderActivityStatusStrip = ({
   codexSnapshotPending = false,
   providerIds,
   className = '',
-  label = 'Provider Activity',
+  label,
+  layout = 'inline',
+  showReadyProviders = false,
+  readyStatusText,
 }: ProviderActivityStatusStripProps): React.JSX.Element | null => {
+  const { t } = useAppTranslation('settings');
+  const effectiveLabel = label ?? t('providerRuntime.connectionUi.status.providerActivity');
   const { displayProviderIds, providerStateMap, shouldRender } = useProviderActivityDisplay({
     cliStatus,
     sourceCliStatus,
@@ -246,23 +261,33 @@ export const ProviderActivityStatusStrip = ({
     multimodelEnabled,
     codexSnapshotPending,
     providerIds,
+    showReadyProviders,
   });
 
   if (!shouldRender) {
     return null;
   }
 
+  const rootClassName =
+    layout === 'stacked'
+      ? `flex min-w-0 flex-col items-start gap-1.5 ${className}`.trim()
+      : `flex min-w-0 flex-wrap items-center gap-2 ${className}`.trim();
+  const itemsClassName =
+    layout === 'stacked'
+      ? 'flex min-w-0 w-full flex-wrap items-center gap-1.5'
+      : 'flex min-w-0 flex-1 flex-wrap items-center gap-2';
+
   return (
-    <div className={`flex min-w-0 flex-wrap items-center gap-2 ${className}`.trim()}>
-      {label ? (
+    <div className={rootClassName}>
+      {effectiveLabel ? (
         <span
           className="shrink-0 text-[11px] font-medium uppercase tracking-[0.08em]"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          {label}
+          {effectiveLabel}
         </span>
       ) : null}
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <div className={itemsClassName}>
         {displayProviderIds.map((providerId) => {
           const providerState = providerStateMap.get(providerId);
           if (!providerState) {
@@ -277,16 +302,18 @@ export const ProviderActivityStatusStrip = ({
           const styles = getActivityToneStyles(tone);
           const statusText =
             tone === 'loading'
-              ? 'Checking...'
+              ? t('providerRuntime.connectionUi.status.checking')
               : tone === 'error'
-                ? formatProviderStatusText(providerState.provider)
-                : 'Checked';
+                ? formatProviderStatusText(providerState.provider, t)
+                : t('providerRuntime.connectionUi.status.checked');
+          const displayStatusText =
+            tone === 'checked' && readyStatusText ? readyStatusText : statusText;
 
           return (
             <div
               key={providerId}
               data-testid={`provider-activity-status-${providerId}`}
-              className="flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]"
+              className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]"
               style={{
                 borderColor: styles.borderColor,
                 backgroundColor: styles.backgroundColor,
@@ -310,9 +337,9 @@ export const ProviderActivityStatusStrip = ({
               <span
                 className="max-w-[280px] truncate"
                 style={{ color: styles.statusColor }}
-                title={statusText}
+                title={displayStatusText}
               >
-                {statusText}
+                {displayStatusText}
               </span>
             </div>
           );

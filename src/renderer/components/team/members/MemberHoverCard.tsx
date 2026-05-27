@@ -1,5 +1,6 @@
 import { memo } from 'react';
 
+import { useAppTranslation } from '@features/localization/renderer';
 import { Badge } from '@renderer/components/ui/badge';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@renderer/components/ui/hover-card';
 import {
@@ -69,6 +70,7 @@ export const MemberHoverCard = memo(function MemberHoverCard({
   onOpenTask,
   children,
 }: MemberHoverCardProps): React.JSX.Element {
+  const { t } = useAppTranslation('team');
   const { isLight } = useTheme();
   const selectedTeamName = useStore((s) => s.selectedTeamName);
   const effectiveTeamName = teamName ?? selectedTeamName;
@@ -82,6 +84,7 @@ export const MemberHoverCard = memo(function MemberHoverCard({
     memberSpawnStatuses,
     spawnEntry,
     runtimeRunId,
+    runtimeEntries,
     runtimeEntry,
     leadActivity,
   } = useStore(
@@ -107,6 +110,9 @@ export const MemberHoverCard = memo(function MemberHoverCard({
       runtimeRunId: effectiveTeamName
         ? s.teamAgentRuntimeByTeam?.[effectiveTeamName]?.runId
         : undefined,
+      runtimeEntries: effectiveTeamName
+        ? s.teamAgentRuntimeByTeam?.[effectiveTeamName]?.members
+        : undefined,
       runtimeEntry: effectiveTeamName
         ? s.teamAgentRuntimeByTeam?.[effectiveTeamName]?.members[name]
         : undefined,
@@ -124,6 +130,7 @@ export const MemberHoverCard = memo(function MemberHoverCard({
     members: teamMembers,
     memberSpawnStatuses,
     memberSpawnSnapshot,
+    memberRuntimeEntries: runtimeEntries,
   });
   const isLaunchSettling =
     progress?.state === 'ready' && getLaunchJoinState(launchJoinMilestones).hasMembersStillJoining;
@@ -140,6 +147,7 @@ export const MemberHoverCard = memo(function MemberHoverCard({
       spawnStatus: spawnEntry?.status,
       spawnLaunchState: spawnEntry?.launchState,
       spawnRuntimeAlive: spawnEntry?.runtimeAlive,
+      spawnEntry,
       runtimeEntry,
     })
       ? currentTaskCandidate
@@ -161,7 +169,11 @@ export const MemberHoverCard = memo(function MemberHoverCard({
     spawnBootstrapStalled: spawnEntry?.bootstrapStalled,
     spawnAgentToolAccepted: spawnEntry?.agentToolAccepted,
     spawnHardFailure: spawnEntry?.hardFailure,
+    spawnHardFailureReason: spawnEntry?.hardFailureReason,
+    spawnError: spawnEntry?.error,
+    spawnRuntimeDiagnostic: spawnEntry?.runtimeDiagnostic,
     spawnLivenessKind: spawnEntry?.livenessKind,
+    spawnRuntimeDiagnosticSeverity: spawnEntry?.runtimeDiagnosticSeverity,
     spawnFirstSpawnAcceptedAt: spawnEntry?.firstSpawnAcceptedAt,
     spawnUpdatedAt: spawnEntry?.updatedAt,
     runtimeEntry,
@@ -219,6 +231,7 @@ export const MemberHoverCard = memo(function MemberHoverCard({
       spawnStatus: spawnEntry?.status,
       spawnLaunchState: spawnEntry?.launchState,
       spawnRuntimeAlive: spawnEntry?.runtimeAlive,
+      spawnEntry,
       runtimeEntry,
     })
       ? reviewTaskCandidate
@@ -326,7 +339,7 @@ export const MemberHoverCard = memo(function MemberHoverCard({
               }}
             >
               <ExternalLink size={12} />
-              Open profile
+              {t('members.actions.openProfile')}
             </button>
           </div>
         </div>

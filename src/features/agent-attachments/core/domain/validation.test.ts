@@ -90,6 +90,44 @@ describe('agent attachment validation', () => {
     expect(result).toEqual({ ok: true, warnings: [] });
   });
 
+  it('allows Claude GIF image delivery without requiring optimization support', () => {
+    const capability = resolveAgentAttachmentCapability({
+      providerId: 'anthropic',
+      model: 'claude-haiku-4-5',
+    });
+    const result = validateAttachmentForCapability({
+      attachment: fakeImageAttachment({
+        id: 'att_gif',
+        originalName: 'clip.gif',
+        mimeType: 'image/gif',
+      }),
+      capability,
+    });
+
+    expect(result).toEqual({ ok: true, warnings: [] });
+  });
+
+  it('blocks GIF images for Codex native delivery', () => {
+    const capability = resolveAgentAttachmentCapability({
+      providerId: 'codex',
+      model: 'gpt-5.4-mini',
+    });
+    const result = validateAttachmentForCapability({
+      attachment: fakeImageAttachment({
+        id: 'att_gif',
+        originalName: 'clip.gif',
+        mimeType: 'image/gif',
+      }),
+      capability,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('attachment_type_unsupported');
+      expect(result.message).toContain('image type');
+    }
+  });
+
   it('blocks non-image files for Codex native delivery', () => {
     const capability = resolveAgentAttachmentCapability({
       providerId: 'codex',

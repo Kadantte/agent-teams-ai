@@ -641,6 +641,70 @@ describe('FileWatcher', () => {
     watcher.stop();
   });
 
+  it('chunks broad project polling baselines and still emits changes after priming', async () => {
+    const projectsDir = '/virtual/projects';
+    const todosDir = '/virtual/todos';
+    const projectNames = Array.from({ length: 65 }, (_, index) =>
+      `encoded-project-${String(index).padStart(3, '0')}`
+    );
+    const fileState = new Map(projectNames.map((name) => [name, { size: 10, mtimeMs: 1000 }]));
+    const fsProvider = {
+      type: 'local' as const,
+      exists: vi.fn().mockResolvedValue(true),
+      readFile: vi.fn().mockResolvedValue(''),
+      stat: vi.fn().mockResolvedValue({
+        size: 10,
+        mtimeMs: 1000,
+        birthtimeMs: 1000,
+        isFile: () => true,
+        isDirectory: () => false,
+      }),
+      readdir: vi.fn(async (dirPath: string) => {
+        if (dirPath === projectsDir) {
+          return projectNames.map((name) => createFsDirent(name, 'directory'));
+        }
+        const projectName = path.basename(dirPath);
+        const state = fileState.get(projectName);
+        if (state) {
+          return [createFsDirent('session-1.jsonl', 'file', state)];
+        }
+        return [];
+      }),
+      createReadStream: vi.fn(() => Readable.from([])),
+      dispose: vi.fn(),
+    };
+
+    const dataCache = new DataCache(50, 10, false);
+    const watcher = new FileWatcher(dataCache, projectsDir, todosDir, fsProvider);
+    const events: unknown[] = [];
+    watcher.on('file-change', (event) => events.push(event));
+
+    setWatcherActive(watcher);
+    const projectsSource = getChangeSource(watcher, 'projects');
+
+    await projectsSource.pollOnce();
+    expect(projectsSource.isPollingPrimed).toBe(false);
+    expect(events).toEqual([]);
+
+    await projectsSource.pollOnce();
+    expect(projectsSource.isPollingPrimed).toBe(true);
+    expect(events).toEqual([]);
+
+    fileState.set(projectNames[0], { size: 12, mtimeMs: 2000 });
+    await projectsSource.pollOnce();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(events).toContainEqual({
+      type: 'change',
+      path: path.join(projectsDir, projectNames[0], 'session-1.jsonl'),
+      projectId: projectNames[0],
+      sessionId: 'session-1',
+      isSubagent: false,
+    });
+
+    watcher.stop();
+  });
+
   it('treats SSH not-found subagent directories as empty during project polling', async () => {
     const projectsDir = '/remote/projects';
     const todosDir = '/remote/todos';
@@ -2537,6 +2601,56 @@ describe('FileWatcher', () => {
 
       // Tracking should now reflect all 3 lines
       expect(watcherAny.lastProcessedLineCount.get(filePath)).toBe(3);
+
+      watcher.stop();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('preserves line offset for oversized pre-existing files without notifications', async () => {
+      vi.useRealTimers();
+      useRealExistsSync();
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filewatcher-large-baseline-'));
+      const projectsDir = path.join(tempDir, 'projects');
+      const projectDir = path.join(projectsDir, 'test-project');
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      const filePath = path.join(projectDir, 'session-large.jsonl');
+      const largeLineCount = 17_000;
+      const largePayload = 'old data '.repeat(120);
+      fs.writeFileSync(
+        filePath,
+        Array.from({ length: largeLineCount }, (_, index) =>
+          jsonlLine(`large-${index}`, largePayload)
+        ).join(''),
+        'utf8'
+      );
+
+      const dataCache = new DataCache(50, 10, false);
+      const notificationManager = createMockNotificationManager();
+      const watcher = new FileWatcher(dataCache, projectsDir, path.join(tempDir, 'todos'));
+      watcher.setNotificationManager(notificationManager);
+
+      const watcherAny = watcher as unknown as {
+        detectErrorsInSessionFile: (
+          projectId: string,
+          sessionId: string,
+          filePath: string
+        ) => Promise<void>;
+        lastProcessedLineCount: Map<string, number>;
+        lastProcessedSize: Map<string, number>;
+        instanceCreatedAt: number;
+      };
+      watcherAny.instanceCreatedAt = Date.now() + 60_000;
+
+      vi.mocked(errorDetector.detectErrors).mockClear();
+
+      await watcherAny.detectErrorsInSessionFile('test-project', 'session-large', filePath);
+
+      expect(errorDetector.detectErrors).not.toHaveBeenCalled();
+      expect(watcherAny.lastProcessedLineCount.get(filePath)).toBe(largeLineCount);
+      expect(watcherAny.lastProcessedSize.get(filePath)).toBe(fs.statSync(filePath).size);
+      expect(notificationManager.addError).not.toHaveBeenCalled();
 
       watcher.stop();
       fs.rmSync(tempDir, { recursive: true, force: true });

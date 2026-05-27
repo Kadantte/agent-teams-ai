@@ -356,7 +356,6 @@ describe('CliInstallerService', () => {
         showBinaryPath: false,
       });
       vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/agent_teams_orchestrator');
-      vi.mocked(execCli).mockResolvedValueOnce({ stdout: '0.0.46', stderr: '' });
       const getProviderStatusesSpy = vi
         .spyOn(ClaudeMultimodelBridgeService.prototype, 'getProviderStatuses')
         .mockResolvedValue([
@@ -377,6 +376,8 @@ describe('CliInstallerService', () => {
         .filter((event) => event.type === 'status');
 
       expect(status.installed).toBe(true);
+      expect(status.binaryPath).toBe('/mock/agent_teams_orchestrator');
+      expect(status.installedVersion).toBeNull();
       expect(resolveInteractiveShellEnvBestEffortMock).not.toHaveBeenCalled();
       expect(status.authStatusChecking).toBe(false);
       expect(status.authLoggedIn).toBe(false);
@@ -403,11 +404,14 @@ describe('CliInstallerService', () => {
         )
       ).toBe(true);
       expect(getProviderStatusesSpy).not.toHaveBeenCalled();
-      expect(execCli).toHaveBeenCalledTimes(1);
-      expect(execCli).toHaveBeenCalledWith(
-        '/mock/agent_teams_orchestrator',
-        ['--version'],
-        expect.objectContaining({ timeout: expect.any(Number) })
+      expect(execCli).not.toHaveBeenCalled();
+      await vi.waitFor(() =>
+        expect(appendCliAuthDiag).toHaveBeenCalledWith(
+          expect.objectContaining({
+            shellEnvMs: 0,
+            versionProbeMs: 0,
+          })
+        )
       );
     });
 
@@ -420,6 +424,32 @@ describe('CliInstallerService', () => {
       expect(status.installed).toBe(false);
       expect(status.binaryPath).toBe('/usr/local/bin/claude');
       expect(status.installedVersion).toBeNull();
+    });
+
+    it('does not run a redundant version probe before an explicit multimodel provider refresh', async () => {
+      allowConsoleLogs();
+      vi.mocked(getConfiguredCliFlavor).mockReturnValue('agent_teams_orchestrator');
+      vi.mocked(getCliFlavorUiOptions).mockReturnValue({
+        displayName: 'agent_teams_orchestrator',
+        supportsSelfUpdate: false,
+        showVersionDetails: false,
+        showBinaryPath: false,
+      });
+      vi.mocked(ClaudeBinaryResolver.resolve).mockResolvedValue('/mock/agent_teams_orchestrator');
+      const providerStatus = createTestProviderStatus('codex', true, 'chatgpt');
+      const getProviderStatusSpy = vi
+        .spyOn(ClaudeMultimodelBridgeService.prototype, 'getProviderStatus')
+        .mockResolvedValue(providerStatus);
+
+      const status = await service.getProviderStatus('codex');
+
+      expect(status).toBe(providerStatus);
+      expect(execCli).not.toHaveBeenCalled();
+      expect(getProviderStatusSpy).toHaveBeenCalledWith(
+        '/mock/agent_teams_orchestrator',
+        'codex',
+        expect.any(Function)
+      );
     });
 
     it('retries the version probe once before marking the runtime unhealthy', async () => {

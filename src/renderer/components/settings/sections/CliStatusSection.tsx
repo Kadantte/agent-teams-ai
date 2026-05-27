@@ -11,9 +11,11 @@ import {
   mergeCodexProviderStatusWithSnapshot,
   useCodexAccountSnapshot,
 } from '@features/codex-account/renderer';
+import { useAppTranslation } from '@features/localization/renderer';
 import { isElectronMode } from '@renderer/api';
 import { confirm } from '@renderer/components/common/ConfirmDialog';
 import { ProviderBrandLogo } from '@renderer/components/common/ProviderBrandLogo';
+import { isCodexProviderRuntimeMissing } from '@renderer/components/runtime/codexRuntimeInstallAction';
 import {
   formatProviderStatusText,
   getProviderConnectionModeSummary,
@@ -126,6 +128,7 @@ function getProviderLabel(providerId: CliProviderId): string {
 }
 
 export const CliStatusSection = (): React.JSX.Element | null => {
+  const { t } = useAppTranslation('settings');
   const isElectron = useMemo(() => isElectronMode(), []);
   const appConfig = useStore((s) => s.appConfig);
   const selectedProjectId = useStore((s) => s.selectedProjectId);
@@ -146,6 +149,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
     bootstrapCliStatus,
     fetchCliStatus,
     fetchCliProviderStatus,
+    fetchCodexRuntimeStatus,
     installCodexRuntime,
     installCli,
     isBusy,
@@ -224,6 +228,22 @@ export const CliStatusSection = (): React.JSX.Element | null => {
     }
   }, [bootstrapCliStatus, cliStatus, fetchCliStatus, isElectron, multimodelEnabled]);
 
+  useEffect(() => {
+    if (!isElectron || codexRuntimeStatus || codexRuntimeStatusLoading) {
+      return;
+    }
+
+    if (visibleEffectiveProviders.some(isCodexProviderRuntimeMissing)) {
+      void fetchCodexRuntimeStatus();
+    }
+  }, [
+    codexRuntimeStatus,
+    codexRuntimeStatusLoading,
+    fetchCodexRuntimeStatus,
+    isElectron,
+    visibleEffectiveProviders,
+  ]);
+
   const handleInstall = useCallback(() => {
     installCli();
   }, [installCli]);
@@ -253,7 +273,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
     async (providerId: CliProviderId) => {
       const provider =
         effectiveCliStatus?.providers.find((entry) => entry.providerId === providerId) ?? null;
-      const disconnectAction = provider ? getProviderDisconnectAction(provider) : null;
+      const disconnectAction = provider ? getProviderDisconnectAction(provider, t) : null;
       if (!disconnectAction) {
         return;
       }
@@ -262,7 +282,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
         title: disconnectAction.title,
         message: disconnectAction.message,
         confirmLabel: disconnectAction.confirmLabel,
-        cancelLabel: 'Cancel',
+        cancelLabel: t('providerRuntime.actions.cancel'),
         variant: 'danger',
       });
 
@@ -275,7 +295,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
         action: 'logout',
       });
     },
-    [effectiveCliStatus?.providers]
+    [effectiveCliStatus?.providers, t]
   );
 
   const handleProviderManage = useCallback((providerId: CliProviderId) => {
@@ -347,7 +367,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
 
   return (
     <div className="mb-2">
-      <SettingsSectionHeader title="CLI Runtime" />
+      <SettingsSectionHeader title={t('cliRuntime.title')} />
       <div className="space-y-3 py-2">
         {/* Loading status */}
         {!effectiveCliStatus && installerState === 'idle' && (
@@ -356,7 +376,9 @@ export const CliStatusSection = (): React.JSX.Element | null => {
             style={{ color: 'var(--color-text-muted)' }}
           >
             <Loader2 className="size-4 animate-spin" />
-            {multimodelEnabled ? 'Checking AI Providers...' : 'Checking Claude CLI...'}
+            {multimodelEnabled
+              ? t('cliRuntime.loading.aiProviders')
+              : t('cliRuntime.loading.claudeCli')}
           </div>
         )}
 
@@ -378,7 +400,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                       className="text-xs font-medium"
                       style={{ color: 'var(--color-text-secondary)' }}
                     >
-                      Multimodel
+                      {t('cliRuntime.labels.multimodel')}
                     </span>
                   </div>
                   {/* Inline action buttons */}
@@ -390,7 +412,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                       style={{ backgroundColor: '#3b82f6' }}
                     >
                       <Download className="size-3.5" />
-                      Update
+                      {t('cliRuntime.actions.update')}
                     </button>
                   ) : effectiveCliStatus.supportsSelfUpdate ? (
                     <button
@@ -405,12 +427,12 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                       {cliStatusLoading ? (
                         <>
                           <Loader2 className="size-3.5 animate-spin" />
-                          Checking...
+                          {t('cliRuntime.actions.checking')}
                         </>
                       ) : (
                         <>
                           <RefreshCw className="size-3.5" />
-                          Check for Updates
+                          {t('cliRuntime.actions.checkForUpdates')}
                         </>
                       )}
                     </button>
@@ -427,7 +449,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                       }}
                     >
                       <Puzzle className="size-3.5" />
-                      Extensions
+                      {t('cliRuntime.actions.extensions')}
                     </button>
                   )}
                 </div>
@@ -445,8 +467,10 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                   effectiveCliStatus.latestVersion && (
                     <div className="ml-6 flex items-center gap-2">
                       <span className="text-xs" style={{ color: '#60a5fa' }}>
-                        v{effectiveCliStatus.installedVersion} &rarr; v
-                        {effectiveCliStatus.latestVersion}
+                        {t('cliStatus.versionUpgrade', {
+                          current: effectiveCliStatus.installedVersion,
+                          latest: effectiveCliStatus.latestVersion,
+                        })}
                       </span>
                     </div>
                   )}
@@ -468,7 +492,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                             shouldShowProviderStatusSkeleton(provider, providerLoading) ||
                             isCodexSnapshotPending(provider, codexSnapshotPending);
                           const runtimeSummary = isConnectionManagedRuntimeProvider(provider)
-                            ? getProviderCurrentRuntimeSummary(provider)
+                            ? getProviderCurrentRuntimeSummary(provider, t)
                             : getProviderRuntimeBackendSummary(provider);
                           const sourceProvider =
                             loadingCliProviderMap.get(provider.providerId) ?? null;
@@ -478,8 +502,8 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                           );
                           const effectiveShowSkeleton = showSkeleton || maskNegativeBootstrapState;
                           const statusText = effectiveShowSkeleton
-                            ? 'Checking...'
-                            : formatProviderStatusText(provider);
+                            ? t('providerRuntime.connectionUi.status.checking')
+                            : formatProviderStatusText(provider, t);
                           const modelCatalogLoading =
                             provider.modelCatalogRefreshState === 'loading' ||
                             isOpenCodeCatalogHydrating(provider);
@@ -491,9 +515,12 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                                   provider
                                 ).length > 0
                               : provider.models.length > 0;
-                          const connectionModeSummary = getProviderConnectionModeSummary(provider);
-                          const credentialSummary = getProviderCredentialSummary(provider);
-                          const disconnectAction = getProviderDisconnectAction(provider);
+                          const connectionModeSummary = getProviderConnectionModeSummary(
+                            provider,
+                            t
+                          );
+                          const credentialSummary = getProviderCredentialSummary(provider, t);
+                          const disconnectAction = getProviderDisconnectAction(provider, t);
                           const hasDetailContent = Boolean(
                             (provider.backend?.label && !runtimeSummary) ||
                             runtimeSummary ||
@@ -507,20 +534,21 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                             <>
                               <div className="col-span-2 flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2 text-xs">
-                                    <span className="flex items-center gap-2">
+                                  <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
+                                    <span className="flex min-w-0 items-center gap-2">
                                       <ProviderBrandLogo
                                         providerId={provider.providerId}
                                         className="size-4 shrink-0"
                                       />
                                       <span
-                                        className="font-medium"
+                                        className="truncate whitespace-nowrap font-medium"
                                         style={{ color: 'var(--color-text-secondary)' }}
                                       >
                                         {provider.displayName}
                                       </span>
                                     </span>
                                     <span
+                                      className="whitespace-nowrap"
                                       style={{
                                         color: getProviderStatusColor(
                                           statusText,
@@ -539,22 +567,30 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                                       style={{ color: 'var(--color-text-muted)' }}
                                     >
                                       {provider.backend?.label && !runtimeSummary && (
-                                        <span>Backend: {provider.backend.label}</span>
+                                        <span>
+                                          {t('cliRuntime.provider.backend', {
+                                            backend: provider.backend.label,
+                                          })}
+                                        </span>
                                       )}
                                       {runtimeSummary ? (
                                         <span>
                                           {isConnectionManagedRuntimeProvider(provider)
                                             ? runtimeSummary
-                                            : `Runtime: ${runtimeSummary}`}
+                                            : t('cliRuntime.provider.runtime', {
+                                                runtime: runtimeSummary,
+                                              })}
                                         </span>
                                       ) : null}
                                       {connectionModeSummary ? (
                                         <span>{connectionModeSummary}</span>
                                       ) : null}
                                       {credentialSummary ? <span>{credentialSummary}</span> : null}
-                                      {modelCatalogLoading ? <span>Loading models...</span> : null}
+                                      {modelCatalogLoading ? (
+                                        <span>{t('cliRuntime.provider.loadingModels')}</span>
+                                      ) : null}
                                       {!hasProviderModels && !modelCatalogLoading && (
-                                        <span>Models unavailable for this runtime build</span>
+                                        <span>{t('cliRuntime.provider.modelsUnavailable')}</span>
                                       )}
                                     </div>
                                   ) : null}
@@ -571,7 +607,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                                     }}
                                   >
                                     <SlidersHorizontal className="size-3" />
-                                    Manage
+                                    {t('cliRuntime.actions.manage')}
                                   </button>
                                   {disconnectAction ? (
                                     <button
@@ -605,7 +641,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                                       }}
                                     >
                                       <LogIn className="size-3" />
-                                      {getProviderConnectLabel(provider)}
+                                      {getProviderConnectLabel(provider, t)}
                                     </button>
                                   ) : null}
                                 </div>
@@ -652,8 +688,8 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="size-4 shrink-0" style={{ color: '#fbbf24' }} />
                   {effectiveCliStatus.binaryPath && effectiveCliStatus.launchError
-                    ? `${runtimeDisplayName} was found but failed to start`
-                    : `${runtimeDisplayName} not installed`}
+                    ? t('cliRuntime.status.foundButFailed', { runtime: runtimeDisplayName })
+                    : t('cliRuntime.status.notInstalled', { runtime: runtimeDisplayName })}
                 </div>
                 {effectiveCliStatus.showBinaryPath && effectiveCliStatus.binaryPath && (
                   <div className="break-all font-mono text-xs text-text-muted">
@@ -687,7 +723,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                   }}
                 >
                   <RefreshCw className="size-3.5" />
-                  Re-check
+                  {t('cliRuntime.actions.recheck')}
                 </button>
                 <button
                   onClick={handleInstall}
@@ -697,16 +733,16 @@ export const CliStatusSection = (): React.JSX.Element | null => {
                 >
                   <Download className="size-3.5" />
                   {effectiveCliStatus.binaryPath && effectiveCliStatus.launchError
-                    ? `Reinstall ${runtimeDisplayName}`
-                    : `Install ${runtimeDisplayName}`}
+                    ? t('cliRuntime.actions.reinstallRuntime', { runtime: runtimeDisplayName })
+                    : t('cliRuntime.actions.installRuntime', { runtime: runtimeDisplayName })}
                 </button>
               </div>
             )}
             {!effectiveCliStatus.installed && !effectiveCliStatus.supportsSelfUpdate && (
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 {effectiveCliStatus.binaryPath && effectiveCliStatus.launchError
-                  ? `The configured ${runtimeDisplayName} failed its startup health check.`
-                  : `The configured ${runtimeDisplayName} was not found.`}
+                  ? t('cliRuntime.status.healthCheckFailed', { runtime: runtimeDisplayName })
+                  : t('cliRuntime.status.configuredNotFound', { runtime: runtimeDisplayName })}
               </p>
             )}
           </div>
@@ -719,7 +755,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
               className="flex items-center justify-between text-xs"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              <span>Downloading...</span>
+              <span>{t('cliRuntime.installer.downloading')}</span>
               <span>
                 {downloadTotal > 0
                   ? `${formatBytes(downloadTransferred)} / ${formatBytes(downloadTotal)} (${downloadProgress}%)`
@@ -755,7 +791,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
             style={{ color: 'var(--color-text-secondary)' }}
           >
             <Loader2 className="size-4 animate-spin" />
-            Checking latest version...
+            {t('cliRuntime.installer.checkingLatest')}
           </div>
         )}
 
@@ -766,7 +802,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
             style={{ color: 'var(--color-text-secondary)' }}
           >
             <Loader2 className="size-4 animate-spin" />
-            Verifying checksum...
+            {t('cliRuntime.installer.verifying')}
           </div>
         )}
 
@@ -777,7 +813,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
             style={{ color: 'var(--color-text-secondary)' }}
           >
             <Loader2 className="size-4 animate-spin" />
-            Installing...
+            {t('cliRuntime.installer.installing')}
           </div>
         )}
 
@@ -785,7 +821,9 @@ export const CliStatusSection = (): React.JSX.Element | null => {
         {installerState === 'completed' && (
           <div className="flex items-center gap-2 text-sm" style={{ color: '#4ade80' }}>
             <CheckCircle className="size-4" />
-            Installed v{completedVersion ?? 'latest'}
+            {t('cliRuntime.installer.installed', {
+              version: completedVersion ?? t('cliRuntime.installer.latest'),
+            })}
           </div>
         )}
 
@@ -794,7 +832,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm" style={{ color: '#f87171' }}>
               <AlertTriangle className="size-4" />
-              {installerError ?? 'Installation failed'}
+              {installerError ?? t('cliRuntime.installer.failed')}
             </div>
             <button
               onClick={handleInstall}
@@ -805,7 +843,7 @@ export const CliStatusSection = (): React.JSX.Element | null => {
               }}
             >
               <RefreshCw className="size-3.5" />
-              Retry
+              {t('cliRuntime.actions.retry')}
             </button>
           </div>
         )}
@@ -813,7 +851,9 @@ export const CliStatusSection = (): React.JSX.Element | null => {
       {providerTerminal && cliStatus?.binaryPath && (
         <TerminalModal
           title={`${getRuntimeDisplayName(cliStatus, multimodelEnabled)} ${
-            providerTerminal.action === 'login' ? 'Login' : 'Logout'
+            providerTerminal.action === 'login'
+              ? t('cliRuntime.providerTerminal.login')
+              : t('cliRuntime.providerTerminal.logout')
           }: ${getProviderLabel(providerTerminal.providerId)}`}
           command={cliStatus.binaryPath}
           args={providerTerminalCommand?.args}
@@ -827,10 +867,14 @@ export const CliStatusSection = (): React.JSX.Element | null => {
           }}
           autoCloseOnSuccessMs={3000}
           successMessage={
-            providerTerminal.action === 'login' ? 'Authentication updated' : 'Provider logged out'
+            providerTerminal.action === 'login'
+              ? t('cliRuntime.providerTerminal.authUpdated')
+              : t('cliRuntime.providerTerminal.loggedOut')
           }
           failureMessage={
-            providerTerminal.action === 'login' ? 'Authentication failed' : 'Logout failed'
+            providerTerminal.action === 'login'
+              ? t('cliRuntime.providerTerminal.authFailed')
+              : t('cliRuntime.providerTerminal.logoutFailed')
           }
         />
       )}

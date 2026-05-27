@@ -2,8 +2,7 @@ export const AGENT_ATTACHMENT_SCHEMA_VERSION = 1 as const;
 
 export type AgentAttachmentKind = 'image' | 'file' | 'unsupported';
 
-export type AgentImageMimeType = 'image/png' | 'image/jpeg' | 'image/webp';
-export type ProviderImageMimeType = 'image/png' | 'image/jpeg';
+export type AgentImageMimeType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
 export type ProviderFileMimeType = 'application/pdf' | 'text/*';
 
 export type AttachmentDeliveryFailureCode =
@@ -98,7 +97,7 @@ export interface AgentAttachmentCapabilityTarget {
 export interface AgentAttachmentCapability {
   supportsImages: boolean;
   supportsFiles: boolean;
-  supportedImageMimeTypes: ProviderImageMimeType[];
+  supportedImageMimeTypes: AgentImageMimeType[];
   supportedFileMimeTypes: ProviderFileMimeType[];
   maxImages: number;
   maxFiles: number;

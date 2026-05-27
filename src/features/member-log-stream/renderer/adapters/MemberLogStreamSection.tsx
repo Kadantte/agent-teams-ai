@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { useAppTranslation } from '@features/localization/renderer';
 import { api } from '@renderer/api';
 import { useStore } from '@renderer/store';
 import { selectResolvedMembersForTeamName } from '@renderer/store/slices/teamSlice';
@@ -37,12 +38,13 @@ function buildMemberSegmentRenderKey(segment: MemberLogStreamSegment): string {
   return `${segment.id}:${firstChunkId ?? segment.startTimestamp}`;
 }
 
-export function MemberLogStreamSection({
+export const MemberLogStreamSection = ({
   teamName,
   member,
   enabled = true,
   onInitialLoadErrorChange,
-}: Readonly<MemberLogStreamSectionProps>): React.JSX.Element {
+}: Readonly<MemberLogStreamSectionProps>): React.JSX.Element => {
+  const { t } = useAppTranslation('team');
   const [selectedLogView, setSelectedLogView] = useState<'execution' | 'process'>('execution');
   const teamMembers = useStore((s) => selectResolvedMembersForTeamName(s, teamName));
   const { stream, loading, error } = useMemberLogStream({ teamName, member, enabled });
@@ -68,47 +70,48 @@ export function MemberLogStreamSection({
   }, [hasInitialLoadError, onInitialLoadErrorChange]);
 
   return (
-    <div className="space-y-4">
-      <div className="inline-flex rounded-xl bg-[var(--color-surface-subtle)] p-1">
+    <div className="space-y-3">
+      <div className="inline-flex rounded-md bg-[var(--color-surface-subtle)] p-0.5">
         <button
           type="button"
-          className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+          className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
             selectedLogView === 'execution'
               ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm'
               : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
           }`}
           onClick={() => setSelectedLogView('execution')}
         >
-          Execution
+          {t('memberLogStream.tabs.execution')}
         </button>
         <button
           type="button"
-          className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+          className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
             selectedLogView === 'process'
               ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm'
               : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
           }`}
           onClick={() => setSelectedLogView('process')}
         >
-          Process
+          {t('memberLogStream.tabs.process')}
         </button>
       </div>
 
       {selectedLogView === 'execution' ? (
         <ExecutionLogStreamView
-          title="Logs"
+          title={t('memberLogStream.logs.title')}
           description={describeMemberStream()}
           stream={stream}
           loading={loading}
           error={error}
           teamName={teamName}
           teamMembers={teamMembers}
-          loadingText="Loading member log stream..."
-          emptyTitle="No log stream entries were found for this member yet."
-          emptyDescription="Member-scoped transcript or runtime logs will appear here when available."
+          loadingText={t('memberLogStream.logs.loading')}
+          emptyTitle={t('memberLogStream.logs.emptyTitle')}
+          emptyDescription={t('memberLogStream.logs.emptyDescription')}
           selectionResetKey={`${teamName}:${member.name}`}
           boundedHistoryNote={boundedHistoryNote}
           forceSegmentHeaders
+          showSegmentParticipantBadge={false}
           buildSegmentRenderKey={buildMemberSegmentRenderKey}
           getSegmentMetaLabel={getSegmentMetaLabel}
         />
@@ -120,4 +123,4 @@ export function MemberLogStreamSection({
       )}
     </div>
   );
-}
+};

@@ -1,11 +1,16 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { TeamAttachmentStore } from '../../../src/main/services/team/TeamAttachmentStore';
 import { TeamTaskAttachmentStore } from '../../../src/main/services/team/TeamTaskAttachmentStore';
+import {
+  type ElectronUserDataMigrationApp,
+  getLegacyElectronUserDataCandidates,
+  migrateElectronUserDataDirectory,
+  shouldCopyElectronUserDataEntry,
+} from '../../../src/main/utils/electronUserDataMigration';
 import {
   getAppDataPath,
   getBackupsBasePath,
@@ -13,12 +18,6 @@ import {
   getMcpServerBasePath,
   setAppDataBasePath,
 } from '../../../src/main/utils/pathDecoder';
-import {
-  getLegacyElectronUserDataCandidates,
-  migrateElectronUserDataDirectory,
-  shouldCopyElectronUserDataEntry,
-  type ElectronUserDataMigrationApp,
-} from '../../../src/main/utils/electronUserDataMigration';
 
 class FakeElectronApp implements ElectronUserDataMigrationApp {
   setPathCalls: { name: string; value: string }[] = [];
@@ -407,6 +406,7 @@ describe('electron userData migration', () => {
         id: 'att-1',
         data: Buffer.from('message attachment').toString('base64'),
         mimeType: 'text/plain',
+        filePath: path.join(currentPath, 'data', 'attachments', 'team-a', 'msg-1', 'att-1--note.txt'),
       },
     ]);
 

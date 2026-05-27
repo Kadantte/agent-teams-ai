@@ -23,6 +23,7 @@ export const OPENCODE_BOOTSTRAP_PENDING_DIAGNOSTIC =
 export const OPENCODE_APP_MANAGED_BOOTSTRAP_PENDING_DIAGNOSTIC =
   'OpenCode app-managed bootstrap evidence is pending after materialized session.';
 
+const BOOTSTRAP_EVIDENCE_BOUNDARY_SKEW_MS = 10_000;
 const OPENCODE_MEMBER_SESSION_RECORDED_AT_PATTERN =
   /\bmember_session_recorded\s+at\s+([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)\b/i;
 
@@ -584,13 +585,29 @@ export function isRecoverableOpenCodeRuntimeEvidence(
 }
 
 export function isBootstrapMemberEvidenceCurrentForMember(
-  current: { firstSpawnAcceptedAt?: string; lastEvaluatedAt?: string },
+  current: { firstSpawnAcceptedAt?: string; lastEvaluatedAt?: string; runtimeRunId?: string },
   bootstrapMember: Pick<
     PersistedTeamLaunchMemberState,
-    'firstSpawnAcceptedAt' | 'lastHeartbeatAt' | 'lastRuntimeAliveAt' | 'lastEvaluatedAt'
+    | 'firstSpawnAcceptedAt'
+    | 'lastHeartbeatAt'
+    | 'lastRuntimeAliveAt'
+    | 'lastEvaluatedAt'
+    | 'runtimeRunId'
   >,
   evidenceKind: 'acceptance' | 'confirmation'
 ): boolean {
+  const currentRuntimeRunId =
+    typeof current.runtimeRunId === 'string' ? current.runtimeRunId.trim() : '';
+  const bootstrapRuntimeRunId =
+    typeof bootstrapMember.runtimeRunId === 'string' ? bootstrapMember.runtimeRunId.trim() : '';
+  if (
+    currentRuntimeRunId.length > 0 &&
+    bootstrapRuntimeRunId.length > 0 &&
+    currentRuntimeRunId !== bootstrapRuntimeRunId
+  ) {
+    return false;
+  }
+
   const bootstrapFirstSpawnAcceptedMs = Date.parse(bootstrapMember.firstSpawnAcceptedAt ?? '');
   const bootstrapLastEvaluatedMs = Date.parse(bootstrapMember.lastEvaluatedAt ?? '');
   const hasDurableBootstrapSpawnAcceptedAt =
@@ -615,5 +632,15 @@ export function isBootstrapMemberEvidenceCurrentForMember(
     Number.isFinite(firstSpawnAcceptedMs) &&
     (!Number.isFinite(lastEvaluatedMs) || firstSpawnAcceptedMs <= lastEvaluatedMs);
   const boundaryMs = hasDurableSpawnBoundary ? firstSpawnAcceptedMs : NaN;
-  return !Number.isFinite(boundaryMs) || evidenceMs >= boundaryMs;
+  const hasCompatibleRuntimeRunIdForSkew =
+    currentRuntimeRunId.length === 0 ||
+    (bootstrapRuntimeRunId.length > 0 && currentRuntimeRunId === bootstrapRuntimeRunId);
+  const withinBootstrapConfirmationClockSkew =
+    evidenceKind === 'confirmation' &&
+    Number.isFinite(boundaryMs) &&
+    boundaryMs - evidenceMs <= BOOTSTRAP_EVIDENCE_BOUNDARY_SKEW_MS &&
+    hasCompatibleRuntimeRunIdForSkew;
+  return (
+    !Number.isFinite(boundaryMs) || evidenceMs >= boundaryMs || withinBootstrapConfirmationClockSkew
+  );
 }

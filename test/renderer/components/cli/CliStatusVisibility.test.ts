@@ -733,11 +733,9 @@ describe('CLI status visibility during completed install state', () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     storeState.cliInstallerState = 'idle';
     storeState.codexRuntimeStatus = {
-      installed: true,
-      source: 'path',
-      state: 'ready',
-      binaryPath: '/usr/local/bin/codex',
-      version: 'codex-cli 0.125.0',
+      installed: false,
+      source: 'missing',
+      state: 'idle',
     };
     storeState.cliStatus = createInstalledCliStatus({
       flavor: 'agent_teams_orchestrator',

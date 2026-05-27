@@ -202,6 +202,46 @@ describe('OpenCodeReadinessBridge', () => {
     );
   });
 
+  it('preserves diagnostics when runtime permission listing bridge fails', async () => {
+    const executor = fakeExecutor(
+      bridgeCommandFailure({
+        command: 'opencode.listRuntimePermissions',
+        requestId: 'permission-list-req-1',
+        kind: 'timeout',
+        message: 'permission list timed out',
+      })
+    );
+    const bridge = new OpenCodeReadinessBridge(executor);
+
+    await expect(
+      bridge.listOpenCodeRuntimePermissions({
+        teamId: 'team-a',
+        teamName: 'team-a',
+        laneId: 'primary',
+        projectPath: '/repo',
+      })
+    ).resolves.toEqual({
+      permissions: [],
+      diagnostics: [
+        'OpenCode runtime permission list bridge failed: timeout: permission list timed out',
+      ],
+    });
+
+    expect(executor.execute).toHaveBeenCalledWith(
+      'opencode.listRuntimePermissions',
+      {
+        teamId: 'team-a',
+        teamName: 'team-a',
+        laneId: 'primary',
+        projectPath: '/repo',
+      },
+      {
+        cwd: '/repo',
+        timeoutMs: 30_000,
+      }
+    );
+  });
+
   it('gives observeMessageDelivery enough time for OpenCode plain-text fallback reconciliation', async () => {
     const executor = fakeExecutor(
       bridgeCommandSuccess({
@@ -565,6 +605,75 @@ describe('OpenCodeReadinessBridge', () => {
       diagnostics: expect.arrayContaining([
         expect.objectContaining({
           code: 'opencode_send_recovered_after_bridge_timeout',
+        }),
+      ]),
+    });
+
+    expect(executor.execute).toHaveBeenCalledTimes(2);
+    expect(executor.execute.mock.calls[1]).toEqual([
+      'opencode.commandStatus',
+      expect.objectContaining({
+        originalCommand: 'opencode.sendMessage',
+        originalRequestId: 'req-1',
+        deliveryAttemptId: 'ledger-1:1:payload',
+        payloadHash: expect.any(String),
+      }),
+      {
+        cwd: '/repo',
+        timeoutMs: 5_000,
+      },
+    ]);
+  });
+
+  it('recovers accepted OpenCode sendMessage after empty bridge output through commandStatus', async () => {
+    const executor = fakeSequenceExecutor([
+      bridgeFailure('contract_violation', 'Bridge stdout was empty', [
+        {
+          id: 'diag-empty-output',
+          type: 'opencode_bridge_contract_violation',
+          providerId: 'opencode',
+          severity: 'error',
+          message: 'Bridge stdout was empty',
+          data: {
+            command: 'opencode.sendMessage',
+            outputSource: 'none',
+            outputReadError: 'ENOENT',
+          },
+          createdAt: '2026-04-21T12:00:00.000Z',
+        },
+      ]),
+      bridgeCommandSuccess({
+        command: 'opencode.commandStatus',
+        requestId: 'status-req-empty-output',
+        data: {
+          status: 'prompt_accepted',
+          safeToRetry: false,
+          accepted: true,
+          sessionId: 'session-bob',
+          runtimePromptMessageId: 'msg_prompt_1',
+          diagnostics: ['OpenCode prompt acceptance recovered from command status.'],
+        },
+      }),
+    ]);
+    const bridge = new OpenCodeReadinessBridge(executor);
+
+    await expect(
+      bridge.sendOpenCodeTeamMessage({
+        teamId: 'team-a',
+        teamName: 'team-a',
+        laneId: 'secondary:opencode:bob',
+        projectPath: '/repo',
+        memberName: 'bob',
+        text: 'hello',
+        messageId: 'message-1',
+        deliveryAttemptId: 'ledger-1:1:payload',
+      })
+    ).resolves.toMatchObject({
+      accepted: true,
+      sessionId: 'session-bob',
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'opencode_send_recovered_after_bridge_empty_output',
         }),
       ]),
     });

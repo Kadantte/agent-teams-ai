@@ -432,6 +432,127 @@ describe('MessageComposer pending send lifecycle', () => {
     });
   });
 
+  it('restores a revision request into the composer', () => {
+    const revisionRequest = {
+      requestId: 'rev-1',
+      originalMessageId: 'msg-123',
+      originalText: 'incomplete message',
+      recipient: 'bob',
+      actionMode: 'ask' as const,
+    };
+    const { render, root } = renderComposer();
+
+    render({ revisionRequest });
+
+    expect(draftHarness.methods.restoreDraft).toHaveBeenCalledWith({
+      text: 'incomplete message',
+      chips: [],
+      attachments: [],
+      actionMode: 'ask',
+    });
+    expect(draftHarness.state.text).toBe('incomplete message');
+    expect(draftHarness.state.actionMode).toBe('ask');
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it('wraps the next send as a correction for the revised message', () => {
+    const revisionRequest = {
+      requestId: 'rev-1',
+      originalMessageId: 'msg-123',
+      originalText: 'incomplete message',
+      recipient: 'bob',
+      actionMode: 'ask' as const,
+    };
+    const { host, onSend, render, root } = renderComposer();
+
+    render({ revisionRequest });
+    render({ revisionRequest });
+
+    act(() => {
+      getSendButton(host).click();
+    });
+
+    expect(onSend).toHaveBeenCalledWith(
+      'bob',
+      [
+        'Correction for my previous message (MessageId: msg-123).',
+        '',
+        'Please use this corrected version instead:',
+        '',
+        'incomplete message',
+      ].join('\n'),
+      'Correction for MessageId: msg-123',
+      undefined,
+      'ask',
+      []
+    );
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it('cancels revision mode without clearing the draft', () => {
+    const onRevisionCancel = vi.fn();
+    const revisionRequest = {
+      requestId: 'rev-1',
+      originalMessageId: 'msg-123',
+      originalText: 'incomplete message',
+      recipient: 'bob',
+      actionMode: 'ask' as const,
+    };
+    const { host, render, root } = renderComposer({ onRevisionCancel });
+
+    render({ revisionRequest });
+    render({ revisionRequest });
+
+    act(() => {
+      getButtonContainingText(host, 'Cancel').click();
+    });
+
+    expect(onRevisionCancel).toHaveBeenCalledOnce();
+    expect(draftHarness.methods.clearDraft).not.toHaveBeenCalled();
+    expect(draftHarness.state.text).toBe('incomplete message');
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it('keeps revision mode when sending the correction fails', () => {
+    const onRevisionComplete = vi.fn();
+    const revisionRequest = {
+      requestId: 'rev-1',
+      originalMessageId: 'msg-123',
+      originalText: 'incomplete message',
+      recipient: 'bob',
+      actionMode: 'ask' as const,
+    };
+    const { host, render, root } = renderComposer({ onRevisionComplete });
+
+    render({ revisionRequest });
+    render({ revisionRequest });
+    draftHarness.methods.restoreDraft.mockClear();
+
+    act(() => {
+      getSendButton(host).click();
+    });
+    render({ revisionRequest, sending: true });
+    render({ revisionRequest, sending: false, sendError: 'runtime failed' });
+
+    expect(onRevisionComplete).not.toHaveBeenCalled();
+    expect(draftHarness.methods.restoreDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'incomplete message' })
+    );
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it('keeps send enabled when stale provisioning state remains after the team is alive', () => {
     provisioningHarness.state.active = true;
     const { host, onSend, root } = renderComposer({ isTeamAlive: true });

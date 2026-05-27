@@ -5,6 +5,7 @@ import 'react-resizable/css/styles.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
+import { registerDynamicImportRecovery } from './utils/dynamicImportRecovery';
 import { App } from './App';
 import { initSentryRenderer } from './sentry';
 import { initializeNotificationListeners } from './store';
@@ -23,6 +24,7 @@ declare global {
 
 // Prepare Sentry before React renders. Actual init waits for telemetry config.
 initSentryRenderer();
+registerDynamicImportRecovery();
 
 let root: ReactDOM.Root | null = null;
 let latestStartupStatus: AppStartupStatus | null = null;

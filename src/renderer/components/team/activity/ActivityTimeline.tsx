@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 
+import { useAppTranslation } from '@features/localization/renderer';
 import {
   areInboxMessagesEquivalentForRender,
   areStringArraysEqual,
@@ -95,6 +96,8 @@ interface ActivityTimelineProps {
   readState?: { readSet: Set<string>; getMessageKey: (message: InboxMessage) => string };
   onCreateTaskFromMessage?: (subject: string, description: string) => void;
   onReplyToMessage?: (message: InboxMessage) => void;
+  revisionMessageId?: string | null;
+  onReviseMessage?: (message: InboxMessage) => void;
   onMemberClick?: (member: ResolvedTeamMember) => void;
   /** Called when a message enters the viewport (for marking as read). */
   onMessageVisible?: (message: InboxMessage) => void;
@@ -169,30 +172,38 @@ const ROW_SIZE_ESTIMATES: Record<TimelineRow['kind'], number> = {
   'message-row': 140,
 };
 
-const TimelineLoadingState = (): React.JSX.Element => (
-  <div
-    className="rounded-md border border-[var(--color-border)] p-3 pl-5 text-xs text-[var(--color-text-muted)]"
-    aria-busy="true"
-    aria-live="polite"
-  >
-    <div className="flex items-center gap-2">
-      <Loader2 size={13} className="animate-spin" />
-      <span>Loading messages...</span>
-    </div>
-    <div className="mt-3 space-y-2" aria-hidden="true">
-      <div className="h-3 w-3/4 animate-pulse rounded bg-[var(--color-surface-raised)]" />
-      <div className="h-3 w-1/2 animate-pulse rounded bg-[var(--color-surface-raised)]" />
-      <div className="h-3 w-2/3 animate-pulse rounded bg-[var(--color-surface-raised)]" />
-    </div>
-  </div>
-);
+const TimelineLoadingState = (): React.JSX.Element => {
+  const { t } = useAppTranslation('team');
 
-const TimelineEmptyState = (): React.JSX.Element => (
-  <div className="rounded-md border border-[var(--color-border)] p-3 pl-5 text-xs text-[var(--color-text-muted)]">
-    <p>No messages</p>
-    <p className="mt-1 text-[11px]">Send a message to a member to see activity.</p>
-  </div>
-);
+  return (
+    <div
+      className="rounded-md border border-[var(--color-border)] p-3 pl-5 text-xs text-[var(--color-text-muted)]"
+      aria-busy="true"
+      aria-live="polite"
+    >
+      <div className="flex items-center gap-2">
+        <Loader2 size={13} className="animate-spin" />
+        <span>{t('activity.timeline.loadingMessages')}</span>
+      </div>
+      <div className="mt-3 space-y-2" aria-hidden="true">
+        <div className="h-3 w-3/4 animate-pulse rounded bg-[var(--color-surface-raised)]" />
+        <div className="h-3 w-1/2 animate-pulse rounded bg-[var(--color-surface-raised)]" />
+        <div className="h-3 w-2/3 animate-pulse rounded bg-[var(--color-surface-raised)]" />
+      </div>
+    </div>
+  );
+};
+
+const TimelineEmptyState = (): React.JSX.Element => {
+  const { t } = useAppTranslation('team');
+
+  return (
+    <div className="rounded-md border border-[var(--color-border)] p-3 pl-5 text-xs text-[var(--color-text-muted)]">
+      <p>{t('activity.timeline.noMessages')}</p>
+      <p className="mt-1 text-[11px]">{t('activity.timeline.emptyHint')}</p>
+    </div>
+  );
+};
 
 function collectScrollMarginObserverTargets(
   rootElement: HTMLElement,
@@ -274,6 +285,8 @@ const MessageRowWithObserver = ({
   onMemberNameClick,
   onCreateTask,
   onReply,
+  revisionMessageId,
+  onRevise,
   onVisible,
   onTaskIdClick,
   onRestartTeam,
@@ -304,6 +317,8 @@ const MessageRowWithObserver = ({
   onMemberNameClick?: (name: string) => void;
   onCreateTask?: (subject: string, description: string) => void;
   onReply?: (message: InboxMessage) => void;
+  revisionMessageId?: string | null;
+  onRevise?: (message: InboxMessage) => void;
   onVisible?: (message: InboxMessage) => void;
   onTaskIdClick?: (taskId: string) => void;
   onRestartTeam?: () => void;
@@ -370,6 +385,8 @@ const MessageRowWithObserver = ({
         onMemberNameClick={onMemberNameClick}
         onCreateTask={onCreateTask}
         onReply={onReply}
+        canRevise={message.messageId === revisionMessageId}
+        onRevise={onRevise}
         onTaskIdClick={onTaskIdClick}
         onRestartTeam={onRestartTeam}
         collapseMode={collapseMode}
@@ -404,6 +421,8 @@ const MemoizedMessageRowWithObserver = React.memo(
     prev.onMemberNameClick === next.onMemberNameClick &&
     prev.onCreateTask === next.onCreateTask &&
     prev.onReply === next.onReply &&
+    prev.revisionMessageId === next.revisionMessageId &&
+    prev.onRevise === next.onRevise &&
     prev.onVisible === next.onVisible &&
     prev.onTaskIdClick === next.onTaskIdClick &&
     prev.onRestartTeam === next.onRestartTeam &&
@@ -430,6 +449,8 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
   readState,
   onCreateTaskFromMessage,
   onReplyToMessage,
+  revisionMessageId,
+  onReviseMessage,
   onMemberClick,
   onMessageVisible,
   onTaskIdClick,
@@ -449,6 +470,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
   loading = false,
   viewport,
 }: ActivityTimelineProps): React.JSX.Element {
+  const { t } = useAppTranslation('team');
   const observerRoot = viewport?.observerRoot ?? viewport?.scrollElementRef;
   const [visibleCount, setVisibleCount] = useState(MESSAGES_PAGE_SIZE);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -792,7 +814,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
           >
             <div className="h-px flex-1 bg-blue-600/30 dark:bg-blue-400/30" />
             <span className="whitespace-nowrap text-[11px] font-medium text-blue-600 dark:text-blue-400">
-              New session
+              {t('activity.timeline.newSession')}
             </span>
             <div className="h-px flex-1 bg-blue-600/30 dark:bg-blue-400/30" />
           </div>
@@ -862,6 +884,8 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
             onMemberNameClick={onMemberClick ? handleMemberNameClick : undefined}
             onCreateTask={onCreateTaskFromMessage}
             onReply={onReplyToMessage}
+            revisionMessageId={revisionMessageId}
+            onRevise={onReviseMessage}
             onVisible={onMessageVisible}
             onTaskIdClick={onTaskIdClick}
             onRestartTeam={onRestartTeam}
@@ -958,14 +982,16 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
             }}
           >
             <span className="text-[11px] tabular-nums text-[var(--color-text-muted)]">
-              +{hiddenCount} older
+              {t('activity.timeline.olderCount', { count: hiddenCount })}
             </span>
             <span className="h-3 w-px bg-blue-600/30 dark:bg-blue-400/30" />
             <button
               onClick={handleShowMore}
               className="rounded-full px-2.5 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)] transition-all hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-text)]"
             >
-              Show {Math.min(MESSAGES_PAGE_SIZE, hiddenCount)} more
+              {t('activity.timeline.showMore', {
+                count: Math.min(MESSAGES_PAGE_SIZE, hiddenCount),
+              })}
             </button>
             {hiddenCount > MESSAGES_PAGE_SIZE && (
               <>
@@ -974,7 +1000,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
                   onClick={handleShowAll}
                   className="rounded-full px-2.5 py-0.5 text-[11px] text-[var(--color-text-muted)] transition-all hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--color-text-secondary)]"
                 >
-                  Show all
+                  {t('activity.timeline.showAll')}
                 </button>
               </>
             )}

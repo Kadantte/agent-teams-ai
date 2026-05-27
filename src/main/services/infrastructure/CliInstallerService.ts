@@ -931,11 +931,6 @@ export class CliInstallerService {
     }
 
     const generation = this.statusGatherGeneration;
-    const versionProbe = await this.probeCliVersion(binaryPath);
-    if (!versionProbe.ok) {
-      return null;
-    }
-
     const providerStatus = await this.multimodelBridgeService.getProviderStatus(
       binaryPath,
       providerId,
@@ -1024,6 +1019,7 @@ export class CliInstallerService {
    * on timeout, getStatus() returns whatever fields were populated so far.
    *
    * Flow: binary resolve → --version (sequential) → Promise.all([auth, GCS]) (parallel)
+   * Lightweight multimodel startup status stops after binary resolution; full status hydrates health.
    */
   private async gatherStatus(
     ref: { current: CliInstallationStatus },
@@ -1050,6 +1046,18 @@ export class CliInstallerService {
     diag.binaryResolveMs = Date.now() - binaryResolveStartedAt;
     if (binaryPath) {
       r.binaryPath = binaryPath;
+      if (r.flavor === 'agent_teams_orchestrator' && providerStatusMode === 'defer') {
+        const recoveredHealthyStatus = this.getRecoverableHealthyStatus(binaryPath);
+        diag.versionProbeMs = 0;
+        r.installed = true;
+        r.installedVersion = recoveredHealthyStatus?.installedVersion ?? null;
+        r.launchError = null;
+        r.authStatusChecking = false;
+        this.markProvidersDeferred(r);
+        this.publishStatusSnapshotIfCurrent(r, generation);
+        return;
+      }
+
       const versionProbeStartedAt = Date.now();
       const versionProbe = await this.probeCliVersion(binaryPath);
       diag.versionProbeMs = Date.now() - versionProbeStartedAt;
@@ -1058,13 +1066,6 @@ export class CliInstallerService {
         r.installedVersion = versionProbe.version;
         r.launchError = null;
         r.authStatusChecking = true;
-
-        if (r.flavor === 'agent_teams_orchestrator' && providerStatusMode === 'defer') {
-          r.authStatusChecking = false;
-          this.markProvidersDeferred(r);
-          this.publishStatusSnapshotIfCurrent(r, generation);
-          return;
-        }
 
         this.rememberHealthyStatus(r);
         this.publishStatusSnapshotIfCurrent(r, generation);

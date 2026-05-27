@@ -1,5 +1,9 @@
 # Release Guide
 
+## Published: v2.1.2 (2026-05-23)
+
+Performance and reliability release: faster startup, deferred provider/runtime hydration, resilient file watching under watcher limits, safer context switching, better team launch diagnostics, and packaged app entry/runtime fixes. GitHub release: [v2.1.2](https://github.com/777genius/agent-teams-ai/releases/tag/v2.1.2).
+
 ## Published: v1.2.0 (2026-03-31)
 
 Agent Graph, per-team tool approval, interactive AskUserQuestion, task comment notifications, cross-team ghost nodes. Major graph improvements: force-directed visualization with kanban task layout, fullscreen/tab mode, animated particles, member hexagons with avatars, popover actions. Permission system overhaul with proper Write/Edit/NotebookEdit seeding and MCP tool catalog integration. Full list: [CHANGELOG.md](./CHANGELOG.md).
@@ -131,11 +135,41 @@ EOF
 )"
 ```
 
+Public release notes must follow this standard every time:
+
+- Start with a short user-facing summary. Explain what changed and why users should care.
+- Do not add a duplicate `## Agent Teams v<VERSION>` heading inside the release body; the GitHub release title already shows the version.
+- Use the sections `What's New`, `Improvements`, and `Bug Fixes`; omit a section only if it would be empty.
+- Keep internal-only CI, lint, dependency, and refactor work out of public notes unless it directly explains a user-visible fix.
+- Put `Downloads` as the final section, after all text notes.
+- Use badge/button links in `Downloads`, not bare asset links.
+- Verify actual asset names with `gh release view v<VERSION> --repo 777genius/agent-teams-ai --json assets` before writing links.
+- Prefer versioned installer links for release-specific notes: `Agent.Teams.AI-<VERSION>-arm64.dmg`, `Agent.Teams.AI-<VERSION>-x64.dmg`, `Agent.Teams.AI.Setup.<VERSION>.exe`, `Agent.Teams.AI-<VERSION>.AppImage`, `agent-teams-ai_<VERSION>_amd64.deb`, `agent-teams-ai-<VERSION>.x86_64.rpm`, and `agent-teams-ai-<VERSION>.pacman`.
+
+Draft releases must be treated as review artifacts:
+
+- Do not hand off a draft release for review while it still has generated notes, stale notes from an earlier run, or a `Full Changelog`-only body.
+- Before telling the user a draft is ready, always edit the draft body with the current release notes template and then re-check it with `gh release view v<VERSION> --repo 777genius/agent-teams-ai --json body,assets,isDraft,isPrerelease,targetCommitish`.
+- Confirm the notes describe the exact target commit that the draft was built from, including any commits added after a previous draft attempt.
+- If a draft already exists when starting or retrying a release, do not delete it automatically. Ask for explicit permission to delete, replace, or reuse it.
+- Never delete a draft release just because the user said to "make a release" or "redo the release". Deleting a draft requires a separate explicit command such as "delete the draft release".
+
+### 4. Required release closeout gate
+
+Do not publish or call a release finished until this is true:
+
+- The GitHub release body is not just auto-generated `Full Changelog`.
+- The release body starts with short user-facing notes: what changed, why users care, and the most important fixes.
+- The `Downloads` table from the template is present and every link points to the current `v<VERSION>` assets.
+- The asset names in the notes match the assets uploaded by `release.yml`.
+- For a draft handoff, `gh release view v<VERSION> --json body,assets,isDraft,isPrerelease,targetCommitish` confirms the release is still a draft, targets the intended commit, has current notes, and has the expected installer assets.
+- For final publication, `gh release view v<VERSION> --json body,assets,isDraft,isPrerelease,targetCommitish` confirms the release is public, has current notes, targets the intended commit, and has the expected installer assets.
+
+If a draft was published before notes were written, immediately edit the public release body with `gh release edit`; do not leave a release with only generated notes.
+
 ## Release Notes Template
 
 ```markdown
-## Agent Teams v<VERSION>
-
 <1-2 sentence summary of the release>
 
 ### What's New
@@ -169,7 +203,9 @@ EOF
     <img src="https://img.shields.io/badge/Windows-Download_.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
   </a>
   <br />
-  <sub>May trigger SmartScreen — click "More info" → "Run anyway"</sub>
+  <sub>May trigger SmartScreen - click "More info" then "Run anyway"</sub>
+  <br />
+  <sub><strong>Windows required:</strong> launch Agent Teams AI as Administrator, especially when using OpenCode runtimes.</sub>
 </td>
 <td align="center">
   <a href="https://github.com/777genius/agent-teams-ai/releases/download/v<VERSION>/Agent.Teams.AI-<VERSION>.AppImage">

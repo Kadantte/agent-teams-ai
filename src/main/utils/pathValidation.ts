@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { getClaudeBasePath, getHomeDir } from './pathDecoder';
+import { getAppDataPath, getClaudeBasePath, getHomeDir } from './pathDecoder';
 
 /**
  * Sensitive file patterns that should never be accessible.
@@ -101,6 +101,7 @@ export function matchesSensitivePattern(normalizedPath: string): boolean {
  * Allowed directories:
  * - The project path itself
  * - The ~/.claude directory (for session data)
+ * - The app-owned data directory (attachments, task attachments)
  *
  * @param normalizedPath - The normalized absolute path to check
  * @param projectPath - The project root path (can be null for global access)
@@ -114,9 +115,16 @@ export function isPathWithinAllowedDirectories(
   const normalizedTarget = normalizeForCompare(normalizedPath, isWindows);
   const claudeDir = getClaudeBasePath();
   const normalizedClaudeDir = normalizeForCompare(claudeDir, isWindows);
+  const appDataDir = getAppDataPath();
+  const normalizedAppDataDir = normalizeForCompare(appDataDir, isWindows);
 
   // Always allow access to ~/.claude for session data
   if (isPathWithinRoot(normalizedTarget, normalizedClaudeDir)) {
+    return true;
+  }
+
+  // Allow app-owned persisted data such as message attachment files.
+  if (isPathWithinRoot(normalizedTarget, normalizedAppDataDir)) {
     return true;
   }
 
@@ -137,7 +145,7 @@ export function isPathWithinAllowedDirectories(
  * Security checks performed:
  * 1. Path must be absolute
  * 2. Path traversal prevention (no ..)
- * 3. Must be within allowed directories (project or ~/.claude)
+ * 3. Must be within allowed directories (project, ~/.claude, or app data)
  * 4. Must not match sensitive file patterns
  *
  * @param filePath - The file path to validate

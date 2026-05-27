@@ -88,6 +88,7 @@ import {
 } from '@main/services/team/TeamMcpConfigBuilder';
 import { TeamTranscriptProjectResolver } from '@main/services/team/TeamTranscriptProjectResolver';
 import { killTrackedCliProcesses } from '@main/utils/childProcess';
+import { buildMergedCliPath } from '@main/utils/cliPathMerge';
 import { getWindowsElevationStatus } from '@main/utils/windowsElevation';
 import {
   APP_GET_WINDOWS_ELEVATION_STATUS,
@@ -190,6 +191,10 @@ import {
   markRendererUnavailable,
   safeSendToRenderer,
 } from './utils/safeWebContentsSend';
+import {
+  captureStartupMemorySnapshot,
+  formatStartupMemorySnapshot,
+} from './utils/startupTelemetry';
 import { syncTelemetryFlag } from './sentry';
 import { setCodexRuntimeMainWindow } from './ipc/codexRuntime';
 import {
@@ -235,7 +240,12 @@ import {
 } from './services';
 
 import type { FileChangeEvent } from '@main/types';
-import type { AppStartupStatus, AppStartupStep, TeamChangeEvent } from '@shared/types';
+import type {
+  AppStartupMemorySnapshot,
+  AppStartupStatus,
+  AppStartupStep,
+  TeamChangeEvent,
+} from '@shared/types';
 
 const logger = createLogger('App');
 const appStartedAtMs = Date.now();
@@ -396,7 +406,10 @@ async function createOpenCodeRuntimeAdapterRegistry(
   }
 
   reportProgress('runtime-environment', 'Preparing runtime environment...');
-  const bridgeEnv = applyOpenCodeAutoUpdatePolicy({ ...process.env });
+  const bridgeEnv = applyOpenCodeAutoUpdatePolicy({
+    ...process.env,
+    PATH: buildMergedCliPath(binaryPath),
+  });
   applyAgentTeamsIdentityEnv(bridgeEnv);
   bridgeEnv.CLAUDE_TEAM_APP_INSTANCE_ID = openCodeManagedHostInstanceId;
   bridgeEnv.AGENT_TEAMS_MCP_CLAUDE_DIR = getClaudeBasePath();
@@ -932,12 +945,14 @@ const STARTUP_CLI_WARMUP_DELAY_MS = 90_000;
 const STARTUP_BACKGROUND_SERVICE_DELAY_MS = 5_000;
 const STARTUP_RECOVERY_CONCURRENCY = 1;
 const appStartupStartedAt = Date.now();
+const initialStartupMemory = captureStartupMemorySnapshot();
 let appStartupSteps: AppStartupStep[] = [
   {
     phase: 'boot',
     message: 'Starting Agent Teams AI...',
     startedAt: appStartupStartedAt,
     updatedAt: appStartupStartedAt,
+    memoryAtStart: initialStartupMemory,
   },
 ];
 let appStartupStatus: AppStartupStatus = {
@@ -947,6 +962,7 @@ let appStartupStatus: AppStartupStatus = {
   error: null,
   startedAt: appStartupStartedAt,
   updatedAt: appStartupStartedAt,
+  memory: initialStartupMemory,
   steps: appStartupSteps,
 };
 
@@ -997,7 +1013,11 @@ function cloneStartupSteps(): AppStartupStep[] {
   return appStartupSteps.map((step) => ({ ...step }));
 }
 
-function updateStartupTimeline(update: Partial<AppStartupStatus>, now: number): void {
+function updateStartupTimeline(
+  update: Partial<AppStartupStatus>,
+  now: number,
+  memory: AppStartupMemorySnapshot
+): void {
   if (!update.phase && !update.message) {
     return;
   }
@@ -1011,12 +1031,14 @@ function updateStartupTimeline(update: Partial<AppStartupStatus>, now: number): 
       current.finishedAt = now;
       current.durationMs = now - current.startedAt;
       current.updatedAt = now;
+      current.memoryAtEnd = memory;
     }
     appStartupSteps.push({
       phase,
       message,
       startedAt: now,
       updatedAt: now,
+      memoryAtStart: memory,
     });
     if (appStartupSteps.length > 32) {
       appStartupSteps = appStartupSteps.slice(-32);
@@ -1027,7 +1049,7 @@ function updateStartupTimeline(update: Partial<AppStartupStatus>, now: number): 
   }
 }
 
-function finishCurrentStartupStep(now: number): void {
+function finishCurrentStartupStep(now: number, memory: AppStartupMemorySnapshot): void {
   const current = appStartupSteps[appStartupSteps.length - 1];
   if (!current || current.finishedAt) {
     return;
@@ -1035,20 +1057,30 @@ function finishCurrentStartupStep(now: number): void {
   current.finishedAt = now;
   current.durationMs = now - current.startedAt;
   current.updatedAt = now;
+  current.memoryAtEnd = memory;
 }
 
 function publishStartupStatus(update: Partial<AppStartupStatus>): void {
   const now = Date.now();
-  updateStartupTimeline(update, now);
+  const memory = captureStartupMemorySnapshot();
+  updateStartupTimeline(update, now, memory);
   if (update.ready === true || update.error) {
-    finishCurrentStartupStep(now);
+    finishCurrentStartupStep(now, memory);
   }
   appStartupStatus = {
     ...appStartupStatus,
     ...update,
     updatedAt: now,
+    memory,
     steps: cloneStartupSteps(),
   };
+  if (update.phase || update.ready === true || update.error) {
+    logger.info(
+      `[startup] phase=${appStartupStatus.phase} ready=${appStartupStatus.ready} elapsedMs=${
+        now - appStartupStartedAt
+      } ${formatStartupMemorySnapshot(memory)}`
+    );
+  }
   safeSendToRenderer(mainWindow, APP_STARTUP_PROGRESS, appStartupStatus);
 }
 

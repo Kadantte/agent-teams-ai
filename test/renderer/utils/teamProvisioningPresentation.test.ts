@@ -1,6 +1,5 @@
-import { describe, expect, it } from 'vitest';
-
 import { buildTeamProvisioningPresentation } from '@renderer/utils/teamProvisioningPresentation';
+import { describe, expect, it } from 'vitest';
 
 describe('buildTeamProvisioningPresentation', () => {
   it('uses a lead-online compact detail for ready teams without teammates', () => {
@@ -925,6 +924,127 @@ describe('buildTeamProvisioningPresentation', () => {
     expect(presentation?.currentStepIndex).toBe(2);
   });
 
+  it('does not present bootstrap-confirmed provisioned-but-not-alive entries as failed', () => {
+    const presentation = buildTeamProvisioningPresentation({
+      progress: {
+        runId: 'run-signal-ops',
+        teamName: 'signal-ops',
+        state: 'ready',
+        startedAt: '2026-05-25T20:13:40.000Z',
+        updatedAt: '2026-05-25T20:14:05.411Z',
+        message: 'Team provisioned',
+        messageSeverity: undefined,
+        pid: 27036,
+        cliLogsTail: '',
+        assistantOutput: '',
+      },
+      members: [
+        {
+          name: 'team-lead',
+          agentType: 'team-lead',
+          providerId: 'anthropic',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+        {
+          name: 'tom',
+          providerId: 'anthropic',
+          laneKind: 'primary',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+      ],
+      memberSpawnStatuses: {
+        tom: {
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) \u2014 team provisioned but not alive',
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnostic:
+            'runtime pid could not be verified because process table is unavailable',
+          runtimeDiagnosticSeverity: 'warning',
+          updatedAt: '2026-05-25T20:14:02.147Z',
+        },
+      },
+      memberRuntimeEntries: {
+        tom: {
+          memberName: 'tom',
+          alive: false,
+          restartable: true,
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnostic:
+            'runtime pid could not be verified because process table is unavailable',
+          runtimeDiagnosticSeverity: 'warning',
+          updatedAt: '2026-05-25T20:14:03.317Z',
+        },
+      },
+    });
+
+    expect(presentation?.isFailed).toBe(false);
+    expect(presentation?.failedSpawnCount).toBe(0);
+    expect(presentation?.heartbeatConfirmedCount).toBe(1);
+    expect(presentation?.panelTone).not.toBe('error');
+    expect(presentation?.compactTone).not.toBe('error');
+  });
+
+  it('presents unsafe bootstrap-confirmed provisioned-but-not-alive entries as failed', () => {
+    const presentation = buildTeamProvisioningPresentation({
+      progress: {
+        runId: 'run-signal-ops',
+        teamName: 'signal-ops',
+        state: 'ready',
+        startedAt: '2026-05-25T20:13:40.000Z',
+        updatedAt: '2026-05-25T20:14:05.411Z',
+        message: 'Team provisioned',
+        messageSeverity: undefined,
+        pid: 27036,
+        cliLogsTail: '',
+        assistantOutput: '',
+      },
+      members: [
+        {
+          name: 'tom',
+          providerId: 'anthropic',
+          laneKind: 'primary',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+      ],
+      memberSpawnStatuses: {
+        tom: {
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+          livenessKind: 'not_found',
+          runtimeDiagnostic: 'Runtime is no longer registered',
+          runtimeDiagnosticSeverity: 'warning',
+          updatedAt: '2026-05-25T20:14:02.147Z',
+        },
+      },
+    });
+
+    expect(presentation?.isFailed).toBe(false);
+    expect(presentation?.failedSpawnCount).toBe(1);
+    expect(presentation?.heartbeatConfirmedCount).toBe(0);
+    expect(presentation?.successMessageSeverity).toBe('warning');
+    expect(presentation?.compactTone).toBe('warning');
+  });
+
   it('does not show core team ready while a primary member is still joining', () => {
     const presentation = buildTeamProvisioningPresentation({
       progress: {
@@ -1605,6 +1725,72 @@ describe('buildTeamProvisioningPresentation', () => {
     expect(presentation?.compactDetail).toBe('All 1 teammates joined');
     expect(presentation?.panelMessage).toBeNull();
     expect(presentation?.currentStepIndex).toBe(4);
+  });
+
+  it('keeps ready launch in finishing state when runtime snapshot contradicts confirmed spawn', () => {
+    const presentation = buildTeamProvisioningPresentation({
+      progress: {
+        runId: 'run-5b',
+        teamName: 'codex-team',
+        state: 'ready',
+        startedAt: '2026-04-13T10:00:00.000Z',
+        updatedAt: '2026-04-13T10:00:08.000Z',
+        message: 'Launch completed',
+        messageSeverity: undefined,
+        pid: 4321,
+        cliLogsTail: '',
+        assistantOutput: '',
+      },
+      members: [
+        {
+          name: 'team-lead',
+          agentType: 'team-lead',
+          status: 'active',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+        {
+          name: 'bob',
+          agentType: 'engineer',
+          status: 'unknown',
+          currentTaskId: null,
+          taskCount: 0,
+          lastActiveAt: null,
+          messageCount: 0,
+        },
+      ],
+      memberSpawnStatuses: {
+        bob: {
+          status: 'online',
+          launchState: 'confirmed_alive',
+          updatedAt: '2026-04-13T10:00:07.000Z',
+          runtimeAlive: true,
+          livenessSource: 'heartbeat',
+          bootstrapConfirmed: true,
+          hardFailure: false,
+          agentToolAccepted: true,
+          firstSpawnAcceptedAt: '2026-04-13T10:00:01.000Z',
+          lastHeartbeatAt: '2026-04-13T10:00:07.000Z',
+        },
+      },
+      memberRuntimeEntries: {
+        bob: {
+          memberName: 'bob',
+          alive: false,
+          restartable: true,
+          livenessKind: 'registered_only',
+          runtimeDiagnostic: 'registered runtime metadata without live process',
+          updatedAt: '2026-04-13T10:00:08.000Z',
+        },
+      },
+    });
+
+    expect(presentation?.compactTitle).toBe('Finishing launch');
+    expect(presentation?.compactDetail).toBe('1 teammate still joining');
+    expect(presentation?.successMessage).toBe('Finishing launch');
+    expect(presentation?.currentStepIndex).toBe(2);
   });
 
   it('ignores removed teammates that still linger in persisted expectedMembers', () => {

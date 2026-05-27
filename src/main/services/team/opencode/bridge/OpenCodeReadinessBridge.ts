@@ -96,6 +96,15 @@ function buildSendPayloadHash(input: OpenCodeSendMessageCommandBody): string {
   return stableHash(hashable);
 }
 
+function isOpenCodeBridgeEmptyOutputFailure(result: OpenCodeBridgeResult<unknown>): boolean {
+  return (
+    !result.ok &&
+    result.error.kind === 'contract_violation' &&
+    (result.error.message === 'Bridge stdout was empty' ||
+      result.error.message === 'Bridge stdout was empty after retry')
+  );
+}
+
 export class OpenCodeReadinessBridge implements OpenCodeTeamRuntimeBridgePort {
   private readonly lastRuntimeSnapshotsByProjectPath = new Map<
     string,
@@ -248,7 +257,13 @@ export class OpenCodeReadinessBridge implements OpenCodeTeamRuntimeBridgePort {
     if (result.ok) {
       return result.data;
     }
-    return { permissions: [] };
+    return {
+      permissions: [],
+      diagnostics: [
+        `OpenCode runtime permission list bridge failed: ${result.error.kind}: ${result.error.message}`,
+        ...result.diagnostics.map(formatDiagnosticEvent),
+      ],
+    };
   }
 
   async cleanupOpenCodeHosts(
@@ -384,12 +399,17 @@ export class OpenCodeReadinessBridge implements OpenCodeTeamRuntimeBridgePort {
         ? withOpenCodeObservedFallbackDiagnostic(result.data)
         : result.data;
     }
-    if (result.error.kind === 'timeout') {
+    if (result.error.kind === 'timeout' || isOpenCodeBridgeEmptyOutputFailure(result)) {
+      const recoveredAfterEmptyOutput = isOpenCodeBridgeEmptyOutputFailure(result);
       const recovered = await this.recoverSendMessageOutcome({
         originalRequestId: activeRequestId,
         body: activeBody,
-        diagnosticCode: 'opencode_send_recovered_after_bridge_timeout',
-        diagnosticMessage: 'OpenCode bridge outcome recovered after timeout.',
+        diagnosticCode: recoveredAfterEmptyOutput
+          ? 'opencode_send_recovered_after_bridge_empty_output'
+          : 'opencode_send_recovered_after_bridge_timeout',
+        diagnosticMessage: recoveredAfterEmptyOutput
+          ? 'OpenCode bridge outcome recovered after empty bridge output.'
+          : 'OpenCode bridge outcome recovered after timeout.',
       });
       if (recovered) {
         return usedObservedFallback ? withOpenCodeObservedFallbackDiagnostic(recovered) : recovered;

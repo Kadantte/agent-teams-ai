@@ -15,6 +15,7 @@ import {
   resolveCodexFastMode,
   resolveCodexRuntimeSelection,
 } from '@features/codex-runtime-profile/renderer';
+import { useAppTranslation } from '@features/localization/renderer';
 import { api } from '@renderer/api';
 import { ProviderActivityStatusStrip } from '@renderer/components/common/ProviderActivityStatusStrip';
 import { SkipPermissionsCheckbox } from '@renderer/components/team/dialogs/SkipPermissionsCheckbox';
@@ -68,6 +69,7 @@ import { refreshCliStatusForCurrentMode } from '@renderer/utils/refreshCliStatus
 import { getAvailableTeamEffortValue } from '@renderer/utils/teamEffortOptions';
 import {
   getTeamModelSelectionError,
+  isTeamProviderRuntimeStatusLoading,
   normalizeExplicitTeamModelForUi,
 } from '@renderer/utils/teamModelAvailability';
 import { getTeamProviderLabel as getCatalogTeamProviderLabel } from '@renderer/utils/teamModelCatalog';
@@ -351,6 +353,7 @@ function buildWorktreePathByMemberName(
 export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Element => {
   const { open, onClose } = props;
   const { isLight } = useTheme();
+  const { t } = useAppTranslation('team');
   const multimodelEnabled = useStore((s) => s.appConfig?.general?.multimodelEnabled ?? true);
   const anthropicProviderFastModeDefault = useStore(
     (s) => s.appConfig?.providerConnections?.anthropic.fastModeDefault ?? false
@@ -608,6 +611,29 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         )
       ),
     [effectiveCliStatus?.providers]
+  );
+  const runtimeProviderLoadingById = useMemo(
+    () =>
+      new Map(
+        selectedMemberProviders.map(
+          (providerId) =>
+            [
+              providerId,
+              isTeamProviderRuntimeStatusLoading(
+                providerId,
+                runtimeProviderStatusById.get(providerId),
+                cliProviderStatusLoading[providerId] === true ||
+                  (providerId === 'codex' && codexSnapshotPending)
+              ),
+            ] as const
+        )
+      ),
+    [
+      cliProviderStatusLoading,
+      codexSnapshotPending,
+      runtimeProviderStatusById,
+      selectedMemberProviders,
+    ]
   );
 
   useEffect(() => {
@@ -1593,9 +1619,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       setPrepareState('failed');
       setPrepareWarnings([]);
       setPrepareChecks([]);
-      setPrepareMessage(
-        'Current preload version does not support team:prepareProvisioning. Restart the dev app.'
-      );
+      setPrepareMessage(t('launch.prepare.unsupportedPreload'));
       return;
     }
 
@@ -1607,7 +1631,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       setPrepareState('idle');
       setPrepareWarnings([]);
       setPrepareChecks([]);
-      setPrepareMessage('Select a working directory to validate the launch environment.');
+      setPrepareMessage(t('launch.prepare.selectWorkingDirectory'));
       return;
     }
 
@@ -1620,9 +1644,15 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       }
     }
 
+    const loadingProviderIds = selectedMemberProviders.filter((providerId) =>
+      runtimeProviderLoadingById.get(providerId)
+    );
+    const readyProviderIds = selectedMemberProviders.filter(
+      (providerId) => !runtimeProviderLoadingById.get(providerId)
+    );
     const providerPlans = buildProviderPreparePlans({
       cwd: effectiveCwd,
-      providerIds: selectedMemberProviders,
+      providerIds: readyProviderIds,
       selectedModelChecksByProvider,
       backendSummaryByProvider: runtimeBackendSummaryByProviderRef.current,
       limitContext: effectiveAnthropicRuntimeLimitContext,
@@ -1634,8 +1664,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         lastPrepareProviderSignatureByIdRef.current.get(plan.providerId) !== plan.requestSignature
     );
     const loadingMessage = getProvisioningProviderProgressMessage(
-      changedPlans.map((plan) => plan.providerId),
-      selectedMemberProviders.length
+      [...loadingProviderIds, ...changedPlans.map((plan) => plan.providerId)],
+      selectedMemberProviders.length,
+      t
     );
     const getSelectedWarnings = (): string[] =>
       selectedMemberProviders.flatMap(
@@ -1663,18 +1694,31 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         selectedWarnings.length > 0 || nextChecks.some((check) => check.status === 'notes');
       const failureMessage =
         getPrimaryProvisioningFailureDetail(nextChecks) ??
-        'Some selected providers need attention.';
+        t('launch.prepare.someProvidersNeedAttention');
       setPrepareState(anyFailure ? 'failed' : 'ready');
       setPrepareMessage(
         anyFailure
           ? failureMessage
           : anyNotes
-            ? 'All selected providers are ready, with notes.'
-            : 'All selected providers are ready.'
+            ? t('launch.prepare.readyWithNotes')
+            : t('launch.prepare.ready')
       );
     };
 
     let checks = alignProvisioningChecks(prepareChecksRef.current, selectedMemberProviders);
+    for (const providerId of loadingProviderIds) {
+      lastPrepareProviderSignatureByIdRef.current.delete(providerId);
+      prepareProviderRequestSeqByIdRef.current.delete(providerId);
+      prepareWarningsByProviderIdRef.current.delete(providerId);
+      checks = updateProviderCheck(checks, providerId, {
+        status: 'checking',
+        backendSummary: runtimeBackendSummaryByProviderRef.current.get(providerId) ?? null,
+        details: [
+          `${getProviderLabel(providerId)} provider status is still loading. Model checks will start automatically.`,
+        ],
+        supportDiagnostics: undefined,
+      });
+    }
     for (const plan of changedPlans) {
       checks = updateProviderCheck(checks, plan.providerId, {
         status: plan.selectedModelIds.length > 0 ? plan.cachedSnapshot.status : 'checking',
@@ -1690,7 +1734,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       changedPlans.length > 0
         ? loadingMessage
         : (prepareMessageRef.current ??
-            getProvisioningProviderProgressMessage([], selectedMemberProviders.length))
+            getProvisioningProviderProgressMessage([], selectedMemberProviders.length, t))
     );
 
     if (changedPlans.length === 0) {
@@ -1769,7 +1813,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               return;
             }
             const failureMessage =
-              error instanceof Error ? error.message : 'Failed to prepare selected providers';
+              error instanceof Error ? error.message : t('launch.prepare.failed');
             const nextChecks = updateProviderCheck(prepareChecksRef.current, plan.providerId, {
               status: 'failed',
               backendSummary: plan.backendSummary,
@@ -1789,10 +1833,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     effectiveCwd,
     effectiveAnthropicRuntimeLimitContext,
     prepareProviderInvalidationEpochById,
+    runtimeProviderLoadingById,
     runtimeProviderStatusById,
     selectedMemberProviders,
     selectedModelChecksByProvider,
     selectedModelChecksByProviderSignature,
+    t,
   ]);
 
   // ---------------------------------------------------------------------------
@@ -1820,7 +1866,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         setProjects(nextProjects);
       } catch (error) {
         if (cancelled) return;
-        setProjectsError(error instanceof Error ? error.message : 'Failed to load projects');
+        setProjectsError(
+          error instanceof Error ? error.message : t('launch.errors.loadProjectsFailed')
+        );
         setProjects([]);
       } finally {
         if (!cancelled) setProjectsLoading(false);
@@ -1830,7 +1878,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
     return () => {
       cancelled = true;
     };
-  }, [open, repositoryGroups, defaultProjectPath]);
+  }, [open, repositoryGroups, defaultProjectPath, t]);
 
   // Pre-select defaultProjectPath (launch mode) or first project
 
@@ -2046,23 +2094,25 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   const modelValidationError = useMemo(() => {
     if (isLaunchMode && selectedProviderId === 'opencode') {
       if (!selectedModel.trim()) {
-        return 'OpenCode lead requires a selected model.';
+        return t('launch.validation.openCodeLeadModelRequired');
       }
       const activeMemberCount = effectiveMemberDrafts.filter(
         (member) => !member.removedAt && member.name.trim()
       ).length;
       if (activeMemberCount === 0) {
-        return 'OpenCode lead requires at least one OpenCode teammate.';
+        return t('launch.validation.openCodeTeammateRequired');
       }
     }
 
-    const leadError = getTeamModelSelectionError(
-      selectedProviderId,
-      selectedModel,
-      runtimeProviderStatusById.get(selectedProviderId)
-    );
-    if (leadError) {
-      return leadError;
+    if (!runtimeProviderLoadingById.get(selectedProviderId)) {
+      const leadError = getTeamModelSelectionError(
+        selectedProviderId,
+        selectedModel,
+        runtimeProviderStatusById.get(selectedProviderId)
+      );
+      if (leadError) {
+        return leadError;
+      }
     }
 
     if (!isLaunchMode) {
@@ -2075,6 +2125,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       }
 
       const providerId = normalizeOptionalTeamProviderId(member.providerId) ?? selectedProviderId;
+      if (runtimeProviderLoadingById.get(providerId)) {
+        continue;
+      }
       const memberError = getTeamModelSelectionError(
         providerId,
         member.model,
@@ -2092,9 +2145,11 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
   }, [
     effectiveMemberDrafts,
     isLaunchMode,
+    runtimeProviderLoadingById,
     runtimeProviderStatusById,
     selectedModel,
     selectedProviderId,
+    t,
   ]);
   const leadModelIssueText = useMemo(() => {
     const issue = getProvisioningModelIssue(
@@ -2162,8 +2217,9 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         message: prepareMessage,
         warnings: prepareWarnings,
         checks: prepareChecks,
+        t,
       }),
-    [prepareChecks, prepareMessage, prepareState, prepareWarnings]
+    [prepareChecks, prepareMessage, prepareState, prepareWarnings, t]
   );
   const showCodexReconnectPrompt = shouldShowCodexReconnectPrompt({
     effectiveCliStatus,
@@ -2211,7 +2267,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
       return;
     }
     if (isLaunchMode && !effectiveCwd) {
-      setLocalError('Select working directory (cwd)');
+      setLocalError(t('launch.validation.selectWorkingDirectory'));
       return;
     }
     if (
@@ -2220,7 +2276,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         (member) => !member.name.trim() || validateMemberNameInline(member.name.trim()) !== null
       )
     ) {
-      setLocalError('Fix member names before launch');
+      setLocalError(t('launch.validation.fixMemberNames'));
       return;
     }
     if (isLaunchMode) {
@@ -2228,7 +2284,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
         .map((member) => member.name.trim().toLowerCase())
         .filter(Boolean);
       if (new Set(activeNames).size !== activeNames.length) {
-        setLocalError('Member names must be unique before launch');
+        setLocalError(t('launch.validation.memberNamesUnique'));
         return;
       }
     }
@@ -2353,10 +2409,10 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
           err instanceof Error
             ? err.message
             : isSchedule
-              ? 'Failed to save schedule'
+              ? t('launch.errors.saveScheduleFailed')
               : isRelaunch
-                ? 'Failed to relaunch team'
-                : 'Failed to launch team';
+                ? t('launch.errors.relaunchFailed')
+                : t('launch.errors.launchFailed');
         setLocalError(message);
         if (isLaunchMode) {
           console.error(
@@ -2392,47 +2448,49 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
 
   const dialogTitle = isLaunchMode
     ? isRelaunch
-      ? 'Relaunch Team'
-      : 'Launch Team'
+      ? t('launch.title.relaunch')
+      : t('launch.title.launch')
     : isEditing
-      ? 'Edit Schedule'
-      : 'Create Schedule';
+      ? t('launch.title.editSchedule')
+      : t('launch.title.createSchedule');
 
   const dialogDescription = isLaunchMode ? (
     isRelaunch ? (
       <>
-        Stop the current run for <span className="font-mono font-medium">{effectiveTeamName}</span>{' '}
-        and start it again via local Claude CLI.
+        {t('launch.description.relaunchPrefix')}{' '}
+        <span className="font-mono font-medium">{effectiveTeamName}</span>{' '}
+        {t('launch.description.relaunchSuffix')}
       </>
     ) : (
       <>
-        Start team <span className="font-mono font-medium">{effectiveTeamName}</span> via local
-        Claude CLI.
+        {t('launch.description.launchPrefix')}{' '}
+        <span className="font-mono font-medium">{effectiveTeamName}</span>{' '}
+        {t('launch.description.launchSuffix')}
       </>
     )
   ) : isEditing ? (
-    `Editing schedule for team "${effectiveTeamName}"`
+    t('launch.description.editSchedule', { team: effectiveTeamName })
   ) : effectiveTeamName ? (
-    `Schedule automatic runs for team "${effectiveTeamName}"`
+    t('launch.description.createScheduleForTeam', { team: effectiveTeamName })
   ) : (
-    'Schedule automatic Claude task execution'
+    t('launch.description.createSchedule')
   );
 
   const submitLabel = isLaunchMode
     ? isRelaunch
-      ? 'Relaunch team'
-      : 'Launch team'
+      ? t('launch.actions.relaunchTeam')
+      : t('launch.actions.launchTeam')
     : isEditing
-      ? 'Save Changes'
-      : 'Create Schedule';
+      ? t('launch.actions.saveChanges')
+      : t('launch.actions.createSchedule');
 
   const submittingLabel = isLaunchMode
     ? isRelaunch
-      ? 'Relaunching...'
-      : 'Launching...'
+      ? t('launch.actions.relaunching')
+      : t('launch.actions.launching')
     : isEditing
-      ? 'Saving...'
-      : 'Creating...';
+      ? t('launch.actions.saving')
+      : t('launch.actions.creating');
 
   // ---------------------------------------------------------------------------
   // Render
@@ -2467,11 +2525,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1 space-y-1">
-                <p className="font-medium">Relaunch will restart the current team run</p>
-                <p className="opacity-80">
-                  Saving these settings will stop the current team process, persist the updated
-                  roster, and launch the team again with the new runtime.
-                </p>
+                <p className="font-medium">{t('launch.relaunchWarning.title')}</p>
+                <p className="opacity-80">{t('launch.relaunchWarning.description')}</p>
               </div>
             </div>
           </div>
@@ -2491,15 +2546,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1 space-y-1">
                 <p className="font-medium">
-                  Another team &ldquo;{conflictingTeam.displayName}&rdquo; is already running for
-                  this working directory
+                  {t('launch.conflict.title', { team: conflictingTeam.displayName })}
                 </p>
-                <p className="opacity-80">
-                  Running two teams in the same directory is risky — they may conflict editing the
-                  same files. Consider using a different directory or a git worktree for isolation.
-                </p>
+                <p className="opacity-80">{t('launch.conflict.description')}</p>
                 <p className="text-[11px] opacity-70">
-                  Working directory: <span className="font-mono">{effectiveCwd}</span>
+                  {t('launch.conflict.workingDirectory')}{' '}
+                  <span className="font-mono">{effectiveCwd}</span>
                 </p>
               </div>
               <button
@@ -2519,17 +2571,17 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               ═══════════════════════════════════════════════════════════════════ */}
           {needsTeamSelector ? (
             <div className="space-y-1.5">
-              <Label className="text-xs">Team</Label>
+              <Label className="text-xs">{t('launch.schedule.team')}</Label>
               <Combobox
                 options={teamOptions}
                 value={selectedTeamName}
                 onValueChange={setSelectedTeamName}
-                placeholder="Select a team..."
-                searchPlaceholder="Search teams..."
+                placeholder={t('launch.schedule.selectTeam')}
+                searchPlaceholder={t('launch.schedule.searchTeams')}
                 emptyMessage={
                   teamOptions.length === 0
-                    ? 'No teams available. Create a team first.'
-                    : 'No teams match your search.'
+                    ? t('launch.schedule.noTeams')
+                    : t('launch.schedule.noMatches')
                 }
                 disabled={teamOptions.length === 0}
                 renderOption={(option, isSelected) => {
@@ -2595,7 +2647,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   <ChevronRight className="size-3.5 shrink-0 text-[var(--color-text-muted)]" />
                 )}
                 <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                  Schedule
+                  {t('launch.schedule.title')}
                 </span>
                 {!schedExpanded && (schedLabel || cronExpression) ? (
                   <span className="ml-auto truncate text-[11px] text-[var(--color-text-muted)] opacity-70">
@@ -2609,14 +2661,14 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   {/* Label */}
                   <div className="space-y-1.5">
                     <Label htmlFor="schedule-label" className="label-optional">
-                      Label (optional)
+                      {t('launch.schedule.labelOptional')}
                     </Label>
                     <Input
                       id="schedule-label"
                       className="h-8 text-xs"
                       value={schedLabel}
                       onChange={(e) => setSchedLabel(e.target.value)}
-                      placeholder="e.g., Daily code review, Nightly tests..."
+                      placeholder={t('launch.schedule.labelPlaceholder')}
                     />
                   </div>
 
@@ -2655,11 +2707,15 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
               ═══════════════════════════════════════════════════════════════════ */}
           {isLaunchMode ? (
             <OptionalSettingsSection
-              title={isRelaunch ? 'Relaunch settings' : 'Optional launch settings'}
+              title={
+                isRelaunch
+                  ? t('launch.optionalSettings.relaunchTitle')
+                  : t('launch.optionalSettings.title')
+              }
               description={
                 isRelaunch
-                  ? 'Review the roster and lead runtime before restarting the team.'
-                  : 'Keep the launch flow focused on the project path and only expand this when you want extra control.'
+                  ? t('launch.optionalSettings.relaunchDescription')
+                  : t('launch.optionalSettings.description')
               }
               summary={launchOptionalSummary}
             >
@@ -2782,7 +2838,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
 
                 <div className="space-y-1.5">
                   <Label htmlFor="dialog-prompt" className="label-optional">
-                    Prompt for team lead (optional)
+                    {t('launch.prompt.teamLeadOptional')}
                   </Label>
                   <MentionableTextarea
                     id="dialog-prompt"
@@ -2796,10 +2852,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                     chips={chipDraft.chips}
                     onChipRemove={chipDraft.removeChip}
                     onFileChipInsert={chipDraft.addChip}
-                    placeholder="Instructions for team lead..."
+                    placeholder={t('launch.prompt.teamLeadPlaceholder')}
                     footerRight={
                       promptDraft.isSaved ? (
-                        <span className="text-[10px] text-[var(--color-text-muted)]">Saved</span>
+                        <span className="text-[10px] text-[var(--color-text-muted)]">
+                          {t('launch.prompt.saved')}
+                        </span>
                       ) : null
                     }
                   />
@@ -2826,10 +2884,10 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                         <p>
-                          Provider changed from {getProviderLabel(previousProviderId!)} to{' '}
-                          {getProviderLabel(selectedProviderId)}. The previous lead session will not
-                          be resumed, and the lead will start with fresh context so the new runtime
-                          is applied correctly.
+                          {t('launch.providerChanged', {
+                            from: getProviderLabel(previousProviderId!),
+                            to: getProviderLabel(selectedProviderId),
+                          })}
                         </p>
                       </div>
                     </div>
@@ -2844,10 +2902,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   >
                     <div className="flex items-start gap-2">
                       <Info className="mt-0.5 size-3.5 shrink-0" />
-                      <p>
-                        Team relaunch starts a fresh lead session. Durable team state, task board,
-                        and member configuration are rehydrated into the launch prompt.
-                      </p>
+                      <p>{t('launch.relaunchFreshSession')}</p>
                     </div>
                   </div>
                 </div>
@@ -2867,7 +2922,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
           ) : (
             <>
               <div className="space-y-1.5">
-                <Label htmlFor="dialog-prompt">Prompt</Label>
+                <Label htmlFor="dialog-prompt">{t('launch.prompt.label')}</Label>
                 <MentionableTextarea
                   id="dialog-prompt"
                   className="min-h-[100px] text-xs"
@@ -2880,32 +2935,32 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   chips={chipDraft.chips}
                   onChipRemove={chipDraft.removeChip}
                   onFileChipInsert={chipDraft.addChip}
-                  placeholder="Instructions for Claude to execute on schedule..."
+                  placeholder={t('launch.prompt.schedulePlaceholder')}
                   footerRight={
                     promptDraft.isSaved ? (
-                      <span className="text-[10px] text-[var(--color-text-muted)]">Saved</span>
+                      <span className="text-[10px] text-[var(--color-text-muted)]">
+                        {t('launch.prompt.saved')}
+                      </span>
                     ) : null
                   }
                 />
                 <p className="text-[11px] text-[var(--color-text-muted)]">
-                  This prompt will be passed to <code className="font-mono">claude -p</code> for
-                  one-shot execution
+                  {t('launch.prompt.oneShotPrefix')} <code className="font-mono">claude -p</code>{' '}
+                  {t('launch.prompt.oneShotSuffix')}
                 </p>
                 {selectedProviderId === 'anthropic' ? (
                   <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] leading-relaxed text-amber-100">
                     <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                     <p>
-                      Starting June 15, 2026, Anthropic bills <code>claude -p</code> and Agent SDK
-                      usage from the monthly Agent SDK credit, separate from interactive Claude Code
-                      limits. The credit resets each billing cycle and unused credit does not roll
-                      over.{' '}
+                      {t('launch.billing.prefix')} <code>claude -p</code>{' '}
+                      {t('launch.billing.suffix')}{' '}
                       <a
                         href={ANTHROPIC_AGENT_SDK_CREDIT_ARTICLE_URL}
                         target="_blank"
                         rel="noreferrer"
                         className="inline-flex items-center gap-1 font-medium underline underline-offset-2 hover:text-white"
                       >
-                        Read Anthropic article
+                        {t('launch.billing.readArticle')}
                         <ExternalLink className="size-3" />
                       </a>
                       .
@@ -2999,7 +3054,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   htmlFor="schedule-max-turns"
                   className="text-[11px] text-[var(--color-text-muted)]"
                 >
-                  Max turns
+                  {t('launch.schedule.maxTurns')}
                 </Label>
                 <Input
                   id="schedule-max-turns"
@@ -3017,7 +3072,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   htmlFor="schedule-max-budget"
                   className="text-[11px] text-[var(--color-text-muted)]"
                 >
-                  Max budget (USD)
+                  {t('launch.schedule.maxBudgetUsd')}
                 </Label>
                 <Input
                   id="schedule-max-budget"
@@ -3027,7 +3082,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   className="h-8 text-xs"
                   value={maxBudgetUsd}
                   onChange={(e) => setMaxBudgetUsd(e.target.value)}
-                  placeholder="No limit"
+                  placeholder={t('launch.schedule.noLimit')}
                 />
               </div>
             </div>
@@ -3054,6 +3109,12 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                 multimodelEnabled={multimodelEnabled}
                 codexSnapshotPending={codexSnapshotPending}
                 providerIds={selectedMemberProviders}
+                label="Selected providers"
+                layout="stacked"
+                showReadyProviders={
+                  effectivePrepare.state === 'idle' || effectivePrepare.state === 'loading'
+                }
+                readyStatusText="Ready"
                 className="mb-2"
               />
               {effectivePrepare.state === 'idle' || effectivePrepare.state === 'loading' ? (
@@ -3064,13 +3125,16 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                       <span>
                         {effectivePrepare.message ??
                           (effectivePrepare.state === 'idle'
-                            ? 'Checking selected providers...'
-                            : 'Preparing environment...')}
+                            ? t('launch.prepare.checkingProviders')
+                            : t('launch.prepare.preparingEnvironment'))}
                       </span>
                       <p className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)] opacity-70">
                         <span>
-                          Pre-flight check to catch errors before{' '}
-                          {isRelaunch ? 'relaunch' : 'launch'}
+                          {t('launch.prepare.preflight', {
+                            action: isRelaunch
+                              ? t('launch.prepare.action.relaunch')
+                              : t('launch.prepare.action.launch'),
+                          })}
                         </span>
                       </p>
                     </div>
@@ -3092,8 +3156,8 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                     <span>
                       {prepareChecks.some((check) => check.status === 'notes') ||
                       prepareWarnings.length > 0
-                        ? 'Selected providers ready (with notes)'
-                        : 'Selected providers ready'}
+                        ? t('launch.prepare.readyWithNotes')
+                        : t('launch.prepare.ready')}
                     </span>
                   </div>
                   {effectivePrepare.message ? (
@@ -3126,14 +3190,21 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                     <div className="min-w-0">
                       <p className="font-medium">
-                        Runtime environment is not available - {isRelaunch ? 'relaunch' : 'launch'}{' '}
-                        is blocked
+                        {t('launch.prepare.blocked', {
+                          action: isRelaunch
+                            ? t('launch.prepare.action.relaunch')
+                            : t('launch.prepare.action.launch'),
+                        })}
                       </p>
                       <p className="mt-0.5 text-red-300/80">
-                        {effectivePrepare.message ?? 'Failed to prepare environment'}
+                        {effectivePrepare.message ?? t('launch.prepare.failed')}
                       </p>
                       <p className="mt-0.5 text-[10px] text-[var(--color-text-muted)] opacity-70">
-                        Pre-flight check to catch errors before {isRelaunch ? 'relaunch' : 'launch'}
+                        {t('launch.prepare.preflight', {
+                          action: isRelaunch
+                            ? t('launch.prepare.action.relaunch')
+                            : t('launch.prepare.action.launch'),
+                        })}
                       </p>
                     </div>
                   </div>
@@ -3165,7 +3236,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                   ) : null}
                   <div className="mt-1 flex items-center gap-2 pl-6">
                     <p className="text-[11px] text-[var(--color-text-muted)]">
-                      {getProvisioningFailureHint(effectivePrepare.message, prepareChecks)}
+                      {getProvisioningFailureHint(effectivePrepare.message, prepareChecks, t)}
                     </p>
                     {(effectivePrepare.message ?? '').toLowerCase().includes('spawn ') ||
                     prepareChecks.some((check) =>
@@ -3179,7 +3250,7 @@ export const LaunchTeamDialog = (props: LaunchTeamDialogProps): React.JSX.Elemen
                           openDashboard();
                         }}
                       >
-                        Go to Dashboard
+                        {t('launch.actions.goToDashboard')}
                       </button>
                     ) : null}
                   </div>

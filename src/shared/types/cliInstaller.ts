@@ -302,7 +302,7 @@ export interface CliInstallationStatus {
   showVersionDetails: boolean;
   /** Whether binary path should be shown in the UI */
   showBinaryPath: boolean;
-  /** Whether the CLI was found and passed the startup health check (`--version`) */
+  /** Whether the CLI is available. Lightweight startup status may defer the health check. */
   installed: boolean;
   /** Installed version string (e.g. "2.1.59"), null if unavailable or not installed */
   installedVersion: string | null;

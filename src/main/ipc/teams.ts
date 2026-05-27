@@ -2572,6 +2572,17 @@ function validateAttachmentSerializedPayload(input: {
   };
 }
 
+function formatAttachmentDeliveryFailure(error: unknown, teamStillAlive: boolean): string {
+  if (!teamStillAlive) {
+    return 'Failed to deliver message with attachments: team process became unavailable';
+  }
+  const message = getErrorMessage(error);
+  if (message.startsWith('Failed to deliver message with attachments:')) {
+    return message;
+  }
+  return `Failed to deliver message with attachments: ${message}`;
+}
+
 function buildMessageDeliveryText(
   baseText: string,
   opts: {
@@ -2920,11 +2931,11 @@ async function handleSendMessage(
         );
         stdinSent = true;
       } catch (stdinError: unknown) {
-        // Stdin failed (process died between check and write)
-        // If attachments were requested, fail rather than silently dropping them
+        // If attachments were requested, fail rather than silently dropping them.
+        // Only report offline when liveness confirms the process is unavailable.
         if (validatedAttachments?.length) {
           throw new Error(
-            'Failed to deliver message with attachments: team process became unavailable'
+            formatAttachmentDeliveryFailure(stdinError, provisioning.isTeamAlive(tn))
           );
         }
         const errMsg = stdinError instanceof Error ? stdinError.message : 'unknown error';

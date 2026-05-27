@@ -1,5 +1,3 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   ClaudePtyWorkspaceTrustStrategy,
   DefaultWorkspaceTrustCoordinator,
@@ -9,9 +7,11 @@ import {
 } from '@features/workspace-trust/core/application';
 import {
   buildWorkspaceTrustPathCandidates,
+  readCodexWorkspaceTrustConfigOverridesFromSettings,
   type WorkspaceTrustDiagnosticStrategyResult,
   type WorkspaceTrustWorkspace,
 } from '@features/workspace-trust/core/domain';
+import { describe, expect, it } from 'vitest';
 
 const featureFlags = {
   enabled: true,
@@ -31,6 +31,18 @@ function workspace(): WorkspaceTrustWorkspace {
     realCwd: '/private/tmp/project',
     platform: 'posix',
   })[0];
+}
+
+function codexTrustOverrides(args: string[]): string[] {
+  const overrides: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === '--settings' && typeof args[index + 1] === 'string') {
+      overrides.push(
+        ...readCodexWorkspaceTrustConfigOverridesFromSettings(JSON.parse(args[index + 1]))
+      );
+    }
+  }
+  return overrides;
 }
 
 class RecordingClaudeStrategy extends ClaudePtyWorkspaceTrustStrategy {
@@ -83,11 +95,53 @@ describe('WorkspaceTrustCoordinator', () => {
     expect(plan.launchArgPatches[0].args.join(' ')).toContain('agent_teams_workspace_trust');
   });
 
+  it('includes canonical git root overrides in Codex trust settings for worktree candidates', async () => {
+    const coordinator = new DefaultWorkspaceTrustCoordinator(new ClaudePtyWorkspaceTrustStrategy());
+    const plan = await coordinator.planFull({
+      providers: ['codex'],
+      workspaces: buildWorkspaceTrustPathCandidates({
+        cwd: '/tmp/generated-worktrees/alice',
+        realCwd: '/private/tmp/generated-worktrees/alice',
+        gitRoot: '/Users/belief/project',
+        source: 'member-worktree',
+        memberId: 'alice',
+        platform: 'posix',
+      }),
+      featureFlags,
+    });
+
+    const overrides = codexTrustOverrides(plan.launchArgPatches[0].args);
+    expect(overrides).toEqual(
+      expect.arrayContaining([
+        'projects."/tmp/generated-worktrees/alice".trust_level="trusted"',
+        'projects."/private/tmp/generated-worktrees/alice".trust_level="trusted"',
+        'projects."/Users/belief/project".trust_level="trusted"',
+      ])
+    );
+  });
+
   it('does not emit Codex settings patches for Anthropic-only launches', async () => {
     const coordinator = new DefaultWorkspaceTrustCoordinator(new ClaudePtyWorkspaceTrustStrategy());
     const plan = await coordinator.planArgsOnly({
       providers: ['claude'],
       workspaces: buildWorkspaceTrustPathCandidates({ cwd: '/tmp/project', platform: 'posix' }),
+      featureFlags,
+    });
+
+    expect(plan.launchArgPatches).toEqual([]);
+  });
+
+  it('does not emit Codex workspace-trust patches for OpenCode-only launches', async () => {
+    const coordinator = new DefaultWorkspaceTrustCoordinator(new ClaudePtyWorkspaceTrustStrategy());
+    const plan = await coordinator.planArgsOnly({
+      providers: ['opencode'],
+      workspaces: buildWorkspaceTrustPathCandidates({
+        cwd: '/tmp/generated-worktrees/alice',
+        gitRoot: '/Users/belief/project',
+        source: 'member-worktree',
+        memberId: 'alice',
+        platform: 'posix',
+      }),
       featureFlags,
     });
 

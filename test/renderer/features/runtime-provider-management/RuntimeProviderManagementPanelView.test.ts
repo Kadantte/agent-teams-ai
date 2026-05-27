@@ -653,9 +653,10 @@ describe('RuntimeProviderManagementPanelView', () => {
     const row = host.querySelector<HTMLElement>(
       '[data-testid="configured-opencode-model-row-llama.cpp/qwen-test:0.5b"]'
     );
-    expect(host.textContent).toContain('Launchable OpenCode models');
+    expect(host.textContent).toContain('OpenCode model routes');
+    expect(host.textContent).toContain('Known routes from OpenCode config');
     expect(row?.textContent).toContain('local');
-    expect(row?.textContent).toContain('configured');
+    expect(row?.textContent).toContain('known route');
     expect(row?.textContent).toContain('needs test');
 
     const buttons = Array.from(row?.querySelectorAll('button') ?? []);
@@ -664,7 +665,7 @@ describe('RuntimeProviderManagementPanelView', () => {
       await Promise.resolve();
     });
     await act(async () => {
-      buttons.find((button) => button.textContent?.includes('Use in team picker'))?.click();
+      buttons.find((button) => button.textContent?.includes('Save for team picker'))?.click();
       await Promise.resolve();
     });
     await act(async () => {
@@ -847,10 +848,30 @@ describe('RuntimeProviderManagementPanelView', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Launchable OpenCode models');
+    expect(host.textContent).toContain('OpenCode model routes');
     expect(host.textContent).toContain('llama.cpp/qwen-test:0.5b');
+    expect(host.textContent).toContain(
+      'Select a validation context above to enable Test and Set default'
+    );
     expect(host.textContent).toContain('Providers');
     expect(host.querySelector('[data-testid="runtime-provider-row-openrouter"]')).toBeNull();
+
+    const row = host.querySelector<HTMLElement>(
+      '[data-testid="configured-opencode-model-row-llama.cpp/qwen-test:0.5b"]'
+    );
+    const buttons = Array.from(row?.querySelectorAll('button') ?? []);
+    expect(buttons.map((button) => [button.textContent?.trim(), button.disabled])).toEqual([
+      ['Test', true],
+      ['Save for team picker', false],
+      ['Set all-projects default', true],
+    ]);
+    expect(
+      Array.from(row?.querySelectorAll('[title]') ?? []).some(
+        (element) =>
+          element.getAttribute('title') ===
+          'Select a project context before testing or saving OpenCode defaults.'
+      )
+    ).toBe(true);
   });
 
   it('shows unknown OpenCode defaults without enabling launch actions', async () => {
@@ -897,6 +918,13 @@ describe('RuntimeProviderManagementPanelView', () => {
 
     const buttons = Array.from(row?.querySelectorAll('button') ?? []);
     expect(buttons.map((button) => button.disabled)).toEqual([true, true, true]);
+    expect(
+      Array.from(row?.querySelectorAll('[title]') ?? []).some(
+        (element) =>
+          element.getAttribute('title') ===
+          'This model is the current OpenCode default, but it is not available in the live catalog yet.'
+      )
+    ).toBe(true);
     await act(async () => {
       buttons.forEach((button) => button.click());
       await Promise.resolve();
@@ -1807,7 +1835,7 @@ describe('RuntimeProviderManagementPanelView', () => {
     });
 
     expect(host.textContent).toContain('openrouter/openai/gpt-oss-20b:free');
-    expect(host.textContent).toContain('Used in team picker');
+    expect(host.textContent).toContain('Saved for team picker');
     expect(host.textContent).toContain('Model probe passed');
     expect(host.textContent).toContain('Recommended');
     expect(host.textContent).toContain('Not recommended');
@@ -1818,7 +1846,7 @@ describe('RuntimeProviderManagementPanelView', () => {
     expect(host.textContent).not.toContain('Set OpenCode default');
     expect(
       Array.from(host.querySelectorAll('button')).some(
-        (button) => button.textContent?.trim() === 'Use in team picker'
+        (button) => button.textContent?.trim() === 'Save for team picker'
       )
     ).toBe(false);
     expect(

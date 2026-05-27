@@ -1192,6 +1192,65 @@ describe('ipc teams handlers', () => {
     }
   });
 
+  it('preserves attachment delivery errors when the lead process is still alive', async () => {
+    const sendHandler = handlers.get(TEAM_SEND_MESSAGE);
+    expect(sendHandler).toBeDefined();
+    provisioningService.isTeamAlive.mockReturnValue(true);
+    provisioningService.sendMessageToTeam.mockRejectedValueOnce(
+      new Error('Claude attachment MIME unsupported: image/avif')
+    );
+
+    const result = (await sendHandler!({} as never, 'my-team', {
+      member: 'team-lead',
+      text: 'see this',
+      attachments: [
+        {
+          id: 'att-1',
+          filename: 'screenshot.png',
+          mimeType: 'image/png',
+          size: 4,
+          data: Buffer.from('test').toString('base64'),
+        },
+      ],
+    })) as { success: boolean; error?: string };
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      'Failed to deliver message with attachments: Claude attachment MIME unsupported: image/avif'
+    );
+    expect(result.error).not.toContain('team process became unavailable');
+    expect(service.sendDirectToLead).not.toHaveBeenCalled();
+    vi.mocked(console.error).mockClear();
+  });
+
+  it('reports attachment delivery as unavailable only when liveness confirms it', async () => {
+    const sendHandler = handlers.get(TEAM_SEND_MESSAGE);
+    expect(sendHandler).toBeDefined();
+    provisioningService.isTeamAlive.mockReturnValueOnce(true).mockReturnValueOnce(false);
+    provisioningService.sendMessageToTeam.mockRejectedValueOnce(new Error('write EPIPE'));
+
+    const result = (await sendHandler!({} as never, 'my-team', {
+      member: 'team-lead',
+      text: 'see this',
+      attachments: [
+        {
+          id: 'att-1',
+          filename: 'screenshot.png',
+          mimeType: 'image/png',
+          size: 4,
+          data: Buffer.from('test').toString('base64'),
+        },
+      ],
+    })) as { success: boolean; error?: string };
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      'Failed to deliver message with attachments: team process became unavailable'
+    );
+    expect(service.sendDirectToLead).not.toHaveBeenCalled();
+    vi.mocked(console.error).mockClear();
+  });
+
   it('rejects delegate mode when recipient is not the team lead', async () => {
     const sendHandler = handlers.get(TEAM_SEND_MESSAGE);
     expect(sendHandler).toBeDefined();

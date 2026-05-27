@@ -1755,6 +1755,110 @@ describe('ProviderRuntimeSettingsDialog', () => {
     expect(icon?.className).toContain('shrink-0');
   });
 
+  it('does not offer Codex runtime install before installer status is known', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const onInstallCodexRuntime = vi.fn();
+
+    await act(async () => {
+      root.render(
+        React.createElement(ProviderRuntimeSettingsDialog, {
+          open: true,
+          onOpenChange: vi.fn(),
+          providers: [
+            createCodexProvider({
+              authenticated: false,
+              authMethod: null,
+              codex: {
+                appServerState: 'runtime-missing',
+                appServerStatusMessage: 'Codex CLI not found',
+                launchAllowed: false,
+                launchIssueMessage: 'Codex CLI not found',
+                launchReadinessState: 'runtime_missing',
+              },
+              availableBackends: [
+                {
+                  id: 'codex-native',
+                  label: 'Codex native',
+                  description: 'Use the local codex exec JSON seam.',
+                  selectable: false,
+                  recommended: true,
+                  available: false,
+                  state: 'runtime-missing',
+                  audience: 'general',
+                  statusMessage: 'Codex CLI not found',
+                },
+              ],
+            }),
+          ],
+          initialProviderId: 'codex',
+          codexRuntimeStatus: null,
+          onInstallCodexRuntime,
+          onSelectBackend: vi.fn(),
+          onRefreshProvider: vi.fn(() => Promise.resolve(undefined)),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).not.toContain('Install Codex CLI');
+    expect(onInstallCodexRuntime).not.toHaveBeenCalled();
+  });
+
+  it('offers Codex runtime install after installer status confirms the runtime is missing', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(ProviderRuntimeSettingsDialog, {
+          open: true,
+          onOpenChange: vi.fn(),
+          providers: [
+            createCodexProvider({
+              authenticated: false,
+              authMethod: null,
+              codex: {
+                appServerState: 'runtime-missing',
+                appServerStatusMessage: 'Codex CLI not found',
+                launchAllowed: false,
+                launchIssueMessage: 'Codex CLI not found',
+                launchReadinessState: 'runtime_missing',
+              },
+              availableBackends: [
+                {
+                  id: 'codex-native',
+                  label: 'Codex native',
+                  description: 'Use the local codex exec JSON seam.',
+                  selectable: false,
+                  recommended: true,
+                  available: false,
+                  state: 'runtime-missing',
+                  audience: 'general',
+                  statusMessage: 'Codex CLI not found',
+                },
+              ],
+            }),
+          ],
+          initialProviderId: 'codex',
+          codexRuntimeStatus: {
+            installed: false,
+            source: 'missing',
+            state: 'idle',
+          },
+          onInstallCodexRuntime: vi.fn(),
+          onSelectBackend: vi.fn(),
+          onRefreshProvider: vi.fn(() => Promise.resolve(undefined)),
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Install Codex CLI');
+  });
+
   it('keeps the API key form open and shows an error when delete fails', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);

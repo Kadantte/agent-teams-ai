@@ -1,15 +1,18 @@
+import {
+  analyzeSessionFileMetadata,
+  calculateMetrics,
+  countJsonlFileWithStats,
+  extractFirstUserMessagePreview,
+  parseJsonlFile,
+  parseJsonlFileWithStats,
+  parseJsonlLine,
+} from '@main/utils/jsonl';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
-import {
-  analyzeSessionFileMetadata,
-  calculateMetrics,
-  parseJsonlFile,
-  parseJsonlLine,
-} from '../../../src/main/utils/jsonl';
-import type { ParsedMessage } from '../../../src/main/types';
+import type { ParsedMessage } from '@main/types';
 
 // Helper to create a minimal ParsedMessage
 function createMessage(overrides: Partial<ParsedMessage> = {}): ParsedMessage {
@@ -142,6 +145,52 @@ describe('jsonl', () => {
   });
 
   describe('analyzeSessionFileMetadata', () => {
+    it('ignores structured non-human rows in head-only first user previews', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jsonl-head-preview-'));
+      try {
+        const filePath = path.join(tempDir, 'session.jsonl');
+        const lines = [
+          JSON.stringify({
+            type: 'user',
+            uuid: 'coordinator-1',
+            timestamp: '2026-01-01T00:00:00.000Z',
+            origin: { kind: 'coordinator' },
+            isSynthetic: true,
+            message: {
+              role: 'user',
+              content: 'Human: I tested the feature looks good',
+            },
+          }),
+          JSON.stringify({
+            type: 'user',
+            uuid: 'protocol-1',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            protocolKind: 'teammate-message',
+            isSynthetic: true,
+            message: {
+              role: 'user',
+              content: '<teammate-message teammate_id="alice">Looks good</teammate-message>',
+            },
+          }),
+          JSON.stringify({
+            type: 'user',
+            uuid: 'u1',
+            timestamp: '2026-01-01T00:00:02.000Z',
+            message: { role: 'user', content: 'real user request' },
+            isMeta: false,
+          }),
+        ];
+        fs.writeFileSync(filePath, `${lines.join('\n')}\n`, 'utf8');
+
+        const preview = await extractFirstUserMessagePreview(filePath);
+
+        expect(preview?.text).toBe('real user request');
+        expect(preview?.timestamp).toBe('2026-01-01T00:00:02.000Z');
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should extract first message, count, ongoing state, and git branch in one pass', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jsonl-meta-'));
       try {
@@ -187,9 +236,146 @@ describe('jsonl', () => {
         }
       }
     });
+
+    it('ignores synthetic user replays when selecting first user metadata', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jsonl-meta-synthetic-'));
+      try {
+        const filePath = path.join(tempDir, 'session.jsonl');
+        const lines = [
+          JSON.stringify({
+            type: 'user',
+            uuid: 'synthetic-replay-1',
+            timestamp: '2026-01-01T00:00:00.000Z',
+            gitBranch: 'feature/test',
+            isReplay: true,
+            isSynthetic: true,
+            message: {
+              role: 'user',
+              content: 'Human: I tested the feature looks good',
+            },
+          }),
+          JSON.stringify({
+            type: 'user',
+            uuid: 'u1',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            gitBranch: 'feature/test',
+            message: { role: 'user', content: 'real user request' },
+            isMeta: false,
+          }),
+        ];
+        fs.writeFileSync(filePath, `${lines.join('\n')}\n`, 'utf8');
+
+        const result = await analyzeSessionFileMetadata(filePath);
+
+        expect(result.firstUserMessage?.text).toBe('real user request');
+        expect(result.firstUserMessage?.timestamp).toBe('2026-01-01T00:00:01.000Z');
+        expect(result.messageCount).toBe(1);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('tolerant parsing', () => {
+    it('counts parseable entries without retaining messages', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jsonl-count-'));
+      try {
+        const filePath = path.join(tempDir, 'session.jsonl');
+        const validAssistant = JSON.stringify({
+          type: 'assistant',
+          uuid: 'a1',
+          timestamp: '2026-01-01T00:00:01.000Z',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'hello' }],
+          },
+        });
+        const validSystem = JSON.stringify({
+          type: 'system',
+          uuid: 's1',
+          timestamp: '2026-01-01T00:00:02.000Z',
+          content: 'system line',
+        });
+        const validUserWithoutContent = JSON.stringify({
+          type: 'user',
+          uuid: 'u1',
+          timestamp: '2026-01-01T00:00:03.000Z',
+          message: {
+            role: 'user',
+          },
+        });
+        const validUserArrayMessage = JSON.stringify({
+          type: 'user',
+          uuid: 'u2',
+          timestamp: '2026-01-01T00:00:04.000Z',
+          message: [],
+        });
+        const invalidMissingMessage = JSON.stringify({
+          type: 'assistant',
+          uuid: 'bad-assistant',
+        });
+        const invalidEmptyUuid = JSON.stringify({
+          type: 'system',
+          uuid: '',
+          content: 'empty uuid',
+        });
+        const invalidAssistantMissingContent = JSON.stringify({
+          type: 'assistant',
+          uuid: 'bad-assistant-content',
+          message: {
+            role: 'assistant',
+          },
+        });
+        const invalidAssistantArrayMessage = JSON.stringify({
+          type: 'assistant',
+          uuid: 'bad-assistant-array',
+          message: [],
+        });
+        const invalidAssistantNullContentBlock = JSON.stringify({
+          type: 'assistant',
+          uuid: 'bad-assistant-null-block',
+          message: {
+            role: 'assistant',
+            content: [null],
+          },
+        });
+        const unknownType = JSON.stringify({
+          type: 'unknown',
+          uuid: 'unknown-1',
+        });
+        const partialJson =
+          '{"type":"assistant","uuid":"a2","timestamp":"2026-01-01T00:00:03.000Z","message":{"role":"assistant","content":[{"type":"text","text":"partial"';
+
+        fs.writeFileSync(
+          filePath,
+          [
+            validAssistant,
+            validSystem,
+            validUserWithoutContent,
+            validUserArrayMessage,
+            invalidMissingMessage,
+            invalidEmptyUuid,
+            invalidAssistantMissingContent,
+            invalidAssistantArrayMessage,
+            invalidAssistantNullContentBlock,
+            unknownType,
+            'not json',
+            partialJson,
+          ].join('\n'),
+          'utf8'
+        );
+
+        const parsed = await parseJsonlFileWithStats(filePath);
+        const counted = await countJsonlFileWithStats(filePath);
+
+        expect(parsed.messages.map((message) => message.uuid)).toEqual(['a1', 's1', 'u1', 'u2']);
+        expect(counted.parsedLineCount).toBe(parsed.parsedLineCount);
+        expect(counted.consumedBytes).toBe(parsed.consumedBytes);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('skips non-JSON garbage and ignores a partial trailing object', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jsonl-tolerant-'));
       try {
@@ -275,6 +461,88 @@ describe('jsonl', () => {
       expect(parsed?.sourceToolAssistantUUID).toBe('assistant-1');
       expect(parsed?.sourceToolUseID).toBe('call-bash-real');
       expect(parsed?.toolResults[0]?.toolUseId).toBe('call-bash-real');
+    });
+
+    it('treats synthetic user-role replays as internal metadata', () => {
+      const parsed = parseJsonlLine(
+        JSON.stringify({
+          parentUuid: null,
+          isSidechain: false,
+          userType: 'external',
+          cwd: '/tmp/project',
+          sessionId: 'session-real-1',
+          version: '1.0.0',
+          gitBranch: 'main',
+          type: 'user',
+          uuid: 'synthetic-user-replay-1',
+          timestamp: '2026-04-12T15:36:14.250Z',
+          isReplay: true,
+          isSynthetic: true,
+          message: {
+            role: 'user',
+            content: 'Human: I tested the feature looks good',
+          },
+        })
+      );
+
+      expect(parsed?.isMeta).toBe(true);
+      expect(parsed?.isReplay).toBe(true);
+      expect(parsed?.isSynthetic).toBe(true);
+    });
+
+    it('preserves structured user-role provenance fields', () => {
+      const parsed = parseJsonlLine(
+        JSON.stringify({
+          parentUuid: null,
+          isSidechain: false,
+          userType: 'external',
+          cwd: '/tmp/project',
+          sessionId: 'session-real-1',
+          version: '1.0.0',
+          gitBranch: 'main',
+          type: 'user',
+          uuid: 'protocol-user-replay-1',
+          timestamp: '2026-04-12T15:36:14.250Z',
+          isReplay: true,
+          isSynthetic: true,
+          origin: { kind: 'coordinator' },
+          protocolKind: 'teammate-message',
+          message: {
+            role: 'user',
+            content: 'plain protocol payload',
+          },
+        })
+      );
+
+      expect(parsed?.origin).toEqual({ kind: 'coordinator' });
+      expect(parsed?.protocolKind).toBe('teammate-message');
+      expect(parsed?.isMeta).toBe(true);
+    });
+
+    it('keeps replayed human user-role messages visible', () => {
+      const parsed = parseJsonlLine(
+        JSON.stringify({
+          parentUuid: null,
+          isSidechain: false,
+          userType: 'external',
+          cwd: '/tmp/project',
+          sessionId: 'session-real-1',
+          version: '1.0.0',
+          gitBranch: 'main',
+          type: 'user',
+          uuid: 'human-user-replay-1',
+          timestamp: '2026-04-12T15:36:14.250Z',
+          isReplay: true,
+          message: {
+            role: 'user',
+            content: 'Human: I tested the feature looks good',
+          },
+        })
+      );
+
+      expect(parsed?.isMeta).toBe(false);
+      expect(parsed?.isReplay).toBe(true);
+      expect(parsed?.isSynthetic).toBeUndefined();
     });
 
     it('parses codex-native projected assistant rows with usage intact', () => {

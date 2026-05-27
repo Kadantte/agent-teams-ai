@@ -1,6 +1,17 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+
+import {
+  ActivityItem,
+  getCrossTeamSentMemberName,
+  getCrossTeamSentTarget,
+  getSystemMessageLabel,
+  isNoiseMessage,
+  isQualifiedExternalRecipient,
+} from '@renderer/components/team/activity/ActivityItem';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import type { InboxMessage } from '@shared/types';
 
 vi.mock('@renderer/hooks/useTheme', () => ({
   useTheme: () => ({ theme: 'dark', resolvedTheme: 'dark', isDark: true, isLight: false }),
@@ -38,16 +49,6 @@ vi.mock('@renderer/components/ui/tooltip', () => ({
 vi.mock('@renderer/components/team/activity/ReplyQuoteBlock', () => ({
   ReplyQuoteBlock: () => null,
 }));
-
-import {
-  ActivityItem,
-  getCrossTeamSentMemberName,
-  getCrossTeamSentTarget,
-  getSystemMessageLabel,
-  isNoiseMessage,
-  isQualifiedExternalRecipient,
-} from '@renderer/components/team/activity/ActivityItem';
-import type { InboxMessage } from '@shared/types';
 
 describe('ActivityItem compact header preview', () => {
   afterEach(() => {
@@ -96,6 +97,65 @@ describe('ActivityItem compact header preview', () => {
     expect(preview?.className).toContain('max-w-full');
     expect(preview?.className).not.toContain('min-h-8');
     expect(preview?.className).not.toContain('truncate');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it('shows edit message action only when revision is enabled', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const onRevise = vi.fn();
+    const message: InboxMessage = {
+      from: 'user',
+      to: 'alice',
+      text: 'incomplete',
+      summary: 'incomplete',
+      timestamp: new Date('2026-04-18T16:30:00.000Z').toISOString(),
+      read: true,
+      source: 'user_sent',
+      messageId: 'msg-1',
+    };
+
+    await act(async () => {
+      root.render(
+        React.createElement(ActivityItem, {
+          message,
+          teamName: 'my-team',
+          canRevise: true,
+          onRevise,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    const editButton = host.querySelector('button[aria-label="Edit message"]');
+    expect(editButton).not.toBeNull();
+
+    await act(async () => {
+      (editButton as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+
+    expect(onRevise).toHaveBeenCalledWith(message);
+
+    await act(async () => {
+      root.render(
+        React.createElement(ActivityItem, {
+          message,
+          teamName: 'my-team',
+          canRevise: false,
+          onRevise,
+        })
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('button[aria-label="Edit message"]')).toBeNull();
 
     await act(async () => {
       root.unmount();

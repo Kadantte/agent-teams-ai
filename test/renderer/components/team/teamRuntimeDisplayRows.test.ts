@@ -1,6 +1,5 @@
-import { describe, expect, it } from 'vitest';
-
 import { buildTeamRuntimeDisplayRows } from '@renderer/components/team/teamRuntimeDisplayRows';
+import { describe, expect, it } from 'vitest';
 
 import type {
   MemberSpawnStatusEntry,
@@ -31,7 +30,9 @@ function createRuntimeSnapshot(
   };
 }
 
-function createSpawnStatus(overrides: Partial<MemberSpawnStatusEntry> = {}): MemberSpawnStatusEntry {
+function createSpawnStatus(
+  overrides: Partial<MemberSpawnStatusEntry> = {}
+): MemberSpawnStatusEntry {
   return {
     status: 'spawning',
     launchState: 'starting',
@@ -88,6 +89,95 @@ describe('buildTeamRuntimeDisplayRows', () => {
       state: 'stopped',
       source: 'mixed',
       stateReason: 'Runtime heartbeat is stale',
+      actionsAllowed: false,
+    });
+  });
+
+  it('does not show bootstrap-only runtime evidence as running when spawn says runtime is stopped', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      runtimeSnapshot: createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          alive: true,
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnostic: 'bootstrap confirmed',
+          runtimeDiagnosticSeverity: 'info',
+        }),
+      }),
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'online',
+          launchState: 'confirmed_alive',
+          bootstrapConfirmed: true,
+          runtimeAlive: false,
+          runtimeDiagnostic: 'persisted runtime pid is not alive',
+          runtimeDiagnosticSeverity: 'warning',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'stopped',
+      source: 'mixed',
+      stateReason: 'persisted runtime pid is not alive',
+      diagnosticSeverity: 'warning',
+      actionsAllowed: false,
+    });
+  });
+
+  it('keeps spawn degradation stronger than stopped evidence for mixed rows', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      runtimeSnapshot: createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          alive: true,
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnostic: 'bootstrap confirmed',
+        }),
+      }),
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'online',
+          launchState: 'runtime_pending_permission',
+          bootstrapConfirmed: true,
+          runtimeAlive: false,
+          pendingPermissionRequestIds: ['perm-1'],
+          runtimeDiagnostic: 'Runtime is waiting for permission approval',
+          runtimeDiagnosticSeverity: 'warning',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'degraded',
+      source: 'mixed',
+      stateReason: 'Runtime is waiting for permission approval',
+      diagnosticSeverity: 'warning',
+      actionsAllowed: false,
+    });
+  });
+
+  it('does not show spawn-only confirmed bootstrap as running when spawn says runtime is stopped', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'online',
+          launchState: 'confirmed_alive',
+          bootstrapConfirmed: true,
+          runtimeAlive: false,
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'stopped',
+      source: 'spawn-status',
+      stateReason: 'Spawn status reports runtime is not alive',
+      diagnosticSeverity: 'warning',
       actionsAllowed: false,
     });
   });
@@ -159,6 +249,274 @@ describe('buildTeamRuntimeDisplayRows', () => {
       state: 'degraded',
       source: 'mixed',
       stateReason: 'Bootstrap command failed. Process is still alive.',
+      actionsAllowed: false,
+    });
+  });
+
+  it('does not degrade bootstrap-confirmed provisioned-but-not-alive rows', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      runtimeSnapshot: createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          alive: false,
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnostic:
+            'runtime pid could not be verified because process table is unavailable',
+          runtimeDiagnosticSeverity: 'warning',
+        }),
+      }),
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) \u2014 team provisioned but not alive',
+          livenessKind: 'confirmed_bootstrap',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'running',
+      source: 'mixed',
+      stateReason: 'Bootstrap confirmed',
+      diagnosticSeverity: 'warning',
+      actionsAllowed: false,
+    });
+  });
+
+  it('does not degrade Windows process-table-unavailable registered metadata rows', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      runtimeSnapshot: createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          alive: false,
+          livenessKind: 'registered_only',
+          runtimeDiagnostic:
+            'runtime pid could not be verified because process table is unavailable',
+          runtimeDiagnosticSeverity: 'warning',
+        }),
+      }),
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason:
+            'CLI process exited (code 1) - team provisioned but not alive; process table unavailable',
+          livenessKind: 'registered_only',
+          runtimeDiagnostic:
+            'runtime pid could not be verified because process table is unavailable',
+          runtimeDiagnosticSeverity: 'warning',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'running',
+      source: 'mixed',
+      stateReason: 'Bootstrap confirmed',
+      diagnosticSeverity: 'warning',
+      actionsAllowed: false,
+    });
+  });
+
+  it('uses spawn process-table proof when runtime registered metadata has no diagnostic text', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      runtimeSnapshot: createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          alive: false,
+          livenessKind: 'registered_only',
+          runtimeDiagnosticSeverity: 'warning',
+        }),
+      }),
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason:
+            'CLI process exited (code 1) - team provisioned but not alive; process table unavailable',
+          livenessKind: 'confirmed_bootstrap',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'running',
+      source: 'mixed',
+      stateReason: 'Bootstrap confirmed',
+      diagnosticSeverity: 'warning',
+      actionsAllowed: false,
+    });
+  });
+
+  it('does not let stale provisioned-but-not-alive spawn evidence hide runtime errors', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      runtimeSnapshot: createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          alive: false,
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnostic: 'Runtime process crashed',
+          runtimeDiagnosticSeverity: 'error',
+        }),
+      }),
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+          livenessKind: 'confirmed_bootstrap',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'degraded',
+      source: 'mixed',
+      stateReason: 'Runtime process crashed',
+      diagnosticSeverity: 'error',
+      actionsAllowed: false,
+    });
+  });
+
+  it('does not let provisioned-but-not-alive spawn evidence hide stopped runtime evidence', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      runtimeSnapshot: createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          alive: false,
+          livenessKind: 'not_found',
+          runtimeDiagnostic: 'Runtime metadata was not found',
+          runtimeDiagnosticSeverity: 'warning',
+        }),
+      }),
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+          livenessKind: 'confirmed_bootstrap',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'stopped',
+      source: 'mixed',
+      stateReason: 'Runtime metadata was not found',
+      diagnosticSeverity: 'warning',
+      actionsAllowed: false,
+    });
+  });
+
+  it('does not let stopped provisioned-but-not-alive spawn evidence hide live runtime context', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      runtimeSnapshot: createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          alive: true,
+          livenessKind: 'runtime_process',
+          runtimeDiagnostic: 'Runtime process is alive',
+          runtimeDiagnosticSeverity: 'info',
+        }),
+      }),
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+          livenessKind: 'not_found',
+          runtimeDiagnostic: 'Runtime is no longer registered',
+          runtimeDiagnosticSeverity: 'warning',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'degraded',
+      source: 'mixed',
+      stateReason: 'Runtime is no longer registered. Process is still alive.',
+      diagnosticSeverity: 'warning',
+      actionsAllowed: false,
+    });
+  });
+
+  it('keeps spawn-only runtime errors visible for provisioned-but-not-alive entries', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnostic: 'Runtime process crashed',
+          runtimeDiagnosticSeverity: 'error',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'degraded',
+      source: 'spawn-status',
+      stateReason: 'Runtime process crashed',
+      diagnosticSeverity: 'error',
+      actionsAllowed: false,
+    });
+  });
+
+  it('keeps spawn-only stopped liveness visible for provisioned-but-not-alive entries', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+          livenessKind: 'not_found',
+          runtimeDiagnostic: 'Runtime is no longer registered',
+          runtimeDiagnosticSeverity: 'warning',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'degraded',
+      source: 'spawn-status',
+      stateReason: 'Runtime is no longer registered',
+      diagnosticSeverity: 'warning',
       actionsAllowed: false,
     });
   });

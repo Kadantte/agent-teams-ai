@@ -1,3 +1,4 @@
+
 <p align="center">
   <a href="docs/screenshots/1.jpg"><img src="docs/screenshots/1.jpg" width="75" alt="Kanban Board" /></a>&nbsp;
   <a href="docs/screenshots/7.png"><img src="docs/screenshots/7.png" width="75" alt="Code Review" /></a>&nbsp;
@@ -28,10 +29,14 @@
 
 <img width="1304" height="820" alt="image" src="https://i.imgur.com/AugQy1B.jpeg" />
 
+<!--
+<img width="1304" height="820" alt="image" src="https://github.com/user-attachments/assets/dea53a01-68b3-4c36-bcf6-e4d1ad4cdb31" />
+<img width="2560" height="1604" alt="telegram-cloud-photo-size-2-5213160716557294036-w" src="https://github.com/user-attachments/assets/cbe0e1e7-f73c-4dd7-94e0-c694fcaf491e" />
+-->
+
 <a href="https://777genius.github.io/agent-teams-ai/">Watch demo on the site or here:</a>
 
-
-https://github.com/user-attachments/assets/d1a85fe5-fb49-4009-b2c1-79ae8818e8c4
+[demo_new_15s.webm](https://github.com/user-attachments/assets/d78cf5a4-80fe-4a8b-a1db-fb272e18029c)
 
 <table>
 <tr>
@@ -144,6 +149,8 @@ An orchestration layer for AI agent teams across Claude, Codex, and OpenCode.
 - **Recent tasks across projects** — browse the latest completed tasks from all your projects in one place
 
 - **Zero-setup onboarding** — start with the free model with no auth, then connect paid/account providers only when you need them
+
+- **Multi-language support** - choose the app language and preferred agent communication language. Current UI languages: Arabic, Bengali, Chinese, English, French, German, Hindi, Indonesian, Japanese, Korean, Portuguese, Russian, Spanish, Urdu.
 
 - **Built-in code editor** — edit project files with Git support without leaving the app
 
@@ -278,7 +285,9 @@ Electron 40, React 19, TypeScript 5, Tailwind CSS 3, Zustand 4. Data from `~/.cl
 
 <br />
 
-**Prerequisites:** Node.js 20+, pnpm 10+
+**Prerequisites:** Node.js 24.16.0 LTS, pnpm 10+
+
+On macOS, official Node.js 24 prebuilt binaries require macOS 13.5+.
 
 ```bash
 git clone https://github.com/777genius/agent-teams-ai.git
@@ -369,9 +378,17 @@ local packaging.
 
 See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for development guidelines. Please read our [Code of Conduct](.github/CODE_OF_CONDUCT.md).
 
+## Partnerships
+
+We are open to partnerships and collaboration opportunities. If you see a way to create value together, we are ready to discuss mutually beneficial terms.
+
+Contact: [quantjumppro@gmail.com](mailto:quantjumppro@gmail.com)
+
 ## Security
 
 IPC and standalone HTTP handlers validate IDs, paths, and payload shape at the boundary. Project editing and write operations are constrained to the selected project root, while read-only discovery also accesses local Claude data under `~/.claude/` and app-owned state paths when required. Path traversal and sensitive config/credential targets are blocked. See [SECURITY.md](.github/SECURITY.md) for details.
+
+GitHub Dependabot monitors dependencies for known vulnerabilities, so security updates are surfaced quickly and applied in time.
 
 ## License
 
