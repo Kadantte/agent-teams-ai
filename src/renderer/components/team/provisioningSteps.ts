@@ -116,6 +116,11 @@ function runtimeEntryContradictsConfirmedJoin(
   if (
     isBootstrapConfirmedProvisionedButNotAliveFailure(entry) &&
     !hasUnsafeProvisionedButNotAliveRuntimeEvidence(entry) &&
+    !hasUnsafeProvisionedButNotAliveRuntimeEvidence({
+      runtimeDiagnostic: runtimeEntry.runtimeDiagnostic,
+      runtimeDiagnosticSeverity: runtimeEntry.runtimeDiagnosticSeverity,
+      livenessKind: runtimeEntry.livenessKind,
+    }) &&
     (runtimeEntry.livenessKind === 'registered_only' ||
       runtimeEntry.livenessKind === 'stale_metadata') &&
     (mentionsProcessTableUnavailable(runtimeEntry.runtimeDiagnostic) ||
