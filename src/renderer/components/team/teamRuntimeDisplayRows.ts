@@ -1,5 +1,6 @@
 import {
   hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
   isBootstrapConfirmedProvisionedButNotAliveFailure,
 } from '@shared/utils/teamLaunchFailureReason';
 
@@ -147,11 +148,10 @@ function buildRuntimeBackedDisplayRow(
   const bootstrapConfirmedProvisionedButNotAlive =
     isBootstrapConfirmedProvisionedButNotAliveFailure(spawn);
   const spawnDegradation = getSpawnDegradation(spawn);
-  const unsafeRuntimeEvidence = hasUnsafeProvisionedButNotAliveRuntimeEvidence({
-    runtimeDiagnostic: runtime.runtimeDiagnostic,
-    runtimeDiagnosticSeverity: runtime.runtimeDiagnosticSeverity,
-    livenessKind: runtime.livenessKind,
-  });
+  const unsafeRuntimeEvidence = hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(
+    spawn,
+    runtime
+  );
   const useBootstrapConfirmedState =
     bootstrapConfirmedProvisionedButNotAlive &&
     !hasErrorDiagnostic &&
@@ -260,7 +260,7 @@ function getSpawnStoppedEvidence(
   if (isBootstrapConfirmedProvisionedButNotAliveFailure(spawn)) {
     return null;
   }
-  if (!spawn || spawn.runtimeAlive !== false || runtime.livenessKind !== 'confirmed_bootstrap') {
+  if (spawn?.runtimeAlive !== false || runtime.livenessKind !== 'confirmed_bootstrap') {
     return null;
   }
   if (spawn.status !== 'online' && spawn.launchState !== 'confirmed_alive') {

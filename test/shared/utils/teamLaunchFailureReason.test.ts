@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
   isBootstrapConfirmedProvisionedButNotAliveFailure,
 } from '@shared/utils/teamLaunchFailureReason';
 
@@ -75,6 +76,63 @@ describe('teamLaunchFailureReason', () => {
         status: 'error',
       })
     ).toBe(false);
+  });
+
+  it('uses spawn process-table evidence for registered runtime metadata without diagnostics', () => {
+    expect(
+      hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(
+        {
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason:
+            'CLI process exited (code 1) - team provisioned but not alive; process table unavailable',
+          launchState: 'failed_to_start',
+          status: 'error',
+        },
+        {
+          livenessKind: 'registered_only',
+          runtimeDiagnosticSeverity: 'warning',
+        }
+      )
+    ).toBe(false);
+  });
+
+  it('uses spawn process-table evidence for runtime metadata without liveness or diagnostics', () => {
+    expect(
+      hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(
+        {
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason:
+            'CLI process exited (code 1) - team provisioned but not alive; process table unavailable',
+          launchState: 'failed_to_start',
+          status: 'error',
+        },
+        {
+          runtimeDiagnosticSeverity: 'warning',
+        }
+      )
+    ).toBe(false);
+  });
+
+  it('keeps registered runtime metadata unsafe when runtime diagnostics contradict spawn proof', () => {
+    expect(
+      hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(
+        {
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason:
+            'CLI process exited (code 1) - team provisioned but not alive; process table unavailable',
+          launchState: 'failed_to_start',
+          status: 'error',
+        },
+        {
+          livenessKind: 'registered_only',
+          runtimeDiagnostic: 'Runtime heartbeat is not alive',
+          runtimeDiagnosticSeverity: 'warning',
+        }
+      )
+    ).toBe(true);
   });
 
   it('recognizes runtime-diagnostic-only provisioned-but-not-alive failures', () => {

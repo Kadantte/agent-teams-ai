@@ -25,7 +25,7 @@ import {
 import { isDisplayableCurrentTask } from '@renderer/utils/teamTaskDisplayState';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import {
-  hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
   isBootstrapConfirmedProvisionedButNotAliveFailure,
 } from '@shared/utils/teamLaunchFailureReason';
 import { isTeamTaskFinishedForDependency } from '@shared/utils/teamTaskState';
@@ -91,8 +91,7 @@ function isOpenCodeNoRuntimeEvidenceFailure(
     isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry);
   const unsafeProvisionedButNotAlive =
     bootstrapConfirmedProvisionedButNotAlive &&
-    (hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawnEntry) ||
-      hasUnsafeProvisionedButNotAliveRuntimeEvidence(runtimeEntry));
+    hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(spawnEntry, runtimeEntry);
   const failed =
     (!bootstrapConfirmedProvisionedButNotAlive || unsafeProvisionedButNotAlive) &&
     (spawnEntry?.launchState === 'failed_to_start' || spawnEntry?.status === 'error');

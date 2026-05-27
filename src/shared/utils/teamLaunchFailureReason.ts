@@ -110,3 +110,33 @@ export function hasUnsafeProvisionedButNotAliveRuntimeEvidence(
   }
   return !hasProcessTableUnavailableMarker;
 }
+
+export function hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(
+  spawnEntry: ProvisionedButNotAliveLaunchEntry | undefined,
+  runtimeEntry: ProvisionedButNotAliveLaunchEntry | undefined
+): boolean {
+  if (hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawnEntry)) {
+    return true;
+  }
+  if (!runtimeEntry) {
+    return false;
+  }
+
+  const runtimeDiagnostic = runtimeEntry.runtimeDiagnostic?.trim();
+  if (
+    !runtimeDiagnostic &&
+    (runtimeEntry.livenessKind == null ||
+      runtimeEntry.livenessKind === 'registered_only' ||
+      runtimeEntry.livenessKind === 'stale_metadata')
+  ) {
+    return hasUnsafeProvisionedButNotAliveRuntimeEvidence({
+      runtimeDiagnostic: spawnEntry?.runtimeDiagnostic,
+      hardFailureReason: spawnEntry?.hardFailureReason,
+      error: spawnEntry?.error,
+      runtimeDiagnosticSeverity: runtimeEntry.runtimeDiagnosticSeverity,
+      livenessKind: runtimeEntry.livenessKind,
+    });
+  }
+
+  return hasUnsafeProvisionedButNotAliveRuntimeEvidence(runtimeEntry);
+}

@@ -327,6 +327,40 @@ describe('buildTeamRuntimeDisplayRows', () => {
     });
   });
 
+  it('uses spawn process-table proof when runtime registered metadata has no diagnostic text', () => {
+    const rows = buildTeamRuntimeDisplayRows({
+      members: [{ name: 'alice' }],
+      runtimeSnapshot: createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          alive: false,
+          livenessKind: 'registered_only',
+          runtimeDiagnosticSeverity: 'warning',
+        }),
+      }),
+      spawnStatuses: {
+        alice: createSpawnStatus({
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason:
+            'CLI process exited (code 1) - team provisioned but not alive; process table unavailable',
+          livenessKind: 'confirmed_bootstrap',
+        }),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      memberName: 'alice',
+      state: 'running',
+      source: 'mixed',
+      stateReason: 'Bootstrap confirmed',
+      diagnosticSeverity: 'warning',
+      actionsAllowed: false,
+    });
+  });
+
   it('does not let stale provisioned-but-not-alive spawn evidence hide runtime errors', () => {
     const rows = buildTeamRuntimeDisplayRows({
       members: [{ name: 'alice' }],

@@ -12,7 +12,7 @@ import { resolveMemberRuntimeSummary } from '@renderer/utils/memberRuntimeSummar
 import { isDisplayableCurrentTask } from '@renderer/utils/teamTaskDisplayState';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import {
-  hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
   isBootstrapConfirmedProvisionedButNotAliveFailure,
 } from '@shared/utils/teamLaunchFailureReason';
 import { getTeamTaskWorkflowColumn } from '@shared/utils/teamTaskState';
@@ -934,8 +934,10 @@ export const MemberList = memo(function MemberList({
             isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry);
           const hasUnsafeProvisionedButNotAliveEvidence =
             bootstrapConfirmedProvisionedButNotAlive &&
-            (hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawnEntry) ||
-              hasUnsafeProvisionedButNotAliveRuntimeEvidence(runtimeEntry));
+            hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(
+              spawnEntry,
+              runtimeEntry
+            );
           const canPromoteBootstrapConfirmedVisualState =
             bootstrapConfirmedProvisionedButNotAlive &&
             spawnEntry?.runtimeDiagnosticSeverity !== 'error' &&

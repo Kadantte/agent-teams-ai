@@ -1831,6 +1831,45 @@ describe('TeamGraphAdapter particles', () => {
     });
   });
 
+  it('uses spawn process-table proof when graph runtime metadata has no diagnostic text', () => {
+    const adapter = TeamGraphAdapter.create();
+    const graph = adapter.adapt(
+      createBaseTeamData({
+        runtimeEntriesByMember: {
+          alice: createLiveRuntimeEntry('alice', {
+            alive: false,
+            livenessKind: 'registered_only',
+            runtimeDiagnosticSeverity: 'warning',
+          }),
+        },
+      }),
+      'my-team',
+      {
+        alice: {
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason:
+            'CLI process exited (code 1) - team provisioned but not alive; process table unavailable',
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnosticSeverity: 'warning',
+          updatedAt: '2026-05-25T20:14:02.147Z',
+        },
+      }
+    );
+
+    expect(findNode(graph, 'member:my-team:alice')).toMatchObject({
+      state: 'active',
+      spawnStatus: 'error',
+      launchVisualState: undefined,
+      launchStatusLabel: undefined,
+      exceptionTone: undefined,
+      exceptionLabel: undefined,
+    });
+  });
+
   it.each([
     {
       name: 'runtime diagnostic error',

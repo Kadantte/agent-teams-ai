@@ -39,7 +39,7 @@ import { isInboxNoiseMessage } from '@shared/utils/inboxNoise';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { buildOrderedVisibleTeamGraphOwnerIds } from '@shared/utils/teamGraphDefaultLayout';
 import {
-  hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
   isBootstrapConfirmedProvisionedButNotAliveFailure,
 } from '@shared/utils/teamLaunchFailureReason';
 import {
@@ -1337,8 +1337,7 @@ export class TeamGraphAdapter {
   ): boolean {
     return (
       !isBootstrapConfirmedProvisionedButNotAliveFailure(spawn) ||
-      hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawn) ||
-      hasUnsafeProvisionedButNotAliveRuntimeEvidence(runtimeEntry)
+      hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(spawn, runtimeEntry)
     );
   }
 

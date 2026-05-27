@@ -1,6 +1,7 @@
 import { isLeadMember } from '@shared/utils/leadDetection';
 import {
   hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
   isBootstrapConfirmedProvisionedButNotAliveFailure,
   mentionsProcessTableUnavailable,
 } from '@shared/utils/teamLaunchFailureReason';
@@ -144,16 +145,14 @@ function runtimeEntryContradictsConfirmedJoin(
   if (
     isBootstrapConfirmedProvisionedButNotAliveFailure(entry) &&
     !hasUnsafeProvisionedButNotAliveRuntimeEvidence(entry) &&
-    !hasUnsafeProvisionedButNotAliveRuntimeEvidence({
-      runtimeDiagnostic: runtimeEntry.runtimeDiagnostic,
-      runtimeDiagnosticSeverity: runtimeEntry.runtimeDiagnosticSeverity,
-      livenessKind: runtimeEntry.livenessKind,
-    }) &&
-    (runtimeEntry.livenessKind === 'registered_only' ||
+    !hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(entry, runtimeEntry) &&
+    (runtimeEntry.livenessKind == null ||
+      runtimeEntry.livenessKind === 'registered_only' ||
       runtimeEntry.livenessKind === 'stale_metadata') &&
     (mentionsProcessTableUnavailable(runtimeEntry.runtimeDiagnostic) ||
       mentionsProcessTableUnavailable(entry.runtimeDiagnostic) ||
-      mentionsProcessTableUnavailable(entry.hardFailureReason))
+      mentionsProcessTableUnavailable(entry.hardFailureReason) ||
+      mentionsProcessTableUnavailable(entry.error))
   ) {
     return false;
   }

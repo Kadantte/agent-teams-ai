@@ -1,6 +1,6 @@
 import { isLeadMember } from '@shared/utils/leadDetection';
 import {
-  hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
   isBootstrapConfirmedProvisionedButNotAliveFailure,
 } from '@shared/utils/teamLaunchFailureReason';
 import { buildTeamMemberColorMap } from '@shared/utils/teamMemberColors';
@@ -1107,8 +1107,7 @@ export function shouldDisplayMemberCurrentTask({
     isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry);
   const unsafeProvisionedButNotAliveEvidence =
     bootstrapConfirmedProvisionedButNotAlive &&
-    (hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawnEntry) ||
-      hasUnsafeProvisionedButNotAliveRuntimeEvidence(runtimeEntry));
+    hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(spawnEntry, runtimeEntry);
   const useBootstrapConfirmedVisualState =
     bootstrapConfirmedProvisionedButNotAlive && !unsafeProvisionedButNotAliveEvidence;
   const effectiveSpawnStatus = useBootstrapConfirmedVisualState ? 'online' : spawnStatus;
@@ -1275,10 +1274,7 @@ export function isOpenCodeRelaunchActionable({
     );
   }
   if (isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry)) {
-    return (
-      hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawnEntry) ||
-      hasUnsafeProvisionedButNotAliveRuntimeEvidence(runtimeEntry)
-    );
+    return hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(spawnEntry, runtimeEntry);
   }
   if (
     spawnEntry?.launchState === 'failed_to_start' ||
@@ -1387,18 +1383,20 @@ export function buildMemberLaunchPresentation({
   const hasRuntimeErrorDiagnostic = runtimeEntry?.runtimeDiagnosticSeverity === 'error';
   const hasUnsafeProvisionedButNotAliveEvidence =
     bootstrapConfirmedProvisionedButNotAlive &&
-    (hasUnsafeProvisionedButNotAliveRuntimeEvidence({
-      status: spawnStatus,
-      launchState: spawnLaunchState,
-      hardFailure: spawnHardFailure,
-      hardFailureReason: spawnHardFailureReason,
-      error: spawnError,
-      runtimeDiagnostic: spawnRuntimeDiagnostic,
-      runtimeDiagnosticSeverity: spawnRuntimeDiagnosticSeverity,
-      bootstrapConfirmed: spawnBootstrapConfirmed,
-      livenessKind: spawnLivenessKind,
-    }) ||
-      hasUnsafeProvisionedButNotAliveRuntimeEvidence(runtimeEntry));
+    hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(
+      {
+        status: spawnStatus,
+        launchState: spawnLaunchState,
+        hardFailure: spawnHardFailure,
+        hardFailureReason: spawnHardFailureReason,
+        error: spawnError,
+        runtimeDiagnostic: spawnRuntimeDiagnostic,
+        runtimeDiagnosticSeverity: spawnRuntimeDiagnosticSeverity,
+        bootstrapConfirmed: spawnBootstrapConfirmed,
+        livenessKind: spawnLivenessKind,
+      },
+      runtimeEntry
+    );
   const allowBootstrapConfirmedVisualPromotion =
     bootstrapConfirmedProvisionedButNotAlive &&
     !hasSpawnRuntimeErrorDiagnostic &&

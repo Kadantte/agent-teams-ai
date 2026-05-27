@@ -1,5 +1,6 @@
 import {
   hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
   isBootstrapConfirmedProvisionedButNotAliveFailure,
 } from '@shared/utils/teamLaunchFailureReason';
 
@@ -551,7 +552,8 @@ export function buildMemberLaunchDiagnosticsPayload(params: {
     hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawnEntry);
   const hasUnsafeRuntimeProvisionedButNotAliveEvidence =
     bootstrapConfirmedProvisionedButNotAlive &&
-    hasUnsafeProvisionedButNotAliveRuntimeEvidence(runtimeEntry);
+    !hasUnsafeSpawnProvisionedButNotAliveEvidence &&
+    hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(spawnEntry, runtimeEntry);
   const hasUnsafeProvisionedButNotAliveEvidence =
     bootstrapConfirmedProvisionedButNotAlive &&
     (hasUnsafeSpawnProvisionedButNotAliveEvidence ||

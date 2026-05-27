@@ -29,7 +29,7 @@ import { getRuntimeMemorySourceLabel } from '@renderer/utils/memberRuntimeSummar
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { deriveTaskDisplayId } from '@shared/utils/taskIdentity';
 import {
-  hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext,
   isBootstrapConfirmedProvisionedButNotAliveFailure,
 } from '@shared/utils/teamLaunchFailureReason';
 import {
@@ -669,8 +669,7 @@ export const MemberCard = memo(function MemberCard({
     isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry);
   const hasUnsafeBootstrapConfirmedProvisionedButNotAlive =
     bootstrapConfirmedProvisionedButNotAlive &&
-    (hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawnEntry) ||
-      hasUnsafeProvisionedButNotAliveRuntimeEvidence(runtimeEntry));
+    hasUnsafeProvisionedButNotAliveRuntimeEvidenceWithSpawnContext(spawnEntry, runtimeEntry);
   const effectiveSpawnStatus = spawnStatus;
   const effectiveSpawnLaunchState = spawnLaunchState;
   const showTaskActivity = shouldDisplayMemberCurrentTask({

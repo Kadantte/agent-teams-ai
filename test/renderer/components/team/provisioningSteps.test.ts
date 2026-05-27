@@ -181,6 +181,73 @@ describe('getLaunchJoinMilestonesFromMembers', () => {
     expect(milestones.pendingSpawnCount).toBe(0);
   });
 
+  it('uses spawn process-table proof when runtime registered metadata has no diagnostic text', () => {
+    const milestones = getLaunchJoinMilestonesFromMembers({
+      members: [{ name: 'tom' }],
+      memberSpawnStatuses: {
+        tom: {
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason:
+            'CLI process exited (code 1) - team provisioned but not alive; process table unavailable',
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnosticSeverity: 'warning',
+          updatedAt: '2026-05-25T20:14:02.147Z',
+        },
+      },
+      memberRuntimeEntries: {
+        tom: {
+          memberName: 'tom',
+          alive: false,
+          restartable: true,
+          livenessKind: 'registered_only',
+          runtimeDiagnosticSeverity: 'warning',
+          updatedAt: '2026-05-25T20:14:03.317Z',
+        },
+      },
+    });
+
+    expect(milestones.heartbeatConfirmedCount).toBe(1);
+    expect(milestones.failedSpawnCount).toBe(0);
+    expect(milestones.pendingSpawnCount).toBe(0);
+  });
+
+  it('uses spawn process-table proof when runtime metadata has no liveness or diagnostic text', () => {
+    const milestones = getLaunchJoinMilestonesFromMembers({
+      members: [{ name: 'tom' }],
+      memberSpawnStatuses: {
+        tom: {
+          status: 'error',
+          launchState: 'failed_to_start',
+          runtimeAlive: false,
+          bootstrapConfirmed: true,
+          hardFailure: true,
+          hardFailureReason:
+            'CLI process exited (code 1) - team provisioned but not alive; process table unavailable',
+          livenessKind: 'confirmed_bootstrap',
+          runtimeDiagnosticSeverity: 'warning',
+          updatedAt: '2026-05-25T20:14:02.147Z',
+        },
+      },
+      memberRuntimeEntries: {
+        tom: {
+          memberName: 'tom',
+          alive: false,
+          restartable: true,
+          runtimeDiagnosticSeverity: 'warning',
+          updatedAt: '2026-05-25T20:14:03.317Z',
+        },
+      },
+    });
+
+    expect(milestones.heartbeatConfirmedCount).toBe(1);
+    expect(milestones.failedSpawnCount).toBe(0);
+    expect(milestones.pendingSpawnCount).toBe(0);
+  });
+
   it('counts unsafe bootstrap-confirmed provisioned-but-not-alive entries as failed', () => {
     const milestones = getLaunchJoinMilestonesFromMembers({
       members: [{ name: 'tom' }],
