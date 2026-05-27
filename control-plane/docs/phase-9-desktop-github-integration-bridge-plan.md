@@ -123,6 +123,13 @@ Weak spots studied in current code:
 - Team runtime already has stable member metadata such as `agentId`,
   `member.name`, role, team name, and provider runtime args. The GitHub bridge
   should use this runtime/config metadata, not parsed transcript text.
+- Existing `shell:openExternal` permits `http`, `https`, and `mailto` globally.
+  GitHub setup must not use that generic opener blindly for server-provided
+  setup URLs because a compromised/buggy backend response could exfiltrate user
+  flow to an unexpected origin.
+- Backend action payload validation caps comment/check body fields at current
+  server limits. Desktop should preflight those limits for UX, but backend
+  remains authoritative and desktop must not silently truncate content.
 
 ## Clean Architecture Shape
 
@@ -282,6 +289,11 @@ Contract invariants:
 - bearer token defines the workspace/client actor
 - request body ids are authorization inputs only where backend already validates
   them against the authenticated actor
+- desktop must reject configured control-plane base URLs with credentials,
+  fragments, non-HTTPS non-localhost schemes, or unexpected path prefixes
+- HTTP adapter must not forward Authorization across cross-origin redirects
+- setup/open-browser URL must be allowlisted against the configured
+  control-plane public base URL and expected GitHub hosts before opening
 
 ## Trusted Agent Action Envelope
 
@@ -327,6 +339,10 @@ Security rules:
   were created
 - `requestId` must be stable for retry of one logical action and unique for
   distinct actions
+- desktop may preflight server-known body limits, but it never mutates or
+  truncates action content before submission without explicit user/agent action
+- backend renders final attribution and hidden markers; desktop must not let
+  agent-authored markdown provide those system blocks
 
 Illustrative local bridge shape:
 
@@ -420,6 +436,37 @@ Token lifecycle:
 - auth failure clears only the hosted integration session, not local teams or
   provider credentials
 
+## URL And Redirect Guardrails
+
+Control-plane base URL:
+
+- configured only through main-process owned settings
+- normalized once before storing
+- must be `https://` outside explicit localhost/dev mode
+- must not contain username/password credentials
+- must not contain a fragment
+- must not point at link-local metadata hosts, private network ranges, or local
+  file protocols unless local development mode explicitly allows localhost
+- must be shown to the user before first token-bearing request when manually
+  configured
+
+HTTP adapter:
+
+- sends desktop bearer token only to the normalized control-plane origin
+- rejects cross-origin redirects before following them with Authorization
+- applies request timeout and bounded response body size
+- maps network, timeout, TLS, and DNS failures into stable hosted integration
+  unavailable states
+- logs URL origin and route template only, never full query strings containing
+  setup or OAuth values
+
+Browser opener:
+
+- opens setup URLs only after validating scheme and origin allowlist
+- rejects `javascript:`, `file:`, custom schemes, and `mailto:`
+- does not scrape browser callback pages for claim tokens
+- relies on backend status polling for setup progress
+
 ## Implementation Ordering
 
 Recommended order:
@@ -448,6 +495,9 @@ Ordering guards:
 - do not rotate token during a running setup/action mutation unless the adapter
   can serialize those calls
 - serialize setup start/resume/cancel-like local dismiss actions per workspace
+- validate and store control-plane base URL before bootstrap/pairing
+- add redirect/base-url tests before any token-bearing HTTP calls
+- add setup URL allowlist tests before wiring `openExternal`
 
 ## UI Requirements
 
@@ -485,6 +535,8 @@ Do not show:
 - raw OAuth codes
 - PKCE verifier
 - internal installation token response
+- full setup callback query string
+- desktop bearer token prefix or lookup prefix
 
 ## Runtime Integration
 
@@ -528,6 +580,20 @@ Idempotency source:
   submission when command fingerprint matches
 - editing the action body or target creates a new `requestId`
 
+Runtime tool surface:
+
+- expose a narrow `request_github_action` style capability only when hosted
+  integration is connected
+- do not expose generic HTTP, GitHub token, installation id, or arbitrary REST
+  path access to agents
+- runtime capability receives target/action/body fields, not desktop token
+- main process attaches trusted identity snapshot and performs final DTO
+  normalization
+- capability is disabled for stopped runs, replaced members, or teams whose
+  current project no longer matches the selected hosted workspace
+- action content is not stored in local durable run manifests, inbox messages,
+  or task logs unless it was already user-visible task content
+
 ## Edge Cases
 
 Critical edge cases:
@@ -539,6 +605,10 @@ Critical edge cases:
 - token rotation succeeds on backend but local secure token write fails
 - secure store is unavailable after OS login, keychain lock, Linux secret
   service absence, or app sandbox change
+- configured control-plane URL changes after token was stored
+- token-bearing request receives a redirect to another origin
+- backend returns a setup URL outside the expected origin allowlist
+- setup URL contains OAuth-like secrets in query and a renderer tries to log it
 - two app windows start setup at the same time
 - two desktop clients are paired to the same hosted workspace and one revokes
   the other
@@ -560,6 +630,9 @@ Critical edge cases:
 - local clock is wrong and makes cached setup/action state look fresh or stale
 - control-plane public base URL changes while desktop has an active setup
   session
+- action payload exceeds server limit, includes binary-like data, or contains
+  control characters in attribution fields
+- agent action request arrives after team run stopped or member was replaced
 
 Expected decisions:
 
@@ -581,6 +654,12 @@ Expected decisions:
 - concurrent setup starts are coalesced by active setup session id when possible
 - member rename after action submit does not rewrite existing action
   attribution
+- changing control-plane base URL invalidates stored desktop token unless the
+  new origin matches the old normalized origin
+- cross-origin redirect with Authorization is treated as security failure, not
+  network retry
+- oversized action content fails locally with a safe validation message and is
+  not truncated silently
 
 ## Architecture Guardrails
 
@@ -599,6 +678,9 @@ Add or extend checks so that:
 - hosted integration token store cannot be imported from renderer/preload
 - hosted integration feature cannot write to generic config files with token-like
   values
+- hosted integration HTTP adapter cannot accept a URL argument from renderer
+- browser opener adapter cannot use generic `shell:openExternal` without
+  setup-specific allowlist validation
 
 ## Test Plan
 
@@ -617,6 +699,10 @@ Unit tests:
 - token rotation recovery with repeated `rotationRequestId`
 - local cache freshness rules never authorize an action
 - runtime identity resolver handles member rename without transcript parsing
+- control-plane base URL normalization rejects credentialed, cross-origin,
+  private-network, fragment, and non-HTTPS non-localhost URLs
+- action payload preflight mirrors backend size/control-character limits without
+  truncation
 
 Integration tests:
 
@@ -630,6 +716,8 @@ Integration tests:
 - target cache refresh happens before action submit
 - two simultaneous renderer calls coalesce or serialize correctly
 - app restart restores setup session id but not action content payload
+- HTTP adapter rejects Authorization-bearing cross-origin redirects
+- setup browser opener rejects unexpected origins and query logging
 
 Security tests:
 
@@ -641,6 +729,8 @@ Security tests:
 - renderer cannot directly call the HTTP adapter
 - persisted local hosted-integration files contain no bearer token
 - runtime subprocess environment contains no desktop token
+- generic renderer `openExternal` path is not used for setup URLs
+- hosted integration logs redact setup/OAuth query values and bearer prefixes
 
 Smoke tests:
 

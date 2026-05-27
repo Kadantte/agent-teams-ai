@@ -121,6 +121,9 @@ Weak spots studied in current code:
   allowlists, unique run ids, and cleanup rules before the first mutation.
 - Manual verification is still needed for browser/OAuth UX, but it cannot be the
   only release evidence.
+- Provider reads may be eventually consistent for a short period after writes.
+  E2E should retry reads with bounded polling, but never hide duplicate writes
+  behind retries.
 
 ## E2E Environment
 
@@ -165,6 +168,8 @@ Run isolation:
 - cleanup never runs against repositories outside the explicit sandbox allowlist
 - every mutation writes a local manifest entry before calling GitHub or
   control-plane
+- sandbox fixtures are namespaced by environment so staging and production beta
+  tests cannot share the same mutable issue/PR unless explicitly locked
 
 Manifest shape:
 
@@ -182,6 +187,17 @@ Manifest shape:
 
 The manifest example is illustrative. Real artifacts must redact or omit
 secrets and raw action bodies.
+
+Dry-run checks before mutation:
+
+- control-plane base URL is staging or approved beta URL
+- GitHub owner/repo match sandbox allowlist
+- GitHub App slug/id match expected environment
+- desktop contract version is supported
+- API and worker build revisions match expected release
+- actions gate and outbox worker are in expected state
+- cleanup permissions are available
+- artifact output directory is writable
 
 ## Golden Path Scenarios
 
@@ -230,6 +246,9 @@ Assertions:
 - encrypted content is deleted or crypto-shredded after success
 - backend action status reaches terminal success
 - audit record links action id, target id, and safe correlation id
+- comment body is not asserted by raw full-body snapshot; assertions target
+  marker, attribution, and safe expected snippets to avoid leaking content into
+  artifacts
 
 ### Agent PR Conversation Comment
 
@@ -287,6 +306,9 @@ Critical failures:
 - GitHub API returns success but response body parsing fails in adapter
 - GitHub comment exists but marker is malformed or from another run
 - cleanup fails after public comment creation
+- provider read-after-write initially misses the created comment
+- E2E process crashes after external mutation but before manifest finalization
+- stale run lock blocks a new run
 
 Expected behavior:
 
@@ -304,6 +326,10 @@ Expected behavior:
 - duplicate callbacks are idempotent or rejected safely
 - malformed marker never causes update/delete of unrelated GitHub content
 - cleanup failure is reported as cleanup-failed, not test success
+- bounded read retries eventually prove the write or report inconclusive with
+  safe ids
+- crash recovery resumes from manifest and does not repeat non-idempotent writes
+- stale run locks expire only after proving no active run owns them
 
 Failure injection guardrails:
 
@@ -319,6 +345,10 @@ Failure injection guardrails:
 - prefer controlled adapter failures for rare provider edge cases
 - keep destructive cleanup behind a confirmation or protected CI environment
   variable
+- every failure injection states whether it uses real GitHub behavior, backend
+  test adapter behavior, or manual sandbox mutation
+- skip real-provider destructive scenarios in production beta validation unless
+  the sandbox account is isolated
 
 ## Privacy And Security Gate
 
@@ -386,6 +416,16 @@ Redaction scan inputs:
 - failure screenshots if any
 - support bundles if generated
 
+Forbidden artifact patterns:
+
+- `agtcp_` desktop token prefix
+- `Bearer `
+- OAuth `code=`
+- PKCE verifier/challenge values
+- GitHub installation token-like values
+- PEM private key headers
+- raw action body outside an explicitly redacted placeholder
+
 ## Release Checklist
 
 Before public beta:
@@ -405,6 +445,9 @@ Before public beta:
 - no open critical or high severity release gate findings
 - skipped scenarios have explicit accepted risk owner and expiry date
 - staging GitHub App settings were reviewed after the final deploy
+- E2E dry-run output was reviewed before mutation run
+- stale sandbox resources from previous runs were either cleaned or accepted as
+  harmless before release evidence was collected
 
 ## Harness Design
 
@@ -436,6 +479,10 @@ Rules:
   cleanup, or redaction
 - scripts avoid test flakes by retrying reads, not mutating writes, unless the
   scenario is explicitly an idempotency test
+- scripts persist manifest after every successful external mutation
+- scripts support `resume --run-id` for crash recovery
+- scripts distinguish cleanup failure from scenario failure
+- scripts never use full GitHub comment body as the cleanup selector
 
 ## Execution Ordering
 
@@ -464,6 +511,8 @@ Ordering guards:
 - destructive cleanup runs only after evidence artifact has been written
 - cleanup must not delete comments/checks from previous runs unless an explicit
   stale-sandbox cleanup mode is used
+- stale-sandbox cleanup mode must be separate from release evidence mode
+- if dry-run fails, no external mutation is attempted
 
 Timeout guidance:
 
@@ -471,6 +520,9 @@ Timeout guidance:
 - outbox dispatch polling should report last backend status and attempt count
 - GitHub read-after-write checks should allow short provider consistency delay
 - timeout does not imply cleanup success
+- polling logs last safe status summary only, not payload or token-bearing URLs
+- timeout budgets are documented per scenario so a slow provider does not look
+  like a product regression without evidence
 
 ## Test Plan
 
@@ -488,6 +540,9 @@ Automated:
 - bounded polling timeout tests
 - duplicate callback tests through mocked public callback route
 - cleanup classification tests
+- dry-run refuses non-sandbox repo test
+- resume-from-manifest test after simulated crash
+- forbidden artifact pattern scan test
 
 Manual:
 
@@ -501,6 +556,8 @@ Manual:
 - review evidence artifact before marking release gate green
 - run browser setup with a second already-connected desktop open
 - simulate app restart after setup start and before claim completion
+- kill the E2E harness after comment creation and verify resume does not create
+  a duplicate
 
 ## Acceptance Criteria
 
@@ -522,6 +579,9 @@ Manual:
 - bounded polling and cleanup behavior are tested
 - duplicate callback behavior is proven safe
 - release gate output classifies failures clearly enough for triage
+- dry-run prevents accidental non-sandbox mutation
+- crash/resume path does not duplicate public GitHub writes
+- artifact redaction scan includes explicit forbidden-pattern checks
 
 ## Rollout
 

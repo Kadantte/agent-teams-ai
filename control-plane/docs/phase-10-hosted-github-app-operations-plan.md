@@ -124,6 +124,9 @@ Weak spots studied in current code:
   combinations through runtime failures.
 - API/worker revision skew is a real risk because the worker processes durable
   outbox event versions. Deployment must make this skew visible and reversible.
+- Public setup/OAuth callback URLs are externally reachable by design. Hosted
+  operations must treat callback abuse, replay, and noisy scanners as normal
+  production traffic, not exceptional incidents.
 
 ## Deployment Topology
 
@@ -261,6 +264,9 @@ Registration drift checks:
 - staging and production GitHub Apps use different secrets and callback URLs
 - app visibility/public listing state is recorded before each rollout stage
 - organization ownership and emergency transfer contacts are current
+- setup URL and OAuth callback URL are tested from outside the private network
+- old callback URLs are removed or redirected only after pending setup sessions
+  expire
 
 ## Secret Custody
 
@@ -303,6 +309,10 @@ Secret rotation guardrails:
   and documented
 - OAuth client secret rotation invalidates pending claim sessions unless a safe
   overlap strategy exists
+- leaked desktop tokens are handled by revoking affected desktop clients, not by
+  rotating GitHub App private key
+- leaked GitHub App private key requires generating a new key, revoking old key,
+  and proving token broker uses only the new key
 
 ## Hosted Configuration
 
@@ -372,6 +382,10 @@ Revision skew controls:
 - deploy tooling records which revision applied migrations
 - rollback notes include whether old code can read the current schema
 - outbox dispatch can be paused independently before rollback
+- `/health` and `/ready` expose build metadata consistently for API and worker
+  logs without exposing env values
+- deploy tooling refuses production promotion if staging API/worker revisions do
+  not match
 
 Rollback rules:
 
@@ -386,6 +400,10 @@ Rollback rules:
   enter OAuth
 - if token broker fails after rollback, pause action dispatch before retries
   consume max attempts
+- if public callback abuse spikes, rate-limit or temporarily disable setup
+  starts before disabling already connected workspaces
+- if desktop auth failures spike after deploy, prefer pausing mutating hosted
+  integration calls over deleting local desktop sessions
 
 ## Worker Operations
 
@@ -422,6 +440,10 @@ Failure behavior:
   burn down
 - dead-letter inspection never decrypts action body by default
 - cleanup of completed encrypted content is observable and bounded
+- provider 401/403 after token issuance marks installation/target for refresh
+  or suspension by policy, not blind retry forever
+- provider 404 for repository/PR/issue is classified separately from network
+  failure
 
 ## API Operations
 
@@ -432,6 +454,10 @@ API health/readiness:
 - hosted mode readiness fails when DB or required config is missing
 - health includes service name/version/build metadata only
 - no secrets or full env values
+- readiness for public callbacks must not depend on GitHub provider success for
+  every installation
+- readiness for actions must fail when DB/outbox/encryption prerequisites are
+  missing
 
 API metrics/logs:
 
@@ -445,6 +471,9 @@ API metrics/logs:
 - public callback result class, not raw query values
 - desktop contract version and safe client build metadata when present
 - hosted feature gate state in startup logs only as booleans
+- callback duplicate/replay counts
+- desktop auth rejected count by safe reason class
+- request body size rejection count
 
 ## Admin And Recovery
 
@@ -487,6 +516,10 @@ Runbook edge cases:
 - migration partially applied
 - encrypted content cleanup job disabled or failing
 - rate-limit retry-after longer than normal alert window
+- public setup callback replayed after session expiry
+- OAuth provider returns error with user-facing description
+- desktop client compromised but GitHub installation still valid
+- target policy accidentally too broad and needs emergency deny
 
 ## Observability And Alerts
 
@@ -507,6 +540,10 @@ Critical alerts:
 - desktop auth failures spike after deploy
 - setup sessions stuck in pending claim
 - worker processing events older than lease plus recovery window
+- callback abuse/replay spike
+- request body size rejection spike
+- provider 401/403 spike after token broker success
+- production app registration drift detected
 
 Dashboards:
 
@@ -531,6 +568,16 @@ Minimum metric dimensions:
 Do not use high-cardinality labels for raw action ids, repository names, user
 names, prompts, comment bodies, or GitHub tokens.
 
+Alert severity:
+
+- page immediately: API/worker readiness down, token broker total failure,
+  encryption/decryption failure spike, outbox lag threatening retention,
+  public callback abuse affecting setup
+- ticket soon: isolated provider 404/422 growth, setup funnel regression,
+  stale repository snapshots, cleanup lag below retention threshold
+- dashboard only: expected policy denials, user-cancelled setup, expired setup
+  sessions
+
 ## Security And Privacy Review
 
 Review checklist:
@@ -553,6 +600,11 @@ Review checklist:
   sharing
 - backups include enough key material references for restore, but not plaintext
   secrets in exported dumps
+- desktop bearer tokens are treated as revocable app credentials and never
+  reused as user identity proof
+- public setup/OAuth callback handlers are safe under duplicate delivery and
+  parameter pollution
+- request size limits exist before payloads reach expensive parsing or logging
 
 Backup and restore gate:
 
@@ -562,6 +614,9 @@ Backup and restore gate:
 - verify restored outbox does not dispatch old public comments unless dispatch
   is explicitly enabled
 - document how to freeze worker dispatch during restore
+- restore drill starts with outbox worker disabled and actions gate disabled
+- restore drill verifies no expired encrypted content is resurrected into
+  dispatchable state
 
 ## Test Plan
 
@@ -579,6 +634,9 @@ Automated tests:
 - admin/runbook command tests where commands are introduced
 - build revision parity test for API/worker smoke where practical
 - backup/restore dry-run checklist before beta
+- public callback duplicate/replay tests
+- request size limit tests for setup/action endpoints
+- provider 401/403/404 classification tests in GitHub action dispatcher
 
 Manual hosted smoke:
 
@@ -599,6 +657,8 @@ Manual hosted smoke:
   recoverable
 - deploy API-only maintenance state and verify worker remains paused
 - deploy worker-only rollback rehearsal in staging with dispatch disabled
+- replay setup/OAuth callback URLs after success/expiry and verify safe result
+- simulate installation removal and verify target refresh/suspension path
 
 ## Acceptance Criteria
 
@@ -618,6 +678,9 @@ Manual hosted smoke:
 - staging proves one restore drill or documents an accepted pre-beta blocker
 - metrics avoid high-cardinality/secrets-bearing labels
 - registration drift checklist is complete for staging and production apps
+- public callback replay and parameter pollution are tested
+- provider auth/not-found errors have distinct safe operational classification
+- request size limits are documented and verified before public beta
 
 ## Rollout
 
