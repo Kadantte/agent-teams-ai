@@ -583,6 +583,62 @@ describe('CLI status visibility during completed install state', () => {
     });
   });
 
+  it('renders Anthropic legacy fallback status as connected with model badges', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    storeState.cliInstallerState = 'idle';
+    storeState.cliStatus = createInstalledCliStatus({
+      flavor: 'agent_teams_orchestrator',
+      displayName: 'Multimodel runtime',
+      supportsSelfUpdate: false,
+      showVersionDetails: false,
+      showBinaryPath: false,
+      authLoggedIn: true,
+      authStatusChecking: false,
+      providers: [
+        {
+          providerId: 'anthropic',
+          displayName: 'Anthropic',
+          supported: true,
+          authenticated: true,
+          authMethod: 'claude.ai',
+          verificationState: 'verified',
+          statusMessage: null,
+          models: ['opus', 'opus[1m]'],
+          modelAvailability: [],
+          canLoginFromUi: true,
+          capabilities: {
+            teamLaunch: true,
+            oneShot: true,
+          },
+          backend: null,
+          modelCatalog: null,
+          modelCatalogRefreshState: 'idle',
+          runtimeCapabilities: null,
+        },
+      ],
+    });
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(CliStatusBanner));
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Anthropic');
+    expect(host.textContent).toContain('Connected via');
+    expect(host.textContent).toContain('Opus');
+    expect(host.textContent).not.toContain('Provider status unavailable');
+    expect(host.textContent).not.toContain('Models unavailable for this runtime build');
+
+    await act(async () => {
+      root.unmount();
+      await Promise.resolve();
+    });
+  });
+
   it('keeps connected provider details visible while a refresh is in flight', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     storeState.cliInstallerState = 'idle';
@@ -752,8 +808,7 @@ describe('CLI status visibility during completed install state', () => {
           state: 'runtime-missing',
           available: false,
           selectable: false,
-          statusMessage:
-            'Codex CLI not found. Install Codex to use native account management.',
+          statusMessage: 'Codex CLI not found. Install Codex to use native account management.',
           detailMessage: 'Codex native runtime is missing.',
           models: [],
         }),
