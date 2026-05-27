@@ -66,6 +66,17 @@ describe("agent GitHub action domain", () => {
     });
   });
 
+  it("does not return unsafe default avatar URLs from the selector", () => {
+    expect(() =>
+      selectSafeAvatarUrl({
+        settings: {
+          allowedAvatarOrigins: ["https://cdn.example.test"],
+          defaultAgentAvatarUrl: "https://evil.example.test/default.png",
+        },
+      }),
+    ).toThrow("Default Agent Teams avatar URL is not safe.");
+  });
+
   it("rejects unsupported pull request review events", () => {
     const payload = decodeGitHubActionPayload({
       actionType: "github.pull_request_review.create",

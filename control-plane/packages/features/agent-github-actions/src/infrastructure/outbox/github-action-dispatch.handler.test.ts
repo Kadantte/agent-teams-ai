@@ -11,12 +11,21 @@ import type { DispatchGitHubActionUseCase } from "../../application/use-cases/di
 import { GitHubActionDispatchHandler } from "./github-action-dispatch.handler.js";
 
 describe("GitHubActionDispatchHandler", () => {
-  it("requires external content reference and integrity hash", async () => {
-    let called = false;
+  it("passes missing content binding into the dispatch use case for terminal status handling", async () => {
+    const calls: Array<Parameters<DispatchGitHubActionUseCase["execute"]>[0]> = [];
     const handler = new GitHubActionDispatchHandler({
-      execute: async () => {
-        called = true;
-        return { kind: "completed" };
+      execute: async (input: Parameters<DispatchGitHubActionUseCase["execute"]>[0]) => {
+        calls.push(input);
+        return {
+          kind: "dead-letter",
+          safeError: {
+            category: "validation",
+            code: "CONTROL_PLANE_GITHUB_ACTION_OUTBOX_CONTENT_REFERENCE_REQUIRED",
+            message:
+              "GitHub action outbox event requires content reference and integrity hash.",
+            retryable: false,
+          },
+        };
       },
     } as unknown as DispatchGitHubActionUseCase);
 
@@ -28,7 +37,12 @@ describe("GitHubActionDispatchHandler", () => {
       },
       kind: "dead-letter",
     });
-    expect(called).toBe(false);
+    expect(calls).toEqual([
+      {
+        actionRequestId: "action-1",
+        attemptNumber: 2,
+      },
+    ]);
   });
 
   it("rejects mismatched payload and aggregate action ids", async () => {

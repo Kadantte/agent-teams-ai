@@ -31,8 +31,8 @@ import { decodeGitHubActionPayloadEnvelope } from "./action-content-codec.js";
 export type DispatchGitHubActionInput = Readonly<{
   actionRequestId: string;
   attemptNumber: number;
-  contentRefId: string;
-  contentIntegrityHash: string;
+  contentRefId?: string;
+  contentIntegrityHash?: string;
   correlationId?: string;
 }>;
 
@@ -94,11 +94,6 @@ export class DispatchGitHubActionUseCase {
           }),
       };
     }
-    const contentBindingError = validateOutboxContentBinding(input, view.request);
-    if (contentBindingError !== undefined) {
-      return { kind: "dead-letter", safeError: contentBindingError };
-    }
-
     const nowMs = this.clock.nowMs();
     await this.transactions.runInTransaction(async (context) => {
       await this.repository.recordAttemptStarted(
@@ -125,6 +120,15 @@ export class DispatchGitHubActionUseCase {
         ? {}
         : { correlationId: input.correlationId }),
     });
+    const contentBindingError = validateOutboxContentBinding(input, view.request);
+    if (contentBindingError !== undefined) {
+      return this.finishTerminalFailure({
+        attemptNumber: input.attemptNumber,
+        safeError: contentBindingError,
+        status: "dead_lettered",
+        view,
+      });
+    }
 
     try {
       const loaded = await this.contentStore.load({
@@ -450,6 +454,14 @@ function validateOutboxContentBinding(
     Awaited<ReturnType<GitHubActionRepository["findForDispatch"]>>
   >["request"],
 ): SafeError | undefined {
+  if (input.contentRefId === undefined || input.contentIntegrityHash === undefined) {
+    return createSafeError({
+      category: "validation",
+      code: "CONTROL_PLANE_GITHUB_ACTION_OUTBOX_CONTENT_REFERENCE_REQUIRED",
+      message:
+        "GitHub action outbox event requires content reference and integrity hash.",
+    });
+  }
   if (
     input.contentRefId === request.externalContentRefId &&
     input.contentIntegrityHash === request.externalContentIntegrityHash

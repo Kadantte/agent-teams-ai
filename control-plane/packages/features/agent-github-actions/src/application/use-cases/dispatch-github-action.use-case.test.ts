@@ -68,7 +68,7 @@ describe("DispatchGitHubActionUseCase", () => {
     expect(harness.operations).not.toContain("content:shred");
   });
 
-  it("dead-letters stale outbox content bindings before loading content", async () => {
+  it("dead-letters stale outbox content bindings before token broker and GitHub dispatch", async () => {
     const harness = createHarness();
 
     await expect(
@@ -84,7 +84,40 @@ describe("DispatchGitHubActionUseCase", () => {
         code: "CONTROL_PLANE_GITHUB_ACTION_OUTBOX_CONTENT_MISMATCH",
       },
     });
-    expect(harness.operations).toEqual([]);
+    expect(harness.operations).toEqual([
+      "attempt:started",
+      "request:dispatching",
+      "attempt:finished",
+      "content:shred",
+      "request:terminal-failure",
+    ]);
+    expect(harness.tokenBrokerCalls).toEqual([]);
+    expect(harness.dispatchBodies).toEqual([]);
+  });
+
+  it("dead-letters missing outbox content bindings with safe status", async () => {
+    const harness = createHarness();
+
+    await expect(
+      harness.useCase.execute(
+        dispatchInput({
+          contentIntegrityHash: undefined,
+          contentRefId: undefined,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      kind: "dead-letter",
+      safeError: {
+        code: "CONTROL_PLANE_GITHUB_ACTION_OUTBOX_CONTENT_REFERENCE_REQUIRED",
+      },
+    });
+    expect(harness.operations).toEqual([
+      "attempt:started",
+      "request:dispatching",
+      "attempt:finished",
+      "content:shred",
+      "request:terminal-failure",
+    ]);
     expect(harness.tokenBrokerCalls).toEqual([]);
     expect(harness.dispatchBodies).toEqual([]);
   });
@@ -234,14 +267,27 @@ function createHarness(
   };
 }
 
+type DispatchInputOverride = {
+  [Key in keyof Parameters<DispatchGitHubActionUseCase["execute"]>[0]]?:
+    | Parameters<DispatchGitHubActionUseCase["execute"]>[0][Key]
+    | undefined;
+};
+
 function dispatchInput(
-  overrides: Partial<Parameters<DispatchGitHubActionUseCase["execute"]>[0]> = {},
+  overrides: DispatchInputOverride = {},
 ): Parameters<DispatchGitHubActionUseCase["execute"]>[0] {
-  return {
+  const input: Parameters<DispatchGitHubActionUseCase["execute"]>[0] = {
     actionRequestId: "action-1",
     attemptNumber: 1,
     contentIntegrityHash: "sha-1",
     contentRefId: "content-1",
-    ...overrides,
   };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) {
+      delete (input as Record<string, unknown>)[key];
+    } else {
+      (input as Record<string, unknown>)[key] = value;
+    }
+  }
+  return input;
 }

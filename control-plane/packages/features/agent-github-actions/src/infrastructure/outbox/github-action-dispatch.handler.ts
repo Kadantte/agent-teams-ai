@@ -58,22 +58,13 @@ export class GitHubActionDispatchHandler implements OutboxEventHandler {
         kind: "dead-letter",
       };
     }
-    if (event.contentRefId === undefined || event.contentIntegrityHash === undefined) {
-      return {
-        error: createSafeError({
-          category: "validation",
-          code: "CONTROL_PLANE_GITHUB_ACTION_OUTBOX_CONTENT_REFERENCE_REQUIRED",
-          message:
-            "GitHub action outbox event requires content reference and integrity hash.",
-        }),
-        kind: "dead-letter",
-      };
-    }
     const result = await this.dispatchGitHubAction.execute({
       actionRequestId,
       attemptNumber: event.attempts,
-      contentIntegrityHash: event.contentIntegrityHash,
-      contentRefId: event.contentRefId,
+      ...(event.contentIntegrityHash === undefined
+        ? {}
+        : { contentIntegrityHash: event.contentIntegrityHash }),
+      ...(event.contentRefId === undefined ? {} : { contentRefId: event.contentRefId }),
     });
     if (result.kind === "completed") {
       return { kind: "completed" };

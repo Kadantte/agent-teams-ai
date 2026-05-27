@@ -68,11 +68,22 @@ export function selectSafeAvatarUrl(input: {
   agentAvatarUrl?: string;
   settings: AgentAttributionRendererSettings;
 }): string {
+  const defaultUrl = parseSafeAvatarUrl(
+    input.settings.defaultAgentAvatarUrl,
+    input.settings,
+  );
+  if (defaultUrl === undefined) {
+    throw createSafeError({
+      category: "validation",
+      code: "CONTROL_PLANE_GITHUB_ACTION_DEFAULT_AVATAR_UNSAFE",
+      message: "Default Agent Teams avatar URL is not safe.",
+    });
+  }
   const agentUrl =
     input.agentAvatarUrl === undefined
       ? undefined
       : parseSafeAvatarUrl(input.agentAvatarUrl, input.settings);
-  return agentUrl ?? input.settings.defaultAgentAvatarUrl;
+  return agentUrl ?? defaultUrl;
 }
 
 function parseSafeAvatarUrl(
