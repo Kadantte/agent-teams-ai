@@ -71,7 +71,10 @@ export class GitHubRestActionDispatcher implements GitHubActionDispatcher {
           safeError: error,
         };
       }
-      return mapUnknownTransportFailure(input.actionType);
+      return mapUnknownTransportFailure({
+        actionType: input.actionType,
+        checkRunId: input.checkRunId,
+      });
     }
   }
 }
@@ -107,7 +110,11 @@ function buildRequest(input: Parameters<GitHubActionDispatcher["dispatch"]>[0]):
     };
   }
   const payload = input.payload as GitHubCheckRunCreateOrUpdatePayload;
-  const body = buildCheckRunBody(payload, input.actionRequestId);
+  const body = buildCheckRunBody(
+    payload,
+    input.actionRequestId,
+    requireRenderedBody(input.renderedBody),
+  );
   if (input.checkRunId !== undefined) {
     return {
       body,
@@ -125,26 +132,18 @@ function buildRequest(input: Parameters<GitHubActionDispatcher["dispatch"]>[0]):
 function buildCheckRunBody(
   payload: GitHubCheckRunCreateOrUpdatePayload,
   actionRequestId: string,
+  renderedBody: string,
 ): Record<string, unknown> {
-  const output =
-    payload.title !== undefined ||
-    payload.summary !== undefined ||
-    payload.text !== undefined
-      ? {
-          output: {
-            summary: payload.summary ?? "",
-            title: payload.title ?? payload.name,
-            ...(payload.text === undefined ? {} : { text: payload.text }),
-          },
-        }
-      : {};
   return {
     external_id: actionRequestId,
     head_sha: payload.headSha,
     name: payload.name,
+    output: {
+      summary: renderedBody,
+      title: payload.title ?? payload.name,
+    },
     status: payload.status,
     ...(payload.conclusion === undefined ? {} : { conclusion: payload.conclusion }),
-    ...output,
   };
 }
 
@@ -232,11 +231,14 @@ async function mapFailureResponse(input: {
   });
 }
 
-function mapUnknownTransportFailure(actionType: string): GitHubActionDispatchResult {
+function mapUnknownTransportFailure(input: {
+  actionType: string;
+  checkRunId: string | undefined;
+}): GitHubActionDispatchResult {
   if (
-    actionType === "github.issue_comment.create" ||
-    actionType === "github.pull_request_comment.create_top_level" ||
-    actionType === "github.pull_request_review.create"
+    input.actionType === "github.issue_comment.create" ||
+    input.actionType === "github.pull_request_comment.create_top_level" ||
+    input.actionType === "github.pull_request_review.create"
   ) {
     return failure({
       code: "CONTROL_PLANE_GITHUB_ACTION_UNKNOWN_RESULT",
@@ -244,9 +246,16 @@ function mapUnknownTransportFailure(actionType: string): GitHubActionDispatchRes
         "GitHub action result is unknown and will not be retried without marker lookup.",
     });
   }
+  if (input.checkRunId === undefined) {
+    return failure({
+      code: "CONTROL_PLANE_GITHUB_ACTION_UNKNOWN_RESULT",
+      message:
+        "GitHub check run create result is unknown and will not be retried without a stored check_run_id.",
+    });
+  }
   return failure({
     code: "CONTROL_PLANE_GITHUB_ACTION_TRANSPORT_FAILED",
-    message: "GitHub action dispatch transport failed.",
+    message: "GitHub check run update transport failed.",
     retryable: true,
   });
 }

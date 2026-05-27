@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  bodyFromActionPayload,
   decodeGitHubActionPayload,
   renderGitHubActionBody,
   selectSafeAvatarUrl,
@@ -81,5 +82,15 @@ describe("agent GitHub action domain", () => {
     ).toMatchObject({
       code: "CONTROL_PLANE_GITHUB_ACTION_CHECK_CONCLUSION_INVALID",
     });
+  });
+
+  it("uses stable check run identity as fallback rendered body source", () => {
+    expect(
+      bodyFromActionPayload({
+        headSha: "a".repeat(40),
+        name: "Agent Teams / review",
+        status: "queued",
+      }),
+    ).toBe("Agent Teams / review");
   });
 });

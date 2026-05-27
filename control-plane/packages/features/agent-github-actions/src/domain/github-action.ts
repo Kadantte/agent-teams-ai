@@ -94,6 +94,7 @@ export type GitHubActionRequest = Readonly<{
   githubCheckRunId?: string;
   githubUrl?: string;
   safeError?: SafeError;
+  attemptCount?: number;
   contentShreddedAtMs?: UnixMilliseconds;
   createdAtMs: UnixMilliseconds;
   updatedAtMs: UnixMilliseconds;
@@ -255,7 +256,9 @@ export function validateGitHubActionPayload(input: {
 }
 
 export function bodyFromActionPayload(payload: GitHubActionPayload): string | undefined {
-  return "body" in payload ? payload.body : (payload.text ?? payload.summary);
+  return "body" in payload
+    ? payload.body
+    : (payload.text ?? payload.summary ?? payload.title ?? payload.name);
 }
 
 function validateBodyActionPayload(number: number, body: string): SafeError | undefined {

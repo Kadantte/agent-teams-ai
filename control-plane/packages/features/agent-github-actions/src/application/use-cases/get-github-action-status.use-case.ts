@@ -17,6 +17,7 @@ export type GitHubActionStatusView = Readonly<{
   actionType: string;
   targetId: string;
   status: string;
+  attemptCount: number;
   githubUrl?: string;
   safeFailure?: Pick<SafeError, "category" | "code" | "message" | "retryable">;
 }>;
@@ -45,6 +46,7 @@ export class GetGitHubActionStatusUseCase {
     return {
       actionRequestId: request.id,
       actionType: request.actionType,
+      attemptCount: request.attemptCount ?? 0,
       status: request.status,
       targetId: request.integrationTargetId,
       ...(request.githubUrl === undefined ? {} : { githubUrl: request.githubUrl }),

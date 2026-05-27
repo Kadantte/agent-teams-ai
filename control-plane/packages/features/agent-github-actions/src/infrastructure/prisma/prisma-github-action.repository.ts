@@ -59,6 +59,9 @@ type GitHubActionRequestRow = {
   safeErrorJson: unknown;
   createdAt: Date;
   updatedAt: Date;
+  _count?: {
+    attempts: number;
+  };
 };
 
 type DispatchRow = GitHubActionRequestRow & {
@@ -150,6 +153,13 @@ export class PrismaGitHubActionRepository implements GitHubActionRepository {
     actionRequestId: GitHubActionRequest["id"];
   }): Promise<GitHubActionRequest | undefined> {
     const row = await this.databaseClient.getClient().gitHubActionRequest.findFirst({
+      include: {
+        _count: {
+          select: {
+            attempts: true,
+          },
+        },
+      },
       where: {
         id: input.actionRequestId,
         workspaceId: input.workspaceId,
@@ -383,6 +393,7 @@ function mapRequest(row: GitHubActionRequestRow): GitHubActionRequest {
     ...(row.githubCheckRunId === null ? {} : { githubCheckRunId: row.githubCheckRunId }),
     ...(row.githubDeliveryId === null ? {} : { githubDeliveryId: row.githubDeliveryId }),
     ...(row.githubUrl === null ? {} : { githubUrl: row.githubUrl }),
+    ...(row._count === undefined ? {} : { attemptCount: row._count.attempts }),
     ...mapSafeError(row.safeErrorJson),
   };
 }
