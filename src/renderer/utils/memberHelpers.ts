@@ -1159,7 +1159,7 @@ export function shouldDisplayMemberCurrentTask({
   if (spawnEntry?.runtimeDiagnosticSeverity === 'error') {
     return false;
   }
-  if (runtimeEntry?.alive === false && !bootstrapConfirmedProvisionedButNotAlive) {
+  if (runtimeEntry?.alive === false && !useBootstrapConfirmedVisualState) {
     return false;
   }
   if (effectiveSpawnRuntimeAlive === false) {

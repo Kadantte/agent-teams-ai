@@ -13608,13 +13608,14 @@ export class TeamProvisioningService {
       status: 'online',
       updatedAt,
       agentToolAccepted: true,
-      runtimeAlive: true,
+      runtimeAlive: source === 'runtime-proof' ? true : prev.runtimeAlive,
       bootstrapConfirmed: true,
       hardFailure: false,
       bootstrapStalled: undefined,
       error: undefined,
       hardFailureReason: undefined,
-      livenessSource: prev.livenessSource ?? 'process',
+      livenessSource:
+        source === 'runtime-proof' ? (prev.livenessSource ?? 'process') : prev.livenessSource,
       firstSpawnAcceptedAt: prev.firstSpawnAcceptedAt ?? observedAt,
       lastHeartbeatAt: isMemberSpawnHeartbeatTimestampNewer(prev.lastHeartbeatAt, observedAt)
         ? observedAt

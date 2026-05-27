@@ -195,6 +195,31 @@ describe('memberHelpers spawn-aware presence', () => {
     ).toBe(false);
   });
 
+  it('does not show task activity for unsafe provisioned-but-not-alive runtime candidates', () => {
+    expect(
+      shouldDisplayMemberCurrentTask({
+        member: { ...member, currentTaskId: 'task-1' },
+        isTeamAlive: true,
+        spawnStatus: 'online',
+        spawnLaunchState: 'confirmed_alive',
+        spawnRuntimeAlive: true,
+        spawnEntry: {
+          ...provisionedButNotAliveSpawn,
+          status: 'online',
+          launchState: 'confirmed_alive',
+          runtimeAlive: true,
+        },
+        runtimeEntry: {
+          ...processTableUnavailableRuntime,
+          alive: false,
+          livenessKind: 'runtime_process_candidate',
+          runtimeDiagnostic:
+            'OpenCode runtime process detected, but teammate bootstrap is not confirmed',
+        },
+      })
+    ).toBe(false);
+  });
+
   it('shows process-online teammates as online with a green dot', () => {
     expect(
       getSpawnAwarePresenceLabel(

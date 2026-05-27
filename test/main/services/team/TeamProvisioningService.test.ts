@@ -22540,7 +22540,7 @@ describe('TeamProvisioningService', () => {
     });
   });
 
-  it('marks a live teammate bootstrap as confirmed from transcript even when runtime discovery is stale', async () => {
+  it('marks a live teammate bootstrap as confirmed from transcript without claiming runtime is alive', async () => {
     allowConsoleLogs();
     const teamName = 'zz-live-bootstrap-transcript-success-without-runtime';
     const leadSessionId = 'lead-session';
@@ -22623,7 +22623,7 @@ describe('TeamProvisioningService', () => {
     expect(run.memberSpawnStatuses.get('atlas')).toMatchObject({
       status: 'online',
       launchState: 'confirmed_alive',
-      runtimeAlive: true,
+      runtimeAlive: false,
       bootstrapConfirmed: true,
     });
     expect(run.provisioningOutputParts.join('\n')).toContain('bootstrap confirmed via transcript');
