@@ -1,0 +1,51 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  hasUnsafeProvisionedButNotAliveRuntimeEvidence,
+  isBootstrapConfirmedProvisionedButNotAliveFailure,
+} from '@shared/utils/teamLaunchFailureReason';
+
+describe('teamLaunchFailureReason', () => {
+  it('treats runtime process candidates as unsafe provisioned-but-not-alive evidence', () => {
+    expect(
+      hasUnsafeProvisionedButNotAliveRuntimeEvidence({
+        bootstrapConfirmed: true,
+        hardFailure: true,
+        hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+        launchState: 'failed_to_start',
+        livenessKind: 'runtime_process_candidate',
+        runtimeDiagnostic:
+          'OpenCode runtime process detected, but teammate bootstrap is not confirmed',
+        runtimeDiagnosticSeverity: 'warning',
+        status: 'error',
+      })
+    ).toBe(true);
+  });
+
+  it('keeps process-table-unavailable registered metadata safe for bootstrap healing', () => {
+    expect(
+      hasUnsafeProvisionedButNotAliveRuntimeEvidence({
+        bootstrapConfirmed: true,
+        hardFailure: true,
+        hardFailureReason: 'CLI process exited (code 1) - team provisioned but not alive',
+        launchState: 'failed_to_start',
+        livenessKind: 'registered_only',
+        runtimeDiagnostic: 'runtime pid could not be verified because process table is unavailable',
+        runtimeDiagnosticSeverity: 'warning',
+        status: 'error',
+      })
+    ).toBe(false);
+  });
+
+  it('recognizes runtime-diagnostic-only provisioned-but-not-alive failures', () => {
+    expect(
+      isBootstrapConfirmedProvisionedButNotAliveFailure({
+        bootstrapConfirmed: true,
+        hardFailure: true,
+        launchState: 'failed_to_start',
+        runtimeDiagnostic: 'CLI process exited (code 1) - team provisioned but not alive',
+        status: 'error',
+      })
+    ).toBe(true);
+  });
+});

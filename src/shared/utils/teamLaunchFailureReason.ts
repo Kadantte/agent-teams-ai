@@ -87,7 +87,11 @@ export function hasUnsafeProvisionedButNotAliveRuntimeEvidence(
   if (entry?.runtimeDiagnosticSeverity === 'error') {
     return true;
   }
-  if (entry?.livenessKind === 'not_found' || entry?.livenessKind === 'shell_only') {
+  if (
+    entry?.livenessKind === 'not_found' ||
+    entry?.livenessKind === 'shell_only' ||
+    entry?.livenessKind === 'runtime_process_candidate'
+  ) {
     return true;
   }
   if (entry?.livenessKind !== 'registered_only' && entry?.livenessKind !== 'stale_metadata') {
