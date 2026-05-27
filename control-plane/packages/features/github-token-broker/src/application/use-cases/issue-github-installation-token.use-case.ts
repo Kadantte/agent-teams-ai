@@ -25,7 +25,11 @@ import type {
   GitHubTokenBrokerAuditLog,
   GitHubTokenBrokerFeatureGatePolicy,
 } from "../ports/policies.js";
-import type { GitHubTokenTargetAuthorizationPort } from "../ports/target-authorization.port.js";
+import type {
+  GitHubTokenTargetAuthorizationInput,
+  GitHubTokenTargetAuthorizationPort,
+  GitHubTokenTargetAuthorizationResult,
+} from "../ports/target-authorization.port.js";
 
 export type IssueGitHubInstallationTokenInput = Readonly<{
   workspaceId: string;
@@ -70,7 +74,7 @@ export class IssueGitHubInstallationTokenUseCase {
       | undefined;
 
     try {
-      const authorization = await this.targetAuthorization.authorize({
+      const authorizationInput: GitHubTokenTargetAuthorizationInput = {
         capability: input.capability,
         nowMs,
         subjectId,
@@ -86,7 +90,8 @@ export class IssueGitHubInstallationTokenUseCase {
         ...(input.teamSubjectId === undefined
           ? {}
           : { teamSubjectId: input.teamSubjectId }),
-      });
+      };
+      const authorization = await this.targetAuthorization.authorize(authorizationInput);
       if (!authorization.allowed || authorization.scope === undefined) {
         throw createSafeError({
           category: "authorization",
@@ -134,6 +139,11 @@ export class IssueGitHubInstallationTokenUseCase {
       if (scopeError !== undefined) {
         throw scopeError;
       }
+      await this.assertAuthorizationStable({
+        authorizationInput,
+        initialPolicyVersion: authorization.policyVersion,
+        initialScope: authorization.scope,
+      });
 
       await this.auditLog.record({
         capability: input.capability,
@@ -185,6 +195,35 @@ export class IssueGitHubInstallationTokenUseCase {
       throw safeError;
     }
   }
+
+  private async assertAuthorizationStable(input: {
+    authorizationInput: GitHubTokenTargetAuthorizationInput;
+    initialPolicyVersion: number | undefined;
+    initialScope: NonNullable<GitHubTokenTargetAuthorizationResult["scope"]>;
+  }): Promise<void> {
+    const latest = await this.targetAuthorization.authorize({
+      ...input.authorizationInput,
+      nowMs: this.clock.nowMs(),
+    });
+    if (
+      latest.allowed &&
+      latest.scope !== undefined &&
+      latest.policyVersion === input.initialPolicyVersion &&
+      sameTokenScope(latest.scope, input.initialScope)
+    ) {
+      return;
+    }
+    throw createSafeError({
+      category: "authorization",
+      code: "CONTROL_PLANE_GITHUB_TOKEN_POLICY_CHANGED",
+      message: "GitHub installation token authorization changed before token use.",
+      safeDetails: {
+        currentPolicyVersion: latest.policyVersion ?? null,
+        previousPolicyVersion: input.initialPolicyVersion ?? null,
+        reasonCode: latest.reasonCode,
+      },
+    });
+  }
 }
 
 function normalizeTokenSubjectId(input: IssueGitHubInstallationTokenInput): string {
@@ -201,4 +240,16 @@ function normalizeTokenSubjectId(input: IssueGitHubInstallationTokenInput): stri
     subjectId: input.subjectId,
     subjectKind: input.subjectKind,
   });
+}
+
+function sameTokenScope(
+  left: NonNullable<GitHubTokenTargetAuthorizationResult["scope"]>,
+  right: NonNullable<GitHubTokenTargetAuthorizationResult["scope"]>,
+): boolean {
+  return (
+    left.githubInstallationId === right.githubInstallationId &&
+    left.githubRepositoryId === right.githubRepositoryId &&
+    left.integrationTargetId === right.integrationTargetId &&
+    left.workspaceId === right.workspaceId
+  );
 }

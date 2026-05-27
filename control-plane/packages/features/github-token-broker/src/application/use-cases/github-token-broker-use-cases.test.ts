@@ -182,6 +182,65 @@ describe("github token broker use cases", () => {
     }
   });
 
+  it("does not return a token lease when policy changes after minting", async () => {
+    let authorizationCalls = 0;
+    let issuerCalls = 0;
+    const auditEvents: Array<Parameters<GitHubTokenBrokerAuditLog["record"]>[0]> = [];
+    const useCase = new IssueGitHubInstallationTokenUseCase(
+      enabledGate(),
+      {
+        authorize: async (input) => {
+          authorizationCalls += 1;
+          return {
+            allowed: true,
+            policyVersion: authorizationCalls === 1 ? 3 : 4,
+            reasonCode: "CONTROL_PLANE_TARGET_POLICY_ALLOWED",
+            scope: {
+              githubInstallationId: "installation-1",
+              githubRepositoryId: "123456",
+              integrationTargetId: input.targetId,
+              workspaceId: input.workspaceId,
+            },
+          };
+        },
+      },
+      {
+        assertAllowed: async () => undefined,
+      },
+      {
+        issue: async () => {
+          issuerCalls += 1;
+          return {
+            expiresAtMs: 1_700_000_600_000 as never,
+            grantedPermissions: { issues: "write" },
+            grantedRepositoryIds: [123456],
+            token: "installation-token",
+          };
+        },
+      },
+      {
+        record: async (event) => {
+          auditEvents.push(event);
+        },
+      },
+      new FixedClock(1_700_000_000_000),
+    );
+
+    await expect(useCase.execute(baseInput())).rejects.toMatchObject({
+      code: "CONTROL_PLANE_GITHUB_TOKEN_POLICY_CHANGED",
+    });
+
+    expect(authorizationCalls).toBe(2);
+    expect(issuerCalls).toBe(1);
+    expect(auditEvents).toEqual([
+      expect.objectContaining({
+        safeErrorCode: "CONTROL_PLANE_GITHUB_TOKEN_POLICY_CHANGED",
+        status: "denied",
+      }),
+    ]);
+    expect(JSON.stringify(auditEvents)).not.toContain("installation-token");
+  });
+
   it("derives desktop-client token subjects from the authenticated desktop subject", async () => {
     let authorizationSubjectId: string | undefined;
     const useCase = new IssueGitHubInstallationTokenUseCase(
