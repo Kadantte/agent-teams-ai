@@ -171,6 +171,39 @@ describe("github token broker use cases", () => {
     });
   });
 
+  it("records safe audit metadata even when token issuer throws a raw error", async () => {
+    const auditEvents: Array<Parameters<GitHubTokenBrokerAuditLog["record"]>[0]> = [];
+    const useCase = new IssueGitHubInstallationTokenUseCase(
+      enabledGate(),
+      authorizedTarget("123456"),
+      {
+        assertAllowed: async () => undefined,
+      },
+      {
+        issue: async () => {
+          throw new Error("network socket leaked a raw error");
+        },
+      },
+      {
+        record: async (event) => {
+          auditEvents.push(event);
+        },
+      },
+      new FixedClock(1_700_000_000_000),
+    );
+
+    await expect(useCase.execute(baseInput())).rejects.toThrow(
+      "network socket leaked a raw error",
+    );
+    expect(auditEvents).toEqual([
+      expect.objectContaining({
+        safeErrorCode: "CONTROL_PLANE_INTERNAL_ERROR",
+        status: "failed",
+      }),
+    ]);
+    expect(JSON.stringify(auditEvents)).not.toContain("network socket leaked");
+  });
+
   it("dry-runs safe scope summaries without issuing tokens", async () => {
     const useCase = new DryRunGitHubTokenScopeUseCase(
       enabledGate(),

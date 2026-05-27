@@ -82,6 +82,28 @@ describe("GitHubRestInstallationTokenIssuer", () => {
     });
   });
 
+  it("maps transport failures to retryable safe errors", async () => {
+    const issuer = new GitHubRestInstallationTokenIssuer(
+      settings(),
+      signer(),
+      (async () => {
+        throw new TypeError("fetch failed with raw socket details");
+      }) as typeof fetch,
+    );
+
+    await expect(
+      issuer.issue({
+        githubInstallationId: "installation-1",
+        nowMs: toUnixMilliseconds(1_700_000_000_000),
+        permissions: { checks: "write" },
+        repositoryIds: [123456],
+      }),
+    ).rejects.toMatchObject({
+      code: "CONTROL_PLANE_GITHUB_TOKEN_API_UNAVAILABLE",
+      retryable: true,
+    });
+  });
+
   it("maps GitHub 403 rate-limit responses to retryable safe errors", async () => {
     const issuer = new GitHubRestInstallationTokenIssuer(
       settings(),
@@ -129,6 +151,58 @@ describe("GitHubRestInstallationTokenIssuer", () => {
 
     await expect(
       issuer.issue({
+        githubInstallationId: "installation-1",
+        nowMs: toUnixMilliseconds(1_700_000_000_000),
+        permissions: { issues: "write" },
+        repositoryIds: [123456],
+      }),
+    ).rejects.toMatchObject({
+      code: "CONTROL_PLANE_GITHUB_TOKEN_RESPONSE_INVALID",
+    });
+  });
+
+  it("rejects unsupported permission and repository metadata in token responses", async () => {
+    const issuerWithUnsupportedPermission = new GitHubRestInstallationTokenIssuer(
+      settings(),
+      signer(),
+      (async () =>
+        new Response(
+          JSON.stringify({
+            expires_at: "2026-05-27T10:00:00.000Z",
+            permissions: { issues: "super-admin" },
+            repositories: [{ id: 123456 }],
+            token: "installation-token",
+          }),
+          { status: 201 },
+        )) as typeof fetch,
+    );
+    await expect(
+      issuerWithUnsupportedPermission.issue({
+        githubInstallationId: "installation-1",
+        nowMs: toUnixMilliseconds(1_700_000_000_000),
+        permissions: { issues: "write" },
+        repositoryIds: [123456],
+      }),
+    ).rejects.toMatchObject({
+      code: "CONTROL_PLANE_GITHUB_TOKEN_RESPONSE_INVALID",
+    });
+
+    const issuerWithInvalidRepository = new GitHubRestInstallationTokenIssuer(
+      settings(),
+      signer(),
+      (async () =>
+        new Response(
+          JSON.stringify({
+            expires_at: "2026-05-27T10:00:00.000Z",
+            permissions: { issues: "write" },
+            repositories: [{ id: "123456" }],
+            token: "installation-token",
+          }),
+          { status: 201 },
+        )) as typeof fetch,
+    );
+    await expect(
+      issuerWithInvalidRepository.issue({
         githubInstallationId: "installation-1",
         nowMs: toUnixMilliseconds(1_700_000_000_000),
         permissions: { issues: "write" },

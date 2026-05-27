@@ -11,7 +11,11 @@ export type GitHubTokenBrokerCapability =
   | "github.check_run.request";
 
 export type GitHubPermissionLevel = "read" | "write";
+export type GitHubGrantedPermissionLevel = GitHubPermissionLevel | "admin";
 export type GitHubPermissionSet = Readonly<Record<string, GitHubPermissionLevel>>;
+export type GitHubGrantedPermissionSet = Readonly<
+  Record<string, GitHubGrantedPermissionLevel>
+>;
 
 export type GitHubRepositoryJsonId = number;
 
@@ -83,7 +87,7 @@ export function validateIssuedTokenScope(input: {
   requestedRepositoryIds: readonly GitHubRepositoryJsonId[];
   requestedPermissions: GitHubPermissionSet;
   grantedRepositoryIds?: readonly GitHubRepositoryJsonId[];
-  grantedPermissions?: GitHubPermissionSet;
+  grantedPermissions?: GitHubGrantedPermissionSet;
 }): SafeError | undefined {
   if (
     input.grantedRepositoryIds !== undefined &&
@@ -119,7 +123,7 @@ export function isGitHubTokenBrokerCapability(
 }
 
 function permissionsAreNoBroaderThanRequested(
-  granted: GitHubPermissionSet,
+  granted: GitHubGrantedPermissionSet,
   requested: GitHubPermissionSet,
 ): boolean {
   for (const [name, level] of Object.entries(granted)) {

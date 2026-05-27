@@ -1,6 +1,10 @@
 import type { UnixMilliseconds } from "@agent-teams-control-plane/shared";
 
-import type { GitHubPermissionSet, GitHubRepositoryJsonId } from "../../domain/index.js";
+import type {
+  GitHubGrantedPermissionSet,
+  GitHubPermissionSet,
+  GitHubRepositoryJsonId,
+} from "../../domain/index.js";
 
 export type GitHubInstallationTokenIssuerInput = Readonly<{
   githubInstallationId: string;
@@ -14,7 +18,7 @@ export type GitHubInstallationTokenIssuerResult = Readonly<{
   token: string;
   expiresAtMs: UnixMilliseconds;
   grantedRepositoryIds?: readonly GitHubRepositoryJsonId[];
-  grantedPermissions?: GitHubPermissionSet;
+  grantedPermissions?: GitHubGrantedPermissionSet;
 }>;
 
 export interface GitHubInstallationTokenIssuer {

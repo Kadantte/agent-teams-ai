@@ -62,6 +62,16 @@ describe("github token broker domain", () => {
     ).toMatchObject({
       code: "CONTROL_PLANE_GITHUB_TOKEN_SCOPE_MISMATCH",
     });
+    expect(
+      validateIssuedTokenScope({
+        grantedPermissions: { issues: "admin" },
+        grantedRepositoryIds: [123],
+        requestedPermissions: { issues: "write" },
+        requestedRepositoryIds: [123],
+      }),
+    ).toMatchObject({
+      code: "CONTROL_PLANE_GITHUB_TOKEN_SCOPE_MISMATCH",
+    });
   });
 
   it("allows GitHub metadata read as an implicit permission in returned scope", () => {

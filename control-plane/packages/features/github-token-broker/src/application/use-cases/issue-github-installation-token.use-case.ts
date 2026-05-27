@@ -4,6 +4,7 @@ import {
   isSafeError,
   parseWorkspaceId,
   SystemClock,
+  toSafeError,
   type Clock,
 } from "@agent-teams-control-plane/shared";
 import {
@@ -159,28 +160,27 @@ export class IssueGitHubInstallationTokenUseCase {
         token: issued.token,
       };
     } catch (error) {
-      if (isSafeError(error)) {
-        await this.auditLog.record({
-          capability: input.capability,
-          eventType: "github_token_broker.installation_token_requested",
-          integrationTargetId: targetId,
-          safeErrorCode: error.code,
-          status: error.category === "authorization" ? "denied" : "failed",
-          workspaceId: workspaceId.value,
-          ...(auditScope?.githubInstallationId === undefined
-            ? {}
-            : { githubInstallationId: auditScope.githubInstallationId }),
-          ...(auditScope?.permissionSummary === undefined
-            ? {}
-            : { permissionSummary: auditScope.permissionSummary }),
-          ...(auditScope?.repositoryCount === undefined
-            ? {}
-            : { repositoryCount: auditScope.repositoryCount }),
-          ...(input.correlationId === undefined
-            ? {}
-            : { correlationId: input.correlationId }),
-        });
-      }
+      const safeError = isSafeError(error) ? error : toSafeError(error);
+      await this.auditLog.record({
+        capability: input.capability,
+        eventType: "github_token_broker.installation_token_requested",
+        integrationTargetId: targetId,
+        safeErrorCode: safeError.code,
+        status: safeError.category === "authorization" ? "denied" : "failed",
+        workspaceId: workspaceId.value,
+        ...(auditScope?.githubInstallationId === undefined
+          ? {}
+          : { githubInstallationId: auditScope.githubInstallationId }),
+        ...(auditScope?.permissionSummary === undefined
+          ? {}
+          : { permissionSummary: auditScope.permissionSummary }),
+        ...(auditScope?.repositoryCount === undefined
+          ? {}
+          : { repositoryCount: auditScope.repositoryCount }),
+        ...(input.correlationId === undefined
+          ? {}
+          : { correlationId: input.correlationId }),
+      });
       throw error;
     }
   }

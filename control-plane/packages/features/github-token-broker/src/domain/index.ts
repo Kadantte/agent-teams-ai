@@ -6,6 +6,8 @@ export {
   permissionSummary,
   toGitHubRepositoryJsonId,
   validateIssuedTokenScope,
+  type GitHubGrantedPermissionLevel,
+  type GitHubGrantedPermissionSet,
   type GitHubInstallationTokenLease,
   type GitHubPermissionLevel,
   type GitHubPermissionSet,
