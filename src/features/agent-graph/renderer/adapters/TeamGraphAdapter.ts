@@ -564,6 +564,7 @@ export class TeamGraphAdapter {
         member.runtimeAdvisory,
         member.providerId,
         spawn,
+        runtimeEntry,
         pendingApprovalAgents?.has(member.name) ?? false
       );
       const currentTask = member.currentTaskId
@@ -607,7 +608,7 @@ export class TeamGraphAdapter {
           ? 'terminated'
           : hasRunningTool
             ? 'tool_calling'
-            : TeamGraphAdapter.#mapMemberStatus(member.status, spawn),
+            : TeamGraphAdapter.#mapMemberStatus(member.status, spawn, runtimeEntry),
         color: isTeamVisualOnline ? (member.color ?? undefined) : undefined,
         role: member.role ?? undefined,
         runtimeLabel: TeamGraphAdapter.#getRuntimeLabel(
@@ -1277,11 +1278,11 @@ export class TeamGraphAdapter {
     runtimeAdvisory: ResolvedTeamMember['runtimeAdvisory'],
     providerId: ResolvedTeamMember['providerId'],
     spawn: MemberSpawnStatusEntry | undefined,
+    runtimeEntry: TeamAgentRuntimeEntry | undefined,
     pendingApproval: boolean
   ): Pick<GraphNode, 'exceptionTone' | 'exceptionLabel'> | undefined {
     const hasUnsuppressedSpawnFailure =
-      !isBootstrapConfirmedProvisionedButNotAliveFailure(spawn) ||
-      hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawn);
+      TeamGraphAdapter.#hasUnsuppressedProvisionedButNotAliveFailure(spawn, runtimeEntry);
     if (
       hasUnsuppressedSpawnFailure &&
       (spawn?.launchState === 'failed_to_start' || spawn?.status === 'error')
@@ -1304,13 +1305,16 @@ export class TeamGraphAdapter {
     return undefined;
   }
 
-  static #mapMemberStatus(status: string, spawn?: MemberSpawnStatusEntry): GraphNodeState {
+  static #mapMemberStatus(
+    status: string,
+    spawn?: MemberSpawnStatusEntry,
+    runtimeEntry?: TeamAgentRuntimeEntry
+  ): GraphNodeState {
     if (spawn?.launchState === 'runtime_pending_permission') return 'waiting';
     if (spawn?.status === 'spawning') return 'thinking';
     if (
       spawn?.status === 'error' &&
-      (!isBootstrapConfirmedProvisionedButNotAliveFailure(spawn) ||
-        hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawn))
+      TeamGraphAdapter.#hasUnsuppressedProvisionedButNotAliveFailure(spawn, runtimeEntry)
     ) {
       return 'error';
     }
@@ -1325,6 +1329,17 @@ export class TeamGraphAdapter {
       default:
         return 'idle';
     }
+  }
+
+  static #hasUnsuppressedProvisionedButNotAliveFailure(
+    spawn: MemberSpawnStatusEntry | undefined,
+    runtimeEntry: TeamAgentRuntimeEntry | undefined
+  ): boolean {
+    return (
+      !isBootstrapConfirmedProvisionedButNotAliveFailure(spawn) ||
+      hasUnsafeProvisionedButNotAliveRuntimeEvidence(spawn) ||
+      hasUnsafeProvisionedButNotAliveRuntimeEvidence(runtimeEntry)
+    );
   }
 
   static #mapTaskStatus(status: string): GraphNodeState {
