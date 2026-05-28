@@ -23,6 +23,10 @@ export interface ResolveTeamMemberRuntimeLivenessInput {
   pane?: TmuxPaneRuntimeInfo;
   processRows: readonly RuntimeProcessTableRow[];
   processTableAvailable: boolean;
+  targetedProcess?: {
+    pid: number;
+    command: string;
+  };
   nowIso: string;
 }
 
@@ -165,12 +169,24 @@ function collectDescendants(
 function isVerifiedRuntimeProcess(params: {
   row: RuntimeProcessTableRow;
   teamName: string;
+  memberName?: string;
   agentId?: string;
+  allowAgentNameFallback?: boolean;
 }): boolean {
-  return (
-    commandArgEquals(params.row.command, '--team-name', params.teamName) &&
-    commandArgEquals(params.row.command, '--agent-id', params.agentId)
-  );
+  if (!commandArgEquals(params.row.command, '--team-name', params.teamName)) {
+    return false;
+  }
+  if (commandArgEquals(params.row.command, '--agent-id', params.agentId)) {
+    return true;
+  }
+  if (!params.allowAgentNameFallback) {
+    return false;
+  }
+  const expectedAgentId = params.agentId?.trim();
+  if (expectedAgentId && extractCliArgValues(params.row.command, '--agent-id').length > 0) {
+    return false;
+  }
+  return commandArgEquals(params.row.command, '--agent-name', params.memberName);
 }
 
 function isOpenCodeRuntimeProcess(command: string | undefined): boolean {
@@ -253,7 +269,13 @@ export function resolveTeamMemberRuntimeLiveness(
 
   const verifiedProcess = input.processRows
     .filter((row) =>
-      isVerifiedRuntimeProcess({ row, teamName: input.teamName, agentId: input.agentId })
+      isVerifiedRuntimeProcess({
+        row,
+        teamName: input.teamName,
+        memberName: input.memberName,
+        agentId: input.agentId,
+        allowAgentNameFallback: input.providerId !== 'opencode' && input.backendType === 'process',
+      })
     )
     .sort((left, right) => right.pid - left.pid)[0];
   if (verifiedProcess) {
@@ -274,6 +296,35 @@ export function resolveTeamMemberRuntimeLiveness(
     typeof runtimePid === 'number' && runtimePid > 0
       ? input.processRows.find((row) => row.pid === runtimePid)
       : undefined;
+  const targetedProcess =
+    typeof runtimePid === 'number' &&
+    runtimePid > 0 &&
+    input.targetedProcess?.pid === runtimePid &&
+    isVerifiedRuntimeProcess({
+      row: {
+        pid: input.targetedProcess.pid,
+        ppid: 0,
+        command: input.targetedProcess.command,
+      },
+      teamName: input.teamName,
+      memberName: input.memberName,
+      agentId: input.agentId,
+      allowAgentNameFallback: input.providerId !== 'opencode' && input.backendType === 'process',
+    })
+      ? input.targetedProcess
+      : undefined;
+  if (targetedProcess) {
+    return result({
+      alive: true,
+      livenessKind: 'runtime_process',
+      pidSource: 'agent_process_table',
+      pid: targetedProcess.pid,
+      runtimeSessionId,
+      processCommand: sanitizeProcessCommandForDiagnostics(targetedProcess.command),
+      runtimeDiagnostic: 'verified runtime process detected by targeted pid check',
+      diagnostics: [...diagnostics, 'matched targeted process by pid and team/member identity'],
+    });
+  }
   if (runtimePidRow && input.providerId === 'opencode') {
     const processCommand = sanitizeProcessCommandForDiagnostics(runtimePidRow.command);
     if (isOpenCodeRuntimeProcess(runtimePidRow.command)) {
@@ -351,7 +402,14 @@ export function resolveTeamMemberRuntimeLiveness(
     const descendants = collectDescendants(input.processRows, pane.panePid);
     const verifiedDescendant = descendants
       .filter((row) =>
-        isVerifiedRuntimeProcess({ row, teamName: input.teamName, agentId: input.agentId })
+        isVerifiedRuntimeProcess({
+          row,
+          teamName: input.teamName,
+          memberName: input.memberName,
+          agentId: input.agentId,
+          allowAgentNameFallback:
+            input.providerId !== 'opencode' && input.backendType === 'process',
+        })
       )
       .sort((left, right) => right.pid - left.pid)[0];
     if (verifiedDescendant) {

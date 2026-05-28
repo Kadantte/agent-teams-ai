@@ -1,9 +1,8 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   resolveTeamMemberRuntimeLiveness,
   sanitizeProcessCommandForDiagnostics,
 } from '@main/services/team/TeamRuntimeLivenessResolver';
+import { describe, expect, it } from 'vitest';
 
 const NOW = '2026-04-24T12:00:00.000Z';
 
@@ -48,6 +47,120 @@ describe('resolveTeamMemberRuntimeLiveness', () => {
     expect(result.livenessKind).toBe('runtime_process');
     expect(result.pidSource).toBe('agent_process_table');
     expect(result.pid).toBe(222);
+  });
+
+  it('promotes a verified team and agent-name process when agent id metadata is missing', () => {
+    const result = resolveTeamMemberRuntimeLiveness({
+      teamName: 'demo',
+      memberName: 'alice',
+      backendType: 'process',
+      persistedRuntimePid: 222,
+      processRows: [
+        {
+          pid: 222,
+          ppid: 1,
+          command: 'node runtime --team-name demo --agent-name alice',
+        },
+      ],
+      processTableAvailable: true,
+      nowIso: NOW,
+    });
+
+    expect(result.alive).toBe(true);
+    expect(result.livenessKind).toBe('runtime_process');
+    expect(result.pidSource).toBe('agent_process_table');
+    expect(result.pid).toBe(222);
+  });
+
+  it('does not let matching agent name override a mismatched command agent id', () => {
+    const result = resolveTeamMemberRuntimeLiveness({
+      teamName: 'demo',
+      memberName: 'alice',
+      agentId: 'alice@demo',
+      backendType: 'process',
+      persistedRuntimePid: 222,
+      processRows: [
+        {
+          pid: 222,
+          ppid: 1,
+          command: 'node runtime --team-name demo --agent-id other@demo --agent-name alice',
+        },
+      ],
+      processTableAvailable: true,
+      nowIso: NOW,
+    });
+
+    expect(result.alive).toBe(false);
+    expect(result.livenessKind).toBe('registered_only');
+  });
+
+  it('does not use agent-name fallback for OpenCode runtime rows', () => {
+    const result = resolveTeamMemberRuntimeLiveness({
+      teamName: 'demo',
+      memberName: 'alice',
+      providerId: 'opencode',
+      backendType: 'process',
+      persistedRuntimePid: 222,
+      processRows: [
+        {
+          pid: 222,
+          ppid: 1,
+          command: 'opencode runtime --team-name demo --agent-name alice',
+        },
+      ],
+      processTableAvailable: true,
+      nowIso: NOW,
+    });
+
+    expect(result.alive).toBe(false);
+    expect(result.livenessKind).toBe('runtime_process_candidate');
+    expect(result.pidSource).toBe('opencode_bridge');
+  });
+
+  it('uses targeted pid verification when the full process table missed a live direct process', () => {
+    const result = resolveTeamMemberRuntimeLiveness({
+      teamName: 'demo',
+      memberName: 'alice',
+      agentId: 'alice@demo',
+      backendType: 'process',
+      persistedRuntimePid: 222,
+      processRows: [],
+      processTableAvailable: true,
+      targetedProcess: {
+        pid: 222,
+        command: 'node runtime --agent-id alice@demo --agent-name alice --team-name demo',
+      },
+      nowIso: NOW,
+    });
+
+    expect(result.alive).toBe(true);
+    expect(result.livenessKind).toBe('runtime_process');
+    expect(result.pidSource).toBe('agent_process_table');
+    expect(result.pid).toBe(222);
+    expect(result.runtimeDiagnostic).toBe(
+      'verified runtime process detected by targeted pid check'
+    );
+  });
+
+  it('does not trust targeted pid verification with mismatched team identity', () => {
+    const result = resolveTeamMemberRuntimeLiveness({
+      teamName: 'demo',
+      memberName: 'alice',
+      agentId: 'alice@demo',
+      backendType: 'process',
+      persistedRuntimePid: 222,
+      processRows: [],
+      processTableAvailable: true,
+      targetedProcess: {
+        pid: 222,
+        command: 'node runtime --agent-id alice@other --agent-name alice --team-name other',
+      },
+      nowIso: NOW,
+    });
+
+    expect(result.alive).toBe(false);
+    expect(result.livenessKind).toBe('stale_metadata');
+    expect(result.pidSource).toBe('persisted_metadata');
   });
 
   it('keeps a verified process pid visible after bootstrap is confirmed', () => {
