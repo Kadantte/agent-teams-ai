@@ -58,8 +58,8 @@ export class GitHubRestClaimAuthorityVerifier implements GitHubClaimAuthorityVer
         }),
       };
     }
-    const repositories = await this.getJsonPage<GitHubRepositoriesResponse>(
-      `/user/installations/${encodeURIComponent(input.githubInstallationId)}/repositories?per_page=100`,
+    const repositories = await this.listInstallationRepositories(
+      input.githubInstallationId,
       input.userAccessToken,
     );
     const nowMs = toUnixMilliseconds(Date.now());
@@ -96,7 +96,7 @@ export class GitHubRestClaimAuthorityVerifier implements GitHubClaimAuthorityVer
         login: user.login ?? "",
       },
       kind: "verified" as const,
-      repositories: (repositories.body.repositories ?? []).flatMap((repository) => {
+      repositories: repositories.flatMap((repository) => {
         if (
           repository.id === undefined ||
           repository.name === undefined ||
@@ -119,10 +119,7 @@ export class GitHubRestClaimAuthorityVerifier implements GitHubClaimAuthorityVer
         ];
       }),
       repositorySync: {
-        complete: repositories.nextPath === undefined,
-        ...(repositories.nextPath === undefined
-          ? {}
-          : { nextCursor: repositories.nextPath }),
+        complete: true,
       },
     };
   }
@@ -154,6 +151,32 @@ export class GitHubRestClaimAuthorityVerifier implements GitHubClaimAuthorityVer
       nextPath = page.nextPath;
     }
     return undefined;
+  }
+
+  private async listInstallationRepositories(
+    githubInstallationId: string,
+    token: string,
+  ): Promise<NonNullable<GitHubRepositoriesResponse["repositories"]>> {
+    let nextPath: string | undefined =
+      `/user/installations/${encodeURIComponent(githubInstallationId)}/repositories?per_page=100`;
+    let pageCount = 0;
+    const repositories: NonNullable<GitHubRepositoriesResponse["repositories"]> = [];
+    while (nextPath !== undefined) {
+      pageCount += 1;
+      if (pageCount > 50) {
+        throw createSafeError({
+          category: "external",
+          code: "CONTROL_PLANE_GITHUB_REPOSITORY_PAGINATION_LIMIT",
+          message: "GitHub repository pagination could not be completed.",
+          retryable: true,
+        });
+      }
+      const page: { body: GitHubRepositoriesResponse; nextPath?: string } =
+        await this.getJsonPage<GitHubRepositoriesResponse>(nextPath, token);
+      repositories.push(...(page.body.repositories ?? []));
+      nextPath = page.nextPath;
+    }
+    return repositories;
   }
 
   private async getJson<T>(path: string, token: string): Promise<T> {

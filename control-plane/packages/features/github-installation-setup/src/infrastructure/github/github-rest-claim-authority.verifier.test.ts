@@ -7,7 +7,7 @@ describe("GitHubRestClaimAuthorityVerifier", () => {
     vi.unstubAllGlobals();
   });
 
-  it("follows installation pagination and marks repository snapshots partial", async () => {
+  it("follows installation and repository pagination before completing snapshots", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -52,6 +52,20 @@ describe("GitHubRestClaimAuthorityVerifier", () => {
             '<https://api.github.com/user/installations/123/repositories?per_page=100&page=2>; rel="next"',
           );
         }
+        if (url.endsWith("/user/installations/123/repositories?per_page=100&page=2")) {
+          return jsonResponse({
+            repositories: [
+              {
+                archived: false,
+                full_name: "octo-org/second",
+                id: 1000,
+                name: "second",
+                owner: { login: "octo-org" },
+                private: false,
+              },
+            ],
+          });
+        }
         throw new Error(`Unexpected GitHub URL ${url}`);
       }),
     );
@@ -75,10 +89,9 @@ describe("GitHubRestClaimAuthorityVerifier", () => {
       return;
     }
     expect(result.account.displayLogin).toBe("octo-org");
-    expect(result.repositories).toHaveLength(1);
+    expect(result.repositories).toHaveLength(2);
     expect(result.repositorySync).toEqual({
-      complete: false,
-      nextCursor: "/user/installations/123/repositories?per_page=100&page=2",
+      complete: true,
     });
   });
 });

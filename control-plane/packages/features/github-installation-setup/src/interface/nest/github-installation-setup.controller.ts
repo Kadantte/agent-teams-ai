@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Inject, Param, Post, Query, Req } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Inject,
+  Param,
+  Post,
+  Query,
+  Req,
+} from "@nestjs/common";
 
 import { AuthenticateDesktopClientUseCase } from "@agent-teams-control-plane/features-workspace-identity";
 import {
@@ -49,6 +59,7 @@ export class GitHubInstallationSetupController {
   }
 
   @Get("api/public/github/setup")
+  @Header("content-type", "text/html; charset=utf-8")
   public async publicSetupCallback(@Query() query: Record<string, unknown>) {
     const installationId = singleQueryString(query.installation_id);
     const state = singleQueryString(query.state);
@@ -57,16 +68,13 @@ export class GitHubInstallationSetupController {
       ...(state === undefined ? {} : { state }),
     });
     if (result.kind === "untrusted-callback") {
-      return {
-        status: "restart_required",
-      };
+      return renderGitHubSetupRestartPage();
     }
-    return {
+    return renderGitHubSetupClaimPage({
       claimContinuationToken: result.claimContinuationToken,
       claimId: result.claimId,
       setupSessionId: result.setupSessionId,
-      status: "pending_claim",
-    };
+    });
   }
 
   @Post("api/public/github/claim/:claimId/start")
@@ -79,6 +87,20 @@ export class GitHubInstallationSetupController {
       claimId,
       ...(claimContinuationToken === undefined ? {} : { claimContinuationToken }),
     });
+  }
+
+  @Get("api/public/github/claim/:claimId/start")
+  @Header("content-type", "text/html; charset=utf-8")
+  public async startPublicClaimOAuthFromBrowser(
+    @Param("claimId") claimId: string,
+    @Query() query: Record<string, unknown>,
+  ) {
+    const claimContinuationToken = singleQueryString(query.claimContinuationToken);
+    const result = await this.startClaimOAuth.execute({
+      claimId,
+      ...(claimContinuationToken === undefined ? {} : { claimContinuationToken }),
+    });
+    return renderGitHubClaimOAuthRedirectPage(result.authorizationUrl);
   }
 
   @Get("api/public/github/oauth/callback")
@@ -111,4 +133,82 @@ function singleBodyString(value: unknown): string | undefined {
 
 function hasDuplicate(value: unknown): boolean {
   return Array.isArray(value) && value.length > 1;
+}
+
+function renderGitHubSetupRestartPage(): string {
+  return renderHtmlPage({
+    body:
+      "<p>This GitHub App installation callback could not be matched to an active setup session.</p>" +
+      "<p>Restart GitHub setup from Agent Teams Desktop.</p>",
+    title: "GitHub setup restart required",
+  });
+}
+
+function renderGitHubSetupClaimPage(input: {
+  claimContinuationToken: string;
+  claimId: string;
+  setupSessionId: string;
+}): string {
+  const claimUrl = `/api/public/github/claim/${encodeURIComponent(input.claimId)}/start`;
+  return renderHtmlPage({
+    body:
+      `<p>GitHub App installation was received for setup session ${escapeHtml(
+        input.setupSessionId,
+      )}.</p>` +
+      '<form id="claim-start-form"><button class="button" type="submit">Continue with GitHub account verification</button></form>' +
+      "<script>" +
+      'document.getElementById("claim-start-form").addEventListener("submit",async(event)=>{' +
+      "event.preventDefault();" +
+      `const response=await fetch("${escapeJavaScriptString(claimUrl)}",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({claimContinuationToken:"${escapeJavaScriptString(
+        input.claimContinuationToken,
+      )}"})});` +
+      "const payload=await response.json();" +
+      "if(response.ok&&payload.authorizationUrl){window.location.assign(payload.authorizationUrl);return;}" +
+      'document.body.insertAdjacentHTML("beforeend","<p>Unable to start GitHub verification. Restart setup from Agent Teams Desktop.</p>");' +
+      "});" +
+      "</script>",
+    title: "Continue GitHub setup",
+  });
+}
+
+function renderGitHubClaimOAuthRedirectPage(authorizationUrl: string): string {
+  const escapedUrl = escapeHtml(authorizationUrl);
+  return renderHtmlPage({
+    body:
+      `<meta http-equiv="refresh" content="0;url=${escapedUrl}">` +
+      `<p>Redirecting to GitHub OAuth...</p>` +
+      `<p><a class="button" href="${escapedUrl}">Continue to GitHub</a></p>`,
+    title: "Redirecting to GitHub",
+  });
+}
+
+function renderHtmlPage(input: { title: string; body: string }): string {
+  return (
+    "<!doctype html>" +
+    '<html lang="en">' +
+    "<head>" +
+    '<meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    `<title>${escapeHtml(input.title)}</title>` +
+    "<style>" +
+    "body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:48px auto;max-width:640px;padding:0 24px;color:#111827;line-height:1.5}" +
+    ".button{display:inline-block;border-radius:6px;background:#111827;color:white;padding:10px 14px;text-decoration:none;font-weight:600}" +
+    "</style>" +
+    "</head>" +
+    `<body><h1>${escapeHtml(input.title)}</h1>${input.body}</body>` +
+    "</html>"
+  );
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeJavaScriptString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/</g, "\\u003c");
 }

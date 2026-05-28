@@ -1075,7 +1075,9 @@ GitHub-controlled route.
 /api/webhooks/github
 ```
 
-Signature verification required before side effects.
+Deferred for the current V1 release. Do not configure this URL in GitHub App
+settings until a signed webhook ingress controller is shipped. Signature
+verification is required before any future side effects.
 
 ### Messenger Webhook API
 

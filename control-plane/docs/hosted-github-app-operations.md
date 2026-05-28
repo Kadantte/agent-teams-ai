@@ -155,12 +155,11 @@ Record these for staging and production separately:
 - App owner organization.
 - Recovery admins and emergency transfer contacts.
 - Homepage URL.
-- Setup URL: `${CONTROL_PLANE_PUBLIC_BASE_URL}/api/public/github/setup/callback`
-  or the implemented setup entrypoint for the current release.
+- Setup URL: `${CONTROL_PLANE_PUBLIC_BASE_URL}/api/public/github/setup`.
 - OAuth callback URL:
-  `${CONTROL_PLANE_PUBLIC_BASE_URL}/api/public/github/claim/oauth/callback`
-  or the implemented claim callback entrypoint for the current release.
-- Webhook URL if webhook ingress is enabled.
+  `${CONTROL_PLANE_PUBLIC_BASE_URL}/api/public/github/oauth/callback`.
+- Webhook URL: leave unset for the current V1 release unless a deployment
+  explicitly ships webhook ingress.
 - Webhook secret stored in the managed secret store.
 - Private key stored only in the managed secret store.
 - App visibility: private during staging, public only after Phase 11.
