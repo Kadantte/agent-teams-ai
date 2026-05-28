@@ -2663,6 +2663,98 @@ describe('TeamProvisioningService', () => {
         pauseSpy.mockRestore();
       }
     });
+
+    it('skips redundant resumeActiveIntervalsForMember calls while a member stays alive', () => {
+      const resumeSpy = vi
+        .spyOn(TeamTaskActivityIntervalService.prototype, 'resumeActiveIntervalsForMember')
+        .mockReturnValue({ changedTasks: 0 });
+      try {
+        const svc = new TeamProvisioningService();
+        const internals = svc as unknown as {
+          resumeTaskActivityIntervalsForAliveMember: (
+            teamName: string,
+            memberName: string,
+            at: string
+          ) => void;
+          dropTaskActivityResumeMarkerForMember: (teamName: string, memberName: string) => void;
+        };
+        const teamName = 'member-task-activity-resume-dedup-team';
+
+        internals.resumeTaskActivityIntervalsForAliveMember(
+          teamName,
+          'alice',
+          '2026-05-29T00:00:00.000Z'
+        );
+        internals.resumeTaskActivityIntervalsForAliveMember(
+          teamName,
+          'alice',
+          '2026-05-29T00:00:05.000Z'
+        );
+        internals.resumeTaskActivityIntervalsForAliveMember(
+          teamName,
+          'ALICE',
+          '2026-05-29T00:00:10.000Z'
+        );
+
+        expect(resumeSpy).toHaveBeenCalledTimes(1);
+        expect(resumeSpy).toHaveBeenNthCalledWith(
+          1,
+          teamName,
+          'alice',
+          '2026-05-29T00:00:00.000Z'
+        );
+
+        internals.dropTaskActivityResumeMarkerForMember(teamName, 'alice');
+        internals.resumeTaskActivityIntervalsForAliveMember(
+          teamName,
+          'alice',
+          '2026-05-29T00:01:00.000Z'
+        );
+
+        expect(resumeSpy).toHaveBeenCalledTimes(2);
+        expect(resumeSpy).toHaveBeenNthCalledWith(
+          2,
+          teamName,
+          'alice',
+          '2026-05-29T00:01:00.000Z'
+        );
+      } finally {
+        resumeSpy.mockRestore();
+      }
+    });
+
+    it('retries resumeActiveIntervalsForMember when the previous call reported failure', () => {
+      const resumeSpy = vi
+        .spyOn(TeamTaskActivityIntervalService.prototype, 'resumeActiveIntervalsForMember')
+        .mockReturnValueOnce({ changedTasks: 0, failed: true })
+        .mockReturnValueOnce({ changedTasks: 1 });
+      try {
+        const svc = new TeamProvisioningService();
+        const internals = svc as unknown as {
+          resumeTaskActivityIntervalsForAliveMember: (
+            teamName: string,
+            memberName: string,
+            at: string
+          ) => void;
+        };
+        const teamName = 'member-task-activity-resume-retry-team';
+
+        internals.resumeTaskActivityIntervalsForAliveMember(
+          teamName,
+          'bob',
+          '2026-05-29T00:00:00.000Z'
+        );
+        internals.resumeTaskActivityIntervalsForAliveMember(
+          teamName,
+          'bob',
+          '2026-05-29T00:00:05.000Z'
+        );
+
+        expect(resumeSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        resumeSpy.mockRestore();
+      }
+    });
   });
 
   describe('member spawn status launch reads', () => {

@@ -3549,6 +3549,7 @@ export class TeamProvisioningService {
   private readonly transcriptProjectResolver: TeamTranscriptProjectResolver;
   private readonly taskActivityIntervalService = new TeamTaskActivityIntervalService();
   private readonly leadTaskActivitySyncedRunKeys = new Set<string>();
+  private readonly memberTaskActivityResumeAppliedByTeam = new Map<string, Set<string>>();
   private readonly crashRepairedActivityIntervalsByTeam = new Set<string>();
   private readonly pendingCrashRepairSnapshotByTeam = new Map<
     string,
@@ -3780,6 +3781,49 @@ export class TeamProvisioningService {
     this.liveTeamAgentRuntimeMetadataCache.delete(teamName);
     this.liveTeamAgentRuntimeMetadataInFlightByTeam.delete(teamName);
     this.runtimeProcessRowsForUsageSnapshotByTeam.delete(teamName);
+  }
+
+  private normalizeMemberKeyForTaskActivity(memberName: string): string {
+    return memberName.trim().toLowerCase();
+  }
+
+  private getMemberTaskActivityResumeAppliedSet(teamName: string): Set<string> {
+    let applied = this.memberTaskActivityResumeAppliedByTeam.get(teamName);
+    if (!applied) {
+      applied = new Set();
+      this.memberTaskActivityResumeAppliedByTeam.set(teamName, applied);
+    }
+    return applied;
+  }
+
+  private resumeTaskActivityIntervalsForAliveMember(
+    teamName: string,
+    memberName: string,
+    at: string
+  ): void {
+    const memberKey = this.normalizeMemberKeyForTaskActivity(memberName);
+    if (!memberKey) return;
+    const applied = this.getMemberTaskActivityResumeAppliedSet(teamName);
+    if (applied.has(memberKey)) return;
+    const result = this.taskActivityIntervalService.resumeActiveIntervalsForMember(
+      teamName,
+      memberName,
+      at
+    );
+    if (!result.failed) {
+      applied.add(memberKey);
+    }
+  }
+
+  private dropTaskActivityResumeMarkerForMember(teamName: string, memberName: string): void {
+    const memberKey = this.normalizeMemberKeyForTaskActivity(memberName);
+    if (!memberKey) return;
+    const applied = this.memberTaskActivityResumeAppliedByTeam.get(teamName);
+    if (!applied) return;
+    applied.delete(memberKey);
+    if (applied.size === 0) {
+      this.memberTaskActivityResumeAppliedByTeam.delete(teamName);
+    }
   }
 
   private cloneMemberSpawnStatusesSnapshot(
@@ -13587,6 +13631,7 @@ export class TeamProvisioningService {
   ): void {
     if (previous.runtimeAlive === true && next.runtimeAlive !== true) {
       this.pauseMemberTaskActivityForRuntimeLoss(run, memberName, previous, observedAt);
+      this.dropTaskActivityResumeMarkerForMember(run.teamName, memberName);
     } else if (previous.runtimeAlive !== true && next.runtimeAlive === true) {
       const nextUpdatedMs = parseOptionalIsoMs(next.updatedAt);
       const previousUpdatedMs = parseOptionalIsoMs(previous.updatedAt);
@@ -13594,7 +13639,7 @@ export class TeamProvisioningService {
         nextUpdatedMs > 0 && (previousUpdatedMs <= 0 || nextUpdatedMs > previousUpdatedMs)
           ? next.updatedAt
           : nowIso();
-      this.taskActivityIntervalService.resumeActiveIntervalsForMember(
+      this.resumeTaskActivityIntervalsForAliveMember(
         run.teamName,
         memberName,
         deriveTaskActivityResumeAt(previous, observedAt, resumeFallbackAt)
@@ -13940,11 +13985,9 @@ export class TeamProvisioningService {
       const runtimeObservedAt = nowIso();
       for (const [memberName, entry] of Object.entries(nextStatuses)) {
         if (entry.runtimeAlive === true) {
-          this.taskActivityIntervalService.resumeActiveIntervalsForMember(
-            teamName,
-            memberName,
-            runtimeObservedAt
-          );
+          this.resumeTaskActivityIntervalsForAliveMember(teamName, memberName, runtimeObservedAt);
+        } else {
+          this.dropTaskActivityResumeMarkerForMember(teamName, memberName);
         }
       }
       const expectedMembers = snapshot ? this.getPersistedLaunchMemberNames(snapshot) : undefined;
