@@ -3463,6 +3463,7 @@ export class TeamProvisioningService {
   private runtimeProcessTableInFlight:
     | Promise<RuntimeTelemetryProcessTableRow[] | null>
     | undefined;
+  private runtimeProcessTableCacheGeneration = 0;
   private readonly runtimeProcessUsageStatsCacheByPid = new Map<
     number,
     {
@@ -3781,6 +3782,9 @@ export class TeamProvisioningService {
     this.liveTeamAgentRuntimeMetadataCache.delete(teamName);
     this.liveTeamAgentRuntimeMetadataInFlightByTeam.delete(teamName);
     this.runtimeProcessRowsForUsageSnapshotByTeam.delete(teamName);
+    this.runtimeProcessUsageStatsCacheByPid.clear();
+    this.runtimeProcessTableCache = undefined;
+    this.runtimeProcessTableCacheGeneration += 1;
   }
 
   private normalizeMemberKeyForTaskActivity(memberName: string): string {
@@ -14307,10 +14311,7 @@ export class TeamProvisioningService {
         runtimeProcessRowsForSnapshot,
         runtimeUsagePids
       );
-      const pidsMissingUsageStats =
-        runtimeProcessRowsForSnapshot == null
-          ? runtimeUsagePids.filter((pid) => !usageStatsByPid.has(pid))
-          : [];
+      const pidsMissingUsageStats = runtimeUsagePids.filter((pid) => !usageStatsByPid.has(pid));
       if (pidsMissingUsageStats.length > 0) {
         const sampledUsageStats = await this.readProcessUsageStatsByPid(pidsMissingUsageStats);
         for (const [pid, stats] of sampledUsageStats) {
@@ -14641,11 +14642,11 @@ export class TeamProvisioningService {
         rssPid &&
         !usageStatsByPid.has(rssPid) &&
         isSharedOpenCodeHost &&
-        runtimeProcessRowsForSnapshot == null &&
         typeof rssPid === 'number' &&
         rssPid > 0
       ) {
         try {
+          this.runtimeProcessUsageStatsCacheByPid.delete(rssPid);
           const refreshedUsageStats = (await this.readProcessUsageStatsByPid([rssPid])).get(rssPid);
           if (refreshedUsageStats) {
             usageStatsByPid.set(rssPid, refreshedUsageStats);
@@ -25795,7 +25796,8 @@ export class TeamProvisioningService {
     }
 
     const currentProcessRows = await this.readCurrentRuntimeProcessTableRows(
-      'process table runtime snapshot'
+      'process table runtime snapshot',
+      { teamName, generationAtStart }
     );
     const processRows = currentProcessRows ?? [];
     const processTableAvailable = currentProcessRows !== null;
@@ -26610,7 +26612,8 @@ export class TeamProvisioningService {
   }
 
   private async readCurrentRuntimeProcessTableRows(
-    label: string
+    label: string,
+    cacheContext?: { teamName: string; generationAtStart: number }
   ): Promise<RuntimeTelemetryProcessTableRow[] | null> {
     const cached = this.runtimeProcessTableCache;
     if (cached && cached.expiresAtMs > Date.now()) {
@@ -26621,6 +26624,7 @@ export class TeamProvisioningService {
       return this.runtimeProcessTableInFlight;
     }
 
+    const generationAtStart = this.runtimeProcessTableCacheGeneration;
     const request = this.withRuntimeTelemetryTimeout(
       listRuntimeProcessTableForCurrentPlatform(),
       TeamProvisioningService.RUNTIME_PROCESS_TABLE_TIMEOUT_MS,
@@ -26642,10 +26646,19 @@ export class TeamProvisioningService {
         return null;
       })
       .then((rows) => {
-        this.runtimeProcessTableCache = {
-          expiresAtMs: Date.now() + TeamProvisioningService.RUNTIME_PROCESS_TABLE_CACHE_TTL_MS,
-          rows,
-        };
+        const callerGenerationStillValid =
+          cacheContext === undefined ||
+          this.getRuntimeSnapshotCacheGeneration(cacheContext.teamName) ===
+            cacheContext.generationAtStart;
+        if (
+          this.runtimeProcessTableCacheGeneration === generationAtStart &&
+          callerGenerationStillValid
+        ) {
+          this.runtimeProcessTableCache = {
+            expiresAtMs: Date.now() + TeamProvisioningService.RUNTIME_PROCESS_TABLE_CACHE_TTL_MS,
+            rows,
+          };
+        }
         return rows;
       })
       .finally(() => {
