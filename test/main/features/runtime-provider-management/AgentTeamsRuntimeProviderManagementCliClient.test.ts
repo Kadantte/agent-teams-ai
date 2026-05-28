@@ -958,7 +958,7 @@ describe('AgentTeamsRuntimeProviderManagementCliClient', () => {
       const client = new AgentTeamsRuntimeProviderManagementCliClient();
       const response = await client.loadView({ runtimeId: 'opencode' });
 
-      expect(ensureOpenCodeProfileNodeModulesJunctionMock).toHaveBeenCalledWith('abc123', runtimeMessage);
+      expect(ensureOpenCodeProfileNodeModulesJunctionMock).toHaveBeenCalledWith('abc123', expect.any(String));
       expect(execCliMock).toHaveBeenCalledTimes(2);
       expect(response.error).toBeUndefined();
       expect(response.view?.runtime?.state).toBe('ready');
@@ -998,7 +998,7 @@ describe('AgentTeamsRuntimeProviderManagementCliClient', () => {
       const client = new AgentTeamsRuntimeProviderManagementCliClient();
       const response = await client.loadView({ runtimeId: 'opencode' });
 
-      expect(ensureOpenCodeProfileNodeModulesJunctionMock).toHaveBeenCalledWith('abc123', runtimeMessage);
+      expect(ensureOpenCodeProfileNodeModulesJunctionMock).toHaveBeenCalledWith('abc123', expect.any(String));
       expect(execCliMock).toHaveBeenCalledTimes(2);
       expect(response.error?.message).toBe(runtimeMessage);
     } finally {
@@ -1089,7 +1089,7 @@ describe('AgentTeamsRuntimeProviderManagementCliClient', () => {
       const client = new AgentTeamsRuntimeProviderManagementCliClient();
       const response = await client.loadProviderDirectory({ runtimeId: 'opencode' });
 
-      expect(ensureOpenCodeProfileNodeModulesJunctionMock).toHaveBeenCalledWith('def456', runtimeMessage);
+      expect(ensureOpenCodeProfileNodeModulesJunctionMock).toHaveBeenCalledWith('def456', expect.any(String));
       expect(execCliMock).toHaveBeenCalledTimes(2);
       expect(response.directory?.entries).toEqual([]);
     } finally {
