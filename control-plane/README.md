@@ -38,6 +38,7 @@ NestJS is an outer framework, not the business architecture. Domain and applicat
 - [Phase 10 Hosted GitHub App Operations Plan](docs/phase-10-hosted-github-app-operations-plan.md)
 - [Phase 11 Live E2E Release Gate Plan](docs/phase-11-live-e2e-release-gate-plan.md)
 - [Hosted GitHub App Operations Runbook](docs/hosted-github-app-operations.md)
+- [Live E2E Release Gate Runbook](docs/live-e2e-release-gate.md)
 - [Edge Cases And Failure Modes](docs/edge-cases.md)
 - [Security And Privacy Model](docs/security-and-privacy.md)
 - [Public Error Contract](docs/error-contract.md)
@@ -126,6 +127,19 @@ CONTROL_PLANE_HOSTED_SMOKE_BASE_URL=https://staging-control-plane.example.test \
 CONTROL_PLANE_HOSTED_SMOKE_EXPECTED_MODE=hosted-official-app \
 CONTROL_PLANE_HOSTED_SMOKE_EXPECTED_REVISION=<release revision> \
 pnpm --dir control-plane hosted:smoke
+```
+
+Live GitHub App release-gate dry run:
+
+```bash
+CONTROL_PLANE_LIVE_E2E_ENVIRONMENT=staging \
+CONTROL_PLANE_LIVE_E2E_BASE_URL=https://staging-control-plane.example.test \
+CONTROL_PLANE_LIVE_E2E_GITHUB_OWNER=sandbox-org \
+CONTROL_PLANE_LIVE_E2E_GITHUB_REPO=sandbox-repo \
+CONTROL_PLANE_LIVE_E2E_SANDBOX_ALLOWLIST=sandbox-org/sandbox-repo \
+CONTROL_PLANE_LIVE_E2E_EXPECTED_MODE=hosted-official-app \
+CONTROL_PLANE_LIVE_E2E_EXPECTED_REVISION=<release revision> \
+pnpm --dir control-plane live:e2e:github-app -- --dry-run
 ```
 
 DB-specific commands:
