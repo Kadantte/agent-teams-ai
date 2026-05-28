@@ -16,7 +16,7 @@
     "db:generate": "PRISMA_GENERATE_ALLOW_NO_DATABASE_URL=1 prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:test:prepare": "node scripts/check-db-test-env.mjs",
-    "test:db": "pnpm db:test:prepare && CONTROL_PLANE_REQUIRE_DB_TESTS=1 vitest run \"packages/**/*.db.test.ts\"",
+    "test:db": "pnpm db:test:prepare && CONTROL_PLANE_REQUIRE_DB_TESTS=1 vitest run --config vitest.db.config.ts",
     "dev:api": "tsx watch apps/api/src/main.ts",
     "dev:worker": "tsx watch apps/worker/src/main.ts",
     "format": "prettier --write .",
