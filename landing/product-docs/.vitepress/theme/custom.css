@@ -409,6 +409,7 @@ body {
 .vp-doc li {
   line-height: 1.8;
   color: var(--vp-c-text-1);
+  overflow-wrap: anywhere;
 }
 
 .vp-doc a {
@@ -435,6 +436,11 @@ body {
   box-shadow: var(--at-shadow-card);
   border-collapse: separate;
   border-spacing: 0;
+}
+
+.vp-doc table code,
+.vp-doc table a {
+  overflow-wrap: anywhere;
 }
 
 .vp-doc th,
@@ -576,6 +582,23 @@ body {
   .VPHero .actions .VPButton {
     width: 100%;
     max-width: 220px;
+  }
+
+  .vp-doc {
+    overflow-wrap: anywhere;
+  }
+
+  .vp-doc table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .vp-doc th,
+  .vp-doc td {
+    min-width: 132px;
+    vertical-align: top;
   }
 
   .vp-doc th,

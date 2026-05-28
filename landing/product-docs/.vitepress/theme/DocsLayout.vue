@@ -25,10 +25,11 @@ type ViewTransitionDocument = Document & {
 
 const refreshImageZoom = async () => {
   await nextTick();
+  const isNarrowViewport = window.matchMedia("(max-width: 640px)").matches;
   zoom?.detach();
   zoom = mediumZoom(".vp-doc img:not(.no-zoom), .docs-zoom-image", {
     background: isDark.value ? "rgba(10, 10, 15, 0.94)" : "rgba(248, 250, 252, 0.94)",
-    margin: 24,
+    margin: isNarrowViewport ? 8 : 24,
     scrollOffset: 0
   });
 };

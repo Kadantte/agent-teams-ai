@@ -82,6 +82,7 @@ const cards = computed(() => {
   color: var(--at-c-text);
   text-decoration: none !important;
   box-shadow: var(--at-shadow-card);
+  min-width: 0;
   transition:
     border-color var(--at-transition-base),
     background-color var(--at-transition-base),
@@ -114,12 +115,16 @@ const cards = computed(() => {
   color: var(--at-c-text);
   font-size: 15px;
   line-height: 1.3;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .docs-card > span:nth-of-type(2) {
   color: var(--at-c-text-muted);
   font-size: 13px;
   line-height: 1.45;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .docs-card__arrow {
@@ -147,6 +152,7 @@ const cards = computed(() => {
 
   .docs-card {
     grid-template-columns: auto 1fr;
+    padding: 16px;
   }
 
   .docs-card__arrow {
