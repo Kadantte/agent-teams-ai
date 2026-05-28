@@ -2,7 +2,6 @@ name: Control Plane CI
 
 on:
   push:
-    branches: [main, dev]
     paths:
       - 'control-plane/**'
       - '.github/workflows/control-plane-ci.yml'
