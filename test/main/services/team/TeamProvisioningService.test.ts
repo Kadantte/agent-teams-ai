@@ -5196,7 +5196,7 @@ describe('TeamProvisioningService', () => {
         launchState: 'failed_to_start',
         runtimeAlive: false,
         livenessSource: undefined,
-        livenessKind: 'stale_metadata',
+        livenessKind: 'not_found',
         hardFailure: true,
         hardFailureReason: 'Teammate did not join within the launch grace window.',
       });
@@ -5315,6 +5315,61 @@ describe('TeamProvisioningService', () => {
         tmuxPaneId: '%1',
         pid: 17528,
         model: 'gpt-5.3-codex',
+      });
+    });
+
+    it('uses targeted pid verification when the full snapshot misses a live direct process teammate', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            {
+              name: 'alice',
+              providerId: 'codex',
+              model: 'gpt-5.4-mini',
+              agentId: 'alice@vector-room-13',
+              backendType: 'process',
+              runtimePid: 74735,
+              tmuxPaneId: 'process:74735',
+            },
+          ],
+        })),
+      };
+      (svc as any).membersMetaStore = {
+        getMembers: vi.fn(async () => [
+          {
+            name: 'alice',
+            providerId: 'codex',
+            model: 'gpt-5.4-mini',
+          },
+        ]),
+      };
+      (svc as any).readPersistedRuntimeMembers = vi.fn(() => [
+        {
+          name: 'alice',
+          providerId: 'codex',
+          model: 'gpt-5.4-mini',
+          agentId: 'alice@vector-room-13',
+          backendType: 'process',
+          runtimePid: 74735,
+          tmuxPaneId: 'process:74735',
+        },
+      ]);
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([]);
+      const targetedRead = vi.spyOn(svc as any, 'readProcessCommandByPid').mockReturnValue(
+        '/Users/belief/.bun/bin/bun cli.js --agent-id alice@vector-room-13 --agent-name alice --team-name vector-room-13 --model gpt-5.4-mini'
+      );
+
+      const metadata = await (svc as any).getLiveTeamAgentRuntimeMetadata('vector-room-13');
+
+      expect(targetedRead).toHaveBeenCalledWith(74735);
+      expect(metadata.get('alice')).toMatchObject({
+        alive: true,
+        livenessKind: 'runtime_process',
+        pidSource: 'agent_process_table',
+        pid: 74735,
+        runtimeDiagnostic: 'verified runtime process detected by targeted pid check',
       });
     });
 
