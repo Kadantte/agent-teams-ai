@@ -69,6 +69,7 @@ export type ControlPlaneConfig = Readonly<{
   publicBaseUrl?: string;
   github: Readonly<{
     restApiVersion?: string;
+    graphqlEndpoint?: string;
     appId?: string;
     appClientId?: string;
     appSlug?: string;
@@ -121,6 +122,7 @@ export type SafeControlPlaneConfigSummary = Readonly<{
   }>;
   github: Readonly<{
     restApiVersionConfigured: boolean;
+    graphqlEndpointConfigured: boolean;
     appIdConfigured: boolean;
     appClientIdConfigured: boolean;
     appSlugConfigured: boolean;
@@ -187,6 +189,7 @@ const rawConfigSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
+  CONTROL_PLANE_GITHUB_GRAPHQL_ENDPOINT: z.string().url().optional(),
   CONTROL_PLANE_GITHUB_ACTIONS_ENABLED: optionalBoolean,
   CONTROL_PLANE_GITHUB_SETUP_ENABLED: optionalBoolean,
   CONTROL_PLANE_GITHUB_TOKEN_BROKER_ENABLED: optionalBoolean,
@@ -351,6 +354,7 @@ export function getSafeConfigSummary(
       restApiVersionConfigured: config.github.restApiVersion !== undefined,
       webhookSecretConfigured: config.secrets.githubWebhookSecret !== undefined,
       encryptionMasterKeyConfigured: config.secrets.encryptionMasterKey !== undefined,
+      graphqlEndpointConfigured: config.github.graphqlEndpoint !== undefined,
     },
     http: config.http,
     mode: config.mode,
@@ -724,6 +728,7 @@ function buildRetentionConfig(raw: RawConfig): ControlPlaneConfig["retention"] {
 function buildGitHubConfig(raw: RawConfig): ControlPlaneConfig["github"] {
   const github: {
     restApiVersion?: string;
+    graphqlEndpoint?: string;
     appId?: string;
     appClientId?: string;
     appSlug?: string;
@@ -735,6 +740,9 @@ function buildGitHubConfig(raw: RawConfig): ControlPlaneConfig["github"] {
   }
   if (raw.CONTROL_PLANE_GITHUB_REST_API_VERSION !== undefined) {
     github.restApiVersion = raw.CONTROL_PLANE_GITHUB_REST_API_VERSION;
+  }
+  if (raw.CONTROL_PLANE_GITHUB_GRAPHQL_ENDPOINT !== undefined) {
+    github.graphqlEndpoint = raw.CONTROL_PLANE_GITHUB_GRAPHQL_ENDPOINT;
   }
   if (raw.CONTROL_PLANE_GITHUB_APP_ID !== undefined) {
     github.appId = raw.CONTROL_PLANE_GITHUB_APP_ID;

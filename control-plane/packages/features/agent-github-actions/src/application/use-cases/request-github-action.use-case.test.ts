@@ -161,6 +161,7 @@ function createHarness(input: { policyAllowed?: boolean } = {}) {
         agentAvatarAllowedOrigins: () => ["https://cdn.example.test"],
         defaultAgentAvatarUrl: () => "https://cdn.example.test/default.png",
         externalContentRetentionDays: () => 3,
+        githubGraphqlEndpoint: () => undefined,
         githubRestApiVersion: () => "2022-11-28",
       },
       {

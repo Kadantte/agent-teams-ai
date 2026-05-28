@@ -45,6 +45,9 @@ import {
 } from "../../infrastructure/config/config-agent-github-actions.policy.js";
 import { ExternalActionContentStoreAdapter } from "../../infrastructure/crypto/external-action-content-store.adapter.js";
 import { NodeGitHubActionIdGenerator } from "../../infrastructure/crypto/node-github-action-id-generator.js";
+import { GitHubCompositeActionDispatcher } from "../../infrastructure/github/github-composite-action.dispatcher.js";
+import { GitHubGraphQLActionDispatcher } from "../../infrastructure/github/github-graphql-action.dispatcher.js";
+import { FetchGitHubGraphQLClient } from "../../infrastructure/github/github-graphql.client.js";
 import { GitHubRestActionDispatcher } from "../../infrastructure/github/github-rest-action.dispatcher.js";
 import { GitHubActionDispatchHandler } from "../../infrastructure/outbox/github-action-dispatch.handler.js";
 import { GitHubActionOutboxAdapter } from "../../infrastructure/outbox/github-action-outbox.adapter.js";
@@ -144,7 +147,12 @@ import {
       provide: GITHUB_ACTION_DISPATCHER,
       inject: [AGENT_GITHUB_ACTIONS_SETTINGS],
       useFactory: (settings: AgentGitHubActionsSettings) =>
-        new GitHubRestActionDispatcher(settings),
+        new GitHubCompositeActionDispatcher(
+          new GitHubGraphQLActionDispatcher(
+            new FetchGitHubGraphQLClient(settings.githubGraphqlEndpoint()),
+          ),
+          new GitHubRestActionDispatcher(settings),
+        ),
     },
     {
       provide: RequestGitHubActionUseCase,

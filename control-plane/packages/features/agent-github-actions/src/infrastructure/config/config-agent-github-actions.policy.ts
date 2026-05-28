@@ -38,6 +38,10 @@ export class ConfigAgentGitHubActionsSettings implements AgentGitHubActionsSetti
     return this.configService.getConfig().retention.externalContentDays;
   }
 
+  public githubGraphqlEndpoint(): string | undefined {
+    return this.configService.getConfig().github.graphqlEndpoint;
+  }
+
   public githubRestApiVersion(): string | undefined {
     return this.configService.getConfig().github.restApiVersion;
   }

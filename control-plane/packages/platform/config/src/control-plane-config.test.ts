@@ -70,6 +70,7 @@ describe("loadControlPlaneConfig", () => {
       CONTROL_PLANE_GITHUB_OAUTH_CLIENT_ID: "client-id",
       CONTROL_PLANE_GITHUB_OAUTH_CLIENT_SECRET: "oauth-secret",
       CONTROL_PLANE_GITHUB_PRIVATE_KEY: "private-key",
+      CONTROL_PLANE_GITHUB_GRAPHQL_ENDPOINT: "https://api.github.example/graphql",
       CONTROL_PLANE_GITHUB_REST_API_VERSION: "2099-01-01",
       CONTROL_PLANE_GITHUB_SETUP_ENABLED: "true",
       CONTROL_PLANE_GITHUB_ACTIONS_ENABLED: "true",
@@ -95,6 +96,7 @@ describe("loadControlPlaneConfig", () => {
       revisionConfigured: true,
     });
     expect(summary.github.privateKeyConfigured).toBe(true);
+    expect(summary.github.graphqlEndpointConfigured).toBe(true);
     expect(summary.github.appClientIdConfigured).toBe(true);
     expect(summary.database.urlConfigured).toBe(true);
     expect(summary.github.encryptionMasterKeyConfigured).toBe(true);
@@ -111,6 +113,7 @@ describe("loadControlPlaneConfig", () => {
     expect(JSON.stringify(summary)).not.toContain("webhook-secret");
     expect(JSON.stringify(summary)).not.toContain("oauth-secret");
     expect(JSON.stringify(summary)).not.toContain("postgresql://user:pass");
+    expect(JSON.stringify(summary)).not.toContain("https://api.github.example/graphql");
     expect(JSON.stringify(summary)).not.toContain("abc123");
   });
 

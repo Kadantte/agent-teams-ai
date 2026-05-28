@@ -11,6 +11,7 @@ export interface AgentGitHubActionsSettings {
   defaultAgentAvatarUrl(): string | undefined;
   agentAvatarAllowedOrigins(): readonly string[];
   externalContentRetentionDays(): number | undefined;
+  githubGraphqlEndpoint(): string | undefined;
   githubRestApiVersion(): string | undefined;
 }
 

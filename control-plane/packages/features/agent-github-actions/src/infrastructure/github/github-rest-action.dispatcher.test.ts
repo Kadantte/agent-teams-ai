@@ -353,6 +353,7 @@ function settings() {
     agentAvatarAllowedOrigins: () => [],
     defaultAgentAvatarUrl: () => undefined,
     externalContentRetentionDays: () => undefined,
+    githubGraphqlEndpoint: () => undefined,
     githubRestApiVersion: () => "2022-11-28",
   };
 }
