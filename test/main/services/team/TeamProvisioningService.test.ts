@@ -3335,7 +3335,7 @@ describe('TeamProvisioningService', () => {
         getConfig: vi.fn(async () => ({
           members: [
             { name: 'team-lead', agentType: 'team-lead' },
-            { name: 'alice', model: 'gpt-5.4-mini' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
           ],
         })),
       };
@@ -3363,7 +3363,7 @@ describe('TeamProvisioningService', () => {
         getConfig: vi.fn(async () => ({
           members: [
             { name: 'team-lead', agentType: 'team-lead' },
-            { name: 'alice', model: 'gpt-5.4-mini' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
           ],
         })),
       };
@@ -3385,6 +3385,26 @@ describe('TeamProvisioningService', () => {
       expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
     });
 
+    it('skips live process table reads when runtime metadata has no verifiable handle', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini' },
+          ],
+        })),
+      };
+
+      const metadata = (await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team')) as Map<
+        string,
+        unknown
+      >;
+
+      expect(metadata.has('alice')).toBe(true);
+      expect(listRuntimeProcessTableForCurrentPlatform).not.toHaveBeenCalled();
+    });
+
     it('uses a longer live runtime metadata cache for persisted teams without a tracked run', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-05-03T12:00:00.000Z'));
@@ -3393,7 +3413,7 @@ describe('TeamProvisioningService', () => {
         getConfig: vi.fn(async () => ({
           members: [
             { name: 'team-lead', agentType: 'team-lead' },
-            { name: 'alice', model: 'gpt-5.4-mini' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
           ],
         })),
       };
@@ -3421,7 +3441,7 @@ describe('TeamProvisioningService', () => {
         getConfig: vi.fn(async () => ({
           members: [
             { name: 'team-lead', agentType: 'team-lead' },
-            { name: 'alice', model: 'gpt-5.4-mini' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
           ],
         })),
       };
@@ -3441,7 +3461,7 @@ describe('TeamProvisioningService', () => {
         getConfig: vi.fn(async () => ({
           members: [
             { name: 'team-lead', agentType: 'team-lead' },
-            { name: 'alice', model: 'gpt-5.4-mini' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
           ],
         })),
       };
@@ -3462,7 +3482,12 @@ describe('TeamProvisioningService', () => {
         getConfig: vi.fn(async () => ({
           members: [
             { name: 'team-lead', agentType: 'team-lead' },
-            { name: 'alice', providerId: 'opencode', model: 'gpt-5.4-mini' },
+            {
+              name: 'alice',
+              providerId: 'opencode',
+              model: 'gpt-5.4-mini',
+              agentId: 'alice@runtime-team',
+            },
           ],
         })),
       };
@@ -4532,7 +4557,10 @@ describe('TeamProvisioningService', () => {
       (TeamProvisioningService as any).RUNTIME_PROCESS_TABLE_TIMEOUT_MS = 5;
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
-          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
+          ],
         })),
       };
       (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');

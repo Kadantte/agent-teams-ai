@@ -3719,6 +3719,7 @@ export class TeamProvisioningService {
     this.liveTeamAgentRuntimeMetadataCache.delete(teamName);
     this.liveTeamAgentRuntimeMetadataInFlightByTeam.delete(teamName);
     this.runtimeProcessRowsForUsageSnapshotByTeam.delete(teamName);
+    this.runtimeProcessUsageStatsCacheByPid.clear();
   }
 
   private cloneMemberSpawnStatusesSnapshot(
@@ -25329,23 +25330,30 @@ export class TeamProvisioningService {
 
     let processRows: RuntimeTelemetryProcessTableRow[] = [];
     let processTableAvailable = true;
-    try {
-      processRows =
-        this.normalizeRuntimeProcessRowsForTelemetry(
-          await this.withRuntimeTelemetryTimeout(
-            listRuntimeProcessTableForCurrentPlatform(),
-            TeamProvisioningService.RUNTIME_PROCESS_TABLE_TIMEOUT_MS,
-            'process table runtime snapshot'
-          ),
-          process.platform === 'win32' ? 'wsl' : 'native'
-        ) ?? [];
-    } catch (error) {
-      processTableAvailable = false;
-      logger.debug(
-        `[${teamName}] Failed to read process table for runtime snapshot: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+    const shouldReadProcessTable = this.shouldReadProcessTableForLiveRuntimeMetadata({
+      metadataByMember,
+      launchSnapshot: persistedLaunchSnapshot,
+      paneInfoById,
+    });
+    if (shouldReadProcessTable) {
+      try {
+        processRows =
+          this.normalizeRuntimeProcessRowsForTelemetry(
+            await this.withRuntimeTelemetryTimeout(
+              listRuntimeProcessTableForCurrentPlatform(),
+              TeamProvisioningService.RUNTIME_PROCESS_TABLE_TIMEOUT_MS,
+              'process table runtime snapshot'
+            ),
+            process.platform === 'win32' ? 'wsl' : 'native'
+          ) ?? [];
+      } catch (error) {
+        processTableAvailable = false;
+        logger.debug(
+          `[${teamName}] Failed to read process table for runtime snapshot: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
     }
     this.runtimeProcessRowsForUsageSnapshotByTeam.set(teamName, {
       expiresAtMs: Date.now() + this.getAgentRuntimeSnapshotCacheTtlMs(teamName, runId),
@@ -25744,6 +25752,34 @@ export class TeamProvisioningService {
       }
     }
     return normalizedRows;
+  }
+
+  private shouldReadProcessTableForLiveRuntimeMetadata(params: {
+    metadataByMember: ReadonlyMap<string, LiveTeamAgentRuntimeMetadata>;
+    launchSnapshot: PersistedTeamLaunchSnapshot | null | undefined;
+    paneInfoById: ReadonlyMap<string, TmuxPaneRuntimeInfo>;
+  }): boolean {
+    for (const [memberName, metadata] of params.metadataByMember.entries()) {
+      if (metadata.agentId?.trim()) {
+        return true;
+      }
+      const paneId = metadata.tmuxPaneId?.trim() ?? '';
+      if (paneId && params.paneInfoById.has(paneId)) {
+        return true;
+      }
+      const launchRuntimePid = params.launchSnapshot?.members[memberName]?.runtimePid;
+      if (
+        (typeof metadata.metricsPid === 'number' &&
+          Number.isFinite(metadata.metricsPid) &&
+          metadata.metricsPid > 0) ||
+        (typeof launchRuntimePid === 'number' &&
+          Number.isFinite(launchRuntimePid) &&
+          launchRuntimePid > 0)
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private async readRuntimeProcessRowsForUsageSnapshot(
