@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useReducer, useState } from 'react';
 
 import { useAppTranslation } from '@features/localization/renderer';
 import { OngoingIndicator } from '@renderer/components/common/OngoingIndicator';
@@ -169,34 +169,14 @@ const TruncatedTitle = ({
 }: {
   text: string;
   className?: string;
-}): React.JSX.Element => {
-  const ref = useRef<HTMLHeadingElement>(null);
-  const [isTruncated, setIsTruncated] = useState(false);
-
-  const checkTruncation = useCallback(() => {
-    const el = ref.current;
-    if (el) {
-      setIsTruncated(el.scrollHeight > el.clientHeight);
-    }
-  }, []);
-
-  return (
-    <Tooltip open={isTruncated ? undefined : false}>
-      <TooltipTrigger asChild>
-        <h5
-          ref={ref}
-          className={`line-clamp-2 text-xs font-medium text-[var(--color-text)] ${className ?? ''}`}
-          onMouseEnter={checkTruncation}
-        >
-          {text}
-        </h5>
-      </TooltipTrigger>
-      <TooltipContent side="top" align="start">
-        {text}
-      </TooltipContent>
-    </Tooltip>
-  );
-};
+}): React.JSX.Element => (
+  <h5
+    className={`line-clamp-2 text-xs font-medium text-[var(--color-text)] ${className ?? ''}`}
+    title={text}
+  >
+    {text}
+  </h5>
+);
 
 const CancelTaskButton = ({
   taskId,
@@ -273,21 +253,17 @@ const TaskActionIconButton = ({
   variant = 'outline',
   disabled = false,
 }: TaskActionIconButtonProps): React.JSX.Element => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <Button
-        variant={variant}
-        size="icon"
-        className={`size-6 shrink-0 rounded-full shadow-sm ${className}`}
-        aria-label={label}
-        onClick={onClick}
-        disabled={disabled}
-      >
-        {icon}
-      </Button>
-    </TooltipTrigger>
-    <TooltipContent side="top">{label}</TooltipContent>
-  </Tooltip>
+  <Button
+    variant={variant}
+    size="icon"
+    className={`size-6 shrink-0 rounded-full shadow-sm ${className}`}
+    aria-label={label}
+    title={label}
+    onClick={onClick}
+    disabled={disabled}
+  >
+    {icon}
+  </Button>
 );
 
 export const KanbanTaskCard = memo(
