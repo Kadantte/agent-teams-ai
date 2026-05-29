@@ -4,6 +4,7 @@ import {
 } from '@features/agent-attachments/contracts';
 import { addMainBreadcrumb } from '@main/sentry';
 import { setCurrentMainOp } from '@main/services/infrastructure/EventLoopLagMonitor';
+import { markTeamEngaged } from '@main/services/infrastructure/teamWatchScope';
 import { getTeamDataWorkerClient } from '@main/services/team/TeamDataWorkerClient';
 import { getAppIconPath } from '@main/utils/appIcon';
 import { getAppDataPath, getTeamsBasePath } from '@main/utils/pathDecoder';
@@ -869,6 +870,9 @@ async function handleGetData(
     return { success: false, error: optionsResult.error };
   }
   const tn = validated.value!;
+  // The UI is fetching this team, so keep its team-root/task artifacts watched
+  // (idle teams the UI never opens are not watched, to scale with team count).
+  markTeamEngaged(tn);
   const getDataOptions = optionsResult.value;
   const startedAt = Date.now();
   let data: TeamViewSnapshot;

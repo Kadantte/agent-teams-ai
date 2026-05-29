@@ -4881,6 +4881,15 @@ export class TeamProvisioningService {
     return this.aliveRunByTeam.get(teamName) ?? null;
   }
 
+  /**
+   * Snapshot of teams that currently have a live runtime run. Used to keep the
+   * file-watch scope covering running teams (read-only; the map is maintained as
+   * runs start and stop).
+   */
+  getAliveTeamNames(): string[] {
+    return [...this.aliveRunByTeam.keys()];
+  }
+
   private getTrackedRunId(teamName: string): string | null {
     return this.getProvisioningRunId(teamName) ?? this.getAliveRunId(teamName);
   }

@@ -14,6 +14,20 @@ export interface TeamTaskWatchRegistryOptions {
   rootPath: string;
   onChange: (eventType: TeamTaskWatchEventType, relativePath: string) => void;
   onError: (error: unknown) => void;
+  /**
+   * Optional provider for the set of team names whose team-root and task
+   * artifacts should be watched. The root directory is always watched (to detect
+   * new/removed teams), and for the 'teams' kind every team's `inboxes/` is
+   * always watched (cross-team message delivery and notifications must stay
+   * immediate). Return `null` (or omit the provider) to watch every team — the
+   * original behavior and the safe fallback.
+   *
+   * Scoping exists because team-root (config/kanban/processes/meta) and task
+   * artifacts only change for teams that are running or currently engaged in the
+   * UI; idle teams are static, so watching all of them is pure overhead that
+   * scales with the number of teams on disk.
+   */
+  getScopedTeamNames?: () => ReadonlySet<string> | null;
 }
 
 const RECONCILE_INTERVAL_MS = 30_000;
@@ -74,6 +88,17 @@ export class TeamTaskWatchRegistry {
       void this.reconcileTargets();
     }, RECONCILE_INTERVAL_MS);
     this.reconcileTimer.unref();
+  }
+
+  /**
+   * Force an immediate target reconciliation. Call this when the scoped team set
+   * changes (a team launches, stops, or becomes engaged in the UI) so the watch
+   * set updates without waiting for the periodic reconcile. Safe to call often:
+   * it no-ops when the resulting target set is unchanged and coalesces with any
+   * in-flight reconcile.
+   */
+  async requestReconcile(): Promise<void> {
+    await this.reconcileTargets();
   }
 
   async close(): Promise<void> {
@@ -237,6 +262,8 @@ export class TeamTaskWatchRegistry {
     // emitting user-visible events for those artifacts.
     const targets = new Set<string>([path.normalize(this.options.rootPath)]);
     const rootEntries = await this.readDirectory(this.options.rootPath);
+    // null => no scoping: watch every team (original behavior / safe fallback).
+    const scopedTeams = this.options.getScopedTeamNames?.() ?? null;
 
     for (const entry of rootEntries) {
       if (!entry.isDirectory()) {
@@ -244,7 +271,14 @@ export class TeamTaskWatchRegistry {
       }
 
       const teamPath = path.join(this.options.rootPath, entry.name);
-      targets.add(path.normalize(teamPath));
+      const inScope = scopedTeams === null || scopedTeams.has(entry.name);
+
+      // Team-root and task artifacts only change for running/engaged teams, so
+      // scope those. Inboxes are always watched so cross-team delivery and
+      // notifications to non-visible teams stay immediate.
+      if (inScope) {
+        targets.add(path.normalize(teamPath));
+      }
 
       if (this.options.kind === 'teams') {
         const inboxPath = path.join(teamPath, 'inboxes');
