@@ -1,10 +1,12 @@
 import {
+  forwardRef,
   lazy,
   memo,
   Suspense,
   useCallback,
   useEffect,
   useId,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -117,14 +119,15 @@ const TeamGraphOverlay = lazy(() =>
     default: m.TeamGraphOverlay,
   }))
 );
-let taskDetailDialogImportPromise: Promise<{
-  default: typeof import('./dialogs/TaskDetailDialog').TaskDetailDialog;
-}> | null = null;
-function loadTaskDetailDialog(): Promise<{
-  default: typeof import('./dialogs/TaskDetailDialog').TaskDetailDialog;
-}> {
+type TaskDetailDialogComponent = typeof import('./dialogs/TaskDetailDialog').TaskDetailDialog;
+let loadedTaskDetailDialogComponent: TaskDetailDialogComponent | null = null;
+let taskDetailDialogImportPromise: Promise<{ default: TaskDetailDialogComponent }> | null = null;
+function loadTaskDetailDialog(): Promise<{ default: TaskDetailDialogComponent }> {
   taskDetailDialogImportPromise ??= import('./dialogs/TaskDetailDialog')
-    .then((m) => ({ default: m.TaskDetailDialog }))
+    .then((m) => {
+      loadedTaskDetailDialogComponent = m.TaskDetailDialog;
+      return { default: m.TaskDetailDialog };
+    })
     .catch((error) => {
       taskDetailDialogImportPromise = null;
       throw error;
@@ -134,7 +137,7 @@ function loadTaskDetailDialog(): Promise<{
 function preloadTaskDetailDialog(): void {
   void loadTaskDetailDialog().catch(() => undefined);
 }
-const TaskDetailDialog = lazy(loadTaskDetailDialog);
+const LazyTaskDetailDialog = lazy(loadTaskDetailDialog);
 const SendMessageDialog = lazy(() =>
   import('./dialogs/SendMessageDialog').then((m) => ({ default: m.SendMessageDialog }))
 );
@@ -174,6 +177,7 @@ import type { SessionInjection } from './session-injection-types';
 import type { Session } from '@renderer/types/data';
 import type { InlineChip } from '@renderer/types/inlineChip';
 import type {
+  KanbanTaskState,
   MemberSpawnStatusEntry,
   ResolvedTeamMember,
   TaskRef,
@@ -185,6 +189,92 @@ import type {
   TeamTaskWithKanban,
 } from '@shared/types';
 import type { EditorSelectionAction } from '@shared/types/editor';
+
+interface TaskDetailDialogHostHandle {
+  openTask: (task: TeamTaskWithKanban) => void;
+  close: () => void;
+}
+
+interface TaskDetailDialogHostProps {
+  teamName: string;
+  kanbanTaskStateByTaskId: Record<string, KanbanTaskState>;
+  taskMap: Map<string, TeamTaskWithKanban>;
+  members: ResolvedTeamMember[];
+  onOwnerChange: (taskId: string, owner: string | null) => void;
+  onViewChanges: (taskId: string, filePath?: string) => void;
+  onOpenInEditor: (filePath: string) => void;
+  onDeleteTask: (taskId: string) => void;
+}
+
+const TaskDetailDialogHost = memo(
+  forwardRef<TaskDetailDialogHostHandle, TaskDetailDialogHostProps>(function TaskDetailDialogHost(
+    {
+      teamName,
+      kanbanTaskStateByTaskId,
+      taskMap,
+      members,
+      onOwnerChange,
+      onViewChanges,
+      onOpenInEditor,
+      onDeleteTask,
+    },
+    ref
+  ) {
+    const [selectedTask, setSelectedTask] = useState<TeamTaskWithKanban | null>(null);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        openTask: setSelectedTask,
+        close: () => setSelectedTask(null),
+      }),
+      []
+    );
+
+    const handleScrollToTask = useCallback((taskId: string) => {
+      setSelectedTask(null);
+      const el = document.querySelector(`[data-task-id="${taskId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        el.classList.remove('kanban-card-focus-pulse');
+        void (el as HTMLElement).offsetWidth;
+        el.classList.add('kanban-card-focus-pulse');
+        el.addEventListener('animationend', () => el.classList.remove('kanban-card-focus-pulse'), {
+          once: true,
+        });
+      }
+    }, []);
+
+    if (selectedTask === null) {
+      return null;
+    }
+
+    const DialogComponent = loadedTaskDetailDialogComponent ?? LazyTaskDetailDialog;
+    const dialog = (
+      <DialogComponent
+        open
+        task={selectedTask}
+        teamName={teamName}
+        kanbanTaskState={kanbanTaskStateByTaskId[selectedTask.id]}
+        taskMap={taskMap}
+        members={members}
+        onClose={() => setSelectedTask(null)}
+        onScrollToTask={handleScrollToTask}
+        onOwnerChange={onOwnerChange}
+        onViewChanges={onViewChanges}
+        onOpenInEditor={onOpenInEditor}
+        onDeleteTask={onDeleteTask}
+      />
+    );
+
+    if (loadedTaskDetailDialogComponent) {
+      return dialog;
+    }
+
+    return <Suspense fallback={null}>{dialog}</Suspense>;
+  })
+);
+TaskDetailDialogHost.displayName = 'TaskDetailDialogHost';
 
 interface TeamDetailViewProps {
   teamName: string;
@@ -1398,7 +1488,6 @@ export const TeamDetailView = memo(function TeamDetailView({
   const { t } = useAppTranslation('team');
   const { isLight } = useTheme();
   const [requestChangesTaskId, setRequestChangesTaskId] = useState<string | null>(null);
-  const [selectedTask, setSelectedTask] = useState<TeamTaskWithKanban | null>(null);
   const [selectedMember, setSelectedMember] = useState<ResolvedTeamMember | null>(null);
   const [selectedMemberView, setSelectedMemberView] = useState<{
     initialTab?: MemberDetailTab;
@@ -1429,6 +1518,8 @@ export const TeamDetailView = memo(function TeamDetailView({
   const [editorOpen, setEditorOpen] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  const taskDetailDialogRef = useRef<TaskDetailDialogHostHandle>(null);
+  const taskDetailDialogPreloadScheduledRef = useRef(false);
   const [messagesPanelMountPoint, setMessagesPanelMountPoint] = useState<HTMLDivElement | null>(
     null
   );
@@ -2020,19 +2111,19 @@ export const TeamDetailView = memo(function TeamDetailView({
     if (!kanbanSearchQuery) return filteredTasks;
     return filterKanbanTasks(filteredTasks, kanbanSearchQuery);
   }, [filteredTasks, kanbanSearchQuery]);
-  const loadedTeamName = data?.teamName;
-  const taskCount = data?.tasks.length ?? 0;
 
   useEffect(() => {
-    if (taskCount === 0) {
+    if (taskDetailDialogPreloadScheduledRef.current) {
       return;
     }
 
-    return scheduleStartupIdleTask(preloadTaskDetailDialog, {
-      minDelayMs: 1000,
-      maxDelayMs: 5000,
+    taskDetailDialogPreloadScheduledRef.current = true;
+    // Start this with the team page, before slow task data can delay the first task click.
+    scheduleStartupIdleTask(preloadTaskDetailDialog, {
+      minDelayMs: 250,
+      maxDelayMs: 2500,
     });
-  }, [loadedTeamName, taskCount]);
+  }, []);
 
   const resolvedActiveTeammateCount = useMemo(
     () => activeMembers.filter((m) => !isLeadMember(m)).length,
@@ -2227,6 +2318,10 @@ export const TeamDetailView = memo(function TeamDetailView({
     setSelectedMemberView(null);
   }, []);
 
+  const openTaskDetailDialog = useCallback((task: TeamTaskWithKanban) => {
+    taskDetailDialogRef.current?.openTask(task);
+  }, []);
+
   const handleSendMessageToMember = useCallback((member: ResolvedTeamMember) => {
     setSendDialogRecipient(member.name);
     setSendDialogDefaultText(undefined);
@@ -2242,12 +2337,15 @@ export const TeamDetailView = memo(function TeamDetailView({
     [openCreateTaskDialog]
   );
 
-  const handleOpenTaskById = useCallback((taskId: string) => {
-    const task = taskMapRef.current.get(taskId);
-    if (task) {
-      setSelectedTask(task);
-    }
-  }, []);
+  const handleOpenTaskById = useCallback(
+    (taskId: string) => {
+      const task = taskMapRef.current.get(taskId);
+      if (task) {
+        openTaskDetailDialog(task);
+      }
+    },
+    [openTaskDetailDialog]
+  );
 
   const handleOpenMessagePanelTask = useCallback(
     (task: TeamTaskWithKanban) => {
@@ -2260,10 +2358,28 @@ export const TeamDetailView = memo(function TeamDetailView({
     (taskId: string) => {
       const task =
         taskMap.get(taskId) ?? data?.tasks.find((candidate) => candidate.displayId === taskId);
-      if (task) setSelectedTask(task);
+      if (task) openTaskDetailDialog(task);
     },
-    [taskMap, data?.tasks]
+    [data?.tasks, openTaskDetailDialog, taskMap]
   );
+
+  const handleTaskOwnerChange = useCallback(
+    (taskId: string, owner: string | null) => {
+      void (async () => {
+        try {
+          await updateTaskOwner(teamName, taskId, owner);
+        } catch {
+          // error via store
+        }
+      })();
+    },
+    [teamName, updateTaskOwner]
+  );
+
+  const handleOpenTaskFileInEditor = useCallback((filePath: string) => {
+    const { revealFileInEditor } = useStore.getState();
+    revealFileInEditor(filePath);
+  }, []);
 
   const handleEditorAction = useCallback(
     (action: EditorSelectionAction) => {
@@ -3181,7 +3297,7 @@ export const TeamDetailView = memo(function TeamDetailView({
                       );
                     }
                   }}
-                  onTaskClick={(task) => setSelectedTask(task)}
+                  onTaskClick={openTaskDetailDialog}
                   onViewChanges={handleViewChanges}
                   onAddTask={(startImmediately) =>
                     openCreateTaskDialog('', '', '', startImmediately)
@@ -3196,7 +3312,7 @@ export const TeamDetailView = memo(function TeamDetailView({
                 teamName={teamName}
                 tasks={data.tasks}
                 memberColorMap={resolvedMemberColorMap}
-                onOpenTask={(task) => setSelectedTask(task)}
+                onOpenTask={openTaskDetailDialog}
                 onViewChanges={handleViewChangesForFile}
               />
 
@@ -3298,7 +3414,7 @@ export const TeamDetailView = memo(function TeamDetailView({
                 onRestartMember={handleRestartMember}
                 onTaskClick={(task) => {
                   closeSelectedMemberDialog();
-                  setSelectedTask(task);
+                  openTaskDetailDialog(task);
                 }}
                 onUpdateRole={async (memberName, role) => {
                   setUpdatingRoleLoading(true);
@@ -3540,51 +3656,17 @@ export const TeamDetailView = memo(function TeamDetailView({
                 </Suspense>
               )}
 
-              {selectedTask !== null && (
-                <Suspense fallback={null}>
-                  <TaskDetailDialog
-                    open={selectedTask !== null}
-                    task={selectedTask}
-                    teamName={teamName}
-                    kanbanTaskState={
-                      selectedTask ? data?.kanbanState.tasks[selectedTask.id] : undefined
-                    }
-                    taskMap={taskMap}
-                    members={activeMembers}
-                    onClose={() => setSelectedTask(null)}
-                    onScrollToTask={(taskId) => {
-                      setSelectedTask(null);
-                      const el = document.querySelector(`[data-task-id="${taskId}"]`);
-                      if (el) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                        el.classList.remove('kanban-card-focus-pulse');
-                        void (el as HTMLElement).offsetWidth;
-                        el.classList.add('kanban-card-focus-pulse');
-                        el.addEventListener(
-                          'animationend',
-                          () => el.classList.remove('kanban-card-focus-pulse'),
-                          { once: true }
-                        );
-                      }
-                    }}
-                    onOwnerChange={(taskId, owner) => {
-                      void (async () => {
-                        try {
-                          await updateTaskOwner(teamName, taskId, owner);
-                        } catch {
-                          // error via store
-                        }
-                      })();
-                    }}
-                    onViewChanges={handleViewChangesForFile}
-                    onOpenInEditor={(filePath) => {
-                      const { revealFileInEditor } = useStore.getState();
-                      revealFileInEditor(filePath);
-                    }}
-                    onDeleteTask={handleDeleteTask}
-                  />
-                </Suspense>
-              )}
+              <TaskDetailDialogHost
+                ref={taskDetailDialogRef}
+                teamName={teamName}
+                kanbanTaskStateByTaskId={data.kanbanState.tasks}
+                taskMap={taskMap}
+                members={activeMembers}
+                onOwnerChange={handleTaskOwnerChange}
+                onViewChanges={handleViewChangesForFile}
+                onOpenInEditor={handleOpenTaskFileInEditor}
+                onDeleteTask={handleDeleteTask}
+              />
 
               <TrashDialog
                 open={trashOpen}
