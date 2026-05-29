@@ -1,13 +1,13 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { MessagesPanel } from '@renderer/components/team/messages/MessagesPanel';
 import {
   findLatestRevisableUserSentMessage,
   hasVisibleReplyForSendMessageDiagnostics,
   isRevisableUserSentMessage,
-  MessagesPanel,
   reconcilePendingRepliesByMember,
-} from '@renderer/components/team/messages/MessagesPanel';
+} from '@renderer/components/team/messages/messagesPanelLogic';
 import { setTeamMessagesSidebarUiState } from '@renderer/components/team/sidebar/teamSidebarUiState';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
