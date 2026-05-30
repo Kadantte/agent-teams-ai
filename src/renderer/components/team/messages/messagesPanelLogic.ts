@@ -67,6 +67,11 @@ function normalizeMessageParticipant(value: unknown): string {
 
 export const REVISION_NOTICE_PREFIX = 'Revision notice for MessageId:';
 const REVISION_CORRECTION_PREFIX = 'Correction for my previous message (MessageId:';
+const REVISION_ORIGINAL_MESSAGE_ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+};
 
 export function trimString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -116,7 +121,12 @@ export function findLatestRevisableUserSentMessage(
   );
 }
 
+export function escapeRevisionOriginalMessageText(text: string): string {
+  return text.replace(/[&<>]/g, (match) => REVISION_ORIGINAL_MESSAGE_ESCAPES[match] ?? match);
+}
+
 export function buildRevisionNoticeText(originalMessageId: string, originalText: string): string {
+  const escapedOriginalText = escapeRevisionOriginalMessageText(originalText);
   return [
     `${REVISION_NOTICE_PREFIX} ${originalMessageId}`,
     '',
@@ -124,7 +134,7 @@ export function buildRevisionNoticeText(originalMessageId: string, originalText:
     '',
     'Message to ignore:',
     '<original_user_message>',
-    originalText,
+    escapedOriginalText,
     '</original_user_message>',
   ].join('\n');
 }

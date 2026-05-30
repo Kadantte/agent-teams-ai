@@ -4851,6 +4851,30 @@ describe('TeamProvisioningService', () => {
       expect(second.get(111)).toEqual({ rssBytes: 123_000_000, cpuPercent: 7 });
     });
 
+    it('bounds runtime process usage cache entries', async () => {
+      const svc = new TeamProvisioningService();
+      const maxEntries = (TeamProvisioningService as unknown as Record<string, number>)
+        .RUNTIME_PROCESS_USAGE_CACHE_MAX_ENTRIES;
+      const pids = Array.from({ length: maxEntries + 2 }, (_value, index) => 10_000 + index);
+      const firstPid = pids[0]!;
+      const newestPid = pids[pids.length - 1]!;
+      const usageByPid = Object.fromEntries(
+        pids.map((pid, index) => [String(pid), createPidusageStat(pid, 100_000_000 + index, 1)])
+      );
+      vi.mocked(pidusage).mockResolvedValueOnce(usageByPid);
+
+      await privateHarness(svc).readProcessUsageStatsByPid(pids);
+
+      const cache = (
+        svc as unknown as {
+          runtimeProcessUsageStatsCacheByPid: Map<number, unknown>;
+        }
+      ).runtimeProcessUsageStatsCacheByPid;
+      expect(cache.size).toBe(maxEntries);
+      expect(cache.has(firstPid)).toBe(false);
+      expect(cache.has(newestPid)).toBe(true);
+    });
+
     it('falls back to direct agent process lookup when tmux pane pid lookup is unavailable', async () => {
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {

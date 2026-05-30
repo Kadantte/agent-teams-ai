@@ -2184,6 +2184,10 @@ async function handleLaunchTeam(
   return wrapTeamHandler('launch', async () => {
     addMainBreadcrumb('team', 'launch', { teamName: validatedTeamName.value! });
     launchIoGovernor?.noteLaunchIntent(validatedTeamName.value!, 'launch');
+    // Keep this team's team-root/task artifacts file-watched for the whole launch (and the
+    // engaged TTL after), so the lead's immediate startup writes are not missed during the
+    // 0-30s window before the periodic watch-scope reconcile would otherwise pick it up.
+    markTeamEngaged(validatedTeamName.value!);
     try {
       const response = await getTeamProvisioningService().launchTeam(
         {

@@ -29,7 +29,21 @@ export const AnimatedHeightReveal = ({
   containerRef,
   children,
 }: AnimatedHeightRevealProps): JSX.Element => {
-  if (!animate && !className && !style && !containerRef) {
+  const needsAnimatedWrapper = Boolean(animate || className || style || containerRef);
+  // Latch the inner (hook-bearing, animating) variant for the lifetime of this slot.
+  // A call site that only passes `animate` (e.g. animate={isNewItem}) flips it true->false
+  // on the render right after the item appears. Without the latch the returned element type
+  // would switch from AnimatedHeightRevealInner to a bare Fragment on that flip, so React
+  // would unmount the inner subtree mid-reveal — aborting the entry animation and remounting
+  // the children (losing focus/internal state). Once the inner variant has rendered we keep
+  // rendering it so the element type stays stable; items that never need it keep the
+  // hook-free fast path.
+  const hasRenderedInnerRef = useRef(needsAnimatedWrapper);
+  if (needsAnimatedWrapper) {
+    hasRenderedInnerRef.current = true;
+  }
+
+  if (!hasRenderedInnerRef.current) {
     return <>{children}</>;
   }
 

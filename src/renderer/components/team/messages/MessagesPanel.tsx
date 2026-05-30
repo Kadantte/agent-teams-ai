@@ -413,15 +413,28 @@ export const MessagesPanel = memo(function MessagesPanel({
     setBottomSheetSnapIndex(initialSidebarStateRef.current.bottomSheetSnapIndex);
   }, [teamName]);
 
-  useEffect(
-    () => () => {
-      if (messagesScrollPersistTimerRef.current) {
-        clearTimeout(messagesScrollPersistTimerRef.current);
-        messagesScrollPersistTimerRef.current = null;
+  useEffect(() => {
+    const persistTeamName = teamName;
+    return () => {
+      if (!messagesScrollPersistTimerRef.current) {
+        return;
       }
-    },
-    []
-  );
+      // A debounced scroll update was still pending when the panel unmounts (e.g. switching
+      // panel mode away from sidebar, closing the tab) or when the team changes. Flush the
+      // latest scroll position directly into persisted UI state so a scroll within the 100ms
+      // debounce window is not lost.
+      clearTimeout(messagesScrollPersistTimerRef.current);
+      messagesScrollPersistTimerRef.current = null;
+      const pendingScrollTop = messagesScrollTopRef.current;
+      const persisted = getTeamMessagesSidebarUiState(persistTeamName);
+      if (Math.abs(persisted.messagesScrollTop - pendingScrollTop) >= 1) {
+        setTeamMessagesSidebarUiState(persistTeamName, {
+          ...persisted,
+          messagesScrollTop: pendingScrollTop,
+        });
+      }
+    };
+  }, [teamName]);
 
   const persistMessagesScrollTop = useCallback((nextScrollTop: number): void => {
     messagesScrollTopRef.current = nextScrollTop;

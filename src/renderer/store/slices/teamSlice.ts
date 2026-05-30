@@ -1027,7 +1027,7 @@ export interface TeamSlice {
     isOnline?: boolean;
   }[];
   crossTeamTargetsLoading: boolean;
-  fetchCrossTeamTargets: () => Promise<void>;
+  fetchCrossTeamTargets: () => Promise<boolean>;
   sendCrossTeamMessage: (request: CrossTeamSendRequest) => Promise<void>;
   requestReview: (teamName: string, taskId: string) => Promise<void>;
   updateKanban: (teamName: string, taskId: string, patch: UpdateKanbanPatch) => Promise<void>;
@@ -3138,15 +3138,17 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     try {
       const targets = await api.crossTeam.listTargets();
       if (!isContextRequestScopeCurrent(get, requestScope)) {
-        return;
+        return false;
       }
       set({ crossTeamTargets: targets, crossTeamTargetsLoading: false });
+      return true;
     } catch (error) {
       if (!isContextRequestScopeCurrent(get, requestScope)) {
-        return;
+        return false;
       }
       logger.error('fetchCrossTeamTargets failed', error);
       set({ crossTeamTargets: [], crossTeamTargetsLoading: false });
+      return false;
     }
   },
 

@@ -383,6 +383,29 @@ describe('team slice context races', () => {
     expect(store.getState().crossTeamTargetsLoading).toBe(false);
   });
 
+  it('resolves true after a successful cross-team targets fetch', async () => {
+    const store = createSliceStore();
+    apiMock.crossTeam.listTargets.mockResolvedValueOnce([
+      { teamName: 'peer', displayName: 'Peer' },
+    ]);
+
+    const ok = await store.getState().fetchCrossTeamTargets();
+
+    expect(ok).toBe(true);
+    expect(store.getState().crossTeamTargets).toEqual([{ teamName: 'peer', displayName: 'Peer' }]);
+  });
+
+  it('resolves false when the cross-team targets fetch fails so the composer can retry', async () => {
+    const store = createSliceStore();
+    apiMock.crossTeam.listTargets.mockRejectedValueOnce(new Error('boom'));
+
+    const ok = await store.getState().fetchCrossTeamTargets();
+
+    expect(ok).toBe(false);
+    expect(store.getState().crossTeamTargets).toEqual([]);
+    expect(store.getState().crossTeamTargetsLoading).toBe(false);
+  });
+
   it('ignores selected team data loaded for a previous context', async () => {
     const store = createSliceStore();
     const localData = deferred<TeamSnapshotLike>();

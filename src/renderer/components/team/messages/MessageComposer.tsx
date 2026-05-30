@@ -207,8 +207,18 @@ export const MessageComposer = ({
   useEffect(() => {
     if (!teamSelectorOpen) return;
     if (!crossTeamTargetsFetchedRef.current) {
+      // Set the guard synchronously to dedupe concurrent fetches, but clear it if the fetch
+      // fails so a later open retries instead of leaving cross-team targets permanently empty.
       crossTeamTargetsFetchedRef.current = true;
-      void fetchCrossTeamTargets();
+      void fetchCrossTeamTargets()
+        .then((ok) => {
+          if (!ok) {
+            crossTeamTargetsFetchedRef.current = false;
+          }
+        })
+        .catch(() => {
+          crossTeamTargetsFetchedRef.current = false;
+        });
     }
     void refreshAliveTeams();
   }, [fetchCrossTeamTargets, refreshAliveTeams, teamSelectorOpen]);

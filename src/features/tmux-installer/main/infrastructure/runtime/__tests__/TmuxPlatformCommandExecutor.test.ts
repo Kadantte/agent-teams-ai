@@ -13,7 +13,10 @@ vi.mock('node:child_process', async () => {
 import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 
-import { TmuxPlatformCommandExecutor } from '../TmuxPlatformCommandExecutor';
+import {
+  parseRuntimeProcessTable,
+  TmuxPlatformCommandExecutor,
+} from '../TmuxPlatformCommandExecutor';
 
 function setPlatform(value: string): void {
   Object.defineProperty(process, 'platform', {
@@ -98,6 +101,23 @@ describe('TmuxPlatformCommandExecutor', () => {
       3_000,
       undefined
     );
+  });
+
+  it('parses the %cpu column when the locale uses a comma decimal separator', () => {
+    // de_DE/fr_FR locales make `ps` print pcpu as e.g. "7,5". The enriched parser must
+    // normalize the comma so the row keeps its cpu/rss metrics and does not leak the
+    // numeric columns into `command` via the basic fallback parser.
+    const rows = parseRuntimeProcessTable('  42   1  7,5  128 opencode runtime --team-name demo\n');
+
+    expect(rows).toEqual([
+      {
+        pid: 42,
+        ppid: 1,
+        command: 'opencode runtime --team-name demo',
+        cpuPercent: 7.5,
+        rssBytes: 131_072,
+      },
+    ]);
   });
 
   it('lists runtime processes inside WSL on Windows instead of using host ps', async () => {

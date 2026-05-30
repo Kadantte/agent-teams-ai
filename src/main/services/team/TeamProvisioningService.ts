@@ -5146,7 +5146,7 @@ export class TeamProvisioningService {
       this.deleteSecondaryRuntimeRun(teamName, laneId);
       if (laneId === 'primary') {
         this.runtimeAdapterRunByTeam.delete(teamName);
-        this.aliveRunByTeam.delete(teamName);
+        this.deleteAliveRunId(teamName);
         this.provisioningRunByTeam.delete(teamName);
         this.invalidateRuntimeSnapshotCaches(teamName);
       }
@@ -14537,7 +14537,9 @@ export class TeamProvisioningService {
         rssPid > 0
       ) {
         try {
-          const refreshedUsageStats = (await this.readProcessUsageStatsByPid([rssPid])).get(rssPid);
+          const refreshedUsageStats = (
+            await this.readProcessUsageStatsByPid([rssPid], { ignoreCachedMisses: true })
+          ).get(rssPid);
           if (refreshedUsageStats) {
             usageStatsByPid.set(rssPid, refreshedUsageStats);
           }
@@ -20834,7 +20836,7 @@ export class TeamProvisioningService {
           laneId: 'primary',
         }).catch(() => undefined);
         this.runtimeAdapterRunByTeam.delete(input.request.teamName);
-        this.aliveRunByTeam.delete(input.request.teamName);
+        this.deleteAliveRunId(input.request.teamName);
         this.invalidateRuntimeSnapshotCaches(input.request.teamName);
       } else {
         this.runtimeAdapterRunByTeam.set(input.request.teamName, {
@@ -20843,7 +20845,7 @@ export class TeamProvisioningService {
           cwd: launchCwd,
           members: result.members,
         });
-        this.aliveRunByTeam.set(input.request.teamName, runId);
+        this.setAliveRunId(input.request.teamName, runId);
         this.invalidateRuntimeSnapshotCaches(input.request.teamName);
       }
       if (this.provisioningRunByTeam.get(input.request.teamName) === runId) {
@@ -22015,7 +22017,7 @@ export class TeamProvisioningService {
       emitDismiss: true,
     });
     this.runtimeAdapterRunByTeam.delete(teamName);
-    this.aliveRunByTeam.delete(teamName);
+    this.deleteAliveRunId(teamName);
     if (this.provisioningRunByTeam.get(teamName) === runId) {
       this.provisioningRunByTeam.delete(teamName);
     }
@@ -22094,7 +22096,7 @@ export class TeamProvisioningService {
       this.runtimeAdapterRunByTeam.delete(teamName);
     }
     if (this.aliveRunByTeam.get(teamName) === runId) {
-      this.aliveRunByTeam.delete(teamName);
+      this.deleteAliveRunId(teamName);
     }
     if (this.provisioningRunByTeam.get(teamName) === runId) {
       this.provisioningRunByTeam.delete(teamName);
@@ -22111,7 +22113,7 @@ export class TeamProvisioningService {
     const timestamp = nowIso();
     this.provisioningRunByTeam.delete(teamName);
     this.runtimeAdapterRunByTeam.delete(teamName);
-    this.aliveRunByTeam.delete(teamName);
+    this.deleteAliveRunId(teamName);
     this.invalidateRuntimeSnapshotCaches(teamName);
     const progress: TeamProvisioningProgress = {
       runId,
@@ -25392,12 +25394,14 @@ export class TeamProvisioningService {
 
     let processRows: RuntimeTelemetryProcessTableRow[] = [];
     let processTableAvailable = true;
+    let processRowsReadForMetadata = false;
     const shouldReadProcessTable = this.shouldReadProcessTableForLiveRuntimeMetadata({
       metadataByMember,
       launchSnapshot: persistedLaunchSnapshot,
       paneInfoById,
     });
     if (shouldReadProcessTable) {
+      processRowsReadForMetadata = true;
       try {
         processRows =
           this.normalizeRuntimeProcessRowsForTelemetry(
@@ -25417,13 +25421,15 @@ export class TeamProvisioningService {
         );
       }
     }
-    this.runtimeProcessRowsForUsageSnapshotByTeam.set(teamName, {
-      expiresAtMs: Date.now() + this.getAgentRuntimeSnapshotCacheTtlMs(teamName, runId),
-      generation: generationAtStart,
-      runId,
-      rows: processTableAvailable ? processRows : null,
-      includesWindowsHostRows: false,
-    });
+    if (processRowsReadForMetadata) {
+      this.runtimeProcessRowsForUsageSnapshotByTeam.set(teamName, {
+        expiresAtMs: Date.now() + this.getAgentRuntimeSnapshotCacheTtlMs(teamName, runId),
+        generation: generationAtStart,
+        runId,
+        rows: processTableAvailable ? processRows : null,
+        includesWindowsHostRows: false,
+      });
+    }
     let windowsHostProcessRows: RuntimeTelemetryProcessTableRow[] | null = null;
     let windowsHostProcessTableAvailable = false;
     const getWindowsHostProcessRows = async (): Promise<RuntimeTelemetryProcessTableRow[]> => {
@@ -26017,11 +26023,14 @@ export class TeamProvisioningService {
 
     const childrenByParent = this.buildRuntimeProcessChildrenByParent(normalizedProcessRows);
     const rowByPid = new Map(normalizedProcessRows.map((row) => [row.pid, row]));
+    const missingRootPids: number[] = [];
+    let hasMatchedRootPid = false;
     for (const rootPid of uniqueRoots) {
       const pids: number[] = [];
       let truncated = false;
       const rootProcessRow = rowByPid.get(rootPid);
       if (!rootProcessRow) {
+        missingRootPids.push(rootPid);
         usageTreesByRootPid.set(rootPid, { pids: [], truncated: false });
         continue;
       }
@@ -26029,6 +26038,7 @@ export class TeamProvisioningService {
         usageTreesByRootPid.set(rootPid, { pids: [], truncated: false });
         continue;
       }
+      hasMatchedRootPid = true;
       const rootProcessSource = rootProcessRow?.runtimeTelemetrySource;
       const addPid = (pid: number): boolean => {
         if (pids.includes(pid)) {
@@ -26085,6 +26095,17 @@ export class TeamProvisioningService {
         truncated = true;
       }
       usageTreesByRootPid.set(rootPid, { pids, truncated });
+    }
+
+    if (hasMatchedRootPid) {
+      for (const rootPid of missingRootPids) {
+        if (scheduledPids.size >= TeamProvisioningService.MAX_RUNTIME_USAGE_PIDS_PER_SNAPSHOT) {
+          usageTreesByRootPid.set(rootPid, { pids: [], truncated: true });
+          continue;
+        }
+        scheduledPids.add(rootPid);
+        usageTreesByRootPid.set(rootPid, { pids: [rootPid], truncated: false });
+      }
     }
 
     return usageTreesByRootPid;
@@ -26233,7 +26254,8 @@ export class TeamProvisioningService {
   }
 
   private async readProcessUsageStatsByPid(
-    pids: readonly number[]
+    pids: readonly number[],
+    cacheOptions: { ignoreCachedMisses?: boolean } = {}
   ): Promise<Map<number, RuntimeProcessUsageStats>> {
     const pidCandidates = Array.isArray(pids) ? pids : [];
     const uniquePids = [...new Set(pidCandidates.filter((pid) => Number.isFinite(pid) && pid > 0))];
@@ -26249,8 +26271,14 @@ export class TeamProvisioningService {
       if (cached && cached.expiresAtMs > now) {
         if (cached.stats) {
           usageStatsByPid.set(pid, { ...cached.stats });
+          continue;
         }
-        continue;
+        if (!cacheOptions.ignoreCachedMisses) {
+          continue;
+        }
+      }
+      if (cached) {
+        this.runtimeProcessUsageStatsCacheByPid.delete(pid);
       }
       pidsToRead.push(pid);
     }
@@ -26263,8 +26291,25 @@ export class TeamProvisioningService {
       stats: RuntimeProcessUsageStats | null | undefined
     ): void => {
       const normalized = stats ? { ...stats } : null;
+      const nowMs = Date.now();
+      for (const [cachedPid, cached] of this.runtimeProcessUsageStatsCacheByPid) {
+        if (cached.expiresAtMs <= nowMs) {
+          this.runtimeProcessUsageStatsCacheByPid.delete(cachedPid);
+        }
+      }
+      while (
+        !this.runtimeProcessUsageStatsCacheByPid.has(pid) &&
+        this.runtimeProcessUsageStatsCacheByPid.size >=
+          TeamProvisioningService.RUNTIME_PROCESS_USAGE_CACHE_MAX_ENTRIES
+      ) {
+        const oldestPid = this.runtimeProcessUsageStatsCacheByPid.keys().next().value;
+        if (oldestPid == null) {
+          break;
+        }
+        this.runtimeProcessUsageStatsCacheByPid.delete(oldestPid);
+      }
       this.runtimeProcessUsageStatsCacheByPid.set(pid, {
-        expiresAtMs: Date.now() + TeamProvisioningService.RUNTIME_PROCESS_USAGE_CACHE_TTL_MS,
+        expiresAtMs: nowMs + TeamProvisioningService.RUNTIME_PROCESS_USAGE_CACHE_TTL_MS,
         stats: normalized,
       });
       if (normalized) {
@@ -27415,7 +27460,7 @@ export class TeamProvisioningService {
     });
     run.onProgress(progress);
     this.provisioningRunByTeam.delete(run.teamName);
-    this.aliveRunByTeam.set(run.teamName, run.runId);
+    this.setAliveRunId(run.teamName, run.runId);
     logger.warn(
       `[${run.teamName}] Recovered ready state from completed deterministic bootstrap snapshot after post-bootstrap finalization delay.`
     );
@@ -31181,7 +31226,7 @@ export class TeamProvisioningService {
         await this.stopMixedSecondaryRuntimeLanes(teamName);
       }
       this.provisioningRunByTeam.delete(teamName);
-      this.aliveRunByTeam.delete(teamName);
+      this.deleteAliveRunId(teamName);
       await this.cleanupAnthropicApiKeyHelperMaterialForStoppedTeam(teamName);
       return;
     }
@@ -31379,7 +31424,7 @@ export class TeamProvisioningService {
         laneId: 'primary',
       }).catch(() => undefined);
       this.runtimeAdapterRunByTeam.delete(teamName);
-      this.aliveRunByTeam.delete(teamName);
+      this.deleteAliveRunId(teamName);
       this.provisioningRunByTeam.delete(teamName);
       this.invalidateRuntimeSnapshotCaches(teamName);
       return;
@@ -31401,7 +31446,7 @@ export class TeamProvisioningService {
       emitDismiss: true,
     });
     this.runtimeAdapterRunByTeam.delete(teamName);
-    this.aliveRunByTeam.delete(teamName);
+    this.deleteAliveRunId(teamName);
     if (this.provisioningRunByTeam.get(teamName) === runId) {
       this.provisioningRunByTeam.delete(teamName);
     }
@@ -31463,7 +31508,7 @@ export class TeamProvisioningService {
         laneId: 'primary',
       }).catch(() => undefined);
       this.runtimeAdapterRunByTeam.delete(teamName);
-      this.aliveRunByTeam.delete(teamName);
+      this.deleteAliveRunId(teamName);
       this.provisioningRunByTeam.delete(teamName);
       this.teamChangeEmitter?.({
         type: 'process',
@@ -33307,7 +33352,7 @@ export class TeamProvisioningService {
           cwd: entry.cwd,
           members: committed.members,
         });
-        this.aliveRunByTeam.set(entry.approval.teamName, entry.approval.runId);
+        this.setAliveRunId(entry.approval.teamName, entry.approval.runId);
       }
       this.syncOpenCodeRuntimeToolApprovals({
         teamName: entry.approval.teamName,
@@ -33968,7 +34013,7 @@ export class TeamProvisioningService {
       });
       run.onProgress(progress);
       this.provisioningRunByTeam.delete(run.teamName);
-      this.aliveRunByTeam.set(run.teamName, run.runId);
+      this.setAliveRunId(run.teamName, run.runId);
       logger.info(`[${run.teamName}] Launch complete. Process alive for subsequent tasks.`);
 
       if (!run.deterministicBootstrap && shouldUseGeminiStagedLaunch(run.request.providerId)) {
@@ -34163,7 +34208,7 @@ export class TeamProvisioningService {
       });
     }
     this.provisioningRunByTeam.delete(run.teamName);
-    this.aliveRunByTeam.set(run.teamName, run.runId);
+    this.setAliveRunId(run.teamName, run.runId);
     logger.info(`[${run.teamName}] Provisioning complete. Process alive for subsequent tasks.`);
 
     if (!run.deterministicBootstrap && shouldUseGeminiStagedLaunch(run.request.providerId)) {
@@ -34849,7 +34894,7 @@ export class TeamProvisioningService {
       this.provisioningRunByTeam.delete(run.teamName);
     }
     if (this.aliveRunByTeam.get(run.teamName) === run.runId) {
-      this.aliveRunByTeam.delete(run.teamName);
+      this.deleteAliveRunId(run.teamName);
     }
     if (!hasNewerTrackedRun) {
       this.clearSecondaryRuntimeRuns(run.teamName);
