@@ -800,6 +800,81 @@ describe('TeamTranscriptProjectResolver', () => {
     });
   });
 
+  it('refreshes parsed head metadata when the file signature changes before a new team lookup', async () => {
+    await setupClaudeRoot();
+    const resolver = new TeamTranscriptProjectResolver() as unknown as ResolverProbe;
+    const projectDir = path.join(tmpDir!, 'projects', encodePath('/repo/head-cache-refresh'));
+    await fs.mkdir(projectDir, { recursive: true });
+    const jsonlPath = path.join(projectDir, 'changing.jsonl');
+    await fs.writeFile(jsonlPath, `${teamTextLine('alpha-team')}\n`, 'utf8');
+
+    const firstStat = await fs.stat(jsonlPath);
+    expect(await resolver.fileBelongsToTeam(jsonlPath, 'missing-team', firstStat)).toBe(false);
+    expect(resolver.teamAffinityHeadMetadataCache.get(jsonlPath)).toMatchObject({
+      mtimeMs: firstStat.mtimeMs,
+      size: firstStat.size,
+      inspectedLineCount: 1,
+    });
+
+    await fs.writeFile(jsonlPath, `${noiseLine(0)}\n${teamTextLine('beta-team')}\n`, 'utf8');
+    const updatedAt = new Date(Date.now() + 5_000);
+    await fs.utimes(jsonlPath, updatedAt, updatedAt);
+    const secondStat = await fs.stat(jsonlPath);
+
+    expect(await resolver.fileBelongsToTeam(jsonlPath, 'beta-team', secondStat)).toBe(true);
+    expect(resolver.teamAffinityHeadMetadataCache.size).toBe(1);
+    expect(resolver.teamAffinityHeadMetadataCache.get(jsonlPath)).toMatchObject({
+      mtimeMs: secondStat.mtimeMs,
+      size: secondStat.size,
+      inspectedLineCount: 2,
+    });
+  });
+
+  it('caches malformed head lines as inspected non-matches while ignoring blank lines', async () => {
+    await setupClaudeRoot();
+    const resolver = new TeamTranscriptProjectResolver() as unknown as ResolverProbe;
+    const projectDir = path.join(tmpDir!, 'projects', encodePath('/repo/head-cache-malformed'));
+    await fs.mkdir(projectDir, { recursive: true });
+    const jsonlPath = path.join(projectDir, 'malformed.jsonl');
+    await fs.writeFile(jsonlPath, `\n{not-json\n\n${teamTextLine('malformed-team')}\n`, 'utf8');
+
+    const fileStat = await fs.stat(jsonlPath);
+    expect(await resolver.fileBelongsToTeam(jsonlPath, 'malformed-team', fileStat)).toBe(true);
+
+    const cachedHead = resolver.teamAffinityHeadMetadataCache.get(jsonlPath);
+    expect(cachedHead?.inspectedLineCount).toBe(2);
+    expect(cachedHead?.lines).toHaveLength(2);
+
+    await fs.unlink(jsonlPath);
+    expect(await resolver.fileBelongsToTeam(jsonlPath, 'missing-team', fileStat)).toBe(false);
+  });
+
+  it('keeps cached head metadata bounded to 40 lines when the first lookup matches early', async () => {
+    await setupClaudeRoot();
+    const resolver = new TeamTranscriptProjectResolver() as unknown as ResolverProbe;
+    const projectDir = path.join(tmpDir!, 'projects', encodePath('/repo/head-cache-bound'));
+    await fs.mkdir(projectDir, { recursive: true });
+    const jsonlPath = path.join(projectDir, 'bound.jsonl');
+    const lines = [
+      teamTextLine('early-team'),
+      ...Array.from({ length: 39 }, (_, i) => noiseLine(i)),
+      teamTextLine('late-team'),
+    ];
+    await fs.writeFile(jsonlPath, `${lines.join('\n')}\n`, 'utf8');
+
+    const fileStat = await fs.stat(jsonlPath);
+    expect(await resolver.fileBelongsToTeam(jsonlPath, 'early-team', fileStat)).toBe(true);
+    expect(resolver.teamAffinityHeadMetadataCache.get(jsonlPath)?.inspectedLineCount).toBe(40);
+    expect(resolver.teamAffinityHeadMetadataCache.get(jsonlPath)?.lines).toHaveLength(40);
+
+    await fs.unlink(jsonlPath);
+    expect(await resolver.fileBelongsToTeam(jsonlPath, 'late-team', fileStat)).toBe(false);
+    expect(resolver.teamAffinityFileCache.get(`late-team\0${jsonlPath}`)).toMatchObject({
+      belongsToTeam: false,
+      headWindowFull: true,
+    });
+  });
+
   // The head-window scan reads chunks + splits on '\n' (not readline). These lock the
   // byte-exact equivalence: CRLF endings, a final line with no trailing newline, a
   // multi-byte char straddling the 64KB read boundary, and the 40-line window bound.
