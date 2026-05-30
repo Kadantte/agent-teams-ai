@@ -1939,6 +1939,9 @@ async function handleCreateTeam(
   return wrapTeamHandler('create', async () => {
     addMainBreadcrumb('team', 'create', { teamName: validation.value.teamName });
     launchIoGovernor?.noteLaunchIntent(validation.value.teamName, 'create');
+    // Keep this team's team-root/task artifacts file-watched while createTeam writes
+    // its initial config, tasks, inboxes, and launch state.
+    markTeamEngaged(validation.value.teamName);
     try {
       const response = await getTeamProvisioningService().createTeam(
         validation.value,
@@ -2104,6 +2107,9 @@ async function handleLaunchTeam(
 
     return wrapTeamHandler('create', async () => {
       launchIoGovernor?.noteLaunchIntent(tn, 'draft-launch');
+      // Draft launch runs through createTeam, so it needs the same immediate watch scope
+      // as a normal launch before startup files begin changing.
+      markTeamEngaged(tn);
       try {
         const response = await getTeamProvisioningService().createTeam(
           createRequest,

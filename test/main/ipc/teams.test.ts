@@ -101,6 +101,10 @@ import {
   removeTeamHandlers,
 } from '../../../src/main/ipc/teams';
 import { ConfigManager } from '../../../src/main/services/infrastructure/ConfigManager';
+import {
+  computeTeamWatchScope,
+  resetTeamWatchScopeForTests,
+} from '../../../src/main/services/infrastructure/teamWatchScope';
 import { LaunchIoGovernor } from '../../../src/main/services/team/LaunchIoGovernor';
 import { getAppDataPath } from '../../../src/main/utils/pathDecoder';
 import {
@@ -355,6 +359,7 @@ describe('ipc teams handlers', () => {
   };
 
   beforeEach(() => {
+    resetTeamWatchScopeForTests();
     handlers.clear();
     vi.clearAllMocks();
     service.listTeams.mockReset();
@@ -427,6 +432,7 @@ describe('ipc teams handlers', () => {
   });
 
   afterEach(() => {
+    resetTeamWatchScopeForTests();
     launchIoGovernor.clearForTests();
     vi.useRealTimers();
     setClaudeBasePathOverride(null);
@@ -1312,6 +1318,23 @@ describe('ipc teams handlers', () => {
       op: 'set_column',
       column: 'approved',
     });
+  });
+
+  it('marks created teams engaged before provisioning writes startup artifacts', async () => {
+    const createTeam = 'created-watch-scope';
+    provisioningService.createTeam.mockImplementationOnce(async () => {
+      expect(computeTeamWatchScope().has(createTeam)).toBe(true);
+      return { runId: 'run-created-watch-scope' };
+    });
+
+    const result = (await handlers.get(TEAM_CREATE)!({ sender: { send: vi.fn() } } as never, {
+      teamName: createTeam,
+      members: [{ name: 'alice' }],
+      cwd: os.tmpdir(),
+    })) as { success: boolean };
+
+    expect(result.success).toBe(true);
+    expect(computeTeamWatchScope().has(createTeam)).toBe(true);
   });
 
   it('returns cached TEAM_LIST data under active launch pressure without starting another scan', async () => {
@@ -4378,6 +4401,7 @@ describe('ipc teams handlers', () => {
         })) as { success: boolean };
 
         expect(result.success).toBe(true);
+        expect(computeTeamWatchScope().has('draft-team')).toBe(true);
         expect(provisioningService.launchTeam).not.toHaveBeenCalled();
         expect(provisioningService.createTeam).toHaveBeenCalledWith(
           {

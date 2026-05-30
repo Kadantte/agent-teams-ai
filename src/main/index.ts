@@ -1431,6 +1431,7 @@ function wireFileWatcherEvents(context: ServiceContext): void {
 
   teamChangeCleanup = () => {
     context.fileWatcher.off('team-change', teamChangeHandler);
+    setAliveTeamsProvider(null);
     setTeamWatchScopeChangeListener(null);
     context.fileWatcher.setTeamWatchScopeProvider(null);
     reconcileScheduler?.dispose();
