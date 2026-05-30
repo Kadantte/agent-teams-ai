@@ -132,7 +132,7 @@ export class FileWatcher extends EventEmitter {
   private disposed = false;
   /** Timestamp when this FileWatcher instance was created (used to distinguish old vs new files).
    * Floored to second granularity because filesystem birthtimeMs may have lower resolution
-   * than Date.now() — without this, a file created in the same millisecond-window could
+   * than Date.now() - without this, a file created in the same millisecond-window could
    * appear older than the watcher on some platforms (e.g. ext4 on Linux). */
   private readonly instanceCreatedAt = Math.floor(Date.now() / 1000) * 1000;
 
@@ -255,7 +255,7 @@ export class FileWatcher extends EventEmitter {
    * Inject the provider that decides which teams' team-root and task artifacts
    * are watched (typically alive ∪ engaged teams). The teams root and every
    * team's inboxes are always watched. Returning null (or leaving the provider
-   * unset) watches every team — the safe fallback / original behavior.
+   * unset) watches every team - the safe fallback / original behavior.
    *
    * Only the chokidar registry path is scoped; the EMFILE polling fallback still
    * watches every team so a scope change can never be mistaken for a deletion.

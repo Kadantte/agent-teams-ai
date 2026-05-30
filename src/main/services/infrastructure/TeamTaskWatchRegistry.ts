@@ -19,7 +19,7 @@ export interface TeamTaskWatchRegistryOptions {
    * artifacts should be watched. The root directory is always watched (to detect
    * new/removed teams), and for the 'teams' kind every team's `inboxes/` is
    * always watched (cross-team message delivery and notifications must stay
-   * immediate). Return `null` (or omit the provider) to watch every team — the
+   * immediate). Return `null` (or omit the provider) to watch every team - the
    * original behavior and the safe fallback.
    *
    * Scoping exists because team-root (config/kanban/processes/meta) and task
