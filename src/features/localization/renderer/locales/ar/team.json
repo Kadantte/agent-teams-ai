@@ -1485,7 +1485,7 @@
     },
     "status": {
       "reusedCrossTeamRequest": "Reused recent cross-team request",
-      "teamOffline": "الفريق غير المباشر"
+      "teamOffline": "غير متصل"
     },
     "revision": {
       "editing": "جارٍ تعديل الرسالة السابقة",

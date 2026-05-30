@@ -1485,7 +1485,7 @@
     },
     "status": {
       "reusedCrossTeamRequest": "Повторно использован недавний cross-team request",
-      "teamOffline": "Команда offline"
+      "teamOffline": "оффлайн"
     },
     "revision": {
       "editing": "Редактируется предыдущее сообщение",

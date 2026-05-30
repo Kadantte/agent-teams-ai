@@ -1485,7 +1485,7 @@
     },
     "status": {
       "reusedCrossTeamRequest": "重新使用最近的跨小组请求",
-      "teamOffline": "团队离线"
+      "teamOffline": "离线"
     },
     "revision": {
       "editing": "正在编辑上一条消息",

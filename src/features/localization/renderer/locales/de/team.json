@@ -1485,7 +1485,7 @@
     },
     "status": {
       "reusedCrossTeamRequest": "Neuer Cross-Dampf-Antrag",
-      "teamOffline": "Team offline"
+      "teamOffline": "offline"
     },
     "revision": {
       "editing": "Vorherige Nachricht wird bearbeitet",

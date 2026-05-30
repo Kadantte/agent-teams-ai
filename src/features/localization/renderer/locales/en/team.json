@@ -1485,7 +1485,7 @@
     },
     "status": {
       "reusedCrossTeamRequest": "Reused recent cross-team request",
-      "teamOffline": "Team offline"
+      "teamOffline": "offline"
     },
     "revision": {
       "editing": "Editing previous message",

@@ -1485,7 +1485,7 @@
     },
     "status": {
       "reusedCrossTeamRequest": "最近のクロスチームリクエストを再利用",
-      "teamOffline": "オフラインチーム"
+      "teamOffline": "オフライン"
     },
     "revision": {
       "editing": "前のメッセージを編集中",

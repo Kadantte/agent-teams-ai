@@ -894,7 +894,7 @@ export const MessageComposer = ({
           isCompactLayout ? 'space-y-1.5' : 'space-y-2'
         )}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {showAttachmentControl ? (
             <>
               <input
@@ -930,9 +930,12 @@ export const MessageComposer = ({
             </>
           ) : null}
 
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div className="ml-auto flex min-w-0 max-w-full items-center justify-end gap-2">
             {!isTeamAlive && !isLaunchBlocking && (
-              <span className="text-[10px]" style={{ color: 'var(--warning-text)' }}>
+              <span
+                className="shrink-0 whitespace-nowrap text-[10px]"
+                style={{ color: 'var(--warning-text)' }}
+              >
                 {t('messageComposer.status.teamOffline')}
               </span>
             )}
@@ -940,7 +943,7 @@ export const MessageComposer = ({
             {/* Combined team + member selector */}
             <div
               className={cn(
-                'mr-[15px] inline-flex items-center border text-xs transition-colors',
+                'mr-[15px] inline-flex min-w-0 max-w-[calc(100%_-_15px)] items-center overflow-hidden border text-xs transition-colors',
                 shouldDockRecipientSelector
                   ? 'relative z-[1] -mb-px overflow-hidden rounded-b-none rounded-t-[1.35rem] border-b-0 bg-[var(--color-surface-raised)]'
                   : 'rounded-full',
@@ -952,7 +955,7 @@ export const MessageComposer = ({
                   <button
                     type="button"
                     className={cn(
-                      'inline-flex items-center gap-1.5 border-r border-r-[var(--color-border)] px-2.5 py-1 text-xs transition-colors',
+                      'inline-flex min-w-0 max-w-[160px] items-center gap-1.5 border-r border-r-[var(--color-border)] px-2.5 py-1 text-xs transition-colors',
                       shouldDockRecipientSelector
                         ? 'rounded-bl-none rounded-tl-[1.35rem]'
                         : 'rounded-l-full',
@@ -988,7 +991,7 @@ export const MessageComposer = ({
                             style={{ backgroundColor: currentTeamColor }}
                           />
                         ) : null}
-                        <span className="text-[var(--color-text-secondary)]">
+                        <span className="min-w-0 truncate text-[var(--color-text-secondary)]">
                           {t('messageComposer.teamSelector.thisTeam')}
                         </span>
                       </>
@@ -1111,7 +1114,7 @@ export const MessageComposer = ({
                   <button
                     type="button"
                     className={cn(
-                      'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs transition-colors',
+                      'inline-flex min-w-0 max-w-[150px] items-center gap-1.5 px-2.5 py-1 text-xs transition-colors',
                       shouldDockRecipientSelector
                         ? 'rounded-br-none rounded-tr-[1.35rem]'
                         : 'rounded-r-full',

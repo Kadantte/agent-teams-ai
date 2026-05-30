@@ -1552,8 +1552,32 @@ a[href],
 .message-composer-orbit-path,
 .message-composer-orbit-glow {
   stroke-dasharray: 9 91;
+  animation: message-composer-orbit-dash 9.6s linear infinite;
   stroke-linecap: butt;
   stroke-linejoin: round;
+}
+
+.message-composer-orbit-path-secondary,
+.message-composer-orbit-glow-secondary {
+  animation-name: message-composer-orbit-dash-secondary;
+}
+
+@keyframes message-composer-orbit-dash {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+@keyframes message-composer-orbit-dash-secondary {
+  from {
+    stroke-dashoffset: 50;
+  }
+  to {
+    stroke-dashoffset: -50;
+  }
 }
 
 .message-composer-orbit-path {
@@ -1574,6 +1598,18 @@ a[href],
 
 .message-composer-orbit-surface:focus-within .message-composer-orbit-glow {
   opacity: 0.36;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-composer-orbit-path,
+  .message-composer-orbit-glow {
+    animation: none;
+  }
+
+  .message-composer-orbit-path-secondary,
+  .message-composer-orbit-glow-secondary {
+    stroke-dashoffset: 50;
+  }
 }
 
 :root.light .message-composer-shell {

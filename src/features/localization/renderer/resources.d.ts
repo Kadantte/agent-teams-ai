@@ -4236,7 +4236,7 @@ export default interface Resources {
       };
       status: {
         reusedCrossTeamRequest: 'Reused recent cross-team request';
-        teamOffline: 'Team offline';
+        teamOffline: 'offline';
       };
       teamSelector: {
         current: 'current';
