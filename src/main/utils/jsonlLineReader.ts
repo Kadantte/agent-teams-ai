@@ -12,7 +12,7 @@ import { createReadStream } from 'fs';
  * a JSON string value, which readline would.
  *
  * The stream is opened with utf8 encoding, so the runtime's StringDecoder reassembles
- * multi-byte characters that straddle a chunk boundary before we split — string
+ * multi-byte characters that straddle a chunk boundary before we split - string
  * concatenation + `indexOf('\n')` is therefore safe.
  *
  * Semantics match the readline loop the callers replace:
