@@ -7,13 +7,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { getTeamColorSet } from '@renderer/constants/teamColors';
 import { useTheme } from '@renderer/hooks/useTheme';
 import { cn } from '@renderer/lib/utils';
-import { useStore } from '@renderer/store';
-import { selectResolvedMembersForTeamName } from '@renderer/store/slices/teamSlice';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
 import { renderLinkifiedText } from '@renderer/utils/linkifiedText';
 import {
   agentAvatarUrl,
-  buildMemberAvatarMap,
   buildMemberLaunchPresentation,
   displayMemberName,
   isOpenCodeRelaunchActionable,
@@ -72,8 +69,10 @@ export interface RuntimeTelemetryScale {
 }
 
 interface MemberCardProps {
+  teamName?: string;
   member: ResolvedTeamMember;
   memberColor: string;
+  avatarUrl?: string;
   fullBleedSurface?: boolean;
   runtimeSummary?: string;
   runtimeEntry?: TeamAgentRuntimeEntry;
@@ -301,53 +300,8 @@ function normalizeRuntimeTelemetrySamples(history: unknown): TeamAgentRuntimeRes
   return (Array.isArray(history) ? history : []).filter(isRuntimeTelemetrySampleLike);
 }
 
-function buildRuntimeTelemetryTitle(
-  runtimeEntry: TeamAgentRuntimeEntry | undefined
-): string | undefined {
-  if (!runtimeEntry) {
-    return undefined;
-  }
-  if (normalizeRuntimeTelemetrySamples(runtimeEntry?.resourceHistory).length === 0) {
-    return undefined;
-  }
-
-  const lines = [
-    'CPU includes parent + child processes.',
-    'Local CPU excludes remote LLM inference.',
-  ];
-  if (runtimeEntry.runtimeLoadScope === 'shared-host') {
-    lines.push('Shared OpenCode host metric; not exclusive to this member.');
-  }
-  if (runtimeEntry.runtimeLoadTruncated) {
-    lines.push('Process tree was capped for this sample.');
-  }
-
-  const detailParts = [
-    runtimeEntry.pid ? `root PID ${runtimeEntry.pid}` : undefined,
-    runtimeEntry.processCount ? `${runtimeEntry.processCount} processes` : undefined,
-    runtimeEntry.runtimeLoadScope ? `scope ${runtimeEntry.runtimeLoadScope}` : undefined,
-    'sample 5s',
-  ].filter((part): part is string => Boolean(part));
-  if (detailParts.length > 0) {
-    lines.push(detailParts.join(' · '));
-  }
-
-  const aggregateCpuLabel = formatRuntimeTelemetryPercent(runtimeEntry.cpuPercent);
-  const primaryCpuLabel = formatRuntimeTelemetryPercent(runtimeEntry.primaryCpuPercent);
-  const childCpuLabel = formatRuntimeTelemetryPercent(runtimeEntry.childCpuPercent);
-  const rssLabel = formatRuntimeTelemetryBytes(runtimeEntry.rssBytes);
-  const splitParts = [
-    aggregateCpuLabel ? `CPU ${aggregateCpuLabel}` : undefined,
-    primaryCpuLabel ? `root ${primaryCpuLabel}` : undefined,
-    childCpuLabel ? `children ${childCpuLabel}` : undefined,
-    rssLabel ? `RSS ${rssLabel}` : undefined,
-  ].filter((part): part is string => Boolean(part));
-  if (splitParts.length > 0) {
-    lines.push(splitParts.join(' · '));
-  }
-
-  lines.push('RSS is summed process RSS and can include shared pages.');
-  return lines.join('\n');
+function hasRuntimeTelemetrySamples(history: unknown): boolean {
+  return Array.isArray(history) && history.some(isRuntimeTelemetrySampleLike);
 }
 
 const RuntimeTelemetryTooltipContent = ({
@@ -613,8 +567,10 @@ const MemberRuntimeTelemetryStrip = memo(function MemberRuntimeTelemetryStrip({
 });
 
 export const MemberCard = memo(function MemberCard({
+  teamName,
   member,
   memberColor,
+  avatarUrl,
   fullBleedSurface = true,
   runtimeSummary,
   runtimeEntry,
@@ -654,17 +610,12 @@ export const MemberCard = memo(function MemberCard({
   // const leadContext = useStore((s) =>
   //   member.agentType === 'team-lead' && teamName ? s.leadContextByTeam[teamName] : undefined
   // );
-  const selectedTeamName = useStore((s) => s.selectedTeamName);
   const [retryingLaunch, setRetryingLaunch] = useState(false);
   const [retryLaunchError, setRetryLaunchError] = useState<string | null>(null);
   const [skippingLaunch, setSkippingLaunch] = useState(false);
   const [skipLaunchError, setSkipLaunchError] = useState<string | null>(null);
   const [restoringMember, setRestoringMember] = useState(false);
   const [restoreMemberError, setRestoreMemberError] = useState<string | null>(null);
-  const teamMembers = useStore((s) =>
-    selectedTeamName ? selectResolvedMembersForTeamName(s, selectedTeamName) : []
-  );
-  const avatarMap = useMemo(() => buildMemberAvatarMap(teamMembers), [teamMembers]);
   const bootstrapConfirmedProvisionedButNotAlive =
     isBootstrapConfirmedProvisionedButNotAliveFailure(spawnEntry);
   const hasUnsafeBootstrapConfirmedProvisionedButNotAlive =
@@ -759,8 +710,10 @@ export const MemberCard = memo(function MemberCard({
     : visibleReviewTask
       ? `Reviewing task: #${deriveTaskDisplayId(visibleReviewTask.id)}`
       : undefined;
-  const runtimeTelemetryTitle = buildRuntimeTelemetryTitle(runtimeEntry);
-  const showRuntimeTelemetryTooltip = Boolean(runtimeTelemetryTitle);
+  const showRuntimeTelemetryTooltip = useMemo(
+    () => hasRuntimeTelemetrySamples(runtimeEntry?.resourceHistory),
+    [runtimeEntry?.resourceHistory]
+  );
   const rowTitle = showRuntimeTelemetryTooltip ? undefined : activityTitle;
   const runtimeTelemetryTooltipIdRef = useRef<string | null>(null);
   if (runtimeTelemetryTooltipIdRef.current == null) {
@@ -881,7 +834,7 @@ export const MemberCard = memo(function MemberCard({
   const launchDiagnosticsPayload = useMemo(
     () =>
       buildMemberLaunchDiagnosticsPayload({
-        teamName: selectedTeamName,
+        teamName,
         runId: runtimeRunId,
         memberName: member.name,
         member,
@@ -900,7 +853,7 @@ export const MemberCard = memo(function MemberCard({
       runtimeAdvisoryLabel,
       runtimeAdvisoryTitle,
       runtimeRunId,
-      selectedTeamName,
+      teamName,
       spawnEntry,
       effectiveSpawnLaunchState,
       spawnLivenessSource,
@@ -1077,7 +1030,7 @@ export const MemberCard = memo(function MemberCard({
               }}
             >
               <img
-                src={avatarMap.get(member.name) ?? agentAvatarUrl(member.name)}
+                src={avatarUrl ?? agentAvatarUrl(member.name)}
                 alt={member.name}
                 className="size-7 rounded-full bg-[var(--color-surface-raised)]"
                 loading="lazy"
@@ -1585,14 +1538,16 @@ export const MemberCard = memo(function MemberCard({
       onOpenChange={handleRuntimeTelemetryTooltipOpenChange}
     >
       <TooltipTrigger asChild>{cardContent}</TooltipTrigger>
-      <TooltipContent
-        side="left"
-        align="start"
-        sideOffset={8}
-        className="border-blue-400/20 bg-[var(--color-surface)] p-3 shadow-xl shadow-black/30"
-      >
-        <RuntimeTelemetryTooltipContent runtimeEntry={runtimeEntry} />
-      </TooltipContent>
+      {runtimeTelemetryTooltipOpen ? (
+        <TooltipContent
+          side="left"
+          align="start"
+          sideOffset={8}
+          className="border-blue-400/20 bg-[var(--color-surface)] p-3 shadow-xl shadow-black/30"
+        >
+          <RuntimeTelemetryTooltipContent runtimeEntry={runtimeEntry} />
+        </TooltipContent>
+      ) : null}
     </Tooltip>
   );
 });

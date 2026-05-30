@@ -7,7 +7,11 @@ import {
   deriveWorkActivityTimerAnchor,
   syncMemberActivityTimer,
 } from '@renderer/utils/memberActivityTimer';
-import { buildMemberColorMap, shouldDisplayMemberCurrentTask } from '@renderer/utils/memberHelpers';
+import {
+  buildMemberAvatarMap,
+  buildMemberColorMap,
+  shouldDisplayMemberCurrentTask,
+} from '@renderer/utils/memberHelpers';
 import { resolveMemberRuntimeSummary } from '@renderer/utils/memberRuntimeSummary';
 import { isDisplayableCurrentTask } from '@renderer/utils/teamTaskDisplayState';
 import { isLeadMember } from '@shared/utils/leadDetection';
@@ -480,9 +484,11 @@ function areMemberListPropsEqual(
 // ---------------------------------------------------------------------------
 
 interface MemberCardRowProps {
+  teamName: string;
   member: ResolvedTeamMember;
   isRemoved: boolean;
   memberColor: string;
+  avatarUrl?: string;
   fullBleedSurface: boolean;
   currentTask: TeamTaskWithKanban | null;
   reviewTask: TeamTaskWithKanban | null;
@@ -516,9 +522,11 @@ interface MemberCardRowProps {
 }
 
 const MemberCardRow = memo(function MemberCardRow({
+  teamName,
   member,
   isRemoved,
   memberColor,
+  avatarUrl,
   fullBleedSurface,
   currentTask,
   reviewTask,
@@ -567,8 +575,10 @@ const MemberCardRow = memo(function MemberCardRow({
 
   return (
     <MemberCard
+      teamName={teamName}
       member={member}
       memberColor={memberColor}
+      avatarUrl={avatarUrl}
       fullBleedSurface={fullBleedSurface}
       taskCounts={taskCounts}
       isTeamAlive={isTeamAlive}
@@ -761,6 +771,7 @@ export const MemberList = memo(function MemberList({
     [activeMembers]
   );
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
+  const avatarMap = useMemo(() => buildMemberAvatarMap(members), [members]);
   const runtimeTelemetryScale = useMemo(
     () => buildRuntimeTelemetryScale(activeMembers, memberRuntimeEntries),
     [activeMembers, memberRuntimeEntries]
@@ -1012,9 +1023,11 @@ export const MemberList = memo(function MemberList({
           return (
             <MemberCardRow
               key={member.name}
+              teamName={teamName}
               member={member}
               isRemoved={false}
               memberColor={colorMap.get(member.name) ?? 'blue'}
+              avatarUrl={avatarMap.get(member.name)}
               fullBleedSurface={!isWide}
               currentTask={currentTask}
               reviewTask={reviewTask}
@@ -1064,9 +1077,11 @@ export const MemberList = memo(function MemberList({
             {removedMembers.map((member) => (
               <MemberCardRow
                 key={member.name}
+                teamName={teamName}
                 member={member}
                 isRemoved={true}
                 memberColor={colorMap.get(member.name) ?? 'blue'}
+                avatarUrl={avatarMap.get(member.name)}
                 fullBleedSurface={!isWide}
                 currentTask={null}
                 reviewTask={null}
