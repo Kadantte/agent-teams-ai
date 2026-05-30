@@ -18,6 +18,15 @@ interface ActivityIntervalResult {
   failed?: boolean;
 }
 
+interface TaskDirectorySignature {
+  key: string;
+}
+
+interface ResumeMembersCacheEntry {
+  memberKey: string;
+  signatureKey: string;
+}
+
 type MutableTeamTask = TeamTask & {
   reviewIntervals?: TaskReviewInterval[];
 };
@@ -322,13 +331,15 @@ function writeTaskFile(filePath: string, task: MutableTeamTask): void {
 }
 
 export class TeamTaskActivityIntervalService {
-  private mutateTeamTasks(
+  private readonly resumeMembersCache = new Map<string, ResumeMembersCacheEntry>();
+
+  private mutateTeamTasksWithLock(
     teamName: string,
-    mutate: (task: MutableTeamTask) => boolean
+    run: () => ActivityIntervalResult
   ): ActivityIntervalResult {
     const lockScope = path.join(getTeamsBasePath(), teamName, 'board-state');
     try {
-      return withFileLockSync(lockScope, () => this.mutateTeamTasksUnlocked(teamName, mutate));
+      return withFileLockSync(lockScope, run);
     } catch (error) {
       logger.warn(
         `[${teamName}] Failed to update task activity intervals: ${
@@ -337,6 +348,19 @@ export class TeamTaskActivityIntervalService {
       );
       return { changedTasks: 0, failed: true };
     }
+  }
+
+  private mutateTeamTasks(
+    teamName: string,
+    mutate: (task: MutableTeamTask) => boolean
+  ): ActivityIntervalResult {
+    const result = this.mutateTeamTasksWithLock(teamName, () =>
+      this.mutateTeamTasksUnlocked(teamName, mutate)
+    );
+    if (result.changedTasks > 0 || result.failed) {
+      this.resumeMembersCache.delete(teamName);
+    }
+    return result;
   }
 
   private mutateTeamTasksUnlocked(
@@ -369,6 +393,38 @@ export class TeamTaskActivityIntervalService {
       TeamTaskReader.invalidateAllTasksCache();
     }
     return { changedTasks };
+  }
+
+  private readTaskDirectorySignature(teamName: string): TaskDirectorySignature | null {
+    const tasksDir = path.join(getTasksBasePath(), teamName);
+    let entries: string[];
+    try {
+      entries = fs
+        .readdirSync(tasksDir)
+        .filter((fileName) => fileName.endsWith('.json') && !fileName.startsWith('.'))
+        .sort();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { key: 'missing' };
+      }
+      return null;
+    }
+
+    const parts: string[] = [];
+    for (const fileName of entries) {
+      try {
+        const stat = fs.statSync(path.join(tasksDir, fileName));
+        if (!stat.isFile()) continue;
+        parts.push([fileName, stat.size, stat.mtimeMs, stat.ctimeMs].join('\0'));
+      } catch {
+        return null;
+      }
+    }
+    return { key: parts.join('\0\0') };
+  }
+
+  private makeMemberSetKey(memberKeys: ReadonlySet<string>): string {
+    return [...memberKeys].sort().join('\0');
   }
 
   pauseActiveIntervalsForTeam(
@@ -450,7 +506,8 @@ export class TeamTaskActivityIntervalService {
    * file-lock + read of every task file PER member PER cycle. This applies the
    * identical per-member resume logic against a member set in one locked pass, so
    * the mutations are exactly the same but the lock + reads happen once per cycle
-   * instead of once per member.
+   * instead of once per member. After a no-op pass, a task-file signature skips
+   * unchanged repeat cycles without parsing every task JSON again.
    */
   resumeActiveIntervalsForMembers(
     teamName: string,
@@ -461,42 +518,74 @@ export class TeamTaskActivityIntervalService {
       memberNames.map((name) => normalizeMemberName(name)).filter((key): key is string => !!key)
     );
     if (memberKeys.size === 0) return { changedTasks: 0 };
+    const memberKey = this.makeMemberSetKey(memberKeys);
 
-    return this.mutateTeamTasks(teamName, (task) => {
-      let changed = false;
-
+    const result = this.mutateTeamTasksWithLock(teamName, () => {
+      const beforeSignature = this.readTaskDirectorySignature(teamName);
+      const cached = this.resumeMembersCache.get(teamName);
       if (
-        task.status === 'in_progress' &&
-        memberKeys.has(normalizeMemberName(task.owner)) &&
-        !hasOpenWorkInterval(task)
+        beforeSignature &&
+        cached?.memberKey === memberKey &&
+        cached.signatureKey === beforeSignature.key
       ) {
-        const activeStartedAt = getActiveWorkStartedAt(task);
-        task.workIntervals = [
-          ...(Array.isArray(task.workIntervals) ? task.workIntervals : []),
-          { startedAt: resumeStartIso(activeStartedAt, at) },
-        ];
-        changed = true;
+        return { changedTasks: 0 };
       }
 
-      const activeReview = getActiveReviewStart(task);
-      if (
-        task.status === 'completed' &&
-        activeReview &&
-        memberKeys.has(normalizeMemberName(activeReview.reviewer)) &&
-        !hasOpenReviewInterval(task, activeReview.reviewer)
-      ) {
-        task.reviewIntervals = [
-          ...(Array.isArray(task.reviewIntervals) ? task.reviewIntervals : []),
-          {
-            reviewer: activeReview.reviewer,
-            startedAt: resumeStartIso(activeReview.startedAt, at),
-          },
-        ];
-        changed = true;
-      }
+      const mutationResult = this.mutateTeamTasksUnlocked(teamName, (task) => {
+        let changed = false;
 
-      return changed;
+        if (
+          task.status === 'in_progress' &&
+          memberKeys.has(normalizeMemberName(task.owner)) &&
+          !hasOpenWorkInterval(task)
+        ) {
+          const activeStartedAt = getActiveWorkStartedAt(task);
+          task.workIntervals = [
+            ...(Array.isArray(task.workIntervals) ? task.workIntervals : []),
+            { startedAt: resumeStartIso(activeStartedAt, at) },
+          ];
+          changed = true;
+        }
+
+        const activeReview = getActiveReviewStart(task);
+        if (
+          task.status === 'completed' &&
+          activeReview &&
+          memberKeys.has(normalizeMemberName(activeReview.reviewer)) &&
+          !hasOpenReviewInterval(task, activeReview.reviewer)
+        ) {
+          task.reviewIntervals = [
+            ...(Array.isArray(task.reviewIntervals) ? task.reviewIntervals : []),
+            {
+              reviewer: activeReview.reviewer,
+              startedAt: resumeStartIso(activeReview.startedAt, at),
+            },
+          ];
+          changed = true;
+        }
+
+        return changed;
+      });
+
+      const nextSignature =
+        mutationResult.changedTasks > 0
+          ? this.readTaskDirectorySignature(teamName)
+          : beforeSignature;
+      if (nextSignature) {
+        this.resumeMembersCache.set(teamName, {
+          memberKey,
+          signatureKey: nextSignature.key,
+        });
+      } else {
+        this.resumeMembersCache.delete(teamName);
+      }
+      return mutationResult;
     });
+
+    if (result.failed) {
+      this.resumeMembersCache.delete(teamName);
+    }
+    return result;
   }
 
   repairStaleIntervalsAfterCrash(
