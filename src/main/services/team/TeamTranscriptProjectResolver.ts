@@ -8,13 +8,22 @@ import {
 } from '@main/utils/pathDecoder';
 import { isLeadMember } from '@shared/utils/leadDetection';
 import { createLogger } from '@shared/utils/logger';
+import { createHash } from 'crypto';
 import { type Dirent } from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { StringDecoder } from 'string_decoder';
 
+import { JsonTeamTranscriptAffinityIndexStore } from './cache/JsonTeamTranscriptAffinityIndexStore';
 import { TeamConfigReader } from './TeamConfigReader';
 
+import type {
+  PersistedTeamTranscriptAffinityEntry,
+  PersistedTeamTranscriptAffinityIndex,
+  TeamTranscriptAffinityFileSignature,
+  TeamTranscriptAffinityIndexStore,
+  TeamTranscriptAffinityMatchSource,
+} from './cache/teamTranscriptAffinityIndexTypes';
 import type { TeamConfig } from '@shared/types';
 
 const logger = createLogger('Service:TeamTranscriptProjectResolver');
@@ -62,6 +71,13 @@ interface TeamTranscriptProjectContextOptions {
   forceRefresh?: boolean;
   includeTeamSubagentSessionDiscovery?: boolean;
 }
+
+type TeamTranscriptFileStat = {
+  mtimeMs: number;
+  size: number;
+  ctimeMs?: number;
+  isFile: () => boolean;
+};
 
 type ScannedSessionProjectMatch = Omit<SessionProjectMatch, 'projectPath'> & {
   projectPath?: string;
@@ -255,7 +271,10 @@ export interface TeamTranscriptProjectLiveBaseContext {
 interface TeamAffinityFileCacheEntry {
   mtimeMs: number;
   size: number;
+  ctimeMs?: number;
   belongsToTeam: boolean;
+  inspectedLineCount: number;
+  headFingerprint: string;
   // True when the verdict was decided after inspecting a FULL head window
   // (>= TEAM_AFFINITY_SCAN_LINES non-empty lines). For append-only transcripts the
   // head is immutable, so a `false` verdict from a full window stays valid while the
@@ -272,13 +291,21 @@ interface TeamAffinityHeadLineMetadata {
 interface TeamAffinityHeadMetadataCacheEntry {
   mtimeMs: number;
   size: number;
+  ctimeMs?: number;
   inspectedLineCount: number;
+  headFingerprint: string;
   lines: TeamAffinityHeadLineMetadata[];
 }
 
 interface TeamAffinityEvaluation {
   belongsToTeam: boolean;
   inspectedLineCount: number;
+  matchSource: TeamTranscriptAffinityMatchSource;
+}
+
+interface TeamAffinityInspectionResult extends TeamAffinityEvaluation {
+  headWindowFull: boolean;
+  indexable: boolean;
 }
 
 export class TeamTranscriptProjectResolver {
@@ -294,7 +321,8 @@ export class TeamTranscriptProjectResolver {
   >();
 
   constructor(
-    private readonly configReader: TeamTranscriptProjectConfigReader = new TeamConfigReader()
+    private readonly configReader: TeamTranscriptProjectConfigReader = new TeamConfigReader(),
+    private readonly affinityIndexStore: TeamTranscriptAffinityIndexStore = new JsonTeamTranscriptAffinityIndexStore()
   ) {}
 
   private readConfigForObservation(teamName: string): Promise<TeamConfig | null> {
@@ -388,6 +416,7 @@ export class TeamTranscriptProjectResolver {
     const sessionIds = await this.discoverSessionIds(
       teamName,
       resolution.projectDir,
+      resolution.projectId,
       resolvedConfig,
       options
     );
@@ -538,6 +567,7 @@ export class TeamTranscriptProjectResolver {
         }
         const teamRootSessionIds = await this.listTeamRootSessionIds(
           dirCandidate.projectDir,
+          dirCandidate.projectId,
           teamName
         );
         if (teamRootSessionIds.length > 0) {
@@ -848,6 +878,7 @@ export class TeamTranscriptProjectResolver {
   private async discoverSessionIds(
     teamName: string,
     projectDir: string,
+    projectId: string,
     config: TeamConfig,
     options?: TeamTranscriptProjectContextOptions
   ): Promise<string[]> {
@@ -858,7 +889,7 @@ export class TeamTranscriptProjectResolver {
       ? null
       : teamLifecycleMtimeCutoffMs(config);
     const [teamRootSessionIds, teamSubagentSessionIds] = await Promise.all([
-      this.listTeamRootSessionIds(projectDir, teamName, rootMtimeSinceMs),
+      this.listTeamRootSessionIds(projectDir, projectId, teamName, rootMtimeSinceMs),
       includeTeamSubagentSessionDiscovery
         ? this.listTeamSubagentSessionIds(projectDir, teamName)
         : Promise.resolve([]),
@@ -992,32 +1023,57 @@ export class TeamTranscriptProjectResolver {
   private async collectRootJsonlSessionIds(
     rootJsonlEntries: Dirent[],
     projectDir: string,
+    projectId: string,
     teamName: string,
     mtimeSinceMs?: number | null
   ): Promise<string[]> {
     const discovered = new Set<string>();
+    const rootFileNames = new Set(rootJsonlEntries.map((entry) => entry.name));
+    const indexEnabled = this.isPersistentAffinityIndexEnabled();
+    const affinityIndex = indexEnabled
+      ? await this.loadTeamTranscriptAffinityIndex(teamName, projectId)
+      : null;
+    const shouldPruneAffinityIndex = Boolean(
+      affinityIndex &&
+      Object.keys(affinityIndex.entries).some((fileName) => !rootFileNames.has(fileName))
+    );
+    const pendingIndexEntries: PersistedTeamTranscriptAffinityEntry[] = [];
     let nextIndex = 0;
 
     const scanNextRootEntry = async (): Promise<void> => {
       while (nextIndex < rootJsonlEntries.length) {
         const entry = rootJsonlEntries[nextIndex++];
         const filePath = path.join(projectDir, entry.name);
-        let precomputedStat: { mtimeMs: number; size: number; isFile: () => boolean } | undefined;
-        if (mtimeSinceMs != null) {
-          try {
-            const stat = await fs.stat(filePath);
-            if (!stat.isFile() || stat.mtimeMs < mtimeSinceMs) {
-              continue;
-            }
-            precomputedStat = stat;
-          } catch {
-            continue;
-          }
-        }
-        if (!(await this.fileBelongsToTeam(filePath, teamName, precomputedStat))) {
+        let fileStat: TeamTranscriptFileStat;
+        try {
+          fileStat = await fs.stat(filePath);
+        } catch {
           continue;
         }
-        discovered.add(entry.name.slice(0, -'.jsonl'.length));
+        if (!fileStat.isFile() || (mtimeSinceMs != null && fileStat.mtimeMs < mtimeSinceMs)) {
+          continue;
+        }
+
+        const indexedBelongsToTeam = indexEnabled
+          ? this.decideTeamAffinityFromIndex(affinityIndex?.entries[entry.name], fileStat)
+          : null;
+        if (indexedBelongsToTeam !== null) {
+          if (indexedBelongsToTeam) {
+            discovered.add(entry.name.slice(0, -'.jsonl'.length));
+          }
+          continue;
+        }
+
+        const inspection = await this.inspectFileTeamAffinity(filePath, teamName, fileStat);
+        if (inspection.belongsToTeam) {
+          discovered.add(entry.name.slice(0, -'.jsonl'.length));
+        }
+        if (inspection.indexable) {
+          const indexEntry = this.buildTeamAffinityIndexEntry(entry.name, fileStat, inspection);
+          if (indexEntry) {
+            pendingIndexEntries.push(indexEntry);
+          }
+        }
       }
     };
 
@@ -1027,11 +1083,26 @@ export class TeamTranscriptProjectResolver {
       )
     );
 
+    if (indexEnabled && (pendingIndexEntries.length > 0 || shouldPruneAffinityIndex)) {
+      await this.affinityIndexStore
+        .upsertProjectEntries({
+          teamName,
+          projectId,
+          projectDir,
+          rootFileNames,
+          entries: pendingIndexEntries,
+        })
+        .catch((error) => {
+          logger.debug(`Failed to write transcript affinity index: ${String(error)}`);
+        });
+    }
+
     return [...discovered];
   }
 
   private async listTeamRootSessionIds(
     projectDir: string,
+    projectId: string,
     teamName: string,
     mtimeSinceMs?: number | null
   ): Promise<string[]> {
@@ -1043,49 +1114,89 @@ export class TeamTranscriptProjectResolver {
     const rootJsonlEntries = dirEntries.filter(
       (entry) => entry.isFile() && entry.name.endsWith('.jsonl')
     );
-    return this.collectRootJsonlSessionIds(rootJsonlEntries, projectDir, teamName, mtimeSinceMs);
+    return this.collectRootJsonlSessionIds(
+      rootJsonlEntries,
+      projectDir,
+      projectId,
+      teamName,
+      mtimeSinceMs
+    );
   }
 
   private async fileBelongsToTeam(
     filePath: string,
     teamName: string,
-    precomputedStat?: { mtimeMs: number; size: number; isFile: () => boolean }
+    precomputedStat?: TeamTranscriptFileStat
   ): Promise<boolean> {
+    return (await this.inspectFileTeamAffinity(filePath, teamName, precomputedStat)).belongsToTeam;
+  }
+
+  private async inspectFileTeamAffinity(
+    filePath: string,
+    teamName: string,
+    precomputedStat?: TeamTranscriptFileStat
+  ): Promise<TeamAffinityInspectionResult> {
+    const emptyResult: TeamAffinityInspectionResult = {
+      belongsToTeam: false,
+      inspectedLineCount: 0,
+      matchSource: 'none',
+      headWindowFull: false,
+      indexable: false,
+    };
     const normalizedTeam = teamName.trim().toLowerCase();
     if (!normalizedTeam) {
-      return false;
+      return emptyResult;
     }
 
     // Reuse the caller's stat when it already statted this exact file (the mtime-window
     // filter in collectRootJsonlSessionIds does). On the live resolution path this drops
     // a second fs.stat of the same file per entry, every poll — and using a single stat
     // snapshot is also more consistent than two reads that could straddle a write.
-    let fileStat: { mtimeMs: number; size: number; isFile: () => boolean };
+    let fileStat: TeamTranscriptFileStat;
     if (precomputedStat) {
       fileStat = precomputedStat;
     } else {
       try {
         fileStat = await fs.stat(filePath);
       } catch {
-        return false;
+        return emptyResult;
       }
     }
 
     if (!fileStat.isFile()) {
-      return false;
+      return emptyResult;
     }
 
     const cacheKey = this.buildTeamAffinityFileCacheKey(filePath, normalizedTeam);
     const cached = this.teamAffinityFileCache.get(cacheKey);
     if (cached) {
+      if (this.teamTranscriptFileSignaturesMatch(cached, fileStat)) {
+        return {
+          belongsToTeam: cached.belongsToTeam,
+          inspectedLineCount: 0,
+          matchSource: 'none',
+          headWindowFull: cached.headWindowFull,
+          indexable: false,
+        };
+      }
       // A positive affinity is decided by early "head" lines that persist as an
       // append-only transcript grows, so a `true` result stays valid while the file
       // only grows (size >= cached). This avoids re-streaming the team's own
       // continuously-growing transcripts on every bootstrap poll. A `false` result
       // is still re-checked on any change, since a short file may later grow head
       // lines that mention the team; a shrink (rewrite/truncate) also forces a re-scan.
-      if (cached.belongsToTeam && fileStat.size >= cached.size) {
-        return true;
+      if (
+        cached.belongsToTeam &&
+        fileStat.size >= cached.size &&
+        (await this.isCachedTeamAffinityHeadCurrent(filePath, cached))
+      ) {
+        return {
+          belongsToTeam: true,
+          inspectedLineCount: 0,
+          matchSource: 'none',
+          headWindowFull: cached.headWindowFull,
+          indexable: false,
+        };
       }
       // A `false` decided from a FULL head window is durable while the file only
       // grows: the first TEAM_AFFINITY_SCAN_LINES lines of an append-only transcript
@@ -1094,27 +1205,45 @@ export class TeamTranscriptProjectResolver {
       // re-scan below, identically to the positive path. This is the main launch win:
       // non-matching transcripts in the project dir are no longer re-streamed +
       // re-parsed on every bootstrap poll.
-      if (!cached.belongsToTeam && cached.headWindowFull && fileStat.size >= cached.size) {
-        return false;
-      }
-      if (cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
-        return cached.belongsToTeam;
+      if (
+        !cached.belongsToTeam &&
+        cached.headWindowFull &&
+        fileStat.size >= cached.size &&
+        (await this.isCachedTeamAffinityHeadCurrent(filePath, cached))
+      ) {
+        return {
+          belongsToTeam: false,
+          inspectedLineCount: 0,
+          matchSource: 'none',
+          headWindowFull: true,
+          indexable: false,
+        };
       }
     }
 
     const headMetadata = await this.getTeamAffinityHeadMetadata(filePath, fileStat);
     if (!headMetadata) {
-      return false;
+      return emptyResult;
     }
     const evaluation = this.evaluateTeamAffinityHeadMetadata(headMetadata, normalizedTeam);
+    const headWindowFull = evaluation.inspectedLineCount >= TEAM_AFFINITY_SCAN_LINES;
 
     this.setTeamAffinityFileCacheEntry(cacheKey, {
       mtimeMs: fileStat.mtimeMs,
       size: fileStat.size,
+      ...(fileStat.ctimeMs != null && Number.isFinite(fileStat.ctimeMs)
+        ? { ctimeMs: fileStat.ctimeMs }
+        : {}),
       belongsToTeam: evaluation.belongsToTeam,
-      headWindowFull: evaluation.inspectedLineCount >= TEAM_AFFINITY_SCAN_LINES,
+      inspectedLineCount: headMetadata.inspectedLineCount,
+      headFingerprint: headMetadata.headFingerprint,
+      headWindowFull,
     });
-    return evaluation.belongsToTeam;
+    return {
+      ...evaluation,
+      headWindowFull,
+      indexable: true,
+    };
   }
 
   private evaluateTeamAffinityHeadMetadata(
@@ -1125,31 +1254,112 @@ export class TeamTranscriptProjectResolver {
     for (const line of metadata.lines) {
       inspectedLineCount += 1;
       if (line.nestedTeamNames.has(normalizedTeam)) {
-        return { belongsToTeam: true, inspectedLineCount };
+        return { belongsToTeam: true, inspectedLineCount, matchSource: 'nested_team_name' };
       }
       if (
         line.normalizedTextContent &&
         lineMentionsNormalizedTeam(line.normalizedTextContent, normalizedTeam)
       ) {
-        return { belongsToTeam: true, inspectedLineCount };
+        return { belongsToTeam: true, inspectedLineCount, matchSource: 'text_team_mention' };
       }
     }
-    return { belongsToTeam: false, inspectedLineCount: metadata.inspectedLineCount };
+    return {
+      belongsToTeam: false,
+      inspectedLineCount: metadata.inspectedLineCount,
+      matchSource: 'none',
+    };
   }
 
-  private async getTeamAffinityHeadMetadata(
-    filePath: string,
-    fileStat: { mtimeMs: number; size: number }
-  ): Promise<TeamAffinityHeadMetadataCacheEntry | null> {
-    const cached = this.teamAffinityHeadMetadataCache.get(filePath);
-    if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
-      return cached;
+  private isPersistentAffinityIndexEnabled(): boolean {
+    return process.env.CLAUDE_TEAM_TRANSCRIPT_AFFINITY_INDEX !== '0';
+  }
+
+  private async loadTeamTranscriptAffinityIndex(
+    teamName: string,
+    projectId: string
+  ): Promise<PersistedTeamTranscriptAffinityIndex | null> {
+    try {
+      return await this.affinityIndexStore.loadProject(teamName, projectId);
+    } catch (error) {
+      logger.debug(`Failed to load transcript affinity index: ${String(error)}`);
+      return null;
     }
-    if (cached) {
-      this.teamAffinityHeadMetadataCache.delete(filePath);
+  }
+
+  private decideTeamAffinityFromIndex(
+    entry: PersistedTeamTranscriptAffinityEntry | undefined,
+    fileStat: TeamTranscriptFileStat
+  ): boolean | null {
+    if (!entry) {
+      return null;
+    }
+    if (!this.teamTranscriptFileSignaturesMatch(entry.signature, fileStat)) {
+      return null;
+    }
+    return entry.verdict === 'belongs';
+  }
+
+  private teamTranscriptFileSignaturesMatch(
+    cached: { size: number; mtimeMs: number; ctimeMs?: number },
+    fileStat: { size: number; mtimeMs: number; ctimeMs?: number }
+  ): boolean {
+    if (cached.size !== fileStat.size || cached.mtimeMs !== fileStat.mtimeMs) {
+      return false;
+    }
+    const cachedCtimeMs =
+      cached.ctimeMs != null && Number.isFinite(cached.ctimeMs) ? cached.ctimeMs : null;
+    const currentCtimeMs =
+      fileStat.ctimeMs != null && Number.isFinite(fileStat.ctimeMs) ? fileStat.ctimeMs : null;
+    if (cachedCtimeMs !== null || currentCtimeMs !== null) {
+      return cachedCtimeMs !== null && currentCtimeMs !== null && cachedCtimeMs === currentCtimeMs;
+    }
+    return true;
+  }
+
+  private buildTeamAffinityIndexEntry(
+    fileName: string,
+    fileStat: TeamTranscriptFileStat,
+    inspection: TeamAffinityInspectionResult
+  ): PersistedTeamTranscriptAffinityEntry | null {
+    if (
+      fileName.length <= '.jsonl'.length ||
+      !fileName.endsWith('.jsonl') ||
+      fileName.includes('/') ||
+      fileName.includes('\\')
+    ) {
+      return null;
     }
 
-    const lines: TeamAffinityHeadLineMetadata[] = [];
+    const sessionId = fileName.slice(0, -'.jsonl'.length);
+    const signature: TeamTranscriptAffinityFileSignature = {
+      size: fileStat.size,
+      mtimeMs: fileStat.mtimeMs,
+      ...(fileStat.ctimeMs != null && Number.isFinite(fileStat.ctimeMs)
+        ? { ctimeMs: fileStat.ctimeMs }
+        : {}),
+    };
+
+    return {
+      fileName,
+      sessionId,
+      signature,
+      verdict: inspection.belongsToTeam ? 'belongs' : 'does_not_belong',
+      headWindowFull: inspection.headWindowFull,
+      inspectedLineCount: inspection.inspectedLineCount,
+      matchSource: inspection.matchSource,
+      writtenAt: new Date().toISOString(),
+    };
+  }
+
+  private async isCachedTeamAffinityHeadCurrent(
+    filePath: string,
+    cached: TeamAffinityFileCacheEntry
+  ): Promise<boolean> {
+    if (cached.inspectedLineCount <= 0) {
+      return false;
+    }
+
+    const fingerprint = createHash('sha256');
     let inspectedLineCount = 0;
     const inspectHeadLine = (rawLine: string): boolean => {
       const trimmed = rawLine.trim();
@@ -1157,6 +1367,76 @@ export class TeamTranscriptProjectResolver {
         return false;
       }
       inspectedLineCount += 1;
+      fingerprint.update(trimmed);
+      fingerprint.update('\n');
+      return inspectedLineCount >= cached.inspectedLineCount;
+    };
+
+    let handle: fs.FileHandle | null = null;
+    try {
+      handle = await fs.open(filePath, 'r');
+      const decoder = new StringDecoder('utf8');
+      const chunk = Buffer.allocUnsafe(TEAM_AFFINITY_READ_CHUNK_BYTES);
+      let pending = '';
+      let position = 0;
+      let stop = false;
+      while (!stop) {
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, position);
+        if (bytesRead <= 0) {
+          pending += decoder.end();
+          if (pending.length > 0) {
+            inspectHeadLine(pending);
+          }
+          break;
+        }
+        position += bytesRead;
+        pending += decoder.write(chunk.subarray(0, bytesRead));
+        let newlineIndex = pending.indexOf('\n');
+        while (newlineIndex !== -1) {
+          const line = pending.slice(0, newlineIndex);
+          pending = pending.slice(newlineIndex + 1);
+          if (inspectHeadLine(line)) {
+            stop = true;
+            break;
+          }
+          newlineIndex = pending.indexOf('\n');
+        }
+      }
+    } catch {
+      return false;
+    } finally {
+      await handle?.close().catch(() => undefined);
+    }
+
+    return (
+      inspectedLineCount === cached.inspectedLineCount &&
+      fingerprint.digest('hex') === cached.headFingerprint
+    );
+  }
+
+  private async getTeamAffinityHeadMetadata(
+    filePath: string,
+    fileStat: { mtimeMs: number; size: number; ctimeMs?: number }
+  ): Promise<TeamAffinityHeadMetadataCacheEntry | null> {
+    const cached = this.teamAffinityHeadMetadataCache.get(filePath);
+    if (cached && this.teamTranscriptFileSignaturesMatch(cached, fileStat)) {
+      return cached;
+    }
+    if (cached) {
+      this.teamAffinityHeadMetadataCache.delete(filePath);
+    }
+
+    const lines: TeamAffinityHeadLineMetadata[] = [];
+    const fingerprint = createHash('sha256');
+    let inspectedLineCount = 0;
+    const inspectHeadLine = (rawLine: string): boolean => {
+      const trimmed = rawLine.trim();
+      if (!trimmed) {
+        return false;
+      }
+      inspectedLineCount += 1;
+      fingerprint.update(trimmed);
+      fingerprint.update('\n');
       lines.push(parseTeamAffinityHeadLine(trimmed));
       return inspectedLineCount >= TEAM_AFFINITY_SCAN_LINES;
     };
@@ -1201,7 +1481,11 @@ export class TeamTranscriptProjectResolver {
     const entry = {
       mtimeMs: fileStat.mtimeMs,
       size: fileStat.size,
+      ...(fileStat.ctimeMs != null && Number.isFinite(fileStat.ctimeMs)
+        ? { ctimeMs: fileStat.ctimeMs }
+        : {}),
       inspectedLineCount,
+      headFingerprint: fingerprint.digest('hex'),
       lines,
     };
     this.setTeamAffinityHeadMetadataCacheEntry(filePath, entry);

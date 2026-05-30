@@ -6,13 +6,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TeamTranscriptProjectResolver } from '../../../../src/main/services/team/TeamTranscriptProjectResolver';
 import { encodePath, setClaudeBasePathOverride } from '../../../../src/main/utils/pathDecoder';
 
+import type { TeamTranscriptAffinityIndexStore } from '../../../../src/main/services/team/cache/teamTranscriptAffinityIndexTypes';
 import type { TeamConfig } from '../../../../src/shared/types/team';
 
 describe('TeamTranscriptProjectResolver', () => {
   let tmpDir: string | null = null;
+  const originalAffinityIndexEnv = process.env.CLAUDE_TEAM_TRANSCRIPT_AFFINITY_INDEX;
 
   afterEach(async () => {
     setClaudeBasePathOverride(null);
+    if (originalAffinityIndexEnv == null) {
+      delete process.env.CLAUDE_TEAM_TRANSCRIPT_AFFINITY_INDEX;
+    } else {
+      process.env.CLAUDE_TEAM_TRANSCRIPT_AFFINITY_INDEX = originalAffinityIndexEnv;
+    }
     if (tmpDir) {
       await fs.rm(tmpDir, { recursive: true, force: true });
       tmpDir = null;
@@ -36,6 +43,62 @@ describe('TeamTranscriptProjectResolver', () => {
   async function readTeamConfig(teamName: string): Promise<TeamConfig> {
     const raw = await fs.readFile(path.join(tmpDir!, 'teams', teamName, 'config.json'), 'utf8');
     return JSON.parse(raw) as TeamConfig;
+  }
+
+  function affinityIndexPath(teamName: string, projectId: string): string {
+    return path.join(
+      tmpDir!,
+      'teams',
+      teamName,
+      'cache',
+      'transcript-affinity',
+      `${encodeURIComponent(projectId)}.json`
+    );
+  }
+
+  async function readAffinityIndex(teamName: string, projectId: string): Promise<{
+    entries: Record<
+      string,
+      { signature: { size: number; mtimeMs: number; ctimeMs?: number }; verdict: string }
+    >;
+  }> {
+    const raw = await fs.readFile(affinityIndexPath(teamName, projectId), 'utf8');
+    return JSON.parse(raw) as {
+      entries: Record<
+        string,
+        { signature: { size: number; mtimeMs: number; ctimeMs?: number }; verdict: string }
+      >;
+    };
+  }
+
+  async function writeAffinityIndex(
+    teamName: string,
+    projectId: string,
+    value: unknown
+  ): Promise<void> {
+    const filePath = affinityIndexPath(teamName, projectId);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(value, null, 2), 'utf8');
+  }
+
+  function sameByteLengthNoTeamTranscript(targetBytes: number): string {
+    for (let length = 0; length < targetBytes; length += 1) {
+      const candidate = `${JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: 'x'.repeat(length),
+        },
+      })}\n`;
+      const candidateBytes = Buffer.byteLength(candidate, 'utf8');
+      if (candidateBytes === targetBytes) {
+        return candidate;
+      }
+      if (candidateBytes > targetBytes) {
+        break;
+      }
+    }
+    throw new Error(`Could not create same-byte transcript for ${targetBytes} bytes`);
   }
 
   async function createSessionFile(
@@ -624,6 +687,325 @@ describe('TeamTranscriptProjectResolver', () => {
     expect(fullContext?.sessionIds).toContain('old-member-session');
   });
 
+  it('uses a persistent exact affinity index without re-reading matching root transcript heads', async () => {
+    await setupClaudeRoot();
+
+    const teamName = 'persistent-index-team';
+    const projectPath = '/Users/test/persistent-index';
+    const sessionId = 'lead-indexed';
+    await createTeamAwareSessionFile(projectPath, sessionId, teamName, 'text');
+    await writeTeamConfig(teamName, {
+      name: 'Persistent Index Team',
+      projectPath,
+      members: [{ name: 'team-lead', agentType: 'team-lead', cwd: projectPath }],
+    });
+
+    const firstResolver = new TeamTranscriptProjectResolver();
+    const firstContext = await firstResolver.getContext(teamName, { forceRefresh: true });
+    expect(firstContext?.sessionIds).toContain(sessionId);
+
+    type ResolverScanProbe = {
+      getTeamAffinityHeadMetadata: (...args: unknown[]) => Promise<unknown>;
+    };
+    const secondResolver = new TeamTranscriptProjectResolver();
+    const scanSpy = vi.spyOn(
+      secondResolver as unknown as ResolverScanProbe,
+      'getTeamAffinityHeadMetadata'
+    );
+    scanSpy.mockRejectedValue(new Error('persistent index should bypass head scan'));
+
+    const secondContext = await secondResolver.getContext(teamName, { forceRefresh: true });
+
+    expect(secondContext?.sessionIds).toContain(sessionId);
+    expect(scanSpy).not.toHaveBeenCalled();
+    scanSpy.mockRestore();
+  });
+
+  it('falls back to a fresh head scan when a persistent index signature is stale', async () => {
+    await setupClaudeRoot();
+
+    const teamName = 'stale-persistent-index-team';
+    const projectPath = '/Users/test/stale-persistent-index';
+    const sessionId = 'stale-indexed';
+    const created = await createTeamAwareSessionFile(projectPath, sessionId, teamName, 'text');
+    await writeTeamConfig(teamName, {
+      name: 'Stale Persistent Index Team',
+      projectPath,
+      members: [{ name: 'team-lead', agentType: 'team-lead', cwd: projectPath }],
+    });
+
+    const firstResolver = new TeamTranscriptProjectResolver();
+    const firstContext = await firstResolver.getContext(teamName, { forceRefresh: true });
+    expect(firstContext?.sessionIds).toContain(sessionId);
+
+    await fs.writeFile(
+      created.jsonlPath,
+      `${JSON.stringify({
+        type: 'assistant',
+        message: { role: 'assistant', content: 'no team mention here' },
+      })}\n`,
+      'utf8'
+    );
+    const updatedAt = new Date(Date.now() + 5_000);
+    await fs.utimes(created.jsonlPath, updatedAt, updatedAt);
+
+    const secondResolver = new TeamTranscriptProjectResolver();
+    const secondContext = await secondResolver.getContext(teamName, { forceRefresh: true });
+
+    expect(secondContext?.sessionIds).not.toContain(sessionId);
+  });
+
+  it('treats ctime mismatch as stale even when persistent index size and mtime still match', async () => {
+    await setupClaudeRoot();
+
+    const teamName = 'ctime-persistent-index-team';
+    const projectPath = '/Users/test/ctime-persistent-index';
+    const projectId = encodePath(projectPath);
+    const sessionId = 'ctime-indexed';
+    const created = await createTeamAwareSessionFile(projectPath, sessionId, teamName, 'text');
+    const stableTime = new Date('2026-05-30T10:00:00.000Z');
+    await fs.utimes(created.jsonlPath, stableTime, stableTime);
+    await writeTeamConfig(teamName, {
+      name: 'Ctime Persistent Index Team',
+      projectPath,
+      members: [{ name: 'team-lead', agentType: 'team-lead', cwd: projectPath }],
+    });
+
+    const firstResolver = new TeamTranscriptProjectResolver();
+    const firstContext = await firstResolver.getContext(teamName, { forceRefresh: true });
+    expect(firstContext?.sessionIds).toContain(sessionId);
+
+    const indexedBefore = await readAffinityIndex(teamName, projectId);
+    const originalSize = indexedBefore.entries[`${sessionId}.jsonl`].signature.size;
+    await fs.writeFile(created.jsonlPath, sameByteLengthNoTeamTranscript(originalSize), 'utf8');
+    await fs.utimes(created.jsonlPath, stableTime, stableTime);
+    const currentStat = await fs.stat(created.jsonlPath);
+
+    expect(currentStat.size).toBe(originalSize);
+    expect(currentStat.mtimeMs).toBe(indexedBefore.entries[`${sessionId}.jsonl`].signature.mtimeMs);
+    expect(currentStat.ctimeMs).not.toBe(
+      indexedBefore.entries[`${sessionId}.jsonl`].signature.ctimeMs
+    );
+
+    const secondResolver = new TeamTranscriptProjectResolver();
+    const secondContext = await secondResolver.getContext(teamName, { forceRefresh: true });
+
+    expect(secondContext?.sessionIds).not.toContain(sessionId);
+  });
+
+  it('treats a persistent index entry without ctime as stale when the file stat has ctime', async () => {
+    await setupClaudeRoot();
+
+    const teamName = 'missing-ctime-persistent-index-team';
+    const projectPath = '/Users/test/missing-ctime-persistent-index';
+    const projectId = encodePath(projectPath);
+    const sessionId = 'missing-ctime-indexed';
+    await createTeamAwareSessionFile(projectPath, sessionId, teamName, 'text');
+    await writeTeamConfig(teamName, {
+      name: 'Missing Ctime Persistent Index Team',
+      projectPath,
+      members: [{ name: 'team-lead', agentType: 'team-lead', cwd: projectPath }],
+    });
+
+    const firstResolver = new TeamTranscriptProjectResolver();
+    const firstContext = await firstResolver.getContext(teamName, { forceRefresh: true });
+    expect(firstContext?.sessionIds).toContain(sessionId);
+
+    const index = await readAffinityIndex(teamName, projectId);
+    delete index.entries[`${sessionId}.jsonl`].signature.ctimeMs;
+    await writeAffinityIndex(teamName, projectId, index);
+
+    type ResolverScanProbe = {
+      getTeamAffinityHeadMetadata: (...args: unknown[]) => Promise<unknown>;
+    };
+    const secondResolver = new TeamTranscriptProjectResolver();
+    const scanSpy = vi.spyOn(
+      secondResolver as unknown as ResolverScanProbe,
+      'getTeamAffinityHeadMetadata'
+    );
+
+    const secondContext = await secondResolver.getContext(teamName, { forceRefresh: true });
+
+    expect(secondContext?.sessionIds).toContain(sessionId);
+    expect(scanSpy).toHaveBeenCalled();
+    scanSpy.mockRestore();
+  });
+
+  it('reuses exact persistent negatives but rescans after a short transcript grows', async () => {
+    await setupClaudeRoot();
+
+    const teamName = 'negative-persistent-index-team';
+    const projectPath = '/Users/test/negative-persistent-index';
+    const sessionId = 'short-negative';
+    const projectDir = path.join(tmpDir!, 'projects', encodePath(projectPath));
+    const jsonlPath = path.join(projectDir, `${sessionId}.jsonl`);
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.writeFile(
+      jsonlPath,
+      `${[0, 1, 2]
+        .map((i) =>
+          JSON.stringify({ type: 'user', message: { role: 'user', content: `noise ${i}` } })
+        )
+        .join('\n')}\n`,
+      'utf8'
+    );
+    await writeTeamConfig(teamName, {
+      name: 'Negative Persistent Index Team',
+      projectPath,
+      members: [{ name: 'team-lead', agentType: 'team-lead', cwd: projectPath }],
+    });
+
+    const firstResolver = new TeamTranscriptProjectResolver();
+    const firstContext = await firstResolver.getContext(teamName, { forceRefresh: true });
+    expect(firstContext?.sessionIds).not.toContain(sessionId);
+
+    type ResolverScanProbe = {
+      getTeamAffinityHeadMetadata: (...args: unknown[]) => Promise<unknown>;
+    };
+    const secondResolver = new TeamTranscriptProjectResolver();
+    const scanSpy = vi.spyOn(
+      secondResolver as unknown as ResolverScanProbe,
+      'getTeamAffinityHeadMetadata'
+    );
+    scanSpy.mockRejectedValue(new Error('persistent negative should bypass head scan'));
+
+    const secondContext = await secondResolver.getContext(teamName, { forceRefresh: true });
+    expect(secondContext?.sessionIds).not.toContain(sessionId);
+    expect(scanSpy).not.toHaveBeenCalled();
+    scanSpy.mockRestore();
+
+    await fs.appendFile(
+      jsonlPath,
+      `${JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: `Current team context:\n- Team name: ${teamName}` }],
+        },
+      })}\n`,
+      'utf8'
+    );
+    const updatedAt = new Date(Date.now() + 5_000);
+    await fs.utimes(jsonlPath, updatedAt, updatedAt);
+
+    const thirdResolver = new TeamTranscriptProjectResolver();
+    const thirdContext = await thirdResolver.getContext(teamName, { forceRefresh: true });
+
+    expect(thirdContext?.sessionIds).toContain(sessionId);
+  });
+
+  it('prunes persistent affinity entries for deleted root transcripts without requiring a new scan', async () => {
+    await setupClaudeRoot();
+
+    const teamName = 'prune-persistent-index-team';
+    const projectPath = '/Users/test/prune-persistent-index';
+    const projectId = encodePath(projectPath);
+    const keptSessionId = 'kept-session';
+    const deletedSessionId = 'deleted-session';
+    const kept = await createTeamAwareSessionFile(projectPath, keptSessionId, teamName, 'text');
+    const deleted = await createTeamAwareSessionFile(
+      projectPath,
+      deletedSessionId,
+      teamName,
+      'text'
+    );
+    await writeTeamConfig(teamName, {
+      name: 'Prune Persistent Index Team',
+      projectPath,
+      members: [{ name: 'team-lead', agentType: 'team-lead', cwd: projectPath }],
+    });
+
+    const firstResolver = new TeamTranscriptProjectResolver();
+    await firstResolver.getContext(teamName, { forceRefresh: true });
+    const indexedBefore = await readAffinityIndex(teamName, projectId);
+    expect(Object.keys(indexedBefore.entries).sort()).toEqual([
+      `${deletedSessionId}.jsonl`,
+      `${keptSessionId}.jsonl`,
+    ]);
+
+    await fs.rm(deleted.jsonlPath);
+
+    type ResolverScanProbe = {
+      getTeamAffinityHeadMetadata: (...args: unknown[]) => Promise<unknown>;
+    };
+    const secondResolver = new TeamTranscriptProjectResolver();
+    const scanSpy = vi.spyOn(
+      secondResolver as unknown as ResolverScanProbe,
+      'getTeamAffinityHeadMetadata'
+    );
+    scanSpy.mockRejectedValue(new Error('remaining exact index hit should bypass head scan'));
+
+    const secondContext = await secondResolver.getContext(teamName, { forceRefresh: true });
+    const indexedAfter = await readAffinityIndex(teamName, projectId);
+
+    expect(secondContext?.sessionIds).toContain(keptSessionId);
+    expect(secondContext?.sessionIds).not.toContain(deletedSessionId);
+    expect(scanSpy).not.toHaveBeenCalled();
+    expect(Object.keys(indexedAfter.entries)).toEqual([`${keptSessionId}.jsonl`]);
+    await fs.access(kept.jsonlPath);
+    scanSpy.mockRestore();
+  });
+
+  it('keeps discovering sessions when the persistent affinity store load or write fails', async () => {
+    await setupClaudeRoot();
+
+    const teamName = 'failing-store-index-team';
+    const projectPath = '/Users/test/failing-store-index';
+    const sessionId = 'failing-store-session';
+    await createTeamAwareSessionFile(projectPath, sessionId, teamName, 'text');
+    await writeTeamConfig(teamName, {
+      name: 'Failing Store Index Team',
+      projectPath,
+      members: [{ name: 'team-lead', agentType: 'team-lead', cwd: projectPath }],
+    });
+
+    const store: TeamTranscriptAffinityIndexStore = {
+      loadProject: vi.fn(async () => {
+        throw new Error('load failed');
+      }),
+      upsertProjectEntries: vi.fn(async () => {
+        throw new Error('write failed');
+      }),
+    };
+    const resolver = new TeamTranscriptProjectResolver(undefined, store);
+
+    const context = await resolver.getContext(teamName, { forceRefresh: true });
+
+    expect(context?.sessionIds).toContain(sessionId);
+    expect(store.loadProject).toHaveBeenCalled();
+    expect(store.upsertProjectEntries).toHaveBeenCalled();
+  });
+
+  it('does not read or write the persistent affinity index when the kill switch is disabled', async () => {
+    await setupClaudeRoot();
+    process.env.CLAUDE_TEAM_TRANSCRIPT_AFFINITY_INDEX = '0';
+
+    const teamName = 'kill-switch-index-team';
+    const projectPath = '/Users/test/kill-switch-index';
+    const sessionId = 'kill-switch-session';
+    await createTeamAwareSessionFile(projectPath, sessionId, teamName, 'text');
+    await writeTeamConfig(teamName, {
+      name: 'Kill Switch Index Team',
+      projectPath,
+      leadSessionId: sessionId,
+      members: [{ name: 'team-lead', agentType: 'team-lead', cwd: projectPath }],
+    });
+
+    const store: TeamTranscriptAffinityIndexStore = {
+      loadProject: vi.fn(async () => {
+        throw new Error('disabled index should not load');
+      }),
+      upsertProjectEntries: vi.fn(async () => undefined),
+    };
+    const resolver = new TeamTranscriptProjectResolver(undefined, store);
+
+    const context = await resolver.getContext(teamName, { forceRefresh: true });
+
+    expect(context?.sessionIds).toContain(sessionId);
+    expect(store.loadProject).not.toHaveBeenCalled();
+    expect(store.upsertProjectEntries).not.toHaveBeenCalled();
+  });
+
   // Regression for the launch hot path: non-matching transcripts must not be
   // re-streamed + re-parsed on every bootstrap poll. A negative verdict decided from
   // a FULL head window (>= 40 inspected lines) is durable while the file only grows,
@@ -633,20 +1015,25 @@ describe('TeamTranscriptProjectResolver', () => {
   type AffinityCacheEntry = {
     mtimeMs: number;
     size: number;
+    ctimeMs?: number;
     belongsToTeam: boolean;
+    inspectedLineCount: number;
+    headFingerprint: string;
     headWindowFull: boolean;
   };
   type HeadMetadataCacheEntry = {
     mtimeMs: number;
     size: number;
+    ctimeMs?: number;
     inspectedLineCount: number;
+    headFingerprint: string;
     lines: unknown[];
   };
   type ResolverProbe = {
     fileBelongsToTeam: (
       filePath: string,
       teamName: string,
-      precomputedStat?: { mtimeMs: number; size: number; isFile: () => boolean }
+      precomputedStat?: { mtimeMs: number; size: number; ctimeMs?: number; isFile: () => boolean }
     ) => Promise<boolean>;
     buildTeamAffinityFileCacheKey: (filePath: string, normalizedTeam: string) => string;
     teamAffinityFileCache: Map<string, AffinityCacheEntry>;
@@ -726,6 +1113,89 @@ describe('TeamTranscriptProjectResolver', () => {
     const second = resolver.teamAffinityFileCache.get(key);
     expect(second?.belongsToTeam).toBe(true);
     expect(second!.size).toBeGreaterThan(sizeAfterFirst); // re-scanned + re-cached
+  });
+
+  it('does not reuse an in-memory positive growth shortcut after the cached head is rewritten', async () => {
+    await setupClaudeRoot();
+    const resolver = new TeamTranscriptProjectResolver() as unknown as ResolverProbe;
+    const team = 'rewrite-positive-team';
+    const projectDir = path.join(tmpDir!, 'projects', encodePath('/repo/rewrite-positive'));
+    await fs.mkdir(projectDir, { recursive: true });
+    const jsonlPath = path.join(projectDir, 'rewrite-positive.jsonl');
+    await fs.writeFile(jsonlPath, `${teamTextLine(team)}\n`, 'utf8');
+
+    expect(await resolver.fileBelongsToTeam(jsonlPath, team)).toBe(true);
+    const key = resolver.buildTeamAffinityFileCacheKey(jsonlPath, team.toLowerCase());
+    const first = resolver.teamAffinityFileCache.get(key);
+    expect(first?.belongsToTeam).toBe(true);
+
+    const replacement = `${JSON.stringify({
+      type: 'assistant',
+      message: { role: 'assistant', content: 'x'.repeat(first!.size + 100) },
+    })}\n`;
+    expect(Buffer.byteLength(replacement, 'utf8')).toBeGreaterThanOrEqual(first!.size);
+    await fs.writeFile(jsonlPath, replacement, 'utf8');
+
+    expect(await resolver.fileBelongsToTeam(jsonlPath, team)).toBe(false);
+    expect(resolver.teamAffinityFileCache.get(key)?.belongsToTeam).toBe(false);
+  });
+
+  it('does not reuse an in-memory full-head negative shortcut after the cached head is rewritten', async () => {
+    await setupClaudeRoot();
+    const resolver = new TeamTranscriptProjectResolver() as unknown as ResolverProbe;
+    const team = 'rewrite-negative-team';
+    const projectDir = path.join(tmpDir!, 'projects', encodePath('/repo/rewrite-negative'));
+    await fs.mkdir(projectDir, { recursive: true });
+    const jsonlPath = path.join(projectDir, 'rewrite-negative.jsonl');
+    const originalLines = Array.from({ length: 45 }, (_, i) => noiseLine(i));
+    await fs.writeFile(jsonlPath, `${originalLines.join('\n')}\n`, 'utf8');
+
+    expect(await resolver.fileBelongsToTeam(jsonlPath, team)).toBe(false);
+    const key = resolver.buildTeamAffinityFileCacheKey(jsonlPath, team.toLowerCase());
+    const first = resolver.teamAffinityFileCache.get(key);
+    expect(first?.headWindowFull).toBe(true);
+
+    const rewrittenLines = [teamTextLine(team), ...originalLines.slice(1)];
+    let replacement = `${rewrittenLines.join('\n')}\n`;
+    if (Buffer.byteLength(replacement, 'utf8') < first!.size) {
+      replacement += `${noiseLine(999)}\n`;
+    }
+    expect(Buffer.byteLength(replacement, 'utf8')).toBeGreaterThanOrEqual(first!.size);
+    await fs.writeFile(jsonlPath, replacement, 'utf8');
+
+    expect(await resolver.fileBelongsToTeam(jsonlPath, team)).toBe(true);
+    expect(resolver.teamAffinityFileCache.get(key)?.belongsToTeam).toBe(true);
+  });
+
+  it('does not reuse in-memory exact caches after a same-size rewrite with restored mtime', async () => {
+    await setupClaudeRoot();
+    const resolver = new TeamTranscriptProjectResolver() as unknown as ResolverProbe;
+    const team = 'same-size-rewrite-team';
+    const projectDir = path.join(tmpDir!, 'projects', encodePath('/repo/same-size-rewrite'));
+    await fs.mkdir(projectDir, { recursive: true });
+    const jsonlPath = path.join(projectDir, 'same-size-rewrite.jsonl');
+    const stableTime = new Date('2026-05-30T10:00:00.000Z');
+    await fs.writeFile(jsonlPath, `${teamTextLine(team)}\n`, 'utf8');
+    await fs.utimes(jsonlPath, stableTime, stableTime);
+
+    expect(await resolver.fileBelongsToTeam(jsonlPath, team)).toBe(true);
+    const key = resolver.buildTeamAffinityFileCacheKey(jsonlPath, team.toLowerCase());
+    const first = resolver.teamAffinityFileCache.get(key);
+    const firstHead = resolver.teamAffinityHeadMetadataCache.get(jsonlPath);
+    expect(first?.belongsToTeam).toBe(true);
+    expect(firstHead?.lines.length).toBeGreaterThan(0);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await fs.writeFile(jsonlPath, sameByteLengthNoTeamTranscript(first!.size), 'utf8');
+    await fs.utimes(jsonlPath, stableTime, stableTime);
+    const rewrittenStat = await fs.stat(jsonlPath);
+
+    expect(rewrittenStat.size).toBe(first!.size);
+    expect(rewrittenStat.mtimeMs).toBe(first!.mtimeMs);
+    expect(rewrittenStat.ctimeMs).not.toBe(first!.ctimeMs);
+
+    expect(await resolver.fileBelongsToTeam(jsonlPath, team)).toBe(false);
+    expect(resolver.teamAffinityFileCache.get(key)?.belongsToTeam).toBe(false);
   });
 
   // Regression: when the caller already statted the file (the mtime-window filter in
