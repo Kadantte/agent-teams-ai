@@ -563,7 +563,7 @@ describe('team change throttling', () => {
       { type: 'lead-activity', teamName: 'my-team', detail: 'active', runId: 'run-1' }
     );
 
-    await vi.advanceTimersByTimeAsync(29_999);
+    await vi.advanceTimersByTimeAsync(59_999);
     expect(refreshTeamDataSpy).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(1);
