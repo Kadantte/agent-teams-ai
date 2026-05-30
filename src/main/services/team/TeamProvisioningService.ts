@@ -25932,7 +25932,12 @@ export class TeamProvisioningService {
   ): { rows: RuntimeTelemetryProcessTableRow[] | null } | null {
     const cached = this.runtimeProcessRowsForUsageSnapshotByTeam.get(teamName);
     const nowMs = Date.now();
-    if (!cached || cached.expiresAtMs <= nowMs || cached.runId !== runId) {
+    if (
+      !cached ||
+      cached.expiresAtMs <= nowMs ||
+      cached.runId !== runId ||
+      cached.generation !== this.getRuntimeSnapshotCacheGeneration(teamName)
+    ) {
       return null;
     }
 
