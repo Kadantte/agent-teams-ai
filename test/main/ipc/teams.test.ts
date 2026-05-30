@@ -1323,7 +1323,7 @@ describe('ipc teams handlers', () => {
   it('marks created teams engaged before provisioning writes startup artifacts', async () => {
     const createTeam = 'created-watch-scope';
     provisioningService.createTeam.mockImplementationOnce(async () => {
-      expect(computeTeamWatchScope().has(createTeam)).toBe(true);
+      expect(computeTeamWatchScope()?.has(createTeam)).toBe(true);
       return { runId: 'run-created-watch-scope' };
     });
 
@@ -1334,7 +1334,7 @@ describe('ipc teams handlers', () => {
     })) as { success: boolean };
 
     expect(result.success).toBe(true);
-    expect(computeTeamWatchScope().has(createTeam)).toBe(true);
+    expect(computeTeamWatchScope()?.has(createTeam)).toBe(true);
   });
 
   it('returns cached TEAM_LIST data under active launch pressure without starting another scan', async () => {
@@ -4401,7 +4401,7 @@ describe('ipc teams handlers', () => {
         })) as { success: boolean };
 
         expect(result.success).toBe(true);
-        expect(computeTeamWatchScope().has('draft-team')).toBe(true);
+        expect(computeTeamWatchScope()?.has('draft-team')).toBe(true);
         expect(provisioningService.launchTeam).not.toHaveBeenCalled();
         expect(provisioningService.createTeam).toHaveBeenCalledWith(
           {

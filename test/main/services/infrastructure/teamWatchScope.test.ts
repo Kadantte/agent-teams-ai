@@ -18,23 +18,23 @@ afterEach(() => {
 describe('teamWatchScope', () => {
   it('includes alive teams from the provider', () => {
     setAliveTeamsProvider(() => ['t-alive']);
-    expect([...computeTeamWatchScope(1000)]).toContain('t-alive');
+    expect([...(computeTeamWatchScope(1000) ?? [])]).toContain('t-alive');
   });
 
   it('includes engaged teams within TTL and prunes after expiry', () => {
     markTeamEngaged('t-eng', 0);
-    expect(computeTeamWatchScope(FIVE_MIN).has('t-eng')).toBe(true);
-    expect(computeTeamWatchScope(FIVE_MIN + 1).has('t-eng')).toBe(false);
+    expect(computeTeamWatchScope(FIVE_MIN)?.has('t-eng')).toBe(true);
+    expect(computeTeamWatchScope(FIVE_MIN + 1)?.has('t-eng')).toBe(false);
     // pruning is sticky: it stays out without re-engaging
-    expect(computeTeamWatchScope(FIVE_MIN + 2).has('t-eng')).toBe(false);
+    expect(computeTeamWatchScope(FIVE_MIN + 2)?.has('t-eng')).toBe(false);
   });
 
   it('unions alive and engaged teams', () => {
     setAliveTeamsProvider(() => ['a']);
     markTeamEngaged('b', 0);
     const scope = computeTeamWatchScope(1000);
-    expect(scope.has('a')).toBe(true);
-    expect(scope.has('b')).toBe(true);
+    expect(scope?.has('a')).toBe(true);
+    expect(scope?.has('b')).toBe(true);
   });
 
   it('notifies the listener only when engagement newly adds to scope', () => {
@@ -66,7 +66,7 @@ describe('teamWatchScope', () => {
       throw new Error('boom');
     });
     expect(() => computeTeamWatchScope(0)).not.toThrow();
-    expect([...computeTeamWatchScope(0)]).toEqual([]);
+    expect(computeTeamWatchScope(0)).toBeNull();
   });
 
   it('ignores empty team names', () => {
@@ -74,6 +74,6 @@ describe('teamWatchScope', () => {
     setTeamWatchScopeChangeListener(listener);
     markTeamEngaged('', 0);
     expect(listener).not.toHaveBeenCalled();
-    expect(computeTeamWatchScope(0).size).toBe(0);
+    expect(computeTeamWatchScope(0)?.size).toBe(0);
   });
 });

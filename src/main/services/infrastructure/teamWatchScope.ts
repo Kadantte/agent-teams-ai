@@ -29,9 +29,9 @@ export function notifyTeamWatchScopeChanged(): void {
   scopeChangeListener?.();
 }
 
-function collectAliveTeams(scope: Set<string>): void {
+function collectAliveTeams(scope: Set<string>): boolean {
   if (!aliveTeamsProvider) {
-    return;
+    return true;
   }
   try {
     for (const teamName of aliveTeamsProvider()) {
@@ -39,9 +39,11 @@ function collectAliveTeams(scope: Set<string>): void {
         scope.add(teamName);
       }
     }
+    return true;
   } catch {
-    // A provider failure must never break watching. The watcher treats a thrown
-    // or empty scope conservatively (inboxes + root stay watched either way).
+    // A provider failure must never narrow watching. Returning null below is the
+    // safe fallback: watch every team, matching the original behavior.
+    return false;
   }
 }
 
@@ -49,9 +51,11 @@ function collectAliveTeams(scope: Set<string>): void {
  * Current set of teams whose team-root/task artifacts should be watched. Prunes
  * engaged entries past their TTL as a side effect of being called.
  */
-export function computeTeamWatchScope(nowMs: number = Date.now()): ReadonlySet<string> {
+export function computeTeamWatchScope(nowMs: number = Date.now()): ReadonlySet<string> | null {
   const scope = new Set<string>();
-  collectAliveTeams(scope);
+  if (!collectAliveTeams(scope)) {
+    return null;
+  }
   for (const [teamName, engagedAt] of engagedAtByTeam) {
     if (nowMs - engagedAt <= ENGAGED_TTL_MS) {
       scope.add(teamName);
@@ -71,7 +75,8 @@ export function markTeamEngaged(teamName: string, nowMs: number = Date.now()): v
   if (!teamName) {
     return;
   }
-  const wasInScope = computeTeamWatchScope(nowMs).has(teamName);
+  const currentScope = computeTeamWatchScope(nowMs);
+  const wasInScope = currentScope === null || currentScope.has(teamName);
   engagedAtByTeam.set(teamName, nowMs);
   if (!wasInScope) {
     scopeChangeListener?.();
