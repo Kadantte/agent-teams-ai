@@ -19,6 +19,8 @@ type RuntimeAwareProviderStatus = Pick<
   CliProviderStatus,
   'providerId' | 'authMethod' | 'backend' | 'modelCatalog'
 >;
+type RuntimeModelCatalog = NonNullable<RuntimeAwareProviderStatus['modelCatalog']>;
+type RuntimeCatalogModel = RuntimeModelCatalog['models'][number];
 
 export interface TeamProviderModelOption {
   value: string;
@@ -290,21 +292,43 @@ export function getTeamModelLabel(model: string | undefined): string | undefined
   return formatParsedClaudeModelLabel(labelTarget) ?? labelTarget;
 }
 
+const runtimeCatalogModelIndexCache = new WeakMap<
+  RuntimeModelCatalog,
+  Map<string, RuntimeCatalogModel>
+>();
+
+function getRuntimeCatalogModelIndex(
+  catalog: RuntimeModelCatalog
+): Map<string, RuntimeCatalogModel> {
+  const cached = runtimeCatalogModelIndexCache.get(catalog);
+  if (cached) {
+    return cached;
+  }
+
+  const index = new Map<string, RuntimeCatalogModel>();
+  for (const item of catalog.models) {
+    if (item.launchModel && !index.has(item.launchModel)) {
+      index.set(item.launchModel, item);
+    }
+    if (item.id && !index.has(item.id)) {
+      index.set(item.id, item);
+    }
+  }
+  runtimeCatalogModelIndexCache.set(catalog, index);
+  return index;
+}
+
 function getRuntimeCatalogModel(
   providerId: SupportedProviderId | undefined,
   model: string | undefined,
   providerStatus?: RuntimeAwareProviderStatus | null
-): NonNullable<RuntimeAwareProviderStatus['modelCatalog']>['models'][number] | null {
+): RuntimeCatalogModel | null {
   const trimmed = model?.trim();
   if (!providerId || !trimmed || providerStatus?.modelCatalog?.providerId !== providerId) {
     return null;
   }
 
-  return (
-    providerStatus.modelCatalog.models.find(
-      (item) => item.launchModel === trimmed || item.id === trimmed
-    ) ?? null
-  );
+  return getRuntimeCatalogModelIndex(providerStatus.modelCatalog).get(trimmed) ?? null;
 }
 
 export function getTeamModelBadgeLabel(

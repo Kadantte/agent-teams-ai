@@ -5602,6 +5602,53 @@ describe('teamSlice actions', () => {
       expect(store.getState().provisioningRuns['run-stale']).toBeUndefined();
     });
 
+    it('ignores provisioning heartbeat updates when only updatedAt changes', () => {
+      const store = createSliceStore();
+      const baseProgress = {
+        runId: 'run-current',
+        teamName: 'my-team',
+        state: 'spawning' as const,
+        message: 'Waiting for model response',
+        startedAt: '2026-03-12T10:00:00.000Z',
+        updatedAt: '2026-03-12T10:00:00.000Z',
+        pid: 1234,
+        assistantOutput: 'partial output',
+        warnings: ['slow response'],
+        launchDiagnostics: [
+          {
+            id: 'diag-1',
+            severity: 'warning' as const,
+            code: 'runtime_process_candidate' as const,
+            label: 'Runtime candidate',
+            observedAt: '2026-03-12T10:00:00.000Z',
+          },
+        ],
+      };
+
+      store.getState().onProvisioningProgress(baseProgress);
+      const firstRuns = store.getState().provisioningRuns;
+      const firstProgress = firstRuns['run-current'];
+
+      store.getState().onProvisioningProgress({
+        ...baseProgress,
+        updatedAt: '2026-03-12T10:00:01.000Z',
+      });
+
+      expect(store.getState().provisioningRuns).toBe(firstRuns);
+      expect(store.getState().provisioningRuns['run-current']).toBe(firstProgress);
+
+      store.getState().onProvisioningProgress({
+        ...baseProgress,
+        updatedAt: '2026-03-12T10:00:02.000Z',
+        assistantOutput: 'partial output\\nnext chunk',
+      });
+
+      expect(store.getState().provisioningRuns).not.toBe(firstRuns);
+      expect(store.getState().provisioningRuns['run-current']?.assistantOutput).toContain(
+        'next chunk'
+      );
+    });
+
     it('promotes a pending run to a real run without throwing', () => {
       const store = createSliceStore();
       store.setState({

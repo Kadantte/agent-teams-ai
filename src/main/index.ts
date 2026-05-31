@@ -62,6 +62,11 @@ import { ensureOpenCodeBridgeRuntimeBinaryEnv } from '@main/services/runtime/ope
 import { ClaudeMultimodelBridgeService } from '@main/services/runtime/ClaudeMultimodelBridgeService';
 import { applyOpenCodeAutoUpdatePolicy } from '@main/services/runtime/openCodeAutoUpdatePolicy';
 import { providerConnectionService } from '@main/services/runtime/ProviderConnectionService';
+import {
+  computeTeamWatchScope,
+  setAliveTeamsProvider,
+  setTeamWatchScopeChangeListener,
+} from '@main/services/infrastructure/teamWatchScope';
 import { JsonScheduleRepository } from '@main/services/schedule/JsonScheduleRepository';
 import { ScheduledTaskExecutor } from '@main/services/schedule/ScheduledTaskExecutor';
 import { SchedulerService } from '@main/services/schedule/SchedulerService';
@@ -1412,8 +1417,23 @@ function wireFileWatcherEvents(context: ServiceContext): void {
     }
   };
   context.fileWatcher.on('team-change', teamChangeHandler);
+
+  // Scope team-root/task file watching to alive + UI-engaged teams so it no longer
+  // scales with the number of teams on disk. Inboxes and the teams root stay fully
+  // watched, so cross-team delivery, the lead inbox relay, and notifications are
+  // unaffected. Unsetting the provider on cleanup reverts to watching every team.
+  setAliveTeamsProvider(() => teamProvisioningService.getAliveTeamNames());
+  setTeamWatchScopeChangeListener(() => {
+    void context.fileWatcher.refreshTeamWatchScope();
+  });
+  context.fileWatcher.setTeamWatchScopeProvider(() => computeTeamWatchScope());
+  void context.fileWatcher.refreshTeamWatchScope();
+
   teamChangeCleanup = () => {
     context.fileWatcher.off('team-change', teamChangeHandler);
+    setAliveTeamsProvider(null);
+    setTeamWatchScopeChangeListener(null);
+    context.fileWatcher.setTeamWatchScopeProvider(null);
     reconcileScheduler?.dispose();
   };
 

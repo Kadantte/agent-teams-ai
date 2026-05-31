@@ -167,9 +167,12 @@ Messages:
     ]);
   });
 
-  it('refreshes the durable feed after cache expiry even when the dirty signal was missed', async () => {
-    let inboxMessages: InboxMessage[] = [makeMessage()];
-    const getInboxMessages = vi.fn(async () => inboxMessages);
+  it('returns clean expired cache immediately and refreshes durable feed in the background', async () => {
+    const refreshRequest = createDeferred<InboxMessage[]>();
+    const getInboxMessages = vi
+      .fn()
+      .mockResolvedValueOnce([makeMessage()])
+      .mockImplementationOnce(() => refreshRequest.promise);
     const service = new TeamMessageFeedService({
       getConfig: vi.fn(async () => config),
       getInboxMessages,
@@ -179,7 +182,7 @@ Messages:
 
     await service.getFeed('signal-ops-4');
 
-    inboxMessages = [
+    const refreshedMessages = [
       makeMessage({
         from: 'jack',
         to: 'user',
@@ -191,6 +194,15 @@ Messages:
     ];
 
     vi.setSystemTime(new Date('2026-04-19T18:46:46.500Z'));
+
+    const stale = await service.getFeed('signal-ops-4');
+    expect(getInboxMessages).toHaveBeenCalledTimes(2);
+    expect(stale.messages).toHaveLength(1);
+
+    refreshRequest.resolve(refreshedMessages);
+    await refreshRequest.promise;
+    await Promise.resolve();
+    await Promise.resolve();
 
     const refreshed = await service.getFeed('signal-ops-4');
     expect(getInboxMessages).toHaveBeenCalledTimes(2);

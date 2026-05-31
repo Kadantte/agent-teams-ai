@@ -1485,7 +1485,7 @@
     },
     "status": {
       "reusedCrossTeamRequest": "최근 Cross-team 요청 사용",
-      "teamOffline": "팀 오프라인"
+      "teamOffline": "오프라인"
     },
     "revision": {
       "editing": "이전 메시지 편집 중",

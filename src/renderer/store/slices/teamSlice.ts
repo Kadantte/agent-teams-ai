@@ -128,7 +128,10 @@ import {
   collectTeamScopedStateRemovals,
   collectTeamScopedVisibleLoadingResets,
 } from '../team/teamScopedStateCleanup';
-import { structurallyShareTeamSnapshot } from '../team/teamSnapshotStructuralSharing';
+import {
+  structurallySharePlainValue,
+  structurallyShareTeamSnapshot,
+} from '../team/teamSnapshotStructuralSharing';
 import { parseToolApprovalSettings } from '../team/teamToolApprovalSettings';
 import { noteTeamRefreshFanout } from '../teamRefreshFanoutDiagnostics';
 import {
@@ -168,6 +171,7 @@ import type {
   TeamAgentRuntimeSnapshot,
   TeamCreateRequest,
   TeamGetDataOptions,
+  TeamLaunchDiagnosticItem,
   TeamLaunchRequest,
   TeamMemberActivityMeta,
   TeamProvisioningProgress,
@@ -243,6 +247,7 @@ const pendingFreshTeamMemberActivityMetaRefreshes = new Set<string>();
 const pendingTeamPendingReplyRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let latestTeamsFetchRequestId = 0;
 let inFlightGlobalTasksRefresh: Promise<void> | null = null;
+let inFlightGlobalTasksRefreshScope: ContextRequestScope | null = null;
 let pendingFreshGlobalTasksRefresh = false;
 interface RefreshTeamDataOptions {
   withDedup?: boolean;
@@ -487,6 +492,45 @@ function isSelectedTeamLoadStillCurrent(
     state.selectedTeamLoadNonce === requestNonce &&
     state.selectedTeamData?.teamName === teamName
   );
+}
+
+function buildTeamSummaryIndexes(teams: readonly TeamSummary[]): {
+  teamByName: Record<string, TeamSummary>;
+  teamBySessionId: Record<string, TeamSummary>;
+} {
+  const teamByName: Record<string, TeamSummary> = {};
+  const teamBySessionId: Record<string, TeamSummary> = {};
+  for (const team of teams) {
+    teamByName[team.teamName] = team;
+    if (team.leadSessionId) {
+      teamBySessionId[team.leadSessionId] = team;
+    }
+    if (Array.isArray(team.sessionHistory)) {
+      for (const sid of team.sessionHistory) {
+        if (typeof sid === 'string' && sid) {
+          teamBySessionId[sid] = team;
+        }
+      }
+    }
+  }
+  return { teamByName, teamBySessionId };
+}
+
+function removeProvisioningSnapshotsForTeams(
+  snapshots: Record<string, TeamSummary>,
+  teams: readonly TeamSummary[]
+): Record<string, TeamSummary> {
+  let nextSnapshots = snapshots;
+  for (const team of teams) {
+    if (!Object.prototype.hasOwnProperty.call(nextSnapshots, team.teamName)) {
+      continue;
+    }
+    if (nextSnapshots === snapshots) {
+      nextSnapshots = { ...snapshots };
+    }
+    delete nextSnapshots[team.teamName];
+  }
+  return nextSnapshots;
 }
 
 function schedulePostPaintTeamEnrichments(params: {
@@ -1027,7 +1071,7 @@ export interface TeamSlice {
     isOnline?: boolean;
   }[];
   crossTeamTargetsLoading: boolean;
-  fetchCrossTeamTargets: () => Promise<void>;
+  fetchCrossTeamTargets: () => Promise<boolean>;
   sendCrossTeamMessage: (request: CrossTeamSendRequest) => Promise<void>;
   requestReview: (teamName: string, taskId: string) => Promise<void>;
   updateKanban: (teamName: string, taskId: string, patch: UpdateKanbanPatch) => Promise<void>;
@@ -1150,6 +1194,65 @@ export function getCurrentProvisioningProgressForTeam(
 ): TeamProvisioningProgress | null {
   const currentRunId = state.currentProvisioningRunIdByTeam[teamName];
   return currentRunId ? (state.provisioningRuns[currentRunId] ?? null) : null;
+}
+
+function stringArraysEqual(
+  a: readonly string[] | undefined,
+  b: readonly string[] | undefined
+): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function launchDiagnosticsEqual(
+  a: readonly TeamLaunchDiagnosticItem[] | undefined,
+  b: readonly TeamLaunchDiagnosticItem[] | undefined
+): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      !left ||
+      !right ||
+      left.id !== right.id ||
+      left.memberName !== right.memberName ||
+      left.severity !== right.severity ||
+      left.code !== right.code ||
+      left.label !== right.label ||
+      left.detail !== right.detail ||
+      left.observedAt !== right.observedAt
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function provisioningProgressPayloadEqual(
+  a: TeamProvisioningProgress,
+  b: TeamProvisioningProgress
+): boolean {
+  return (
+    a.runId === b.runId &&
+    a.teamName === b.teamName &&
+    a.state === b.state &&
+    a.message === b.message &&
+    a.messageSeverity === b.messageSeverity &&
+    a.startedAt === b.startedAt &&
+    a.pid === b.pid &&
+    a.error === b.error &&
+    a.cliLogsTail === b.cliLogsTail &&
+    a.assistantOutput === b.assistantOutput &&
+    a.configReady === b.configReady &&
+    stringArraysEqual(a.warnings, b.warnings) &&
+    launchDiagnosticsEqual(a.launchDiagnostics, b.launchDiagnostics)
+  );
 }
 
 export function isTeamProvisioningActive(
@@ -1482,32 +1585,36 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
       ) {
         return;
       }
-      const teamByName: Record<string, TeamSummary> = {};
-      const teamBySessionId: Record<string, TeamSummary> = {};
-      for (const team of teams) {
-        teamByName[team.teamName] = team;
-        if (team.leadSessionId) {
-          teamBySessionId[team.leadSessionId] = team;
-        }
-        if (Array.isArray(team.sessionHistory)) {
-          for (const sid of team.sessionHistory) {
-            if (typeof sid === 'string' && sid) {
-              teamBySessionId[sid] = team;
-            }
-          }
-        }
-      }
       // Atomic update: set teams AND clean up provisioning snapshots in one call
       // to prevent any render cycle with duplicate cards.
       set((state) => {
-        const nextSnapshots = { ...state.provisioningSnapshotByTeam };
-        for (const team of teams) {
-          delete nextSnapshots[team.teamName];
+        const nextTeams = structurallySharePlainValue(state.teams, teams);
+        const indexes = buildTeamSummaryIndexes(nextTeams);
+        const nextTeamByName = structurallySharePlainValue(state.teamByName, indexes.teamByName);
+        const nextTeamBySessionId = structurallySharePlainValue(
+          state.teamBySessionId,
+          indexes.teamBySessionId
+        );
+        const nextSnapshots = removeProvisioningSnapshotsForTeams(
+          state.provisioningSnapshotByTeam,
+          nextTeams
+        );
+
+        if (
+          nextTeams === state.teams &&
+          nextTeamByName === state.teamByName &&
+          nextTeamBySessionId === state.teamBySessionId &&
+          nextSnapshots === state.provisioningSnapshotByTeam &&
+          state.teamsLoading === false &&
+          state.teamsError === null
+        ) {
+          return {};
         }
+
         return {
-          teams,
-          teamByName,
-          teamBySessionId,
+          teams: nextTeams,
+          teamByName: nextTeamByName,
+          teamBySessionId: nextTeamBySessionId,
           teamsLoading: false,
           teamsError: null,
           provisioningSnapshotByTeam: nextSnapshots,
@@ -1536,7 +1643,13 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
 
   fetchAllTasks: async () => {
     if (inFlightGlobalTasksRefresh) {
-      pendingFreshGlobalTasksRefresh = true;
+      const inFlightScope = inFlightGlobalTasksRefreshScope;
+      if (
+        get().globalTasksInitialized ||
+        (inFlightScope && !isContextRequestScopeCurrent(get, inFlightScope))
+      ) {
+        pendingFreshGlobalTasksRefresh = true;
+      }
       await inFlightGlobalTasksRefresh;
       return;
     }
@@ -1552,6 +1665,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
           set({ globalTasksLoading: true, globalTasksError: null });
         }
         const requestScope = captureContextRequestScope(get);
+        inFlightGlobalTasksRefreshScope = requestScope;
         const oldTasks = get().globalTasks;
         try {
           const tasks = await withTimeout(
@@ -1572,12 +1686,12 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
             isInitialFetch: wasFirst,
           });
 
-          set({
-            globalTasks: tasks,
+          set((state) => ({
+            globalTasks: structurallySharePlainValue(state.globalTasks, tasks),
             globalTasksLoading: false,
             globalTasksInitialized: true,
             globalTasksError: null,
-          });
+          }));
         } catch (error) {
           if (!isContextRequestScopeCurrent(get, requestScope)) {
             continue;
@@ -1600,6 +1714,7 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     const request = runRefresh().finally(() => {
       if (inFlightGlobalTasksRefresh === request) {
         inFlightGlobalTasksRefresh = null;
+        inFlightGlobalTasksRefreshScope = null;
       }
     });
     inFlightGlobalTasksRefresh = request;
@@ -3138,15 +3253,17 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     try {
       const targets = await api.crossTeam.listTargets();
       if (!isContextRequestScopeCurrent(get, requestScope)) {
-        return;
+        return false;
       }
       set({ crossTeamTargets: targets, crossTeamTargetsLoading: false });
+      return true;
     } catch (error) {
       if (!isContextRequestScopeCurrent(get, requestScope)) {
-        return;
+        return false;
       }
       logger.error('fetchCrossTeamTargets failed', error);
       set({ crossTeamTargets: [], crossTeamTargetsLoading: false });
+      return false;
     }
   },
 
@@ -3956,11 +4073,8 @@ export const createTeamSlice: StateCreator<AppState, [], [], TeamSlice> = (set, 
     const becameConfigReady =
       progress.configReady === true && existingProgress?.configReady !== true;
     const isDuplicateProgress =
-      existingProgress?.updatedAt === progress.updatedAt &&
-      existingProgress?.state === progress.state &&
-      existingProgress?.message === progress.message &&
-      existingProgress?.error === progress.error &&
-      existingProgress?.pid === progress.pid;
+      existingProgress !== undefined &&
+      provisioningProgressPayloadEqual(existingProgress, progress);
     if (isDuplicateProgress && currentRunId === progress.runId) {
       return;
     }

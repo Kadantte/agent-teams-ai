@@ -129,7 +129,6 @@ function buildOpenCodeDeliveryRecord(
     lastReason: 'OpenCode bridge command timed out',
     diagnostics: [
       'OpenCode prompt_async accepted; response observation will continue through durable app-side ledger reconciliation.',
-      'project_behavior_changed',
       'opencode_session_stale_observe_scheduled_after_accepted_prompt',
       'OpenCode bridge command timed out',
     ],
@@ -762,9 +761,7 @@ describe('TeamMemberRuntimeAdvisoryService', () => {
       kind: 'api_error',
       reasonCode: 'backend_error',
     });
-    expect(advisory?.message).toContain(
-      'opencode_session_stale_observe_scheduled_after_accepted_prompt'
-    );
+    expect(advisory?.message).toBe('OpenCode runtime delivery did not complete.');
   });
 
   it('keeps stale OpenCode advisories visible after unrelated later delivery success', async () => {

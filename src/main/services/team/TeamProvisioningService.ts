@@ -54,6 +54,7 @@ import {
 } from '@features/workspace-trust/main';
 import { ConfigManager } from '@main/services/infrastructure/ConfigManager';
 import { NotificationManager } from '@main/services/infrastructure/NotificationManager';
+import { notifyTeamWatchScopeChanged } from '@main/services/infrastructure/teamWatchScope';
 import { prepareAgentChildProcessWritableEnv } from '@main/services/runtime/agentChildProcessPreflight';
 import { getAppIconPath } from '@main/utils/appIcon';
 import {
@@ -314,10 +315,9 @@ import {
   extractBootstrapFailureReason,
   extractHeartbeatTimestamp,
   extractTranscriptMessageText,
-  getBootstrapTranscriptSuccessSource,
+  getBootstrapTranscriptSuccessSourceFromNormalized,
   getCanonicalSendMessageFieldRule,
   getCanonicalSendMessageToolRule,
-  isBootstrapTranscriptContextText,
   isTaskBoardSnapshotWorkCandidate,
   normalizeMemberDiagnosticText,
   shouldUseGeminiStagedLaunch,
@@ -598,6 +598,15 @@ interface PersistedRuntimeMemberLike {
   runtimeSessionId?: string;
 }
 
+interface PersistedTeamConfigCacheEntry {
+  path: string;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  projectPath: string | null;
+  members: PersistedRuntimeMemberLike[];
+}
+
 type RelayInboxMessage = InboxMessage & { messageId: string };
 
 interface RelayInboxMessageView {
@@ -687,6 +696,145 @@ type BootstrapTranscriptOutcome =
       reason: string;
     };
 
+interface BootstrapTranscriptOutcomeCacheEntry {
+  mtimeMs: number;
+  size: number;
+  outcome: BootstrapTranscriptOutcome | null;
+}
+
+interface BootstrapTranscriptOutcomeLookupCacheEntry {
+  expiresAtMs: number;
+  outcome: BootstrapTranscriptOutcome | null;
+}
+
+interface BootstrapTranscriptOutcomeCandidate {
+  text: string;
+  // text.replace(/\s+/g,' ').trim().toLowerCase(), computed once and reused across
+  // members so success/context detection does not re-normalize the same line.
+  normalizedText: string;
+  observedAt: string;
+  parsedAgentName: string | null;
+  // The shared parsed-tail line this candidate was built from. Used to memoize the
+  // pure extractBootstrapFailureReason() result on the line itself so an N-member
+  // team extracts each line's failure reason at most once instead of once per member.
+  parsedLine: ParsedBootstrapTranscriptTailLine;
+}
+
+interface ParsedBootstrapTranscriptTailLine {
+  rawTimestamp: string | null;
+  timestampMs: number;
+  text: string | null;
+  normalizedText: string | null;
+  parsedAgentName: string | null;
+  // Memoized extractBootstrapFailureReason(text): undefined = not computed yet,
+  // null = computed/no failure reason, string = the failure reason. Lives as long as
+  // this line's parse-cache entry (filePath + mtime + size); a file change re-parses
+  // into fresh line objects, so the memo cannot drift from the line's text.
+  bootstrapFailureReason?: string | null;
+  bootstrapContextCandidateByTeam?: Map<string, boolean>;
+  bootstrapContextMemberMatchByName?: Map<string, boolean>;
+  bootstrapSuccessSourceByTeamMember?: Map<string, BootstrapTranscriptSuccessSource | null>;
+}
+
+interface ParsedBootstrapTranscriptTailCacheEntry {
+  mtimeMs: number;
+  size: number;
+  lines: ParsedBootstrapTranscriptTailLine[];
+}
+
+function isNormalizedBootstrapTranscriptContextCandidateText(
+  normalizedText: string,
+  normalizedTeamName: string
+): boolean {
+  if (!normalizedText || !normalizedTeamName) {
+    return false;
+  }
+  if (!normalizedText.includes(normalizedTeamName)) {
+    return false;
+  }
+  return (
+    normalizedText.includes('bootstrap') ||
+    normalizedText.includes('bootstrapping') ||
+    normalizedText.includes('member briefing') ||
+    normalizedText.includes('task briefing')
+  );
+}
+
+function isNormalizedBootstrapTranscriptContextMemberText(
+  normalizedText: string,
+  normalizedMemberName: string
+): boolean {
+  return !!normalizedMemberName && normalizedText.includes(normalizedMemberName);
+}
+
+function getCachedBootstrapContextCandidateForLine(
+  line: ParsedBootstrapTranscriptTailLine,
+  normalizedText: string,
+  normalizedTeamName: string
+): boolean {
+  let candidateByTeam = line.bootstrapContextCandidateByTeam;
+  if (!candidateByTeam) {
+    candidateByTeam = new Map<string, boolean>();
+    line.bootstrapContextCandidateByTeam = candidateByTeam;
+  }
+  const cached = candidateByTeam.get(normalizedTeamName);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const value = isNormalizedBootstrapTranscriptContextCandidateText(
+    normalizedText,
+    normalizedTeamName
+  );
+  candidateByTeam.set(normalizedTeamName, value);
+  return value;
+}
+
+function getCachedBootstrapContextMemberMatchForLine(
+  line: ParsedBootstrapTranscriptTailLine,
+  normalizedText: string,
+  normalizedMemberName: string
+): boolean {
+  let matchByName = line.bootstrapContextMemberMatchByName;
+  if (!matchByName) {
+    matchByName = new Map<string, boolean>();
+    line.bootstrapContextMemberMatchByName = matchByName;
+  }
+  const cached = matchByName.get(normalizedMemberName);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const value = isNormalizedBootstrapTranscriptContextMemberText(
+    normalizedText,
+    normalizedMemberName
+  );
+  matchByName.set(normalizedMemberName, value);
+  return value;
+}
+
+function getCachedBootstrapSuccessSourceForLine(
+  line: ParsedBootstrapTranscriptTailLine,
+  normalizedText: string,
+  normalizedTeamName: string,
+  normalizedMemberName: string
+): BootstrapTranscriptSuccessSource | null {
+  let sourceByTeamMember = line.bootstrapSuccessSourceByTeamMember;
+  if (!sourceByTeamMember) {
+    sourceByTeamMember = new Map<string, BootstrapTranscriptSuccessSource | null>();
+    line.bootstrapSuccessSourceByTeamMember = sourceByTeamMember;
+  }
+  const cacheKey = `${normalizedTeamName}\0${normalizedMemberName}`;
+  if (sourceByTeamMember.has(cacheKey)) {
+    return sourceByTeamMember.get(cacheKey) ?? null;
+  }
+  const source = getBootstrapTranscriptSuccessSourceFromNormalized(
+    normalizedText,
+    normalizedTeamName,
+    normalizedMemberName
+  );
+  sourceByTeamMember.set(cacheKey, source);
+  return source;
+}
+
 import type {
   ActiveToolCall,
   AgentActionMode,
@@ -772,8 +920,17 @@ interface RuntimeProcessLoadStats extends RuntimeProcessUsageStats {
 
 type RuntimeTelemetryProcessSource = 'native' | 'wsl' | 'windows-host';
 
-interface RuntimeTelemetryProcessTableRow extends RuntimeProcessTableRow {
+interface RuntimeTelemetryProcessTableRow extends RuntimeProcessTableRow, RuntimeProcessUsageStats {
   runtimeTelemetrySource?: RuntimeTelemetryProcessSource;
+}
+
+interface RuntimeProcessRowsCacheEntry {
+  expiresAtMs: number;
+  generation: number;
+  runId: string | null;
+  sampledAtMs: number;
+  rows: RuntimeTelemetryProcessTableRow[] | null;
+  includesWindowsHostRows: boolean;
 }
 
 class RuntimeTelemetryTimeoutError extends Error {
@@ -3281,6 +3438,10 @@ export class TeamProvisioningService {
 
   private static readonly CLAUDE_LOG_LINES_LIMIT = 50_000;
   private static readonly BOOTSTRAP_FAILURE_TAIL_BYTES = 128 * 1024;
+  // A transcript whose mtime predates the lookup window (minus slack for clock skew
+  // between the line timestamp source and the filesystem) cannot hold a line at/after
+  // sinceMs, so it is skipped without opening it. The slack keeps detection safe.
+  private static readonly BOOTSTRAP_TRANSCRIPT_MTIME_SLACK_MS = 5_000;
   private static readonly RECENT_CROSS_TEAM_DELIVERY_TTL_MS = 10 * 60 * 1000;
   private static readonly PENDING_INBOX_RELAY_TTL_MS = 2 * 60 * 1000;
   private static readonly SAME_TEAM_NATIVE_DELIVERY_GRACE_MS = 15_000;
@@ -3289,15 +3450,26 @@ export class TeamProvisioningService {
   private static readonly SAME_TEAM_RUN_START_SKEW_MS = 1_000;
   private static readonly SAME_TEAM_PERSIST_RETRY_MS = 2_000;
   private static readonly AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS = 2_000;
+  private static readonly PERSISTED_AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS = 10_000;
+  private static readonly RUNTIME_RESOURCE_TELEMETRY_CACHE_TTL_MS = 60_000;
+  private static readonly RUNTIME_RESOURCE_TELEMETRY_FAILURE_CACHE_TTL_MS = 10_000;
+  private static readonly RUNTIME_RESOURCE_SAMPLE_MIN_INTERVAL_MS = 30_000;
   private static readonly AGENT_RUNTIME_RESOURCE_HISTORY_LIMIT = 60;
+  private static readonly BOOTSTRAP_TRANSCRIPT_OUTCOME_CACHE_MAX_ENTRIES = 2_048;
+  private static readonly PERSISTED_BOOTSTRAP_TRANSCRIPT_OUTCOME_LOOKUP_CACHE_TTL_MS = 10_000;
   private static readonly MAX_RUNTIME_TREE_PIDS_PER_ROOT = 64;
   private static readonly MAX_RUNTIME_USAGE_PIDS_PER_SNAPSHOT = 512;
   private static readonly RUNTIME_PROCESS_TABLE_TIMEOUT_MS = 1_500;
   private static readonly RUNTIME_WINDOWS_PROCESS_TABLE_TIMEOUT_MS = 1_500;
+  private static readonly RUNTIME_LIVENESS_PROCESS_TABLE_CACHE_TTL_MS = 5_000;
+  private static readonly RUNTIME_LIVENESS_PROCESS_TABLE_FAILURE_CACHE_TTL_MS = 2_000;
+  private static readonly RUNTIME_PROCESS_USAGE_CACHE_TTL_MS = 30_000;
+  private static readonly RUNTIME_PROCESS_USAGE_CACHE_MAX_ENTRIES = 4_096;
   private static readonly RUNTIME_PIDUSAGE_BATCH_TIMEOUT_MS = 2_000;
   private static readonly RUNTIME_PIDUSAGE_SINGLE_TIMEOUT_MS = 750;
   private static readonly RUNTIME_PIDUSAGE_FALLBACK_CONCURRENCY = 16;
   private static readonly MEMBER_SPAWN_STATUS_SNAPSHOT_CACHE_TTL_MS = 500;
+  private static readonly PERSISTED_MEMBER_SPAWN_STATUS_SNAPSHOT_CACHE_TTL_MS = 5_000;
   private static readonly LAUNCH_STATE_NOOP_REFRESH_MS = 15_000;
   private static readonly RETAINED_PROVISIONING_PROGRESS_TTL_MS = 5 * 60_000;
   private static readonly OPENCODE_RUNTIME_DELIVERY_ADVISORY_EVENT_TTL_MS = 24 * 60 * 60_000;
@@ -3349,6 +3521,21 @@ export class TeamProvisioningService {
     string,
     PersistedTranscriptClaudeLogsCacheEntry
   >();
+  private readonly bootstrapTranscriptOutcomeCache = new Map<
+    string,
+    BootstrapTranscriptOutcomeCacheEntry
+  >();
+  // Shared parsed-tail cache keyed by filePath (validated by mtime+size) so the
+  // same growing transcript is read + JSON.parsed ONCE per change instead of once
+  // per member per poll. The per-member outcome scan below is unchanged.
+  private readonly parsedBootstrapTranscriptTailCache = new Map<
+    string,
+    ParsedBootstrapTranscriptTailCacheEntry
+  >();
+  private readonly bootstrapTranscriptOutcomeLookupCache = new Map<
+    string,
+    BootstrapTranscriptOutcomeLookupCacheEntry
+  >();
   private readonly teamOpLocks = new Map<string, Promise<void>>();
   private readonly leadInboxRelayInFlight = new Map<string, Promise<number>>();
   private readonly relayedLeadInboxMessageIds = new Map<string, Set<string>>();
@@ -3388,14 +3575,16 @@ export class TeamProvisioningService {
   >();
   private readonly runtimeProcessRowsForUsageSnapshotByTeam = new Map<
     string,
+    RuntimeProcessRowsCacheEntry
+  >();
+  private readonly runtimeProcessUsageStatsCacheByPid = new Map<
+    number,
     {
       expiresAtMs: number;
-      generation: number;
-      runId: string | null;
-      rows: RuntimeTelemetryProcessTableRow[] | null;
-      includesWindowsHostRows: boolean;
+      stats: RuntimeProcessUsageStats | null;
     }
   >();
+  private readonly persistedTeamConfigCache = new Map<string, PersistedTeamConfigCacheEntry>();
   private readonly agentRuntimeSnapshotInFlightByTeam = new Map<
     string,
     {
@@ -3426,7 +3615,7 @@ export class TeamProvisioningService {
     {
       expiresAtMs: number;
       generation: number;
-      runId: string;
+      runId: string | null;
       snapshot: MemberSpawnStatusesSnapshot;
     }
   >();
@@ -3687,7 +3876,9 @@ export class TeamProvisioningService {
     this.agentRuntimeSnapshotInFlightByTeam.delete(teamName);
     this.liveTeamAgentRuntimeMetadataCache.delete(teamName);
     this.liveTeamAgentRuntimeMetadataInFlightByTeam.delete(teamName);
-    this.runtimeProcessRowsForUsageSnapshotByTeam.delete(teamName);
+    this.persistedTeamConfigCache.delete(teamName);
+    // Process table rows are TTL-bound. Resource telemetry can use the longer
+    // TTL, while liveness only reuses rows through a short age gate.
   }
 
   private cloneMemberSpawnStatusesSnapshot(
@@ -4843,8 +5034,38 @@ export class TeamProvisioningService {
     return this.aliveRunByTeam.get(teamName) ?? null;
   }
 
+  private setAliveRunId(teamName: string, runId: string): void {
+    if (!teamName || !runId || this.aliveRunByTeam.get(teamName) === runId) {
+      return;
+    }
+    this.aliveRunByTeam.set(teamName, runId);
+    notifyTeamWatchScopeChanged();
+  }
+
+  private deleteAliveRunId(teamName: string): void {
+    if (this.aliveRunByTeam.delete(teamName)) {
+      notifyTeamWatchScopeChanged();
+    }
+  }
+
+  /**
+   * Snapshot of teams that currently have a live runtime run. Used to keep the
+   * file-watch scope covering running teams (read-only; the map is maintained as
+   * runs start and stop).
+   */
+  getAliveTeamNames(): string[] {
+    return [...this.aliveRunByTeam.keys()];
+  }
+
   private getTrackedRunId(teamName: string): string | null {
     return this.getProvisioningRunId(teamName) ?? this.getAliveRunId(teamName);
+  }
+
+  private getAgentRuntimeSnapshotCacheTtlMs(teamName: string, runId: string | null): number {
+    if (runId || this.runtimeAdapterRunByTeam.has(teamName)) {
+      return TeamProvisioningService.AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS;
+    }
+    return TeamProvisioningService.PERSISTED_AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS;
   }
 
   private canDeliverToTrackedRuntimeRun(teamName: string, runId: string): boolean {
@@ -5048,7 +5269,7 @@ export class TeamProvisioningService {
       this.deleteSecondaryRuntimeRun(teamName, laneId);
       if (laneId === 'primary') {
         this.runtimeAdapterRunByTeam.delete(teamName);
-        this.aliveRunByTeam.delete(teamName);
+        this.deleteAliveRunId(teamName);
         this.provisioningRunByTeam.delete(teamName);
         this.invalidateRuntimeSnapshotCaches(teamName);
       }
@@ -10301,6 +10522,7 @@ export class TeamProvisioningService {
     peekAutoResumeService()?.cancelPendingAutoResume(teamName);
     this.clearOpenCodeRuntimeToolApprovals(teamName, { emitDismiss: true });
     this.invalidateRuntimeSnapshotCaches(teamName);
+    this.runtimeProcessRowsForUsageSnapshotByTeam.delete(teamName);
     this.retainedClaudeLogsByTeam.delete(teamName);
     this.persistedTranscriptClaudeLogsCache.delete(teamName);
     this.leadInboxRelayInFlight.delete(teamName);
@@ -13802,6 +14024,17 @@ export class TeamProvisioningService {
     source?: 'live' | 'persisted' | 'merged';
   }> {
     const readPersistedStatuses = async (resolvedRunId: string | null) => {
+      const generationAtStart = this.getMemberSpawnStatusesCacheGeneration(teamName);
+      const cached = this.memberSpawnStatusesSnapshotCache.get(teamName);
+      if (
+        cached &&
+        cached.expiresAtMs > Date.now() &&
+        cached.runId === resolvedRunId &&
+        cached.generation === generationAtStart
+      ) {
+        return this.cloneMemberSpawnStatusesSnapshot(cached.snapshot);
+      }
+
       const repairSnapshot = await this.readTaskActivityRepairLaunchSnapshot(teamName);
       this.repairStaleTaskActivityIntervalsOnce(teamName, repairSnapshot);
       const { snapshot, statuses } = await this.reconcilePersistedLaunchState(teamName);
@@ -13810,20 +14043,23 @@ export class TeamProvisioningService {
           this.getOpenCodeSecondaryBootstrapPendingMemberNames(snapshot),
       });
       const runtimeObservedAt = nowIso();
-      for (const [memberName, entry] of Object.entries(nextStatuses)) {
-        if (entry.runtimeAlive === true) {
-          this.taskActivityIntervalService.resumeActiveIntervalsForMember(
-            teamName,
-            memberName,
-            runtimeObservedAt
-          );
-        }
+      const aliveMemberNames = Object.entries(nextStatuses)
+        .filter(([, entry]) => entry.runtimeAlive === true)
+        .map(([memberName]) => memberName);
+      if (aliveMemberNames.length > 0) {
+        // Resume all alive members in a single locked task-file pass per cycle
+        // instead of one synchronous lock + full task read per member.
+        this.taskActivityIntervalService.resumeActiveIntervalsForMembers(
+          teamName,
+          aliveMemberNames,
+          runtimeObservedAt
+        );
       }
       const expectedMembers = snapshot ? this.getPersistedLaunchMemberNames(snapshot) : undefined;
       const summary = expectedMembers
         ? summarizeMemberSpawnStatusRecord(expectedMembers, nextStatuses)
         : undefined;
-      return {
+      const persistedSnapshot = {
         statuses: nextStatuses,
         runId: resolvedRunId,
         teamLaunchState: summary
@@ -13835,6 +14071,20 @@ export class TeamProvisioningService {
         summary: summary ?? snapshot?.summary,
         source: 'persisted' as const,
       };
+      if (
+        this.getMemberSpawnStatusesCacheGeneration(teamName) === generationAtStart &&
+        this.getTrackedRunId(teamName) === resolvedRunId
+      ) {
+        this.memberSpawnStatusesSnapshotCache.set(teamName, {
+          expiresAtMs:
+            Date.now() +
+            TeamProvisioningService.PERSISTED_MEMBER_SPAWN_STATUS_SNAPSHOT_CACHE_TTL_MS,
+          generation: generationAtStart,
+          runId: resolvedRunId,
+          snapshot: this.cloneMemberSpawnStatusesSnapshot(persistedSnapshot),
+        });
+      }
+      return persistedSnapshot;
     };
 
     const runId = this.getTrackedRunId(teamName);
@@ -14095,7 +14345,17 @@ export class TeamProvisioningService {
       const runtimeUsagePids = [
         ...new Set([...runtimeUsageTreesByRootPid.values()].flatMap((tree) => tree.pids)),
       ];
-      usageStatsByPid = await this.readProcessUsageStatsByPid(runtimeUsagePids);
+      usageStatsByPid = this.buildProcessUsageStatsFromRows(runtimeProcessRows, runtimeUsagePids);
+      const pidsMissingUsageStats = runtimeUsagePids.filter((pid) => !usageStatsByPid.has(pid));
+      if (
+        pidsMissingUsageStats.length > 0 &&
+        this.shouldSampleMissingRuntimeUsageStatsWithPidusage()
+      ) {
+        const sampledUsageStats = await this.readProcessUsageStatsByPid(pidsMissingUsageStats);
+        for (const [pid, stats] of sampledUsageStats) {
+          usageStatsByPid.set(pid, stats);
+        }
+      }
     } catch (error) {
       logger.debug(
         `[${teamName}] Runtime telemetry sampling failed; continuing without resource metrics: ${
@@ -14401,10 +14661,13 @@ export class TeamProvisioningService {
         !usageStatsByPid.has(rssPid) &&
         isSharedOpenCodeHost &&
         typeof rssPid === 'number' &&
-        rssPid > 0
+        rssPid > 0 &&
+        this.isRuntimePidusageTelemetryEnabled()
       ) {
         try {
-          const refreshedUsageStats = (await this.readProcessUsageStatsByPid([rssPid])).get(rssPid);
+          const refreshedUsageStats = (
+            await this.readProcessUsageStatsByPid([rssPid], { ignoreCachedMisses: true })
+          ).get(rssPid);
           if (refreshedUsageStats) {
             usageStatsByPid.set(rssPid, refreshedUsageStats);
           }
@@ -14537,7 +14800,7 @@ export class TeamProvisioningService {
       this.getTrackedRunId(teamName) === runId
     ) {
       this.agentRuntimeSnapshotCache.set(teamName, {
-        expiresAtMs: Date.now() + TeamProvisioningService.AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS,
+        expiresAtMs: Date.now() + this.getAgentRuntimeSnapshotCacheTtlMs(teamName, runId),
         snapshot,
       });
     }
@@ -20701,7 +20964,7 @@ export class TeamProvisioningService {
           laneId: 'primary',
         }).catch(() => undefined);
         this.runtimeAdapterRunByTeam.delete(input.request.teamName);
-        this.aliveRunByTeam.delete(input.request.teamName);
+        this.deleteAliveRunId(input.request.teamName);
         this.invalidateRuntimeSnapshotCaches(input.request.teamName);
       } else {
         this.runtimeAdapterRunByTeam.set(input.request.teamName, {
@@ -20710,7 +20973,7 @@ export class TeamProvisioningService {
           cwd: launchCwd,
           members: result.members,
         });
-        this.aliveRunByTeam.set(input.request.teamName, runId);
+        this.setAliveRunId(input.request.teamName, runId);
         this.invalidateRuntimeSnapshotCaches(input.request.teamName);
       }
       if (this.provisioningRunByTeam.get(input.request.teamName) === runId) {
@@ -21882,7 +22145,7 @@ export class TeamProvisioningService {
       emitDismiss: true,
     });
     this.runtimeAdapterRunByTeam.delete(teamName);
-    this.aliveRunByTeam.delete(teamName);
+    this.deleteAliveRunId(teamName);
     if (this.provisioningRunByTeam.get(teamName) === runId) {
       this.provisioningRunByTeam.delete(teamName);
     }
@@ -21961,7 +22224,7 @@ export class TeamProvisioningService {
       this.runtimeAdapterRunByTeam.delete(teamName);
     }
     if (this.aliveRunByTeam.get(teamName) === runId) {
-      this.aliveRunByTeam.delete(teamName);
+      this.deleteAliveRunId(teamName);
     }
     if (this.provisioningRunByTeam.get(teamName) === runId) {
       this.provisioningRunByTeam.delete(teamName);
@@ -21978,7 +22241,7 @@ export class TeamProvisioningService {
     const timestamp = nowIso();
     this.provisioningRunByTeam.delete(teamName);
     this.runtimeAdapterRunByTeam.delete(teamName);
-    this.aliveRunByTeam.delete(teamName);
+    this.deleteAliveRunId(teamName);
     this.invalidateRuntimeSnapshotCaches(teamName);
     const progress: TeamProvisioningProgress = {
       runId,
@@ -25259,31 +25522,57 @@ export class TeamProvisioningService {
 
     let processRows: RuntimeTelemetryProcessTableRow[] = [];
     let processTableAvailable = true;
-    try {
-      processRows =
-        this.normalizeRuntimeProcessRowsForTelemetry(
-          await this.withRuntimeTelemetryTimeout(
-            listRuntimeProcessTableForCurrentPlatform(),
-            TeamProvisioningService.RUNTIME_PROCESS_TABLE_TIMEOUT_MS,
-            'process table runtime snapshot'
-          ),
-          process.platform === 'win32' ? 'wsl' : 'native'
-        ) ?? [];
-    } catch (error) {
-      processTableAvailable = false;
-      logger.debug(
-        `[${teamName}] Failed to read process table for runtime snapshot: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-    this.runtimeProcessRowsForUsageSnapshotByTeam.set(teamName, {
-      expiresAtMs: Date.now() + TeamProvisioningService.AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS,
-      generation: generationAtStart,
-      runId,
-      rows: processTableAvailable ? processRows : null,
-      includesWindowsHostRows: false,
+    let processRowsReadForMetadata = false;
+    const shouldReadProcessTable = this.shouldReadProcessTableForLiveRuntimeMetadata({
+      metadataByMember,
+      launchSnapshot: persistedLaunchSnapshot,
+      paneInfoById,
     });
+    if (shouldReadProcessTable) {
+      const cachedRows = this.readCachedRuntimeProcessRowsForLiveRuntimeMetadata(teamName, runId);
+      if (cachedRows) {
+        processTableAvailable = cachedRows.rows !== null;
+        processRows = cachedRows.rows ?? [];
+      } else {
+        processRowsReadForMetadata = true;
+        try {
+          processRows =
+            this.normalizeRuntimeProcessRowsForTelemetry(
+              await this.withRuntimeTelemetryTimeout(
+                listRuntimeProcessTableForCurrentPlatform(),
+                TeamProvisioningService.RUNTIME_PROCESS_TABLE_TIMEOUT_MS,
+                'process table runtime snapshot'
+              ),
+              process.platform === 'win32' ? 'wsl' : 'native'
+            ) ?? [];
+        } catch (error) {
+          processTableAvailable = false;
+          logger.debug(
+            `[${teamName}] Failed to read process table for runtime snapshot: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      }
+    }
+    if (
+      processRowsReadForMetadata &&
+      this.getRuntimeSnapshotCacheGeneration(teamName) === generationAtStart
+    ) {
+      const sampledAtMs = Date.now();
+      this.runtimeProcessRowsForUsageSnapshotByTeam.set(teamName, {
+        expiresAtMs:
+          sampledAtMs +
+          (processTableAvailable
+            ? TeamProvisioningService.RUNTIME_RESOURCE_TELEMETRY_CACHE_TTL_MS
+            : TeamProvisioningService.RUNTIME_RESOURCE_TELEMETRY_FAILURE_CACHE_TTL_MS),
+        generation: generationAtStart,
+        runId,
+        sampledAtMs,
+        rows: processTableAvailable ? processRows : null,
+        includesWindowsHostRows: false,
+      });
+    }
     let windowsHostProcessRows: RuntimeTelemetryProcessTableRow[] | null = null;
     let windowsHostProcessTableAvailable = false;
     const getWindowsHostProcessRows = async (): Promise<RuntimeTelemetryProcessTableRow[]> => {
@@ -25439,7 +25728,7 @@ export class TeamProvisioningService {
       this.getTrackedRunId(teamName) === runId
     ) {
       this.liveTeamAgentRuntimeMetadataCache.set(teamName, {
-        expiresAtMs: Date.now() + TeamProvisioningService.AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS,
+        expiresAtMs: Date.now() + this.getAgentRuntimeSnapshotCacheTtlMs(teamName, runId),
         metadata: this.cloneLiveTeamAgentRuntimeMetadata(metadataByMember),
         runId,
       });
@@ -25561,6 +25850,17 @@ export class TeamProvisioningService {
       ...(params.pid ? { pid: params.pid } : {}),
       ...(params.runtimePid ? { runtimePid: params.runtimePid } : {}),
     };
+    const lastSample = existingHistory.at(-1);
+    const lastSampleMs = lastSample ? Date.parse(lastSample.timestamp) : Number.NaN;
+    const sampleMs = Date.parse(sample.timestamp);
+    const sampledRecently =
+      Number.isFinite(lastSampleMs) &&
+      Number.isFinite(sampleMs) &&
+      sampleMs - lastSampleMs >= 0 &&
+      sampleMs - lastSampleMs < TeamProvisioningService.RUNTIME_RESOURCE_SAMPLE_MIN_INTERVAL_MS;
+    if (sampledRecently) {
+      return existingHistory.map((entry) => ({ ...entry }));
+    }
     const nextHistory = [...existingHistory, sample].slice(
       -TeamProvisioningService.AGENT_RUNTIME_RESOURCE_HISTORY_LIMIT
     );
@@ -25620,9 +25920,18 @@ export class TeamProvisioningService {
     if (!stat || typeof stat !== 'object') {
       return undefined;
     }
-    const candidate = stat as { memory?: unknown; cpu?: unknown };
-    const rssBytes = normalizeRuntimeTelemetryNumber(candidate.memory);
-    const cpuPercent = normalizeRuntimeTelemetryNumber(candidate.cpu);
+    const candidate = stat as {
+      memory?: unknown;
+      cpu?: unknown;
+      rssBytes?: unknown;
+      cpuPercent?: unknown;
+    };
+    const rssBytes =
+      normalizeRuntimeTelemetryNumber(candidate.memory) ??
+      normalizeRuntimeTelemetryNumber(candidate.rssBytes);
+    const cpuPercent =
+      normalizeRuntimeTelemetryNumber(candidate.cpu) ??
+      normalizeRuntimeTelemetryNumber(candidate.cpuPercent);
     const normalized: RuntimeProcessUsageStats = {
       ...(rssBytes != null && rssBytes >= 0 ? { rssBytes } : {}),
       ...(cpuPercent != null && cpuPercent >= 0 ? { cpuPercent } : {}),
@@ -25654,15 +25963,81 @@ export class TeamProvisioningService {
           candidate.runtimeTelemetrySource === 'windows-host'
             ? candidate.runtimeTelemetrySource
             : undefined);
+        const usageStats = this.normalizeRuntimeProcessUsageStats(candidate);
         normalizedRows.push({
           pid: Math.floor(pid),
           ppid: Math.floor(ppid),
           command,
+          ...(usageStats ?? {}),
           ...(runtimeTelemetrySource ? { runtimeTelemetrySource } : {}),
         });
       }
     }
     return normalizedRows;
+  }
+
+  private shouldReadProcessTableForLiveRuntimeMetadata(params: {
+    metadataByMember: ReadonlyMap<string, LiveTeamAgentRuntimeMetadata>;
+    launchSnapshot: PersistedTeamLaunchSnapshot | null | undefined;
+    paneInfoById: ReadonlyMap<string, TmuxPaneRuntimeInfo>;
+  }): boolean {
+    for (const [memberName, metadata] of params.metadataByMember.entries()) {
+      if (metadata.agentId?.trim()) {
+        return true;
+      }
+      const paneId = metadata.tmuxPaneId?.trim() ?? '';
+      if (paneId && params.paneInfoById.has(paneId)) {
+        return true;
+      }
+      const launchRuntimePid = params.launchSnapshot?.members[memberName]?.runtimePid;
+      if (
+        (typeof metadata.metricsPid === 'number' &&
+          Number.isFinite(metadata.metricsPid) &&
+          metadata.metricsPid > 0) ||
+        (typeof launchRuntimePid === 'number' &&
+          Number.isFinite(launchRuntimePid) &&
+          launchRuntimePid > 0)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private readCachedRuntimeProcessRowsForLiveRuntimeMetadata(
+    teamName: string,
+    runId: string | null
+  ): { rows: RuntimeTelemetryProcessTableRow[] | null } | null {
+    const cached = this.runtimeProcessRowsForUsageSnapshotByTeam.get(teamName);
+    const nowMs = Date.now();
+    if (!cached || cached.expiresAtMs <= nowMs || cached.runId !== runId) {
+      return null;
+    }
+
+    // Process table rows are sampled global OS state. Do not tie reuse to
+    // runtime snapshot generation: launch progress invalidates runtime metadata
+    // frequently, and the age gate below keeps liveness freshness bounded.
+    const sampledAtMs =
+      typeof cached.sampledAtMs === 'number' && Number.isFinite(cached.sampledAtMs)
+        ? cached.sampledAtMs
+        : 0;
+    const maxAgeMs =
+      cached.rows === null
+        ? TeamProvisioningService.RUNTIME_LIVENESS_PROCESS_TABLE_FAILURE_CACHE_TTL_MS
+        : TeamProvisioningService.RUNTIME_LIVENESS_PROCESS_TABLE_CACHE_TTL_MS;
+    if (sampledAtMs <= 0 || nowMs - sampledAtMs > maxAgeMs) {
+      return null;
+    }
+
+    if (cached.rows === null) {
+      return { rows: null };
+    }
+
+    const rows =
+      this.normalizeRuntimeProcessRowsForTelemetry(cached.rows)?.filter(
+        (row) => row.runtimeTelemetrySource !== 'windows-host'
+      ) ?? [];
+    return { rows };
   }
 
   private async readRuntimeProcessRowsForUsageSnapshot(
@@ -25673,18 +26048,12 @@ export class TeamProvisioningService {
       process.platform === 'win32' && options.includeWindowsHostRows === true;
     const cached = this.runtimeProcessRowsForUsageSnapshotByTeam.get(teamName);
     const canUseCached =
-      cached &&
-      cached.expiresAtMs > Date.now() &&
-      cached.generation === this.getRuntimeSnapshotCacheGeneration(teamName) &&
-      cached.runId === this.getTrackedRunId(teamName);
+      cached && cached.expiresAtMs > Date.now() && cached.runId === this.getTrackedRunId(teamName);
     if (canUseCached && (!includeWindowsHostRows || cached.includesWindowsHostRows)) {
       return cached.rows;
     }
 
-    let rows =
-      canUseCached && cached.rows
-        ? this.normalizeRuntimeProcessRowsForTelemetry(cached.rows)
-        : null;
+    let rows = canUseCached && cached.rows ? cached.rows : null;
     let runtimeProcessTableAvailable = rows != null;
     try {
       if (!rows) {
@@ -25732,10 +26101,16 @@ export class TeamProvisioningService {
     }
 
     const resultRows = rows && rows.length > 0 ? rows : runtimeProcessTableAvailable ? [] : null;
+    const sampledAtMs = Date.now();
     this.runtimeProcessRowsForUsageSnapshotByTeam.set(teamName, {
-      expiresAtMs: Date.now() + TeamProvisioningService.AGENT_RUNTIME_SNAPSHOT_CACHE_TTL_MS,
+      expiresAtMs:
+        sampledAtMs +
+        (resultRows === null
+          ? TeamProvisioningService.RUNTIME_RESOURCE_TELEMETRY_FAILURE_CACHE_TTL_MS
+          : TeamProvisioningService.RUNTIME_RESOURCE_TELEMETRY_CACHE_TTL_MS),
       generation: this.getRuntimeSnapshotCacheGeneration(teamName),
       runId: this.getTrackedRunId(teamName),
+      sampledAtMs,
       rows: resultRows,
       includesWindowsHostRows,
     });
@@ -25746,7 +26121,7 @@ export class TeamProvisioningService {
     processRows: readonly RuntimeTelemetryProcessTableRow[]
   ): Map<number, RuntimeTelemetryProcessTableRow[]> {
     const childrenByParent = new Map<number, RuntimeTelemetryProcessTableRow[]>();
-    for (const row of this.normalizeRuntimeProcessRowsForTelemetry(processRows) ?? []) {
+    for (const row of processRows) {
       const current = childrenByParent.get(row.ppid) ?? [];
       current.push(row);
       childrenByParent.set(row.ppid, current);
@@ -25759,12 +26134,11 @@ export class TeamProvisioningService {
     processRows: readonly RuntimeTelemetryProcessTableRow[] | null,
     rootOwnersByPid: Map<number, Set<string>>
   ): void {
-    const normalizedRows = this.normalizeRuntimeProcessRowsForTelemetry(processRows);
-    if (!normalizedRows || normalizedRows.length === 0) {
+    if (!processRows || processRows.length === 0) {
       return;
     }
 
-    for (const row of normalizedRows) {
+    for (const row of processRows) {
       if (process.platform === 'win32' && row.runtimeTelemetrySource === 'wsl') {
         continue;
       }
@@ -25836,10 +26210,16 @@ export class TeamProvisioningService {
 
     const childrenByParent = this.buildRuntimeProcessChildrenByParent(normalizedProcessRows);
     const rowByPid = new Map(normalizedProcessRows.map((row) => [row.pid, row]));
+    const missingRootPids: number[] = [];
     for (const rootPid of uniqueRoots) {
       const pids: number[] = [];
       let truncated = false;
       const rootProcessRow = rowByPid.get(rootPid);
+      if (!rootProcessRow) {
+        missingRootPids.push(rootPid);
+        usageTreesByRootPid.set(rootPid, { pids: [], truncated: false });
+        continue;
+      }
       if (process.platform === 'win32' && rootProcessRow?.runtimeTelemetrySource === 'wsl') {
         usageTreesByRootPid.set(rootPid, { pids: [], truncated: false });
         continue;
@@ -25900,6 +26280,15 @@ export class TeamProvisioningService {
         truncated = true;
       }
       usageTreesByRootPid.set(rootPid, { pids, truncated });
+    }
+
+    for (const rootPid of missingRootPids) {
+      if (scheduledPids.size >= TeamProvisioningService.MAX_RUNTIME_USAGE_PIDS_PER_SNAPSHOT) {
+        usageTreesByRootPid.set(rootPid, { pids: [], truncated: true });
+        continue;
+      }
+      scheduledPids.add(rootPid);
+      usageTreesByRootPid.set(rootPid, { pids: [rootPid], truncated: false });
     }
 
     return usageTreesByRootPid;
@@ -26025,8 +26414,43 @@ export class TeamProvisioningService {
     }
   }
 
-  private async readProcessUsageStatsByPid(
+  private buildProcessUsageStatsFromRows(
+    processRows: readonly RuntimeTelemetryProcessTableRow[] | null,
     pids: readonly number[]
+  ): Map<number, RuntimeProcessUsageStats> {
+    const usageStatsByPid = new Map<number, RuntimeProcessUsageStats>();
+    const requestedPids = new Set(pids.filter((pid) => Number.isFinite(pid) && pid > 0));
+    if (!Array.isArray(processRows) || requestedPids.size === 0) {
+      return usageStatsByPid;
+    }
+
+    for (const row of processRows) {
+      if (!requestedPids.has(row.pid)) {
+        continue;
+      }
+      const usageStats = this.normalizeRuntimeProcessUsageStats(row);
+      if (usageStats) {
+        usageStatsByPid.set(row.pid, usageStats);
+      }
+    }
+    return usageStatsByPid;
+  }
+
+  private shouldSampleMissingRuntimeUsageStatsWithPidusage(): boolean {
+    // CPU/RSS telemetry already comes from the enriched process table in the
+    // default path. If this opt-in is enabled, preserve the older fallback for
+    // missing rows across platforms.
+    return this.isRuntimePidusageTelemetryEnabled();
+  }
+
+  private isRuntimePidusageTelemetryEnabled(): boolean {
+    const value = process.env.CLAUDE_TEAM_RUNTIME_PIDUSAGE_ENABLED?.trim().toLowerCase();
+    return value === '1' || value === 'true' || value === 'yes';
+  }
+
+  private async readProcessUsageStatsByPid(
+    pids: readonly number[],
+    cacheOptions: { ignoreCachedMisses?: boolean } = {}
   ): Promise<Map<number, RuntimeProcessUsageStats>> {
     const pidCandidates = Array.isArray(pids) ? pids : [];
     const uniquePids = [...new Set(pidCandidates.filter((pid) => Number.isFinite(pid) && pid > 0))];
@@ -26035,20 +26459,83 @@ export class TeamProvisioningService {
     }
 
     const usageStatsByPid = new Map<number, RuntimeProcessUsageStats>();
+    const pidsToRead: number[] = [];
+    const now = Date.now();
+    for (const pid of uniquePids) {
+      const cached = this.runtimeProcessUsageStatsCacheByPid.get(pid);
+      if (cached && cached.expiresAtMs > now) {
+        if (cached.stats) {
+          usageStatsByPid.set(pid, { ...cached.stats });
+          continue;
+        }
+        if (!cacheOptions.ignoreCachedMisses) {
+          continue;
+        }
+      }
+      if (cached) {
+        this.runtimeProcessUsageStatsCacheByPid.delete(pid);
+      }
+      pidsToRead.push(pid);
+    }
+    if (pidsToRead.length === 0) {
+      return usageStatsByPid;
+    }
+    if (!this.isRuntimePidusageTelemetryEnabled()) {
+      return usageStatsByPid;
+    }
+
+    const rememberUsageStats = (
+      pid: number,
+      stats: RuntimeProcessUsageStats | null | undefined
+    ): void => {
+      const normalized = stats ? { ...stats } : null;
+      const nowMs = Date.now();
+      for (const [cachedPid, cached] of this.runtimeProcessUsageStatsCacheByPid) {
+        if (cached.expiresAtMs <= nowMs) {
+          this.runtimeProcessUsageStatsCacheByPid.delete(cachedPid);
+        }
+      }
+      while (
+        !this.runtimeProcessUsageStatsCacheByPid.has(pid) &&
+        this.runtimeProcessUsageStatsCacheByPid.size >=
+          TeamProvisioningService.RUNTIME_PROCESS_USAGE_CACHE_MAX_ENTRIES
+      ) {
+        const oldestPid = this.runtimeProcessUsageStatsCacheByPid.keys().next().value;
+        if (oldestPid == null) {
+          break;
+        }
+        this.runtimeProcessUsageStatsCacheByPid.delete(oldestPid);
+      }
+      this.runtimeProcessUsageStatsCacheByPid.set(pid, {
+        expiresAtMs: nowMs + TeamProvisioningService.RUNTIME_PROCESS_USAGE_CACHE_TTL_MS,
+        stats: normalized,
+      });
+      if (normalized) {
+        usageStatsByPid.set(pid, { ...normalized });
+      }
+    };
+
     const options = RUNTIME_PIDUSAGE_OPTIONS;
     try {
       const statsByPid = await this.withRuntimeTelemetryTimeout(
-        pidusage(uniquePids, options),
+        pidusage(pidsToRead, options),
         TeamProvisioningService.RUNTIME_PIDUSAGE_BATCH_TIMEOUT_MS,
         'pidusage batch runtime telemetry'
       );
+      const observedPids = new Set<number>();
       for (const [rawPid, stat] of Object.entries(
         statsByPid && typeof statsByPid === 'object' ? statsByPid : {}
       )) {
         const pid = Number.parseInt(rawPid, 10);
         const usageStats = this.normalizeRuntimeProcessUsageStats(stat);
-        if (Number.isFinite(pid) && pid > 0 && usageStats) {
-          usageStatsByPid.set(pid, usageStats);
+        if (Number.isFinite(pid) && pid > 0) {
+          observedPids.add(pid);
+          rememberUsageStats(pid, usageStats);
+        }
+      }
+      for (const pid of pidsToRead) {
+        if (!observedPids.has(pid)) {
+          rememberUsageStats(pid, null);
         }
       }
       return usageStatsByPid;
@@ -26066,10 +26553,10 @@ export class TeamProvisioningService {
 
     for (
       let offset = 0;
-      offset < uniquePids.length;
+      offset < pidsToRead.length;
       offset += TeamProvisioningService.RUNTIME_PIDUSAGE_FALLBACK_CONCURRENCY
     ) {
-      const chunk = uniquePids.slice(
+      const chunk = pidsToRead.slice(
         offset,
         offset + TeamProvisioningService.RUNTIME_PIDUSAGE_FALLBACK_CONCURRENCY
       );
@@ -26082,13 +26569,12 @@ export class TeamProvisioningService {
               `pidusage runtime telemetry pid=${pid}`
             );
             const usageStats = this.normalizeRuntimeProcessUsageStats(stat);
-            if (usageStats) {
-              usageStatsByPid.set(pid, usageStats);
-            }
+            rememberUsageStats(pid, usageStats);
           } catch (error) {
             if (error instanceof RuntimeTelemetryTimeoutError) {
               logger.debug(error.message);
             }
+            rememberUsageStats(pid, null);
             // Process likely exited between discovery and sampling.
           }
         })
@@ -27172,7 +27658,7 @@ export class TeamProvisioningService {
     });
     run.onProgress(progress);
     this.provisioningRunByTeam.delete(run.teamName);
-    this.aliveRunByTeam.set(run.teamName, run.runId);
+    this.setAliveRunId(run.teamName, run.runId);
     logger.warn(
       `[${run.teamName}] Recovered ready state from completed deterministic bootstrap snapshot after post-bootstrap finalization delay.`
     );
@@ -29966,6 +30452,19 @@ export class TeamProvisioningService {
     memberName: string,
     sinceMs: number | null
   ): Promise<BootstrapTranscriptOutcome | null> {
+    const lookupCacheKey = this.buildBootstrapTranscriptOutcomeLookupCacheKey(
+      teamName,
+      memberName,
+      sinceMs
+    );
+    const cachedLookup = this.getPersistedBootstrapTranscriptOutcomeLookupCacheEntry(
+      teamName,
+      lookupCacheKey
+    );
+    if (cachedLookup !== undefined) {
+      return this.cloneBootstrapTranscriptOutcome(cachedLookup);
+    }
+
     let summaries: Awaited<ReturnType<TeamMemberLogsFinder['findMemberLogs']>>;
     try {
       summaries = await this.memberLogsFinder.findMemberLogs(teamName, memberName, sinceMs);
@@ -29992,7 +30491,69 @@ export class TeamProvisioningService {
       ...(await this.readBootstrapTranscriptOutcomesInProjectRoot(teamName, memberName, sinceMs))
     );
 
-    return this.selectLatestBootstrapTranscriptOutcome(outcomes);
+    const outcome = this.selectLatestBootstrapTranscriptOutcome(outcomes);
+    this.setPersistedBootstrapTranscriptOutcomeLookupCacheEntry(teamName, lookupCacheKey, outcome);
+    return outcome;
+  }
+
+  private cloneBootstrapTranscriptOutcome(
+    outcome: BootstrapTranscriptOutcome | null
+  ): BootstrapTranscriptOutcome | null {
+    return outcome ? { ...outcome } : null;
+  }
+
+  private buildBootstrapTranscriptOutcomeLookupCacheKey(
+    teamName: string,
+    memberName: string,
+    sinceMs: number | null
+  ): string {
+    return [teamName.trim().toLowerCase(), memberName.trim().toLowerCase(), sinceMs ?? ''].join(
+      '\0'
+    );
+  }
+
+  private getPersistedBootstrapTranscriptOutcomeLookupCacheEntry(
+    teamName: string,
+    cacheKey: string
+  ): BootstrapTranscriptOutcome | null | undefined {
+    if (this.getTrackedRunId(teamName) || this.runtimeAdapterRunByTeam.has(teamName)) {
+      return undefined;
+    }
+    const cached = this.bootstrapTranscriptOutcomeLookupCache.get(cacheKey);
+    if (!cached) {
+      return undefined;
+    }
+    if (cached.expiresAtMs <= Date.now()) {
+      this.bootstrapTranscriptOutcomeLookupCache.delete(cacheKey);
+      return undefined;
+    }
+    return cached.outcome;
+  }
+
+  private setPersistedBootstrapTranscriptOutcomeLookupCacheEntry(
+    teamName: string,
+    cacheKey: string,
+    outcome: BootstrapTranscriptOutcome | null
+  ): void {
+    if (this.getTrackedRunId(teamName) || this.runtimeAdapterRunByTeam.has(teamName)) {
+      return;
+    }
+    if (
+      !this.bootstrapTranscriptOutcomeLookupCache.has(cacheKey) &&
+      this.bootstrapTranscriptOutcomeLookupCache.size >=
+        TeamProvisioningService.BOOTSTRAP_TRANSCRIPT_OUTCOME_CACHE_MAX_ENTRIES
+    ) {
+      const oldestKey = this.bootstrapTranscriptOutcomeLookupCache.keys().next().value;
+      if (oldestKey) {
+        this.bootstrapTranscriptOutcomeLookupCache.delete(oldestKey);
+      }
+    }
+    this.bootstrapTranscriptOutcomeLookupCache.set(cacheKey, {
+      expiresAtMs:
+        Date.now() +
+        TeamProvisioningService.PERSISTED_BOOTSTRAP_TRANSCRIPT_OUTCOME_LOOKUP_CACHE_TTL_MS,
+      outcome: this.cloneBootstrapTranscriptOutcome(outcome),
+    });
   }
 
   private async readRecentBootstrapTranscriptOutcome(
@@ -30005,8 +30566,8 @@ export class TeamProvisioningService {
       contextMemberNames?: readonly string[];
     } = {}
   ): Promise<BootstrapTranscriptOutcome | null> {
-    let handle: fs.promises.FileHandle | null = null;
     const normalizedMemberName = memberName.trim().toLowerCase();
+    const normalizedTeamName = teamName.trim().toLowerCase();
     const contextMemberNames = Array.from(
       new Set(
         [memberName, ...(options.contextMemberNames ?? [])]
@@ -30014,114 +30575,243 @@ export class TeamProvisioningService {
           .filter(Boolean)
       )
     );
+    const normalizedContextMemberNames = contextMemberNames.map((name) =>
+      name.trim().toLowerCase()
+    );
+    const cacheKey = this.buildBootstrapTranscriptOutcomeCacheKey({
+      filePath,
+      sinceMs,
+      memberName: normalizedMemberName,
+      teamName,
+      allowAnonymousFailure: options.allowAnonymousFailure === true,
+      contextMemberNames,
+    });
     try {
-      handle = await fs.promises.open(filePath, 'r');
-      const stat = await handle.stat();
+      // Stat without opening: on a cache hit we must NOT open the file. During a
+      // tracked launch the per-member lookup cache is bypassed, so this scan runs
+      // for every recent session file x every member x every poll; opening before
+      // the cache check turned every one of those into a wasted open() syscall.
+      const stat = await fs.promises.stat(filePath);
       if (!stat.isFile() || stat.size <= 0) {
         return null;
       }
-      const start = Math.max(0, stat.size - TeamProvisioningService.BOOTSTRAP_FAILURE_TAIL_BYTES);
-      const buffer = Buffer.alloc(stat.size - start);
-      if (buffer.length === 0) {
-        return null;
+      const cached = this.bootstrapTranscriptOutcomeCache.get(cacheKey);
+      if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+        return cached.outcome;
       }
-      await handle.read(buffer, 0, buffer.length, start);
-      const lines = buffer.toString('utf8').split('\n');
-      if (start > 0) {
-        lines.shift();
-      }
+      // Parse the transcript tail once per (filePath, mtime, size) and share it
+      // across members. getParsedBootstrapTranscriptTail opens the file ITSELF only
+      // when its parse cache misses, so a shared-cache hit also avoids the open.
+      const parsedLines = await this.getParsedBootstrapTranscriptTail(filePath, stat);
+      const shouldCollectBootstrapContext = options.allowAnonymousFailure !== true;
       const bootstrapContextMembers = new Set<string>();
-      for (const rawLine of lines) {
-        const line = rawLine?.trim();
-        if (!line) continue;
-        let parsed: { timestamp?: unknown } | null = null;
-        try {
-          parsed = JSON.parse(line) as { timestamp?: unknown };
-        } catch {
-          continue;
-        }
-        const timestampMs =
-          typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : Number.NaN;
+      const candidates: BootstrapTranscriptOutcomeCandidate[] = [];
+      for (const parsedLine of parsedLines) {
+        const { timestampMs, parsedAgentName, text, rawTimestamp, normalizedText } = parsedLine;
         if (sinceMs != null && (!Number.isFinite(timestampMs) || timestampMs < sinceMs)) {
           continue;
         }
-        const parsedAgentName =
-          typeof (parsed as { agentName?: unknown }).agentName === 'string'
-            ? (parsed as { agentName?: string }).agentName?.trim().toLowerCase() || null
-            : null;
         if (
           parsedAgentName &&
           !matchesObservedMemberNameForExpected(parsedAgentName, normalizedMemberName)
         ) {
           continue;
         }
-        const text = extractTranscriptMessageText(parsed);
         if (!text) {
           continue;
         }
-        for (const contextMemberName of contextMemberNames) {
-          if (isBootstrapTranscriptContextText(text, teamName, contextMemberName)) {
-            bootstrapContextMembers.add(contextMemberName.trim().toLowerCase());
+        const lineNormalizedText = normalizedText ?? '';
+        if (shouldCollectBootstrapContext) {
+          const isBootstrapContextLine = getCachedBootstrapContextCandidateForLine(
+            parsedLine,
+            lineNormalizedText,
+            normalizedTeamName
+          );
+          if (isBootstrapContextLine) {
+            for (const contextMemberName of normalizedContextMemberNames) {
+              if (
+                getCachedBootstrapContextMemberMatchForLine(
+                  parsedLine,
+                  lineNormalizedText,
+                  contextMemberName
+                )
+              ) {
+                bootstrapContextMembers.add(contextMemberName);
+              }
+            }
           }
         }
+        candidates.push({
+          text,
+          normalizedText: lineNormalizedText,
+          observedAt:
+            rawTimestamp && rawTimestamp.length > 0 ? rawTimestamp : new Date().toISOString(),
+          parsedAgentName,
+          parsedLine,
+        });
       }
       const hasUnambiguousMatchingBootstrapContext =
-        bootstrapContextMembers.size === 1 && bootstrapContextMembers.has(normalizedMemberName);
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const line = lines[index]?.trim();
-        if (!line) continue;
-        let parsed: { timestamp?: unknown } | null = null;
-        try {
-          parsed = JSON.parse(line) as { timestamp?: unknown };
-        } catch {
-          continue;
+        shouldCollectBootstrapContext &&
+        bootstrapContextMembers.size === 1 &&
+        bootstrapContextMembers.has(normalizedMemberName);
+      let outcome: BootstrapTranscriptOutcome | null = null;
+      for (let index = candidates.length - 1; index >= 0; index -= 1) {
+        const candidate = candidates[index];
+        if (!candidate) continue;
+        // Lazy + memoized on the shared parsed line: computed at most once per line
+        // across all members and re-scans, and only for lines this newest-first loop
+        // actually reaches (lines past the first match are never extracted).
+        const cachedLine = candidate.parsedLine;
+        if (cachedLine.bootstrapFailureReason === undefined) {
+          cachedLine.bootstrapFailureReason = extractBootstrapFailureReason(candidate.text);
         }
-        const timestampMs =
-          typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : Number.NaN;
-        if (sinceMs != null) {
-          if (!Number.isFinite(timestampMs) || timestampMs < sinceMs) {
-            continue;
-          }
-        }
-        const parsedAgentName =
-          typeof (parsed as { agentName?: unknown }).agentName === 'string'
-            ? (parsed as { agentName?: string }).agentName?.trim().toLowerCase() || null
-            : null;
-        if (
-          parsedAgentName &&
-          !matchesObservedMemberNameForExpected(parsedAgentName, normalizedMemberName)
-        ) {
-          continue;
-        }
-        const text = extractTranscriptMessageText(parsed);
-        if (!text) continue;
-        const observedAt =
-          typeof parsed.timestamp === 'string' && parsed.timestamp.trim().length > 0
-            ? parsed.timestamp.trim()
-            : new Date().toISOString();
-        const reason = extractBootstrapFailureReason(text);
+        const reason = cachedLine.bootstrapFailureReason;
         if (reason) {
           if (
-            !parsedAgentName &&
+            !candidate.parsedAgentName &&
             options.allowAnonymousFailure !== true &&
             !hasUnambiguousMatchingBootstrapContext
           ) {
             continue;
           }
-          return { kind: 'failure', observedAt, reason };
+          outcome = { kind: 'failure', observedAt: candidate.observedAt, reason };
+          break;
         }
-        const successSource = getBootstrapTranscriptSuccessSource(text, teamName, memberName);
+        const successSource = getCachedBootstrapSuccessSourceForLine(
+          cachedLine,
+          candidate.normalizedText,
+          normalizedTeamName,
+          normalizedMemberName
+        );
         if (successSource) {
-          return { kind: 'success', observedAt, source: successSource };
+          outcome = { kind: 'success', observedAt: candidate.observedAt, source: successSource };
+          break;
         }
       }
+      this.setBootstrapTranscriptOutcomeCacheEntry(cacheKey, {
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        outcome,
+      });
+      return outcome;
     } catch {
       return null;
-    } finally {
-      await handle?.close().catch(() => undefined);
     }
+  }
 
-    return null;
+  private buildBootstrapTranscriptOutcomeCacheKey(input: {
+    filePath: string;
+    sinceMs: number | null;
+    memberName: string;
+    teamName: string;
+    allowAnonymousFailure: boolean;
+    contextMemberNames: readonly string[];
+  }): string {
+    const normalizedContextMembers = Array.from(
+      new Set(input.contextMemberNames.map((name) => name.trim().toLowerCase()).filter(Boolean))
+    )
+      .sort()
+      .join('\0');
+    return [
+      input.filePath,
+      input.sinceMs ?? '',
+      input.memberName,
+      input.teamName.trim().toLowerCase(),
+      input.allowAnonymousFailure ? '1' : '0',
+      normalizedContextMembers,
+    ].join('\0');
+  }
+
+  private async getParsedBootstrapTranscriptTail(
+    filePath: string,
+    stat: { mtimeMs: number; size: number }
+  ): Promise<ParsedBootstrapTranscriptTailLine[]> {
+    const cached = this.parsedBootstrapTranscriptTailCache.get(filePath);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      return cached.lines;
+    }
+    const lines: ParsedBootstrapTranscriptTailLine[] = [];
+    const start = Math.max(0, stat.size - TeamProvisioningService.BOOTSTRAP_FAILURE_TAIL_BYTES);
+    const length = stat.size - start;
+    if (length > 0) {
+      // Open lazily: only a genuine parse-cache miss (file changed since last
+      // parse) reaches here, so we never open a file whose tail is already cached.
+      const handle = await fs.promises.open(filePath, 'r');
+      let rawLines: string[];
+      try {
+        const buffer = Buffer.alloc(length);
+        await handle.read(buffer, 0, length, start);
+        rawLines = buffer.toString('utf8').split('\n');
+      } finally {
+        await handle.close().catch(() => undefined);
+      }
+      if (start > 0) {
+        rawLines.shift();
+      }
+      for (const rawLine of rawLines) {
+        const line = rawLine?.trim();
+        if (!line) continue;
+        let parsed: { timestamp?: unknown; agentName?: unknown } | null = null;
+        try {
+          parsed = JSON.parse(line) as { timestamp?: unknown; agentName?: unknown };
+        } catch {
+          continue;
+        }
+        const rawTimestamp =
+          typeof parsed.timestamp === 'string' && parsed.timestamp.trim().length > 0
+            ? parsed.timestamp.trim()
+            : null;
+        const timestampMs =
+          typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : Number.NaN;
+        const parsedAgentName =
+          typeof parsed.agentName === 'string'
+            ? parsed.agentName.trim().toLowerCase() || null
+            : null;
+        const text = extractTranscriptMessageText(parsed);
+        const normalizedText = text ? text.replace(/\s+/g, ' ').trim().toLowerCase() : null;
+        lines.push({ rawTimestamp, timestampMs, text, normalizedText, parsedAgentName });
+      }
+    }
+    this.setParsedBootstrapTranscriptTailCacheEntry(filePath, {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      lines,
+    });
+    return lines;
+  }
+
+  private setParsedBootstrapTranscriptTailCacheEntry(
+    filePath: string,
+    entry: ParsedBootstrapTranscriptTailCacheEntry
+  ): void {
+    if (
+      !this.parsedBootstrapTranscriptTailCache.has(filePath) &&
+      this.parsedBootstrapTranscriptTailCache.size >=
+        TeamProvisioningService.BOOTSTRAP_TRANSCRIPT_OUTCOME_CACHE_MAX_ENTRIES
+    ) {
+      const oldestKey = this.parsedBootstrapTranscriptTailCache.keys().next().value;
+      if (oldestKey) {
+        this.parsedBootstrapTranscriptTailCache.delete(oldestKey);
+      }
+    }
+    this.parsedBootstrapTranscriptTailCache.set(filePath, entry);
+  }
+
+  private setBootstrapTranscriptOutcomeCacheEntry(
+    cacheKey: string,
+    entry: BootstrapTranscriptOutcomeCacheEntry
+  ): void {
+    if (
+      !this.bootstrapTranscriptOutcomeCache.has(cacheKey) &&
+      this.bootstrapTranscriptOutcomeCache.size >=
+        TeamProvisioningService.BOOTSTRAP_TRANSCRIPT_OUTCOME_CACHE_MAX_ENTRIES
+    ) {
+      const oldestKey = this.bootstrapTranscriptOutcomeCache.keys().next().value;
+      if (oldestKey) {
+        this.bootstrapTranscriptOutcomeCache.delete(oldestKey);
+      }
+    }
+    this.bootstrapTranscriptOutcomeCache.set(cacheKey, entry);
   }
 
   private async readBootstrapTranscriptOutcomesInProjectRoot(
@@ -30162,8 +30852,27 @@ export class TeamProvisioningService {
         if (config?.leadSessionId && entry.name === `${config.leadSessionId}.jsonl`) {
           continue;
         }
+        const candidatePath = path.join(projectDir, entry.name);
+        // Project dirs can hold hundreds of old session transcripts. A file last
+        // modified before the lookup window cannot contain a bootstrap line at/after
+        // sinceMs (append-only: line timestamp <= write time <= mtime), so
+        // readRecentBootstrapTranscriptOutcome would return null. Skip it with a
+        // cheap stat instead of opening + tail-reading every file each poll.
+        if (sinceMs != null) {
+          try {
+            const candidateStat = await fs.promises.stat(candidatePath);
+            if (
+              candidateStat.mtimeMs <
+              sinceMs - TeamProvisioningService.BOOTSTRAP_TRANSCRIPT_MTIME_SLACK_MS
+            ) {
+              continue;
+            }
+          } catch {
+            continue;
+          }
+        }
         const outcome = await this.readRecentBootstrapTranscriptOutcome(
-          path.join(projectDir, entry.name),
+          candidatePath,
           sinceMs,
           memberName,
           teamName,
@@ -30733,7 +31442,7 @@ export class TeamProvisioningService {
         await this.stopMixedSecondaryRuntimeLanes(teamName);
       }
       this.provisioningRunByTeam.delete(teamName);
-      this.aliveRunByTeam.delete(teamName);
+      this.deleteAliveRunId(teamName);
       await this.cleanupAnthropicApiKeyHelperMaterialForStoppedTeam(teamName);
       return;
     }
@@ -30931,7 +31640,7 @@ export class TeamProvisioningService {
         laneId: 'primary',
       }).catch(() => undefined);
       this.runtimeAdapterRunByTeam.delete(teamName);
-      this.aliveRunByTeam.delete(teamName);
+      this.deleteAliveRunId(teamName);
       this.provisioningRunByTeam.delete(teamName);
       this.invalidateRuntimeSnapshotCaches(teamName);
       return;
@@ -30953,7 +31662,7 @@ export class TeamProvisioningService {
       emitDismiss: true,
     });
     this.runtimeAdapterRunByTeam.delete(teamName);
-    this.aliveRunByTeam.delete(teamName);
+    this.deleteAliveRunId(teamName);
     if (this.provisioningRunByTeam.get(teamName) === runId) {
       this.provisioningRunByTeam.delete(teamName);
     }
@@ -31015,7 +31724,7 @@ export class TeamProvisioningService {
         laneId: 'primary',
       }).catch(() => undefined);
       this.runtimeAdapterRunByTeam.delete(teamName);
-      this.aliveRunByTeam.delete(teamName);
+      this.deleteAliveRunId(teamName);
       this.provisioningRunByTeam.delete(teamName);
       this.teamChangeEmitter?.({
         type: 'process',
@@ -31051,32 +31760,74 @@ export class TeamProvisioningService {
     }
   }
 
-  private readPersistedTeamProjectPath(teamName: string): string | null {
+  private clonePersistedRuntimeMember(
+    member: PersistedRuntimeMemberLike
+  ): PersistedRuntimeMemberLike {
+    return { ...member };
+  }
+
+  private isPersistedRuntimeMemberLike(member: unknown): member is PersistedRuntimeMemberLike {
+    return !!member && typeof member === 'object';
+  }
+
+  private readPersistedTeamConfig(teamName: string): PersistedTeamConfigCacheEntry | null {
     const configPath = path.join(getTeamsBasePath(), teamName, 'config.json');
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(configPath);
+    } catch {
+      this.persistedTeamConfigCache.delete(teamName);
+      return null;
+    }
+
+    const cached = this.persistedTeamConfigCache.get(teamName);
+    if (
+      cached &&
+      cached.path === configPath &&
+      cached.size === stat.size &&
+      cached.mtimeMs === stat.mtimeMs &&
+      cached.ctimeMs === stat.ctimeMs
+    ) {
+      return cached;
+    }
+
     try {
       const raw = fs.readFileSync(configPath, 'utf8');
-      const parsed = JSON.parse(raw) as { projectPath?: unknown };
+      const parsed = JSON.parse(raw) as { projectPath?: unknown; members?: unknown };
       const projectPath = typeof parsed.projectPath === 'string' ? parsed.projectPath.trim() : '';
-      return projectPath || null;
+      const members = Array.isArray(parsed.members)
+        ? parsed.members
+            .filter((member): member is PersistedRuntimeMemberLike =>
+              this.isPersistedRuntimeMemberLike(member)
+            )
+            .map((member) => this.clonePersistedRuntimeMember(member))
+        : [];
+      const entry: PersistedTeamConfigCacheEntry = {
+        path: configPath,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        ctimeMs: stat.ctimeMs,
+        projectPath: projectPath || null,
+        members,
+      };
+      this.persistedTeamConfigCache.set(teamName, entry);
+      return entry;
     } catch {
+      this.persistedTeamConfigCache.delete(teamName);
       return null;
     }
   }
 
+  private readPersistedTeamProjectPath(teamName: string): string | null {
+    return this.readPersistedTeamConfig(teamName)?.projectPath ?? null;
+  }
+
   private readPersistedRuntimeMembers(teamName: string): PersistedRuntimeMemberLike[] {
-    const configPath = path.join(getTeamsBasePath(), teamName, 'config.json');
-    try {
-      const raw = fs.readFileSync(configPath, 'utf8');
-      const parsed = JSON.parse(raw) as { members?: unknown };
-      if (!Array.isArray(parsed.members)) {
-        return [];
-      }
-      return parsed.members.filter((member): member is PersistedRuntimeMemberLike => {
-        return !!member && typeof member === 'object';
-      });
-    } catch {
-      return [];
-    }
+    return (
+      this.readPersistedTeamConfig(teamName)?.members.map((member) =>
+        this.clonePersistedRuntimeMember(member)
+      ) ?? []
+    );
   }
 
   private listPersistedTeamNames(): string[] {
@@ -32859,7 +33610,7 @@ export class TeamProvisioningService {
           cwd: entry.cwd,
           members: committed.members,
         });
-        this.aliveRunByTeam.set(entry.approval.teamName, entry.approval.runId);
+        this.setAliveRunId(entry.approval.teamName, entry.approval.runId);
       }
       this.syncOpenCodeRuntimeToolApprovals({
         teamName: entry.approval.teamName,
@@ -33520,7 +34271,7 @@ export class TeamProvisioningService {
       });
       run.onProgress(progress);
       this.provisioningRunByTeam.delete(run.teamName);
-      this.aliveRunByTeam.set(run.teamName, run.runId);
+      this.setAliveRunId(run.teamName, run.runId);
       logger.info(`[${run.teamName}] Launch complete. Process alive for subsequent tasks.`);
 
       if (!run.deterministicBootstrap && shouldUseGeminiStagedLaunch(run.request.providerId)) {
@@ -33715,7 +34466,7 @@ export class TeamProvisioningService {
       });
     }
     this.provisioningRunByTeam.delete(run.teamName);
-    this.aliveRunByTeam.set(run.teamName, run.runId);
+    this.setAliveRunId(run.teamName, run.runId);
     logger.info(`[${run.teamName}] Provisioning complete. Process alive for subsequent tasks.`);
 
     if (!run.deterministicBootstrap && shouldUseGeminiStagedLaunch(run.request.providerId)) {
@@ -34401,7 +35152,7 @@ export class TeamProvisioningService {
       this.provisioningRunByTeam.delete(run.teamName);
     }
     if (this.aliveRunByTeam.get(run.teamName) === run.runId) {
-      this.aliveRunByTeam.delete(run.teamName);
+      this.deleteAliveRunId(run.teamName);
     }
     if (!hasNewerTrackedRun) {
       this.clearSecondaryRuntimeRuns(run.teamName);

@@ -352,6 +352,14 @@ function cloneCached<T>(value: T): T {
     : (JSON.parse(JSON.stringify(value)) as T);
 }
 
+function dateFromFingerprintMs(ms: unknown): Date | null {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) {
+    return null;
+  }
+  const date = new Date(ms);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
 async function statPathFingerprint(filePath: string): Promise<PathFingerprint> {
   try {
     const stat = await fs.promises.stat(filePath, { bigint: true });
@@ -637,7 +645,7 @@ function applyCachedTaskReadResult(
     bumpSkipReason(taskDiag.skipReasons, cached.skipReason);
     return;
   }
-  tasks.push(cloneCached(cached.task));
+  tasks.push(cached.task);
 }
 
 function pruneTaskFileCache(
@@ -952,7 +960,7 @@ async function listTeams(
     if (dependencyFingerprint.cacheSafe && cached?.fingerprint === dependencyFingerprint.value) {
       cached.lastUsedAt = nowMs();
       diag.cacheHits++;
-      return cloneCached(cached.summary);
+      return cached.summary;
     }
     diag.cacheMisses++;
 
@@ -1460,7 +1468,6 @@ async function readTasksDirForTeam(
       }
       taskDiag.cacheMisses++;
 
-      const stat = await fs.promises.stat(taskPath);
       const raw = await readFileUtf8WithTimeout(taskPath, payload.maxTaskReadMs);
       const parsed = JSON.parse(raw) as ParsedTask;
       const metadata = parsed.metadata;
@@ -1504,11 +1511,12 @@ async function readTasksDirForTeam(
         typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined;
       let updatedAt: string | undefined;
       try {
+        const birthtime = dateFromFingerprintMs(pathFingerprint.birthtimeMs);
+        const mtime = dateFromFingerprintMs(pathFingerprint.mtimeMs);
         if (!createdAt) {
-          const bt = stat.birthtime.getTime();
-          createdAt = (bt > 0 ? stat.birthtime : stat.mtime).toISOString();
+          createdAt = (birthtime ?? mtime)?.toISOString();
         }
-        updatedAt = stat.mtime.toISOString();
+        updatedAt = mtime?.toISOString();
       } catch {
         /* ignore */
       }
@@ -1559,7 +1567,7 @@ async function readTasksDirForTeam(
         status,
         workIntervals: normalizeWorkIntervals(parsed),
         reviewIntervals: normalizeReviewIntervals(parsed),
-        historyEvents: normalizeHistoryEvents(parsed),
+        historyEvents,
         blocks: Array.isArray(parsed.blocks) ? (parsed.blocks as unknown[]) : undefined,
         blockedBy: Array.isArray(parsed.blockedBy) ? (parsed.blockedBy as unknown[]) : undefined,
         related: Array.isArray(parsed.related)

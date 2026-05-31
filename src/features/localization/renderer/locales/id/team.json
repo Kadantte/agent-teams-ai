@@ -1485,7 +1485,7 @@
     },
     "status": {
       "reusedCrossTeamRequest": "Mengulang permintaan tim-cross- baru-baru ini",
-      "teamOffline": "Tim luring"
+      "teamOffline": "offline"
     },
     "revision": {
       "editing": "Mengedit pesan sebelumnya",

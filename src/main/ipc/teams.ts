@@ -4,6 +4,7 @@ import {
 } from '@features/agent-attachments/contracts';
 import { addMainBreadcrumb } from '@main/sentry';
 import { setCurrentMainOp } from '@main/services/infrastructure/EventLoopLagMonitor';
+import { markTeamEngaged } from '@main/services/infrastructure/teamWatchScope';
 import { getTeamDataWorkerClient } from '@main/services/team/TeamDataWorkerClient';
 import { getAppIconPath } from '@main/utils/appIcon';
 import { getAppDataPath, getTeamsBasePath } from '@main/utils/pathDecoder';
@@ -193,6 +194,7 @@ import type {
   CreateTaskRequest,
   EffortLevel,
   GlobalTask,
+  InboxMessage,
   IpcResult,
   KanbanColumnId,
   LeadActivitySnapshot,
@@ -328,6 +330,33 @@ function noteHeavyTeamDataWorkerFallback(operation: string): void {
   logger.error(
     `[${operation}] team-data-worker unavailable in packaged runtime; falling back to main-thread execution for heavy message/activity path`
   );
+}
+
+async function getNewestMessagesPageWithLiveOverlay(input: {
+  teamName: string;
+  limit: number;
+  liveMessages: InboxMessage[];
+  includeUndefinedCursorInFallback?: boolean;
+}): Promise<MessagesPage> {
+  const { teamName, limit, liveMessages } = input;
+  const worker = getTeamDataWorkerClient();
+  const options = input.includeUndefinedCursorInFallback
+    ? { cursor: undefined, limit, liveMessages }
+    : { limit, liveMessages };
+  if (worker.isAvailable()) {
+    try {
+      return await worker.getMessagesPage(teamName, options);
+    } catch (workerErr) {
+      logger.warn(
+        `[teams:getMessagesPage] worker failed for live overlay, falling back: ${
+          workerErr instanceof Error ? workerErr.message : workerErr
+        }`
+      );
+    }
+  }
+
+  noteHeavyTeamDataWorkerFallback('teams:getMessagesPage.liveOverlay');
+  return getTeamDataService().getMessagesPage(teamName, options);
 }
 
 function invalidateTeamRosterSnapshotCaches(teamName: string): void {
@@ -869,6 +898,9 @@ async function handleGetData(
     return { success: false, error: optionsResult.error };
   }
   const tn = validated.value!;
+  // The UI is fetching this team, so keep its team-root/task artifacts watched
+  // (idle teams the UI never opens are not watched, to scale with team count).
+  markTeamEngaged(tn);
   const getDataOptions = optionsResult.value;
   const startedAt = Date.now();
   let data: TeamViewSnapshot;
@@ -988,7 +1020,8 @@ async function handleGetData(
   let merged = mergeLiveLeadProcessMessages(durableMessages, live);
   if (durableMessages.length >= 50) {
     try {
-      const newestPage = await teamDataService.getMessagesPage(tn, {
+      const newestPage = await getNewestMessagesPageWithLiveOverlay({
+        teamName: tn,
         limit: 50,
         liveMessages: live,
       });
@@ -1935,6 +1968,9 @@ async function handleCreateTeam(
   return wrapTeamHandler('create', async () => {
     addMainBreadcrumb('team', 'create', { teamName: validation.value.teamName });
     launchIoGovernor?.noteLaunchIntent(validation.value.teamName, 'create');
+    // Keep this team's team-root/task artifacts file-watched while createTeam writes
+    // its initial config, tasks, inboxes, and launch state.
+    markTeamEngaged(validation.value.teamName);
     try {
       const response = await getTeamProvisioningService().createTeam(
         validation.value,
@@ -2100,6 +2136,9 @@ async function handleLaunchTeam(
 
     return wrapTeamHandler('create', async () => {
       launchIoGovernor?.noteLaunchIntent(tn, 'draft-launch');
+      // Draft launch runs through createTeam, so it needs the same immediate watch scope
+      // as a normal launch before startup files begin changing.
+      markTeamEngaged(tn);
       try {
         const response = await getTeamProvisioningService().createTeam(
           createRequest,
@@ -2180,6 +2219,10 @@ async function handleLaunchTeam(
   return wrapTeamHandler('launch', async () => {
     addMainBreadcrumb('team', 'launch', { teamName: validatedTeamName.value! });
     launchIoGovernor?.noteLaunchIntent(validatedTeamName.value!, 'launch');
+    // Keep this team's team-root/task artifacts file-watched for the whole launch (and the
+    // engaged TTL after), so the lead's immediate startup writes are not missed during the
+    // 0-30s window before the periodic watch-scope reconcile would otherwise pick it up.
+    markTeamEngaged(validatedTeamName.value!);
     try {
       const response = await getTeamProvisioningService().launchTeam(
         {
@@ -2708,10 +2751,11 @@ async function handleGetMessagesPage(
       cursor == null ? getTeamProvisioningService().getLiveLeadProcessMessages(teamName) : [];
 
     if (liveMessages.length > 0) {
-      page = await getTeamDataService().getMessagesPage(teamName, {
-        cursor,
+      page = await getNewestMessagesPageWithLiveOverlay({
+        teamName,
         limit,
         liveMessages,
+        includeUndefinedCursorInFallback: true,
       });
       scanNotifications(page);
       return page;

@@ -449,6 +449,14 @@ export class TeamMessageFeedService {
         messages: cached.messages,
       };
     }
+    if (cached && !cacheDirty && cacheExpired) {
+      this.refreshCleanExpiredCacheInBackground(teamName, cached, now);
+      return {
+        teamName,
+        feedRevision: cached.feedRevision,
+        messages: cached.messages,
+      };
+    }
 
     const existingRequest = this.inFlightByTeam.get(teamName);
     const generationAtStart = this.getGeneration(teamName);
@@ -477,6 +485,43 @@ export class TeamMessageFeedService {
 
   private getGeneration(teamName: string): number {
     return this.generationByTeam.get(teamName) ?? 0;
+  }
+
+  private refreshCleanExpiredCacheInBackground(
+    teamName: string,
+    cached: TeamMessageFeedCacheEntry,
+    now: number
+  ): void {
+    const generationAtStart = this.getGeneration(teamName);
+    const existingRequest = this.inFlightByTeam.get(teamName);
+    if (existingRequest?.generationAtStart === generationAtStart) {
+      return;
+    }
+
+    const request = this.buildFeed(teamName, cached, now, false, true, generationAtStart).catch(
+      (error) => {
+        logger.debug(
+          `[${teamName}] background message feed refresh failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+        return {
+          teamName,
+          feedRevision: cached.feedRevision,
+          messages: cached.messages,
+        };
+      }
+    );
+
+    const trackedRequest = request.finally(() => {
+      if (this.inFlightByTeam.get(teamName)?.promise === trackedRequest) {
+        this.inFlightByTeam.delete(teamName);
+      }
+    });
+    this.inFlightByTeam.set(teamName, {
+      promise: trackedRequest,
+      generationAtStart,
+    });
   }
 
   private async buildFeed(

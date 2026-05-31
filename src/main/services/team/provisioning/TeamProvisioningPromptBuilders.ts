@@ -265,9 +265,13 @@ export function isBootstrapTranscriptSuccessText(
 export function getBootstrapTranscriptSuccessSource(
   text: string,
   teamName: string,
-  memberName: string
+  memberName: string,
+  // Optional pre-normalized text, MUST equal text.replace(/\s+/g,' ').trim().toLowerCase().
+  // Lets callers that scan one line against many members normalize it once.
+  precomputedNormalizedText?: string
 ): BootstrapTranscriptSuccessSource | null {
-  const normalizedText = text.replace(/\s+/g, ' ').trim().toLowerCase();
+  const normalizedText =
+    precomputedNormalizedText ?? text.replace(/\s+/g, ' ').trim().toLowerCase();
   if (!normalizedText) {
     return null;
   }
@@ -275,6 +279,22 @@ export function getBootstrapTranscriptSuccessSource(
   const normalizedTeamName = teamName.trim().toLowerCase();
   const normalizedMemberName = memberName.trim().toLowerCase();
   if (!normalizedTeamName || !normalizedMemberName) {
+    return null;
+  }
+
+  return getBootstrapTranscriptSuccessSourceFromNormalized(
+    normalizedText,
+    normalizedTeamName,
+    normalizedMemberName
+  );
+}
+
+export function getBootstrapTranscriptSuccessSourceFromNormalized(
+  normalizedText: string,
+  normalizedTeamName: string,
+  normalizedMemberName: string
+): BootstrapTranscriptSuccessSource | null {
+  if (!normalizedText || !normalizedTeamName || !normalizedMemberName) {
     return null;
   }
 
@@ -298,9 +318,13 @@ export function getBootstrapTranscriptSuccessSource(
 export function isBootstrapTranscriptContextText(
   text: string,
   teamName: string,
-  memberName: string
+  memberName: string,
+  // Optional pre-normalized text, MUST equal text.replace(/\s+/g,' ').trim().toLowerCase().
+  // Lets callers that scan one line against many members normalize it once.
+  precomputedNormalizedText?: string
 ): boolean {
-  const normalizedText = text.replace(/\s+/g, ' ').trim().toLowerCase();
+  const normalizedText =
+    precomputedNormalizedText ?? text.replace(/\s+/g, ' ').trim().toLowerCase();
   const normalizedTeamName = teamName.trim().toLowerCase();
   const normalizedMemberName = memberName.trim().toLowerCase();
   if (!normalizedText || !normalizedTeamName || !normalizedMemberName) {

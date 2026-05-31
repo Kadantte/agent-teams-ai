@@ -144,6 +144,7 @@ import {
   listTmuxPanePidsForCurrentPlatform,
   listTmuxPaneRuntimeInfoForCurrentPlatform,
   sendKeysToTmuxPaneForCurrentPlatform,
+  type RuntimeProcessTableRow,
 } from '@features/tmux-installer/main';
 import { agentTeamsMcpHttpServer } from '@main/services/team/AgentTeamsMcpHttpServer';
 import {
@@ -202,6 +203,38 @@ import pidusage from 'pidusage';
 
 const EXPECTED_RUNTIME_PIDUSAGE_OPTIONS =
   process.platform === 'win32' ? { maxage: 10_000 } : { maxage: 0 };
+const ORIGINAL_RUNTIME_PIDUSAGE_ENABLED = process.env.CLAUDE_TEAM_RUNTIME_PIDUSAGE_ENABLED;
+
+type RuntimeTelemetryProcessTableRow = RuntimeProcessTableRow & {
+  runtimeTelemetrySource?: 'native' | 'wsl' | 'windows-host';
+};
+
+function restoreRuntimePidusageTelemetryEnv() {
+  if (ORIGINAL_RUNTIME_PIDUSAGE_ENABLED === undefined) {
+    delete process.env.CLAUDE_TEAM_RUNTIME_PIDUSAGE_ENABLED;
+    return;
+  }
+  process.env.CLAUDE_TEAM_RUNTIME_PIDUSAGE_ENABLED = ORIGINAL_RUNTIME_PIDUSAGE_ENABLED;
+}
+
+function withRuntimePidusageTelemetryEnv(
+  value: string | undefined,
+  callback: () => Promise<void>
+): Promise<void> {
+  const previous = process.env.CLAUDE_TEAM_RUNTIME_PIDUSAGE_ENABLED;
+  if (value === undefined) {
+    delete process.env.CLAUDE_TEAM_RUNTIME_PIDUSAGE_ENABLED;
+  } else {
+    process.env.CLAUDE_TEAM_RUNTIME_PIDUSAGE_ENABLED = value;
+  }
+  return callback().finally(() => {
+    if (previous === undefined) {
+      delete process.env.CLAUDE_TEAM_RUNTIME_PIDUSAGE_ENABLED;
+    } else {
+      process.env.CLAUDE_TEAM_RUNTIME_PIDUSAGE_ENABLED = previous;
+    }
+  });
+}
 
 function allowConsoleLogs() {
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -620,6 +653,43 @@ type TeamProvisioningServicePrivateHarness = {
   applyProcessBootstrapTransportOverlay: (
     input: Record<string, unknown>
   ) => Record<string, unknown>;
+  reconcilePersistedLaunchState: (
+    teamName: string
+  ) => Promise<{
+    snapshot: null;
+    statuses: Record<string, never>;
+  }>;
+  readProcessUsageStatsByPid: (
+    pids: readonly number[]
+  ) => Promise<Map<number, { rssBytes?: number; cpuPercent?: number }>>;
+  readRuntimeProcessRowsForUsageSnapshot: (teamName: string) => Promise<unknown[] | null>;
+  readCachedRuntimeProcessRowsForLiveRuntimeMetadata: (
+    teamName: string,
+    runId: string | null
+  ) => { rows: RuntimeTelemetryProcessTableRow[] | null } | null;
+  runtimeProcessRowsForUsageSnapshotByTeam: Map<
+    string,
+    {
+      expiresAtMs: number;
+      generation: number;
+      runId: string | null;
+      sampledAtMs: number;
+      rows: RuntimeTelemetryProcessTableRow[] | null;
+      includesWindowsHostRows: boolean;
+    }
+  >;
+  getRuntimeSnapshotCacheGeneration: (teamName: string) => number;
+  invalidateRuntimeSnapshotCaches: (teamName: string) => void;
+  aliveRunByTeam: Map<string, string>;
+  readRecentBootstrapTranscriptOutcome: (
+    filePath: string,
+    sinceMs: number | null,
+    memberName: string,
+    teamName: string,
+    options?: { allowAnonymousFailure?: boolean; contextMemberNames?: readonly string[] }
+  ) => Promise<{ kind: string; observedAt: string; source?: string; reason?: string } | null>;
+  readPersistedRuntimeMembers: (teamName: string) => Array<Record<string, unknown>>;
+  readPersistedTeamProjectPath: (teamName: string) => string | null;
 };
 
 function privateHarness(svc: TeamProvisioningService): TeamProvisioningServicePrivateHarness {
@@ -773,7 +843,9 @@ async function waitForFile(filePath: string, timeoutMs = 2_000): Promise<void> {
 
 describe('TeamProvisioningService', () => {
   beforeEach(() => {
+    process.env.CLAUDE_TEAM_RUNTIME_PIDUSAGE_ENABLED = '1';
     vi.clearAllMocks();
+    vi.mocked(pidusage).mockReset();
     vi.mocked(killTmuxPaneForCurrentPlatformSync).mockReset();
     vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockReset();
     vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([]);
@@ -802,6 +874,7 @@ describe('TeamProvisioningService', () => {
   });
 
   afterEach(() => {
+    restoreRuntimePidusageTelemetryEnv();
     clearAutoResumeService();
     vi.useRealTimers();
     try {
@@ -831,6 +904,51 @@ describe('TeamProvisioningService', () => {
       const svc = new TeamProvisioningService();
       await expect(svc.warmup()).resolves.not.toThrow();
       expect(spawnCli).toHaveBeenCalled();
+    });
+  });
+
+  describe('persisted team config cache', () => {
+    it('returns defensive runtime member copies and refreshes when config changes', () => {
+      const teamName = 'persisted-config-cache-team';
+      const teamDir = path.join(tempTeamsBase, teamName);
+      const configPath = path.join(teamDir, 'config.json');
+      fs.mkdirSync(teamDir, { recursive: true });
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({
+          projectPath: '/repo-one',
+          members: [{ name: 'alice', agentId: 'agent-alice' }],
+        }),
+        'utf8'
+      );
+
+      const svc = new TeamProvisioningService();
+      const internals = privateHarness(svc);
+      const firstMembers = internals.readPersistedRuntimeMembers(teamName);
+      firstMembers[0]!.name = 'mutated';
+
+      expect(internals.readPersistedRuntimeMembers(teamName)[0]).toMatchObject({
+        name: 'alice',
+        agentId: 'agent-alice',
+      });
+      expect(internals.readPersistedTeamProjectPath(teamName)).toBe('/repo-one');
+
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({
+          projectPath: '/repo-two',
+          members: [{ name: 'bob', agentId: 'agent-bob' }],
+        }),
+        'utf8'
+      );
+      const refreshedAt = new Date(Date.now() + 5_000);
+      fs.utimesSync(configPath, refreshedAt, refreshedAt);
+
+      expect(internals.readPersistedRuntimeMembers(teamName)[0]).toMatchObject({
+        name: 'bob',
+        agentId: 'agent-bob',
+      });
+      expect(internals.readPersistedTeamProjectPath(teamName)).toBe('/repo-two');
     });
   });
 
@@ -3319,7 +3437,7 @@ describe('TeamProvisioningService', () => {
         getConfig: vi.fn(async () => ({
           members: [
             { name: 'team-lead', agentType: 'team-lead' },
-            { name: 'alice', model: 'gpt-5.4-mini' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
           ],
         })),
       };
@@ -3347,7 +3465,7 @@ describe('TeamProvisioningService', () => {
         getConfig: vi.fn(async () => ({
           members: [
             { name: 'team-lead', agentType: 'team-lead' },
-            { name: 'alice', model: 'gpt-5.4-mini' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
           ],
         })),
       };
@@ -3369,13 +3487,88 @@ describe('TeamProvisioningService', () => {
       expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
     });
 
-    it('clears runtime probe caches when starting a new run for the team', async () => {
+    it('skips live process table reads when runtime metadata has no verifiable handle', async () => {
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
           members: [
             { name: 'team-lead', agentType: 'team-lead' },
             { name: 'alice', model: 'gpt-5.4-mini' },
+          ],
+        })),
+      };
+
+      const metadata = (await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team')) as Map<
+        string,
+        unknown
+      >;
+
+      expect(metadata.has('alice')).toBe(true);
+      expect(listRuntimeProcessTableForCurrentPlatform).not.toHaveBeenCalled();
+    });
+
+    it('uses a longer live runtime metadata cache for persisted teams without a tracked run', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-03T12:00:00.000Z'));
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
+          ],
+        })),
+      };
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([]);
+
+      await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
+      vi.setSystemTime(new Date('2026-05-03T12:00:03.000Z'));
+      await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
+      vi.setSystemTime(new Date('2026-05-03T12:00:06.000Z'));
+      await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
+
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(new Date('2026-05-03T12:00:11.000Z'));
+      await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
+
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(2);
+    });
+
+    it('reuses process rows through the short liveness cache for tracked runs', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-03T12:00:00.000Z'));
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
+          ],
+        })),
+      };
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([]);
+
+      await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
+      vi.setSystemTime(new Date('2026-05-03T12:00:03.000Z'));
+      await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
+
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(new Date('2026-05-03T12:00:06.000Z'));
+      await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
+
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(2);
+    });
+
+    it('clears runtime probe caches when starting a new run for the team', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
           ],
         })),
       };
@@ -3396,7 +3589,12 @@ describe('TeamProvisioningService', () => {
         getConfig: vi.fn(async () => ({
           members: [
             { name: 'team-lead', agentType: 'team-lead' },
-            { name: 'alice', providerId: 'opencode', model: 'gpt-5.4-mini' },
+            {
+              name: 'alice',
+              providerId: 'opencode',
+              model: 'gpt-5.4-mini',
+              agentId: 'alice@runtime-team',
+            },
           ],
         })),
       };
@@ -3494,7 +3692,268 @@ describe('TeamProvisioningService', () => {
       });
     });
 
+    it('uses process table CPU and RSS values before falling back to pidusage', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini' },
+          ],
+        })),
+      };
+      (svc as any).readPersistedRuntimeMembers = vi.fn(() => [
+        {
+          name: 'alice',
+          agentId: 'alice@runtime-team',
+          tmuxPaneId: '%1',
+          backendType: 'tmux',
+        },
+      ]);
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(listTmuxPaneRuntimeInfoForCurrentPlatform).mockResolvedValueOnce(
+        new Map([
+          [
+            '%1',
+            {
+              paneId: '%1',
+              panePid: 222,
+              currentCommand: 'codex',
+            },
+          ],
+        ])
+      );
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+        {
+          pid: 111,
+          ppid: 1,
+          command: '/usr/bin/node lead.js',
+          cpuPercent: 3.5,
+          rssBytes: 123_000_000,
+        },
+        {
+          pid: 222,
+          ppid: 1,
+          command:
+            '/Users/belief/.bun/bin/bun cli.js --agent-id alice@runtime-team --agent-name alice --team-name runtime-team --model gpt-5.4-mini',
+          cpuPercent: 7,
+          rssBytes: 456_000_000,
+        },
+      ]);
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(pidusage).not.toHaveBeenCalled();
+      expect(snapshot.members['team-lead']).toMatchObject({
+        pid: 111,
+        cpuPercent: 3.5,
+        rssBytes: 123_000_000,
+      });
+      expect(snapshot.members.alice).toMatchObject({
+        pid: 222,
+        cpuPercent: 7,
+        rssBytes: 456_000_000,
+      });
+    });
+
+    it('keeps cached runtime resource process rows across snapshot invalidations', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-03T12:00:00.000Z'));
+      const svc = new TeamProvisioningService();
+      const harness = privateHarness(svc);
+      harness.aliveRunByTeam.set('runtime-team', 'run-1');
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
+        {
+          pid: 111,
+          ppid: 1,
+          command: '/usr/bin/node lead.js',
+          cpuPercent: 3.5,
+          rssBytes: 123_000_000,
+        },
+      ]);
+
+      const firstRows = await harness.readRuntimeProcessRowsForUsageSnapshot('runtime-team');
+      harness.invalidateRuntimeSnapshotCaches('runtime-team');
+      vi.setSystemTime(new Date('2026-05-03T12:00:05.000Z'));
+      const secondRows = await harness.readRuntimeProcessRowsForUsageSnapshot('runtime-team');
+
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
+      expect(secondRows).toEqual(firstRows);
+      vi.useRealTimers();
+    });
+
+    it('keeps fresh live runtime process rows across snapshot invalidations', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-03T12:00:00.000Z'));
+      const svc = new TeamProvisioningService();
+      const harness = privateHarness(svc);
+      const rows: RuntimeTelemetryProcessTableRow[] = [
+        {
+          pid: 111,
+          ppid: 1,
+          command: '/usr/bin/node lead.js',
+          cpuPercent: 3.5,
+          rssBytes: 123_000_000,
+          runtimeTelemetrySource: 'native',
+        },
+      ];
+      harness.runtimeProcessRowsForUsageSnapshotByTeam.set('runtime-team', {
+        expiresAtMs: Date.now() + 60_000,
+        generation: harness.getRuntimeSnapshotCacheGeneration('runtime-team'),
+        runId: 'run-1',
+        sampledAtMs: Date.now(),
+        rows,
+        includesWindowsHostRows: false,
+      });
+
+      harness.invalidateRuntimeSnapshotCaches('runtime-team');
+      vi.setSystemTime(new Date('2026-05-03T12:00:04.000Z'));
+
+      const cached = harness.readCachedRuntimeProcessRowsForLiveRuntimeMetadata(
+        'runtime-team',
+        'run-1'
+      );
+      expect(cached).toEqual({ rows });
+      vi.useRealTimers();
+    });
+
+    it('skips pidusage by default when process table metrics are missing', async () => {
+      await withRuntimePidusageTelemetryEnv(undefined, async () => {
+        const svc = new TeamProvisioningService();
+        (svc as any).configReader = {
+          getConfig: vi.fn(async () => ({
+            members: [
+              { name: 'team-lead', agentType: 'team-lead' },
+              { name: 'alice', model: 'gpt-5.4-mini' },
+            ],
+          })),
+        };
+        (svc as any).readPersistedRuntimeMembers = vi.fn(() => [
+          {
+            name: 'alice',
+            agentId: 'alice@runtime-team',
+            tmuxPaneId: '%1',
+            backendType: 'tmux',
+          },
+        ]);
+        (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+        (svc as any).runs.set('run-1', {
+          runId: 'run-1',
+          child: { pid: 111 },
+          request: { model: 'gpt-5.4' },
+          processKilled: false,
+          cancelRequested: false,
+          spawnContext: null,
+        });
+        vi.mocked(listTmuxPaneRuntimeInfoForCurrentPlatform).mockResolvedValueOnce(
+          new Map([
+            [
+              '%1',
+              {
+                paneId: '%1',
+                panePid: 222,
+                currentCommand: 'codex',
+              },
+            ],
+          ])
+        );
+        vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+          {
+            pid: 999,
+            ppid: 1,
+            command: '/usr/bin/node unrelated.js',
+            cpuPercent: 1.5,
+            rssBytes: 12_000_000,
+          },
+        ]);
+
+        const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+        expect(pidusage).not.toHaveBeenCalled();
+        expect(snapshot.members['team-lead']).toMatchObject({ pid: 111 });
+        expect(snapshot.members['team-lead']?.rssBytes).toBeUndefined();
+        expect(snapshot.members.alice).toMatchObject({ pid: 222 });
+        expect(snapshot.members.alice?.rssBytes).toBeUndefined();
+      });
+    });
+
+    it('falls back to pidusage for root pids missing from an otherwise available process table', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini' },
+          ],
+        })),
+      };
+      (svc as any).readPersistedRuntimeMembers = vi.fn(() => [
+        {
+          name: 'alice',
+          agentId: 'alice@runtime-team',
+          tmuxPaneId: '%1',
+          backendType: 'tmux',
+        },
+      ]);
+      (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
+      (svc as any).runs.set('run-1', {
+        runId: 'run-1',
+        child: { pid: 111 },
+        request: { model: 'gpt-5.4' },
+        processKilled: false,
+        cancelRequested: false,
+        spawnContext: null,
+      });
+      vi.mocked(listTmuxPaneRuntimeInfoForCurrentPlatform).mockResolvedValueOnce(
+        new Map([
+          [
+            '%1',
+            {
+              paneId: '%1',
+              panePid: 222,
+              currentCommand: 'codex',
+            },
+          ],
+        ])
+      );
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+        {
+          pid: 999,
+          ppid: 1,
+          command: '/usr/bin/node unrelated.js',
+          cpuPercent: 1.5,
+          rssBytes: 12_000_000,
+        },
+      ]);
+      vi.mocked(pidusage).mockResolvedValueOnce({
+        '111': createPidusageStat(111, 123_000_000),
+        '222': createPidusageStat(222, 456_000_000),
+      });
+
+      const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(pidusage).toHaveBeenCalledWith([111, 222], EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
+      expect(snapshot.members['team-lead']).toMatchObject({
+        pid: 111,
+        rssBytes: 123_000_000,
+      });
+      expect(snapshot.members.alice).toMatchObject({
+        pid: 222,
+        rssBytes: 456_000_000,
+      });
+    });
+
     it('captures CPU and memory history on runtime snapshots', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-05-03T12:00:00.000Z'));
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
@@ -3540,6 +3999,7 @@ describe('TeamProvisioningService', () => {
       ]);
 
       (svc as any).invalidateRuntimeSnapshotCaches('runtime-team');
+      vi.setSystemTime(new Date('2026-05-03T12:00:31.000Z'));
       vi.mocked(pidusage).mockResolvedValueOnce({
         '111': createPidusageStat(111, 130_000_000, 18),
       } as any);
@@ -4330,7 +4790,10 @@ describe('TeamProvisioningService', () => {
       (TeamProvisioningService as any).RUNTIME_PROCESS_TABLE_TIMEOUT_MS = 5;
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
-          members: [{ name: 'team-lead', agentType: 'team-lead' }],
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
+          ],
         })),
       };
       (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
@@ -4602,6 +5065,47 @@ describe('TeamProvisioningService', () => {
 
       expect(stats.size).toBe(1);
       expect(stats.get(333)).toEqual({ rssBytes: 123_000_000, cpuPercent: 7 });
+    });
+
+    it('caches runtime process usage stats for repeated reads', async () => {
+      const svc = new TeamProvisioningService();
+      const usageByPid: Record<string, ReturnType<typeof createPidusageStat>> = {
+        '111': createPidusageStat(111, 123_000_000, 7),
+      };
+      vi.mocked(pidusage).mockResolvedValueOnce(usageByPid);
+
+      const harness = privateHarness(svc);
+      const first = await harness.readProcessUsageStatsByPid([111]);
+      const second = await harness.readProcessUsageStatsByPid([111]);
+
+      expect(pidusage).toHaveBeenCalledTimes(1);
+      expect(pidusage).toHaveBeenCalledWith([111], EXPECTED_RUNTIME_PIDUSAGE_OPTIONS);
+      expect(first.get(111)).toEqual({ rssBytes: 123_000_000, cpuPercent: 7 });
+      expect(second.get(111)).toEqual({ rssBytes: 123_000_000, cpuPercent: 7 });
+    });
+
+    it('bounds runtime process usage cache entries', async () => {
+      const svc = new TeamProvisioningService();
+      const maxEntries = (TeamProvisioningService as unknown as Record<string, number>)
+        .RUNTIME_PROCESS_USAGE_CACHE_MAX_ENTRIES;
+      const pids = Array.from({ length: maxEntries + 2 }, (_value, index) => 10_000 + index);
+      const firstPid = pids[0]!;
+      const newestPid = pids[pids.length - 1]!;
+      const usageByPid = Object.fromEntries(
+        pids.map((pid, index) => [String(pid), createPidusageStat(pid, 100_000_000 + index, 1)])
+      );
+      vi.mocked(pidusage).mockResolvedValueOnce(usageByPid);
+
+      await privateHarness(svc).readProcessUsageStatsByPid(pids);
+
+      const cache = (
+        svc as unknown as {
+          runtimeProcessUsageStatsCacheByPid: Map<number, unknown>;
+        }
+      ).runtimeProcessUsageStatsCacheByPid;
+      expect(cache.size).toBe(maxEntries);
+      expect(cache.has(firstPid)).toBe(false);
+      expect(cache.has(newestPid)).toBe(true);
     });
 
     it('falls back to direct agent process lookup when tmux pane pid lookup is unavailable', async () => {
@@ -20867,6 +21371,176 @@ describe('TeamProvisioningService', () => {
     expect(result.statuses.tom?.hardFailureReason).toBeUndefined();
     expect(result.statuses.tom?.runtimeDiagnostic).toBeUndefined();
     expect(result.statuses.tom?.runtimeDiagnosticSeverity).toBeUndefined();
+  });
+
+  it('refreshes cached bootstrap transcript outcome when the transcript file changes', async () => {
+    const teamName = 'zz-unit-bootstrap-transcript-cache-refresh';
+    const memberName = 'tom';
+    const transcriptPath = path.join(tempProjectsBase, 'bootstrap-cache.jsonl');
+    const writeTranscriptText = async (text: string, timestamp: string): Promise<void> => {
+      await fsPromises.writeFile(
+        transcriptPath,
+        `${JSON.stringify({
+          timestamp,
+          agentName: memberName,
+          text,
+        })}\n`,
+        'utf8'
+      );
+      const updatedAt = new Date(Date.now() + 5_000);
+      await fsPromises.utimes(transcriptPath, updatedAt, updatedAt);
+    };
+
+    await writeTranscriptText(
+      `member briefing for ${memberName} on team "${teamName}" (${teamName}). Ready.`,
+      '2026-05-24T09:25:42.904Z'
+    );
+
+    const svc = new TeamProvisioningService();
+    const firstOutcome = await privateHarness(svc).readRecentBootstrapTranscriptOutcome(
+      transcriptPath,
+      null,
+      memberName,
+      teamName
+    );
+
+    expect(firstOutcome).toMatchObject({ kind: 'success', source: 'member_briefing' });
+
+    await writeTranscriptText(
+      'bootstrap failed: model not found during teammate startup',
+      '2026-05-24T09:26:42.904Z'
+    );
+
+    const secondOutcome = await privateHarness(svc).readRecentBootstrapTranscriptOutcome(
+      transcriptPath,
+      null,
+      memberName,
+      teamName
+    );
+
+    expect(secondOutcome).toMatchObject({
+      kind: 'failure',
+      reason: 'bootstrap failed: model not found during teammate startup',
+    });
+  });
+
+  it('parses a bootstrap transcript tail once and shares it across members', async () => {
+    const teamName = 'zz-unit-bootstrap-transcript-shared-parse';
+    const transcriptPath = path.join(tempProjectsBase, 'bootstrap-shared-parse.jsonl');
+    await fsPromises.writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        timestamp: '2026-05-24T09:25:42.904Z',
+        agentName: 'alice',
+        text: `member briefing for alice on team "${teamName}" (${teamName}). Ready.`,
+      })}\n`,
+      'utf8'
+    );
+    const updatedAt = new Date(Date.now() + 5_000);
+    await fsPromises.utimes(transcriptPath, updatedAt, updatedAt);
+
+    const svc = new TeamProvisioningService();
+
+    const aliceOutcome = await privateHarness(svc).readRecentBootstrapTranscriptOutcome(
+      transcriptPath,
+      null,
+      'alice',
+      teamName
+    );
+    const bobOutcome = await privateHarness(svc).readRecentBootstrapTranscriptOutcome(
+      transcriptPath,
+      null,
+      'bob',
+      teamName
+    );
+
+    // Per-member detection is unchanged: alice's briefing is a success, the same
+    // line is not attributed to bob.
+    expect(aliceOutcome).toMatchObject({ kind: 'success', source: 'member_briefing' });
+    expect(bobOutcome).toBeNull();
+    // The transcript tail is parsed once and shared: a single cache entry for the
+    // file rather than one parse per member.
+    expect((svc as unknown as Record<string, Map<string, unknown>>).parsedBootstrapTranscriptTailCache.size).toBe(
+      1
+    );
+  });
+
+  it('caches persisted bootstrap transcript outcome lookup between close polling reads', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-03T12:00:00.000Z'));
+    const teamName = 'zz-unit-bootstrap-transcript-lookup-cache';
+    const memberName = 'tom';
+    const transcriptPath = path.join(tempProjectsBase, 'bootstrap-lookup-cache.jsonl');
+    const svc = new TeamProvisioningService();
+    const harness = svc as any;
+    const findMemberLogs = vi.fn(async () => [{ filePath: transcriptPath }]);
+    const readRecentBootstrapTranscriptOutcome = vi.fn(async () => ({
+      kind: 'success',
+      observedAt: '2026-05-24T09:25:42.904Z',
+      source: 'member_briefing',
+    }));
+    const readBootstrapTranscriptOutcomesInProjectRoot = vi.fn(async () => []);
+    harness.memberLogsFinder = { findMemberLogs };
+    harness.readRecentBootstrapTranscriptOutcome = readRecentBootstrapTranscriptOutcome;
+    harness.readBootstrapTranscriptOutcomesInProjectRoot =
+      readBootstrapTranscriptOutcomesInProjectRoot;
+
+    const firstOutcome = await harness.findBootstrapTranscriptOutcome(teamName, memberName, 123);
+    vi.setSystemTime(new Date('2026-05-03T12:00:06.000Z'));
+    const secondOutcome = await harness.findBootstrapTranscriptOutcome(teamName, memberName, 123);
+
+    expect(secondOutcome).toEqual(firstOutcome);
+    expect(findMemberLogs).toHaveBeenCalledTimes(1);
+    expect(readRecentBootstrapTranscriptOutcome).toHaveBeenCalledTimes(1);
+    expect(readBootstrapTranscriptOutcomesInProjectRoot).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date('2026-05-03T12:00:11.000Z'));
+    await harness.findBootstrapTranscriptOutcome(teamName, memberName, 123);
+
+    expect(findMemberLogs).toHaveBeenCalledTimes(2);
+    expect(readRecentBootstrapTranscriptOutcome).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not use persisted bootstrap transcript outcome lookup cache for tracked runs', async () => {
+    const teamName = 'zz-unit-bootstrap-transcript-active-lookup-cache';
+    const memberName = 'tom';
+    const transcriptPath = path.join(tempProjectsBase, 'bootstrap-active-lookup-cache.jsonl');
+    const svc = new TeamProvisioningService();
+    const harness = svc as any;
+    const findMemberLogs = vi.fn(async () => [{ filePath: transcriptPath }]);
+    const readRecentBootstrapTranscriptOutcome = vi.fn(async () => ({
+      kind: 'success',
+      observedAt: '2026-05-24T09:25:42.904Z',
+      source: 'member_briefing',
+    }));
+    harness.memberLogsFinder = { findMemberLogs };
+    harness.readRecentBootstrapTranscriptOutcome = readRecentBootstrapTranscriptOutcome;
+    harness.readBootstrapTranscriptOutcomesInProjectRoot = vi.fn(async () => []);
+    harness.aliveRunByTeam.set(teamName, 'run-1');
+
+    await harness.findBootstrapTranscriptOutcome(teamName, memberName, 123);
+    await harness.findBootstrapTranscriptOutcome(teamName, memberName, 123);
+
+    expect(findMemberLogs).toHaveBeenCalledTimes(2);
+    expect(readRecentBootstrapTranscriptOutcome).toHaveBeenCalledTimes(2);
+  });
+
+  it('caches persisted member spawn statuses between close polling reads', async () => {
+    const teamName = 'zz-unit-persisted-status-cache';
+    const svc = new TeamProvisioningService();
+    const harness = privateHarness(svc);
+    harness.reconcilePersistedLaunchState = vi.fn(async () => ({
+      snapshot: null,
+      statuses: {},
+    }));
+    harness.attachLiveRuntimeMetadataToStatuses = vi.fn(async (_teamName, statuses) => statuses);
+
+    const first = await svc.getMemberSpawnStatuses(teamName);
+    const second = await svc.getMemberSpawnStatuses(teamName);
+
+    expect(first).toEqual(second);
+    expect(harness.reconcilePersistedLaunchState).toHaveBeenCalledTimes(1);
+    expect(harness.attachLiveRuntimeMetadataToStatuses).toHaveBeenCalledTimes(1);
   });
 
   it('does not heal cleanup-finalized launch failures from stale bootstrap-state confirmation', async () => {
