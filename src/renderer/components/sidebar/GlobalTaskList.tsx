@@ -201,6 +201,85 @@ type TeamBooleanResolver = (teamName: string) => boolean;
 type TaskOwnerColorResolver = (task: GlobalTask) => string | null | undefined;
 type TeamHeaderFormatter = (teamDisplayName: string) => string;
 type ProjectGroupVisibleCountChange = (projectKey: string, visibleCount: number) => void;
+type TeamMemberColorInput = Parameters<typeof buildMemberColorMap>[0][number];
+interface SidebarTeamsDerived {
+  identityKey: string;
+  filterTeams: { teamName: string; displayName: string }[];
+  statusSummaries: TeamSummary[];
+  memberColorByTeam: Map<string, Map<string, string>>;
+}
+
+let cachedSidebarTeamsSignature: string | null = null;
+let cachedSidebarTeamsDerived: SidebarTeamsDerived = {
+  identityKey: '',
+  filterTeams: [],
+  statusSummaries: [],
+  memberColorByTeam: new Map(),
+};
+
+function encodeSignatureParts(parts: readonly unknown[]): string {
+  return parts
+    .map((part) => {
+      const text = part == null ? '' : String(part);
+      return `${text.length}:${text}`;
+    })
+    .join('|');
+}
+
+function buildSidebarTeamsSignature(teams: readonly TeamSummary[]): string {
+  const parts: unknown[] = [];
+  for (const team of teams) {
+    parts.push(
+      team.teamName,
+      team.displayName,
+      team.projectPath,
+      team.lastActivity,
+      team.partialLaunchFailure ? 1 : 0,
+      team.teamLaunchState
+    );
+    for (const member of team.members ?? []) {
+      const colorMember = member as TeamMemberColorInput;
+      parts.push(colorMember.name, colorMember.color, colorMember.agentType, colorMember.removedAt);
+    }
+  }
+  return encodeSignatureParts(parts);
+}
+
+function selectSidebarTeamsDerived(teams: readonly TeamSummary[]): SidebarTeamsDerived {
+  const signature = buildSidebarTeamsSignature(teams);
+  if (signature === cachedSidebarTeamsSignature) {
+    return cachedSidebarTeamsDerived;
+  }
+
+  const memberColorByTeam = new Map<string, Map<string, string>>();
+  for (const team of teams) {
+    if (team.members && team.members.length > 0) {
+      memberColorByTeam.set(team.teamName, buildMemberColorMap(team.members));
+    }
+  }
+
+  cachedSidebarTeamsSignature = signature;
+  cachedSidebarTeamsDerived = {
+    identityKey: encodeSignatureParts(teams.map((team) => team.teamName)),
+    filterTeams: teams.map((team) => ({
+      teamName: team.teamName,
+      displayName: team.displayName,
+    })),
+    statusSummaries: teams.map((team) => ({
+      teamName: team.teamName,
+      displayName: team.displayName,
+      description: '',
+      memberCount: team.memberCount,
+      taskCount: team.taskCount,
+      projectPath: team.projectPath,
+      lastActivity: team.lastActivity,
+      partialLaunchFailure: team.partialLaunchFailure,
+      teamLaunchState: team.teamLaunchState,
+    })),
+    memberColorByTeam,
+  };
+  return cachedSidebarTeamsDerived;
+}
 
 interface GlobalTaskRowProps {
   task: GlobalTask;
@@ -677,7 +756,6 @@ export const GlobalTaskList = memo(function GlobalTaskList({
     repositoryGroupsLoading,
     repositoryGroupsInitialized,
     repositoryGroupsError,
-    teams,
     provisioningRuns,
     currentProvisioningRunIdByTeam,
     leadActivityByTeam,
@@ -699,12 +777,12 @@ export const GlobalTaskList = memo(function GlobalTaskList({
       repositoryGroupsLoading: s.repositoryGroupsLoading,
       repositoryGroupsInitialized: s.repositoryGroupsInitialized,
       repositoryGroupsError: s.repositoryGroupsError,
-      teams: s.teams,
       provisioningRuns: s.provisioningRuns,
       currentProvisioningRunIdByTeam: s.currentProvisioningRunIdByTeam,
       leadActivityByTeam: s.leadActivityByTeam,
     }))
   );
+  const sidebarTeams = useStore((s) => selectSidebarTeamsDerived(s.teams));
 
   const [internalFilters, setInternalFilters] = useState(defaultTaskFiltersState);
   const [internalFiltersPopoverOpen, setInternalFiltersPopoverOpen] = useState(false);
@@ -791,7 +869,7 @@ export const GlobalTaskList = memo(function GlobalTaskList({
     return () => {
       cancelled = true;
     };
-  }, [fetchAliveTeams, teams]);
+  }, [fetchAliveTeams, sidebarTeams.identityKey]);
 
   const readyProgressRefreshKey = useMemo(() => {
     return Object.entries(currentProvisioningRunIdByTeam)
@@ -824,7 +902,7 @@ export const GlobalTaskList = memo(function GlobalTaskList({
     const result = new Set<string>();
     if (aliveTeamsInitialized) {
       const teamSummariesByName = new Map<string, TeamSummary>();
-      for (const team of teams) {
+      for (const team of sidebarTeams.statusSummaries) {
         teamSummariesByName.set(team.teamName, team);
       }
       for (const task of globalTasks) {
@@ -858,26 +936,16 @@ export const GlobalTaskList = memo(function GlobalTaskList({
     globalTasks,
     leadActivityByTeam,
     provisioningState,
-    teams,
+    sidebarTeams.statusSummaries,
   ]);
-
-  const memberColorByTeam = useMemo(() => {
-    const result = new Map<string, Map<string, string>>();
-    for (const team of teams) {
-      if (team.members && team.members.length > 0) {
-        result.set(team.teamName, buildMemberColorMap(team.members));
-      }
-    }
-    return result;
-  }, [teams]);
 
   const getOwnerColorName = useCallback(
     (task: GlobalTask): string | null | undefined => {
       if (!task.owner) return null;
-      const teamColorMap = memberColorByTeam.get(task.teamName);
+      const teamColorMap = sidebarTeams.memberColorByTeam.get(task.teamName);
       return teamColorMap ? (teamColorMap.get(task.owner) ?? null) : undefined;
     },
-    [memberColorByTeam]
+    [sidebarTeams.memberColorByTeam]
   );
   const isTeamOffline = useCallback(
     (teamName: string): boolean => offlineTeamNames.has(teamName),
@@ -1118,10 +1186,7 @@ export const GlobalTaskList = memo(function GlobalTaskList({
       syncProjectGroupVisibleCountByKey(projectRequestedVisibleCountByKey, projectGroupVisibility),
     [projectRequestedVisibleCountByKey, projectGroupVisibility]
   );
-  const taskFilterTeams = useMemo(
-    () => teams.map((team) => ({ teamName: team.teamName, displayName: team.displayName })),
-    [teams]
-  );
+  const taskFilterTeams = useMemo(() => sidebarTeams.filterTeams, [sidebarTeams.filterTeams]);
 
   const { isCollapsed: isProjectGroupCollapsed, toggle: toggleProjectGroup } = useCollapsedGroups(
     'project',
