@@ -11,7 +11,7 @@
   <a href="docs/screenshots/6.png"><img src="docs/screenshots/6.png" width="65" alt="Settings" /></a>
 </p>
 
-<h1 align="center"><a href="https://777genius.github.io/agent-teams-ai/">Agent Teams</a></h1>
+<h1 align="center"><a href="https://agentteams.live/">Agent Teams</a></h1>
 
 <p align="center">
   <strong><code>You're the CTO, agents are your team. They handle tasks themselves, message each other, review each other. You just look at the kanban board and drink coffee.</code></strong>
@@ -34,7 +34,7 @@
 <img width="2560" height="1604" alt="telegram-cloud-photo-size-2-5213160716557294036-w" src="https://github.com/user-attachments/assets/cbe0e1e7-f73c-4dd7-94e0-c694fcaf491e" />
 -->
 
-<a href="https://777genius.github.io/agent-teams-ai/">Watch demo on the site or here:</a>
+<a href="https://agentteams.live/">Watch demo on the site or here:</a>
 
 [demo_new_15s.webm](https://github.com/user-attachments/assets/d78cf5a4-80fe-4a8b-a1db-fb272e18029c)
 
