@@ -21,6 +21,7 @@ import {
   CARD_ICON_MUTED,
 } from '@renderer/constants/cssVariables';
 import { getTeamColorSet } from '@renderer/constants/teamColors';
+import { useTheme } from '@renderer/hooks/useTheme';
 import { agentAvatarUrl } from '@renderer/utils/memberHelpers';
 import {
   areStringArraysEqual,
@@ -567,6 +568,7 @@ const LeadThoughtsGroupRowComponent = ({
   expandItemKey,
 }: LeadThoughtsGroupRowProps): React.JSX.Element => {
   const { t } = useAppTranslation('team');
+  const { isLight } = useTheme();
   const ref = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -843,7 +845,7 @@ const LeadThoughtsGroupRowComponent = ({
             <div className="min-w-0">
               <div className="flex min-w-0 items-start gap-3">
                 <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                  <MemberBadge name={leadName} color={memberColor} hideAvatar />
+                  <MemberBadge name={leadName} color={memberColor} isLight={isLight} hideAvatar />
                   <span className="shrink-0 text-[10px]" style={{ color: CARD_ICON_MUTED }}>
                     {t('activity.thoughts.count', { count: thoughts.length })}
                   </span>
@@ -916,7 +918,7 @@ const LeadThoughtsGroupRowComponent = ({
                     />
                   </div>
                 ) : null}
-                <MemberBadge name={leadName} color={memberColor} hideAvatar />
+                <MemberBadge name={leadName} color={memberColor} isLight={isLight} hideAvatar />
                 <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
                   {t('activity.thoughts.count', { count: thoughts.length })}
                 </span>
@@ -987,7 +989,7 @@ const LeadThoughtsGroupRowComponent = ({
                   />
                 </div>
               ) : null}
-              <MemberBadge name={leadName} color={memberColor} hideAvatar />
+              <MemberBadge name={leadName} color={memberColor} isLight={isLight} hideAvatar />
               <span className="text-[10px]" style={{ color: CARD_ICON_MUTED }}>
                 {t('activity.thoughts.count', { count: thoughts.length })}
               </span>

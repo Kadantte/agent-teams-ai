@@ -24,6 +24,8 @@ interface MemberBadgeProps {
   color?: string;
   /** Owning team context for hover-card store lookups. */
   teamName?: string;
+  /** Pre-resolved theme flag from callers that already read theme state. */
+  isLight?: boolean;
   /** Avatar + badge size variant */
   size?: 'xs' | 'sm' | 'md';
   /** Pre-resolved avatar URL from a caller that already owns the member roster. */
@@ -55,19 +57,23 @@ function getCachedMemberAvatarMap(members: readonly ResolvedTeamMember[]): Map<s
  * When onClick is provided, both avatar and badge are clickable as one unit.
  * Wrapped in MemberHoverCard to show member info on hover.
  */
-export const MemberBadge = memo(
+type MemberBadgeContentProps = Omit<MemberBadgeProps, 'isLight'> & {
+  isLight: boolean;
+};
+
+const MemberBadgeContent = memo(
   ({
     name,
     color,
     teamName,
+    isLight,
     size = 'sm',
     avatarUrl,
     hideAvatar,
     onClick,
     disableHoverCard,
-  }: MemberBadgeProps): React.JSX.Element => {
+  }: MemberBadgeContentProps): React.JSX.Element => {
     const colors = getTeamColorSet(color ?? '');
-    const { isLight } = useTheme();
     const effectiveAvatarTeamName = useStore((s) =>
       hideAvatar || avatarUrl != null ? null : (teamName ?? s.selectedTeamName)
     );
@@ -139,5 +145,22 @@ export const MemberBadge = memo(
     );
   }
 );
+
+MemberBadgeContent.displayName = 'MemberBadgeContent';
+
+const ThemedMemberBadge = memo(function ThemedMemberBadge({
+  isLight: _isLight,
+  ...props
+}: MemberBadgeProps): React.JSX.Element {
+  const { isLight } = useTheme();
+  return <MemberBadgeContent {...props} isLight={isLight} />;
+});
+
+export const MemberBadge = memo(function MemberBadge(props: MemberBadgeProps): React.JSX.Element {
+  if (typeof props.isLight === 'boolean') {
+    return <MemberBadgeContent {...props} isLight={props.isLight} />;
+  }
+  return <ThemedMemberBadge {...props} />;
+});
 
 MemberBadge.displayName = 'MemberBadge';

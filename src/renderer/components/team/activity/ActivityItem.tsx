@@ -437,6 +437,7 @@ const PassiveIdlePeerSummaryRow = ({
   teamName,
   senderName,
   senderColor,
+  isLight,
   summary,
   timestamp,
   onMemberNameClick,
@@ -444,6 +445,7 @@ const PassiveIdlePeerSummaryRow = ({
   teamName: string;
   senderName: string;
   senderColor?: string;
+  isLight: boolean;
   summary: string;
   timestamp: string;
   onMemberNameClick?: (memberName: string) => void;
@@ -460,6 +462,7 @@ const PassiveIdlePeerSummaryRow = ({
         name={senderName}
         color={senderColor}
         teamName={teamName}
+        isLight={isLight}
         hideAvatar={false}
         onClick={onMemberNameClick}
       />
@@ -491,6 +494,7 @@ const TaskStallRemediationRow = ({
   teamName,
   recipientName,
   recipientColor,
+  isLight,
   taskRef,
   timestamp,
   onMemberNameClick,
@@ -499,6 +503,7 @@ const TaskStallRemediationRow = ({
   teamName: string;
   recipientName: string;
   recipientColor?: string;
+  isLight: boolean;
   taskRef?: NonNullable<InboxMessage['taskRefs']>[number];
   timestamp: string;
   onMemberNameClick?: (memberName: string) => void;
@@ -525,6 +530,7 @@ const TaskStallRemediationRow = ({
         name={recipientName}
         color={recipientColor}
         teamName={teamName}
+        isLight={isLight}
         hideAvatar
         onClick={onMemberNameClick}
       />
@@ -557,6 +563,7 @@ const MemberWorkSyncNudgeRow = ({
   teamName,
   recipientName,
   recipientColor,
+  isLight,
   taskRefs,
   intent,
   timestamp,
@@ -566,6 +573,7 @@ const MemberWorkSyncNudgeRow = ({
   teamName: string;
   recipientName: string;
   recipientColor?: string;
+  isLight: boolean;
   taskRefs?: InboxMessage['taskRefs'];
   intent?: InboxMessage['workSyncIntent'];
   timestamp: string;
@@ -599,6 +607,7 @@ const MemberWorkSyncNudgeRow = ({
         name={recipientName}
         color={recipientColor}
         teamName={teamName}
+        isLight={isLight}
         hideAvatar
         onClick={onMemberNameClick}
       />
@@ -636,6 +645,7 @@ const BootstrapSystemRow = ({
   runtime,
   senderColor,
   recipientColor,
+  isLight,
   timestamp,
   onMemberNameClick,
 }: {
@@ -646,6 +656,7 @@ const BootstrapSystemRow = ({
   runtime?: string;
   senderColor?: string;
   recipientColor?: string;
+  isLight: boolean;
   timestamp: string;
   onMemberNameClick?: (memberName: string) => void;
 }): React.JSX.Element => {
@@ -664,6 +675,7 @@ const BootstrapSystemRow = ({
         name={senderName}
         color={senderColor}
         teamName={teamName}
+        isLight={isLight}
         hideAvatar
         onClick={onMemberNameClick}
       />
@@ -672,6 +684,7 @@ const BootstrapSystemRow = ({
         name={recipientName}
         color={recipientColor}
         teamName={teamName}
+        isLight={isLight}
         hideAvatar
         onClick={onMemberNameClick}
       />
@@ -692,6 +705,7 @@ const BootstrapAcknowledgementRow = ({
   recipientName,
   senderColor,
   recipientColor,
+  isLight,
   timestamp,
   onMemberNameClick,
 }: {
@@ -700,6 +714,7 @@ const BootstrapAcknowledgementRow = ({
   recipientName: string;
   senderColor?: string;
   recipientColor?: string;
+  isLight: boolean;
   timestamp: string;
   onMemberNameClick?: (memberName: string) => void;
 }): React.JSX.Element => {
@@ -713,6 +728,7 @@ const BootstrapAcknowledgementRow = ({
         name={senderName}
         color={senderColor}
         teamName={teamName}
+        isLight={isLight}
         hideAvatar
         onClick={onMemberNameClick}
       />
@@ -721,6 +737,7 @@ const BootstrapAcknowledgementRow = ({
         name={recipientName}
         color={recipientColor}
         teamName={teamName}
+        isLight={isLight}
         hideAvatar
         onClick={onMemberNameClick}
       />
@@ -1206,6 +1223,7 @@ export const ActivityItem = memo(
           teamName={teamName}
           senderName={senderName}
           senderColor={senderColor}
+          isLight={isLight}
           summary={idleSemantic.peerSummary}
           timestamp={timestamp}
           onMemberNameClick={onMemberNameClick}
@@ -1219,6 +1237,7 @@ export const ActivityItem = memo(
           teamName={teamName}
           recipientName={message.to ?? 'teammate'}
           recipientColor={recipientColor}
+          isLight={isLight}
           taskRef={message.taskRefs?.[0]}
           timestamp={timestamp}
           onMemberNameClick={onMemberNameClick}
@@ -1233,6 +1252,7 @@ export const ActivityItem = memo(
           teamName={teamName}
           recipientName={message.to ?? 'teammate'}
           recipientColor={recipientColor}
+          isLight={isLight}
           taskRefs={message.taskRefs}
           intent={message.workSyncIntent}
           timestamp={timestamp}
@@ -1252,6 +1272,7 @@ export const ActivityItem = memo(
           runtime={bootstrapDisplay.runtime}
           senderColor={senderColor}
           recipientColor={recipientColor}
+          isLight={isLight}
           timestamp={timestamp}
           onMemberNameClick={onMemberNameClick}
         />
@@ -1266,6 +1287,7 @@ export const ActivityItem = memo(
           recipientName={message.to ?? 'lead'}
           senderColor={senderColor}
           recipientColor={recipientColor}
+          isLight={isLight}
           timestamp={timestamp}
           onMemberNameClick={onMemberNameClick}
         />
@@ -1305,6 +1327,7 @@ export const ActivityItem = memo(
         name={senderName}
         color={senderColor}
         teamName={teamName}
+        isLight={isLight}
         hideAvatar={senderHideAvatar || compactHeader}
         onClick={onMemberNameClick}
         disableHoverCard={crossTeamOrigin != null}
@@ -1383,6 +1406,7 @@ export const ActivityItem = memo(
               name={crossTeamSentMemberName ?? qualifiedRecipient?.memberName ?? message.to}
               color={crossTeamTarget ? undefined : recipientColor}
               teamName={crossTeamTarget ? undefined : teamName}
+              isLight={isLight}
               hideAvatar={
                 compactHeader ||
                 (crossTeamSentMemberName ?? qualifiedRecipient?.memberName ?? message.to) === 'user'
