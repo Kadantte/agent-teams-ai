@@ -26,6 +26,8 @@ interface MemberBadgeProps {
   teamName?: string;
   /** Avatar + badge size variant */
   size?: 'xs' | 'sm' | 'md';
+  /** Pre-resolved avatar URL from a caller that already owns the member roster. */
+  avatarUrl?: string;
   /** Hide the avatar icon, show only the name badge */
   hideAvatar?: boolean;
   onClick?: (name: string) => void;
@@ -59,6 +61,7 @@ export const MemberBadge = memo(
     color,
     teamName,
     size = 'sm',
+    avatarUrl,
     hideAvatar,
     onClick,
     disableHoverCard,
@@ -66,7 +69,7 @@ export const MemberBadge = memo(
     const colors = getTeamColorSet(color ?? '');
     const { isLight } = useTheme();
     const effectiveAvatarTeamName = useStore((s) =>
-      hideAvatar ? null : (teamName ?? s.selectedTeamName)
+      hideAvatar || avatarUrl != null ? null : (teamName ?? s.selectedTeamName)
     );
     const teamMembers = useStore((s) =>
       effectiveAvatarTeamName
@@ -87,7 +90,7 @@ export const MemberBadge = memo(
 
     const avatar = (
       <img
-        src={avatarMap.get(name) ?? agentAvatarUrl(name, avatarSize)}
+        src={avatarUrl ?? avatarMap.get(name) ?? agentAvatarUrl(name, avatarSize)}
         alt=""
         className={`${avatarClass} shrink-0 rounded-full bg-[var(--color-surface-raised)]`}
         loading="lazy"

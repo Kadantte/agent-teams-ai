@@ -26,7 +26,7 @@ import {
   validateAttachmentPayloadsForMember,
 } from '@renderer/utils/attachmentRecipientCapabilities';
 import { formatAgentRole } from '@renderer/utils/formatAgentRole';
-import { buildMemberColorMap } from '@renderer/utils/memberHelpers';
+import { buildMemberAvatarMap, buildMemberColorMap } from '@renderer/utils/memberHelpers';
 import { isOpenCodeRuntimeDeliveryHardUxFailureFromDebugDetails } from '@renderer/utils/openCodeRuntimeDeliveryDiagnostics';
 import { nameColorSet } from '@renderer/utils/projectColor';
 import { getSuggestedSlashCommandsForProvider } from '@renderer/utils/providerSlashCommands';
@@ -293,6 +293,7 @@ export const MessageComposer = ({
   const slashCommandDataEnabled = textHasSlashCommandTrigger;
 
   const colorMap = useMemo(() => buildMemberColorMap(members), [members]);
+  const avatarMap = useMemo(() => buildMemberAvatarMap(members), [members]);
 
   const mentionSuggestions = useMemo<MentionSuggestion[]>(
     () =>
@@ -1129,6 +1130,7 @@ export const MessageComposer = ({
                         name={recipient}
                         color={selectedResolvedColor}
                         size="sm"
+                        avatarUrl={avatarMap.get(recipient)}
                         hideAvatar={recipient === 'user'}
                         disableHoverCard
                       />
@@ -1207,6 +1209,7 @@ export const MessageComposer = ({
                               name={m.name}
                               color={resolvedColor}
                               size="sm"
+                              avatarUrl={avatarMap.get(m.name)}
                               hideAvatar={m.name === 'user'}
                               disableHoverCard
                             />
