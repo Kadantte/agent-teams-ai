@@ -87,6 +87,30 @@ import type { InboxMessage } from '@shared/types';
 
 type StructuredMessage = Record<string, unknown>;
 
+interface PermissionStatusIconProps {
+  requestId: string;
+}
+
+const PermissionStatusIcon = memo(function PermissionStatusIcon({
+  requestId,
+}: PermissionStatusIconProps): React.JSX.Element {
+  const pendingApprovals = useStore(useShallow((s) => s.pendingApprovals));
+  const resolvedApprovals = useStore(useShallow((s) => s.resolvedApprovals));
+
+  const resolved = resolvedApprovals.get(requestId);
+  if (resolved === true) {
+    return <Check size={12} className="text-emerald-400" />;
+  }
+  if (resolved === false) {
+    return <X size={12} className="text-red-400" />;
+  }
+  const isPending = pendingApprovals.some((a) => a.requestId === requestId);
+  if (isPending) {
+    return <Clock size={12} className="animate-pulse text-amber-400" />;
+  }
+  return <Check size={12} className="text-emerald-400/50" />;
+});
+
 function parseQualifiedRecipient(
   value: string | undefined
 ): { teamName: string; memberName: string } | null {
@@ -1034,30 +1058,16 @@ export const ActivityItem = memo(
       commentTaskRef?.displayId ??
       (commentTaskRef?.taskId ? `#${commentTaskRef.taskId.slice(0, 6)}` : null);
 
-    // Permission request status icon (check/x/clock)
-    const pendingApprovals = useStore(useShallow((s) => s.pendingApprovals));
-    const resolvedApprovals = useStore(useShallow((s) => s.resolvedApprovals));
-    const permissionIcon = useMemo(() => {
+    const permissionRequestId = useMemo(() => {
       if (!structured) return null;
       const type = typeof structured.type === 'string' ? structured.type : null;
       if (type !== 'permission_request') return null;
       const requestId = typeof structured.request_id === 'string' ? structured.request_id : null;
-      if (!requestId) return null;
-
-      const resolved = resolvedApprovals.get(requestId);
-      if (resolved === true) {
-        return <Check size={12} className="text-emerald-400" />;
-      }
-      if (resolved === false) {
-        return <X size={12} className="text-red-400" />;
-      }
-      const isPending = pendingApprovals.some((a) => a.requestId === requestId);
-      if (isPending) {
-        return <Clock size={12} className="animate-pulse text-amber-400" />;
-      }
-      // Not in pending and not resolved — already handled before we started tracking
-      return <Check size={12} className="text-emerald-400/50" />;
-    }, [structured, pendingApprovals, resolvedApprovals]);
+      return requestId || null;
+    }, [structured]);
+    const permissionIcon = permissionRequestId ? (
+      <PermissionStatusIcon requestId={permissionRequestId} />
+    ) : null;
 
     // Noise messages: minimal inline row
     if (noiseLabel) {
