@@ -202,72 +202,66 @@ export function filterTeamMessages(
     searchQuery,
   } = options;
   const leadNames = normalizeLeadNames(rawLeadNames);
-
-  let list = messages.filter((m) => {
-    const data = getMessageFilterData(m);
-    return (
-      !data.isTaskCommentNotification &&
-      (includeAutomationEvents || !data.isTaskStallRemediation) &&
-      (includeMemberWorkSyncNudges || !data.isMemberWorkSyncNudge) &&
-      !data.isReviewPickupEscalation &&
-      !data.isInternalControlEnvelope
-    );
-  });
-  if (timeWindow) {
-    list = list.filter((m) => {
-      const ts = new Date(m.timestamp).getTime();
-      return ts >= timeWindow.start && ts < timeWindow.end;
-    });
-  }
-  if (!filter.showNoise) {
-    list = list.filter((m) => {
-      const data = getMessageFilterData(m);
-      if (!data.isNoiseMessage) return true;
-      return includePassiveIdlePeerSummariesWhenNoiseHidden && data.keepIdleWhenNoiseHidden;
-    });
-  }
-
   const hasFrom = filter.from.size > 0;
   const hasTo = filter.to.size > 0;
-  if (hasFrom && hasTo) {
-    list = list.filter((m) => {
-      const data = getMessageFilterData(m);
+  const q = searchQuery.trim().toLowerCase();
+  const visibleMessagesById = new Map<string, InboxMessage>();
+  const filteredMessages: InboxMessage[] = [];
+
+  for (const message of messages) {
+    const data = getMessageFilterData(message);
+    if (
+      data.isTaskCommentNotification ||
+      (!includeAutomationEvents && data.isTaskStallRemediation) ||
+      (!includeMemberWorkSyncNudges && data.isMemberWorkSyncNudge) ||
+      data.isReviewPickupEscalation ||
+      data.isInternalControlEnvelope
+    ) {
+      continue;
+    }
+
+    if (timeWindow) {
+      const ts = new Date(message.timestamp).getTime();
+      if (ts < timeWindow.start || ts >= timeWindow.end) {
+        continue;
+      }
+    }
+
+    if (
+      !filter.showNoise &&
+      data.isNoiseMessage &&
+      (!includePassiveIdlePeerSummariesWhenNoiseHidden || !data.keepIdleWhenNoiseHidden)
+    ) {
+      continue;
+    }
+
+    if (hasFrom || hasTo) {
       const fromMatch = Boolean(data.trimmedFrom && filter.from.has(data.trimmedFrom));
       const toMatch = Boolean(data.trimmedTo && filter.to.has(data.trimmedTo));
-      return fromMatch && toMatch;
-    });
-  } else if (hasFrom || hasTo) {
-    list = list.filter((m) => {
-      const data = getMessageFilterData(m);
-      if (hasFrom) return Boolean(data.trimmedFrom && filter.from.has(data.trimmedFrom));
-      if (hasTo) return Boolean(data.trimmedTo && filter.to.has(data.trimmedTo));
-      return true;
-    });
-  }
+      if ((hasFrom && !fromMatch) || (hasTo && !toMatch)) {
+        continue;
+      }
+    }
 
-  const q = searchQuery.trim().toLowerCase();
-  if (q) {
-    list = list.filter((m) => {
-      const text = getSanitizedInboxMessageText(m).toLowerCase();
-      const summary = getSanitizedInboxMessageSummary(m).toLowerCase();
-      const from = (m.from ?? '').toLowerCase();
-      const to = (m.to ?? '').toLowerCase();
-      return text.includes(q) || summary.includes(q) || from.includes(q) || to.includes(q);
-    });
-  }
+    if (q) {
+      const text = getSanitizedInboxMessageText(message).toLowerCase();
+      const summary = getSanitizedInboxMessageSummary(message).toLowerCase();
+      const from = (message.from ?? '').toLowerCase();
+      const to = (message.to ?? '').toLowerCase();
+      if (!text.includes(q) && !summary.includes(q) && !from.includes(q) && !to.includes(q)) {
+        continue;
+      }
+    }
 
-  const visibleMessagesById = new Map(
-    list
-      .map((m) => {
-        const id = getMessageFilterData(m).trimmedMessageId;
-        return id ? ([id, m] as const) : null;
-      })
-      .filter((entry): entry is readonly [string, InboxMessage] => entry !== null)
-  );
+    filteredMessages.push(message);
+    if (data.trimmedMessageId) {
+      visibleMessagesById.set(data.trimmedMessageId, message);
+    }
+  }
 
   const seenRuntimeDeliveryRelayDuplicates = new Set<string>();
 
-  return list.filter((m) => {
+  return filteredMessages.filter((m) => {
     const relayOfMessageId =
       typeof m.relayOfMessageId === 'string' ? m.relayOfMessageId.trim() : '';
     if (!relayOfMessageId) {
