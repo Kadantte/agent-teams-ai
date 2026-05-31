@@ -380,46 +380,55 @@ export const MessagesPanel = memo(function MessagesPanel({
     teamMentionMeta,
     openTeamTab,
     messages,
-    messagesState,
+    messagesEntryPresent,
+    messagesHasMore,
+    messagesLoadingHead,
+    messagesLoadingOlder,
     loadOlderTeamMessages,
     refreshTeamMessagesHead,
   } = useStore(
-    useShallow((s) => ({
-      sendTeamMessage: s.sendTeamMessage,
-      sendCrossTeamMessage: s.sendCrossTeamMessage,
-      sendingMessage: s.sendingMessage,
-      sendMessageError: s.sendMessageError,
-      sendMessageWarning: s.sendMessageWarning,
-      sendMessageDebugDetails: s.sendMessageDebugDetails,
-      lastSendMessageResult: s.lastSendMessageResult,
-      clearSendMessageRuntimeDiagnostics: s.clearSendMessageRuntimeDiagnostics,
-      refreshSendMessageRuntimeDeliveryStatus: s.refreshSendMessageRuntimeDeliveryStatus,
-      teamMentionMeta: selectMessagesPanelTeamMentionMeta(s.teams),
-      openTeamTab: s.openTeamTab,
-      messages: selectTeamMessages(s, teamName),
-      messagesState: teamName ? s.teamMessagesByName[teamName] : undefined,
-      loadOlderTeamMessages: s.loadOlderTeamMessages,
-      refreshTeamMessagesHead: s.refreshTeamMessagesHead,
-    }))
+    useShallow((s) => {
+      const messagesState = teamName ? s.teamMessagesByName[teamName] : undefined;
+      return {
+        sendTeamMessage: s.sendTeamMessage,
+        sendCrossTeamMessage: s.sendCrossTeamMessage,
+        sendingMessage: s.sendingMessage,
+        sendMessageError: s.sendMessageError,
+        sendMessageWarning: s.sendMessageWarning,
+        sendMessageDebugDetails: s.sendMessageDebugDetails,
+        lastSendMessageResult: s.lastSendMessageResult,
+        clearSendMessageRuntimeDiagnostics: s.clearSendMessageRuntimeDiagnostics,
+        refreshSendMessageRuntimeDeliveryStatus: s.refreshSendMessageRuntimeDeliveryStatus,
+        teamMentionMeta: selectMessagesPanelTeamMentionMeta(s.teams),
+        openTeamTab: s.openTeamTab,
+        messages: selectTeamMessages(s, teamName),
+        messagesEntryPresent: messagesState !== undefined,
+        messagesHasMore: messagesState?.hasMore ?? false,
+        messagesLoadingHead: messagesState?.loadingHead ?? false,
+        messagesLoadingOlder: messagesState?.loadingOlder ?? false,
+        loadOlderTeamMessages: s.loadOlderTeamMessages,
+        refreshTeamMessagesHead: s.refreshTeamMessagesHead,
+      };
+    })
   );
   const bootstrapHeadRefreshAttemptedForTeamRef = useRef<string | null>(null);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!messagesState?.hasMore || messagesState.loadingHead || messagesState.loadingOlder) {
+    if (!messagesHasMore || messagesLoadingHead || messagesLoadingOlder) {
       return;
     }
     await loadOlderTeamMessages(teamName);
-  }, [loadOlderTeamMessages, messagesState, teamName]);
+  }, [loadOlderTeamMessages, messagesHasMore, messagesLoadingHead, messagesLoadingOlder, teamName]);
 
   const handleLoadOlderMessagesClick = useCallback(() => {
     void loadOlderMessages();
   }, [loadOlderMessages]);
 
-  const loadingOlderMessages = messagesState?.loadingOlder ?? false;
-  const hasMore = messagesState?.hasMore ?? false;
+  const loadingOlderMessages = messagesLoadingOlder;
+  const hasMore = messagesHasMore;
   const effectiveMessages = messages;
   const loadingInitialMessages =
-    effectiveMessages.length === 0 && (messagesState === undefined || messagesState.loadingHead);
+    effectiveMessages.length === 0 && (!messagesEntryPresent || messagesLoadingHead);
 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const floatingComposerMeasureRef = useRef<HTMLDivElement | null>(null);
@@ -591,7 +600,7 @@ export const MessagesPanel = memo(function MessagesPanel({
       bootstrapHeadRefreshAttemptedForTeamRef.current = null;
       return;
     }
-    if (messagesState?.loadingHead || messagesState?.loadingOlder) {
+    if (messagesLoadingHead || messagesLoadingOlder) {
       return;
     }
     if (bootstrapHeadRefreshAttemptedForTeamRef.current === teamName) {
@@ -601,8 +610,8 @@ export const MessagesPanel = memo(function MessagesPanel({
     void refreshTeamMessagesHead(teamName).catch(() => undefined);
   }, [
     effectiveMessages.length,
-    messagesState?.loadingHead,
-    messagesState?.loadingOlder,
+    messagesLoadingHead,
+    messagesLoadingOlder,
     refreshTeamMessagesHead,
     teamName,
   ]);
