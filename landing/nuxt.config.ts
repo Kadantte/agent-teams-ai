@@ -8,6 +8,7 @@ declare const process: {
 };
 
 const siteUrl =
+  process.env.NUXT_PUBLIC_LANDING_SITE_URL ||
   process.env.AGENT_TEAMS_LANDING_SITE_URL ||
   process.env.NUXT_PUBLIC_SITE_URL ||
   "https://777genius.github.io/agent-teams-ai";

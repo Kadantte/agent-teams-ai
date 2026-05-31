@@ -25,6 +25,7 @@ const embeddedDocsBase = appBase === "/" ? "/docs/" : `${appBase}docs/`;
 const base = process.env.VITEPRESS_BASE ? normalizeBase(process.env.VITEPRESS_BASE) : embeddedDocsBase;
 const landingSiteUrl = trimTrailingSlash(
   process.env.AGENT_TEAMS_LANDING_SITE_URL ||
+    process.env.NUXT_PUBLIC_LANDING_SITE_URL ||
     process.env.VITEPRESS_LANDING_SITE_URL ||
     process.env.NUXT_PUBLIC_SITE_URL ||
     "https://777genius.github.io/agent-teams-ai"
