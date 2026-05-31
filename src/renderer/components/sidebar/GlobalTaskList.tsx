@@ -797,7 +797,7 @@ const ProjectTaskGroup = memo(
   (prev, next) =>
     prev.group.projectKey === next.group.projectKey &&
     prev.group.projectLabel === next.group.projectLabel &&
-    areTaskSidebarArraysEqual(prev.group.tasks, next.group.tasks) &&
+    prev.group.tasks.length === next.group.tasks.length &&
     prev.isCollapsed === next.isCollapsed &&
     prev.visibleCount === next.visibleCount &&
     prev.noProjectGroupColor === next.noProjectGroupColor &&
