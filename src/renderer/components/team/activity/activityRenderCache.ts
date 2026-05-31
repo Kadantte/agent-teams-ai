@@ -40,8 +40,7 @@ export function taskRefsCacheSignature(taskRefs?: readonly TaskRef[]): string {
 
   let encoded = '';
   let hasPart = false;
-  for (let index = 0; index < taskRefs.length; index += 1) {
-    const ref = taskRefs[index];
+  for (const ref of taskRefs) {
     const parts = [ref.taskId, ref.displayId, ref.teamName ?? ''];
     for (const part of parts) {
       if (hasPart) encoded += '|';

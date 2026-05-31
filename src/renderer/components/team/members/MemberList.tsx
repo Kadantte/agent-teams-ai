@@ -858,6 +858,16 @@ export const MemberList = memo(function MemberList({
     undefined
   );
   memberRuntimeEntriesRef.current = memberRuntimeEntries;
+  const [runtimeTelemetryCacheNowMs, setRuntimeTelemetryCacheNowMs] = useState(() => Date.now());
+  const hasMemberRuntimeEntries = Boolean(memberRuntimeEntries && memberRuntimeEntries.size > 0);
+
+  useEffect(() => {
+    if (!hasMemberRuntimeEntries) return;
+    const intervalId = window.setInterval(() => {
+      setRuntimeTelemetryCacheNowMs(Date.now());
+    }, MEMBER_CARD_RUNTIME_TELEMETRY_CACHE_MS);
+    return () => window.clearInterval(intervalId);
+  }, [hasMemberRuntimeEntries]);
 
   const handleResize = useCallback((entries: ResizeObserverEntry[]) => {
     const entry = entries[0];
@@ -917,7 +927,7 @@ export const MemberList = memo(function MemberList({
     const nextEntries = buildCachedMemberRuntimeEntries(
       memberRuntimeEntries,
       memberRuntimeEntryCacheRef.current,
-      Date.now()
+      runtimeTelemetryCacheNowMs
     );
     const reusedEntries = reuseRuntimeEntriesMapIfUnchanged(
       displayedRuntimeEntriesRef.current,
@@ -925,7 +935,7 @@ export const MemberList = memo(function MemberList({
     );
     displayedRuntimeEntriesRef.current = reusedEntries;
     return reusedEntries;
-  }, [memberRuntimeEntries]);
+  }, [memberRuntimeEntries, runtimeTelemetryCacheNowMs]);
   const runtimeTelemetryScale = useMemo(
     () =>
       runtimeTelemetryPreviewActive
