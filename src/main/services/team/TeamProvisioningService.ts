@@ -739,18 +739,14 @@ interface ParsedBootstrapTranscriptTailCacheEntry {
   lines: ParsedBootstrapTranscriptTailLine[];
 }
 
-function isNormalizedBootstrapTranscriptContextText(
+function isNormalizedBootstrapTranscriptContextCandidateText(
   normalizedText: string,
-  normalizedTeamName: string,
-  normalizedMemberName: string
+  normalizedTeamName: string
 ): boolean {
-  if (!normalizedText || !normalizedTeamName || !normalizedMemberName) {
+  if (!normalizedText || !normalizedTeamName) {
     return false;
   }
-  if (
-    !normalizedText.includes(normalizedTeamName) ||
-    !normalizedText.includes(normalizedMemberName)
-  ) {
+  if (!normalizedText.includes(normalizedTeamName)) {
     return false;
   }
   return (
@@ -759,6 +755,13 @@ function isNormalizedBootstrapTranscriptContextText(
     normalizedText.includes('member briefing') ||
     normalizedText.includes('task briefing')
   );
+}
+
+function isNormalizedBootstrapTranscriptContextMemberText(
+  normalizedText: string,
+  normalizedMemberName: string
+): boolean {
+  return !!normalizedMemberName && normalizedText.includes(normalizedMemberName);
 }
 
 import type {
@@ -25952,10 +25955,7 @@ export class TeamProvisioningService {
       return { rows: null };
     }
 
-    const rows =
-      this.normalizeRuntimeProcessRowsForTelemetry(cached.rows)?.filter(
-        (row) => row.runtimeTelemetrySource !== 'windows-host'
-      ) ?? [];
+    const rows = cached.rows.filter((row) => row.runtimeTelemetrySource !== 'windows-host');
     return { rows };
   }
 
@@ -25972,10 +25972,7 @@ export class TeamProvisioningService {
       return cached.rows;
     }
 
-    let rows =
-      canUseCached && cached.rows
-        ? this.normalizeRuntimeProcessRowsForTelemetry(cached.rows)
-        : null;
+    let rows = canUseCached && cached.rows ? cached.rows : null;
     let runtimeProcessTableAvailable = rows != null;
     try {
       if (!rows) {
@@ -26043,7 +26040,7 @@ export class TeamProvisioningService {
     processRows: readonly RuntimeTelemetryProcessTableRow[]
   ): Map<number, RuntimeTelemetryProcessTableRow[]> {
     const childrenByParent = new Map<number, RuntimeTelemetryProcessTableRow[]>();
-    for (const row of this.normalizeRuntimeProcessRowsForTelemetry(processRows) ?? []) {
+    for (const row of processRows) {
       const current = childrenByParent.get(row.ppid) ?? [];
       current.push(row);
       childrenByParent.set(row.ppid, current);
@@ -26056,12 +26053,11 @@ export class TeamProvisioningService {
     processRows: readonly RuntimeTelemetryProcessTableRow[] | null,
     rootOwnersByPid: Map<number, Set<string>>
   ): void {
-    const normalizedRows = this.normalizeRuntimeProcessRowsForTelemetry(processRows);
-    if (!normalizedRows || normalizedRows.length === 0) {
+    if (!processRows || processRows.length === 0) {
       return;
     }
 
-    for (const row of normalizedRows) {
+    for (const row of processRows) {
       if (process.platform === 'win32' && row.runtimeTelemetrySource === 'wsl') {
         continue;
       }
@@ -30549,15 +30545,20 @@ export class TeamProvisioningService {
         }
         const lineNormalizedText = normalizedText ?? '';
         if (shouldCollectBootstrapContext) {
-          for (const contextMemberName of normalizedContextMemberNames) {
-            if (
-              isNormalizedBootstrapTranscriptContextText(
-                lineNormalizedText,
-                normalizedTeamName,
-                contextMemberName
-              )
-            ) {
-              bootstrapContextMembers.add(contextMemberName);
+          const isBootstrapContextLine = isNormalizedBootstrapTranscriptContextCandidateText(
+            lineNormalizedText,
+            normalizedTeamName
+          );
+          if (isBootstrapContextLine) {
+            for (const contextMemberName of normalizedContextMemberNames) {
+              if (
+                isNormalizedBootstrapTranscriptContextMemberText(
+                  lineNormalizedText,
+                  contextMemberName
+                )
+              ) {
+                bootstrapContextMembers.add(contextMemberName);
+              }
             }
           }
         }
