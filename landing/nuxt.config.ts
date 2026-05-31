@@ -18,6 +18,12 @@ const muxPlaybackId = process.env.NUXT_PUBLIC_MUX_PLAYBACK_ID || "qyeNuDjFqoDALK
 const muxBackgroundPlaybackId = process.env.NUXT_PUBLIC_MUX_BACKGROUND_PLAYBACK_ID || muxPlaybackId;
 const docsSiteUrl =
   process.env.AGENT_TEAMS_DOCS_SITE_URL || process.env.NUXT_PUBLIC_DOCS_SITE_URL || "";
+
+process.env.NUXT_PUBLIC_SITE_URL = siteUrl;
+if (docsSiteUrl) {
+  process.env.NUXT_PUBLIC_DOCS_SITE_URL = docsSiteUrl;
+}
+
 const baseURL = process.env.NUXT_APP_BASE_URL || "/";
 const basePrefixedDocsPath = `${baseURL.replace(/\/?$/, "/")}docs`;
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
