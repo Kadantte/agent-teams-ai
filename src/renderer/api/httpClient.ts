@@ -653,6 +653,10 @@ export class HttpAPIClient implements ElectronAPI {
     return { success: true };
   };
 
+  getDiscordMemberCount = async (): Promise<{ count: number | null; error?: string }> => {
+    return { count: null, error: 'Not available in browser mode' };
+  };
+
   windowControls = {
     minimize: async (): Promise<void> => {},
     maximize: async (): Promise<void> => {},

@@ -922,6 +922,7 @@ export interface ElectronAPI extends RecentProjectsElectronApi, CodexAccountElec
   ) => Promise<{ success: boolean; error?: string }>;
   showInFolder: (filePath: string) => Promise<void>;
   openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
+  getDiscordMemberCount: () => Promise<{ count: number | null; error?: string }>;
 
   // Window controls (when title bar is hidden, e.g. Windows / Linux)
   windowControls: {

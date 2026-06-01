@@ -759,6 +759,7 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke('shell:openPath', targetPath, projectRoot, userSelectedFromDialog),
   showInFolder: (filePath: string) => ipcRenderer.invoke('shell:showInFolder', filePath),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  getDiscordMemberCount: () => ipcRenderer.invoke('discord:getMemberCount'),
 
   // Window controls (when title bar is hidden, e.g. Windows / Linux)
   windowControls: {
