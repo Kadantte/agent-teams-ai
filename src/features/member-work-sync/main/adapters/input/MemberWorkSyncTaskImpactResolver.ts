@@ -50,6 +50,10 @@ function taskReferenceKeys(task: Pick<TeamTask, 'id' | 'displayId'>): string[] {
   return [...new Set(keys.flatMap((value) => [value, value.replace(/^#/, '')]))];
 }
 
+function normalizedTaskReferences(values: readonly string[] | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))];
+}
+
 function findLeadMemberName(activeMembers: string[]): string | null {
   return activeMembers.find((memberName) => isLeadMember({ name: memberName })) ?? null;
 }
@@ -179,7 +183,7 @@ export class MemberWorkSyncTaskImpactResolver {
         taskReferenceKeys(candidate).map((key) => [key, candidate] as const)
       )
     );
-    const brokenDependencies = (task.blockedBy ?? []).filter((dependencyId) => {
+    const brokenDependencies = normalizedTaskReferences(task.blockedBy).filter((dependencyId) => {
       const dependency = tasksByReference.get(dependencyId);
       return !dependency || isDeletedTask(dependency);
     });
@@ -200,7 +204,7 @@ export class MemberWorkSyncTaskImpactResolver {
         continue;
       }
       if (
-        (candidate.blockedBy ?? []).some(
+        normalizedTaskReferences(candidate.blockedBy).some(
           (dependencyId) => tasksByReference.get(dependencyId) === task
         )
       ) {

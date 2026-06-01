@@ -1,3 +1,5 @@
+import { isTeamTaskBlockedByUnfinishedDependency } from '@shared/utils/teamTaskState';
+
 import { getOpenCodeWeakStartStallThresholdMs } from './featureGates';
 import { classifyTaskProgressTouch, type TaskProgressSignal } from './TaskProgressSignalClassifier';
 
@@ -374,7 +376,7 @@ export class TeamTaskStallPolicy {
     if (task.reviewState === 'review') {
       return skip(task.id, 'Task is currently under review', 'review_active');
     }
-    if (task.blockedBy?.length) {
+    if (isTeamTaskBlockedByUnfinishedDependency(task, snapshot.allTasksById)) {
       return skip(task.id, 'Task is blocked', 'task_blocked');
     }
     if (task.needsClarification) {

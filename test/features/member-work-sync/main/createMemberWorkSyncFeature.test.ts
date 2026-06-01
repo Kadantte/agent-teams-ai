@@ -3153,6 +3153,157 @@ describe('createMemberWorkSyncFeature composition', () => {
     }
   });
 
+  it('refreshes an expired still_working lease during nudge dispatch without a status read', async () => {
+    const claudeRoot = makeTempRoot();
+    setClaudeBasePathOverride(claudeRoot);
+    const teamsBasePath = getTeamsBasePath();
+    const teamName = 'team-a';
+    const memberName = 'bob';
+    const feature = createMemberWorkSyncFeature({
+      teamsBasePath,
+      configReader: {
+        getConfig: vi.fn(async () => ({
+          name: teamName,
+          members: [{ name: memberName, providerId: 'codex' }],
+        })),
+      } as never,
+      taskReader: {
+        getTasks: vi.fn(async () => [
+          {
+            id: 'task-1',
+            displayId: '11111111',
+            subject: 'Wake after lease expiry',
+            status: 'in_progress',
+            owner: memberName,
+          },
+        ]),
+      } as never,
+      kanbanManager: {
+        getState: vi.fn(async () => ({
+          teamName,
+          reviewers: [],
+          tasks: {},
+        })),
+      } as never,
+      membersMetaStore: {
+        getMembers: vi.fn(async () => []),
+      } as never,
+      isTeamActive: vi.fn(async () => true),
+      canDispatchNudges: vi.fn(async () => true),
+    });
+
+    try {
+      await seedBlockingShadowCollectingMetrics({ teamsBasePath, teamName, memberName });
+      const current = await feature.refreshStatus({ teamName, memberName });
+      expect(await readMemberOutboxItems({ teamsBasePath, teamName, memberName })).toEqual({});
+
+      await expect(
+        feature.report({
+          teamName,
+          memberName,
+          state: 'still_working',
+          agendaFingerprint: current.agenda.fingerprint,
+          reportToken: current.reportToken,
+          taskIds: ['task-1'],
+          source: 'test',
+        })
+      ).resolves.toMatchObject({
+        accepted: true,
+        status: { state: 'still_working', report: { accepted: true } },
+      });
+
+      const store = new JsonMemberWorkSyncStore(new MemberWorkSyncStorePaths(teamsBasePath));
+      const acceptedStatus = await store.read({ teamName, memberName });
+      expect(acceptedStatus?.report?.accepted).toBe(true);
+      const expiredReportedAt = new Date(Date.now() - 7 * 60_000).toISOString();
+      const expiredAt = new Date(Date.now() - 6 * 60_000).toISOString();
+      await store.write({
+        ...acceptedStatus!,
+        evaluatedAt: expiredReportedAt,
+        report: {
+          ...acceptedStatus!.report!,
+          reportedAt: expiredReportedAt,
+          expiresAt: expiredAt,
+        },
+      });
+      await seedShadowReadyMetrics({ teamsBasePath, teamName, memberName });
+
+      await expect(feature.dispatchDueNudges([teamName])).resolves.toEqual({
+        claimed: 1,
+        delivered: 1,
+        superseded: 0,
+        retryable: 0,
+        terminal: 0,
+      });
+      expect(await readInboxMessages({ teamsBasePath, teamName, memberName })).toHaveLength(1);
+    } finally {
+      await feature.dispose();
+    }
+  });
+
+  it('materializes a missing active-member status during nudge dispatch', async () => {
+    const claudeRoot = makeTempRoot();
+    setClaudeBasePathOverride(claudeRoot);
+    const teamsBasePath = getTeamsBasePath();
+    const teamName = 'team-a';
+    const memberName = 'bob';
+    const feature = createMemberWorkSyncFeature({
+      teamsBasePath,
+      configReader: {
+        getConfig: vi.fn(async () => ({
+          name: teamName,
+          members: [{ name: memberName, providerId: 'codex' }],
+        })),
+      } as never,
+      taskReader: {
+        getTasks: vi.fn(async () => [
+          {
+            id: 'task-1',
+            displayId: '11111111',
+            subject: 'Wake after app restart',
+            status: 'pending',
+            owner: memberName,
+          },
+        ]),
+      } as never,
+      kanbanManager: {
+        getState: vi.fn(async () => ({
+          teamName,
+          reviewers: [],
+          tasks: {},
+        })),
+      } as never,
+      membersMetaStore: {
+        getMembers: vi.fn(async () => []),
+      } as never,
+      isTeamActive: vi.fn(async () => true),
+      canDispatchNudges: vi.fn(async () => true),
+    });
+
+    try {
+      await seedNonBlockingShadowCollectingMetrics({ teamsBasePath, teamName, memberName });
+      await expect(feature.dispatchDueNudges([teamName])).resolves.toEqual({
+        claimed: 1,
+        delivered: 1,
+        superseded: 0,
+        retryable: 0,
+        terminal: 0,
+      });
+      expect(await readInboxMessages({ teamsBasePath, teamName, memberName })).toHaveLength(1);
+      await expect(
+        new JsonMemberWorkSyncStore(new MemberWorkSyncStorePaths(teamsBasePath)).read({
+          teamName,
+          memberName,
+        })
+      ).resolves.toMatchObject({
+        state: 'needs_sync',
+        shadow: { triggerReasons: ['startup_scan'] },
+      });
+    } finally {
+      await feature.dispose();
+    }
+  });
+
   it('uses snapshot config reads for startup roster materialization', async () => {
     const getConfig = vi.fn(async () => ({ members: [] }));
     const getConfigSnapshot = vi.fn(async () => ({

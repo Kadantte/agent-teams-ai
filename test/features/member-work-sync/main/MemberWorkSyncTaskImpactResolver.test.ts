@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-
 import { MemberWorkSyncTaskImpactResolver } from '@features/member-work-sync/main/adapters/input/MemberWorkSyncTaskImpactResolver';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { TeamTask } from '@shared/types';
 
@@ -112,7 +111,7 @@ describe('MemberWorkSyncTaskImpactResolver', () => {
         subject: 'Depends on display id',
         status: 'pending',
         owner: 'tom',
-        blockedBy: ['11111111'],
+        blockedBy: [' 11111111 '],
       },
     ];
     const resolver = new MemberWorkSyncTaskImpactResolver({

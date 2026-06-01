@@ -17,11 +17,13 @@ import { describe, expect, it } from 'vitest';
 
 import type {
   MemberWorkSyncActionableWorkItem,
+  MemberWorkSyncMetricEvent,
   MemberWorkSyncOutboxEnsureInput,
   MemberWorkSyncOutboxItem,
   MemberWorkSyncOutboxMarkDeliveredInput,
   MemberWorkSyncOutboxMarkFailedInput,
   MemberWorkSyncOutboxMarkSupersededInput,
+  MemberWorkSyncPhase2ReadinessReason,
   MemberWorkSyncPhase2ReadinessState,
   MemberWorkSyncReportIntent,
   MemberWorkSyncReportRequest,
@@ -94,6 +96,9 @@ class InMemoryStatusStore implements MemberWorkSyncStatusStorePort {
   readonly pendingReports: Array<{ request: MemberWorkSyncReportRequest; reason: string }> = [];
   readonly pendingIntents = new Map<string, MemberWorkSyncReportIntent>();
   phase2ReadinessState: MemberWorkSyncPhase2ReadinessState = 'collecting_shadow_data';
+  phase2ReadinessReasons: MemberWorkSyncPhase2ReadinessReason[] = [];
+  metricsGeneratedAt = '2026-04-29T00:00:00.000Z';
+  recentEvents: MemberWorkSyncMetricEvent[] = [];
 
   async read(): Promise<MemberWorkSyncStatus | null> {
     return this.writes.at(-1) ?? null;
@@ -129,7 +134,7 @@ class InMemoryStatusStore implements MemberWorkSyncStatusStorePort {
   async readTeamMetrics(teamName: string): Promise<MemberWorkSyncTeamMetrics> {
     return {
       teamName,
-      generatedAt: '2026-04-29T00:00:00.000Z',
+      generatedAt: this.metricsGeneratedAt,
       memberCount: 1,
       stateCounts: {
         caught_up: 0,
@@ -144,10 +149,10 @@ class InMemoryStatusStore implements MemberWorkSyncStatusStorePort {
       fingerprintChangeCount: 0,
       reportAcceptedCount: 0,
       reportRejectedCount: 0,
-      recentEvents: [],
+      recentEvents: this.recentEvents,
       phase2Readiness: {
         state: this.phase2ReadinessState,
-        reasons: [],
+        reasons: this.phase2ReadinessReasons,
         thresholds: {
           minObservedMembers: 1,
           minStatusEvents: 20,
@@ -1284,6 +1289,85 @@ describe('MemberWorkSync use cases', () => {
     const revived = outbox.items.get(`member-work-sync:team-a:bob:${current.agenda.fingerprint}`);
     expect(revived).toMatchObject({ status: 'pending' });
     expect(revived).not.toHaveProperty('lastError');
+  });
+
+  it('dispatches native stale recovery after an attached still_working report expires', async () => {
+    const outbox = new InMemoryOutboxStore();
+    const inbox = new InMemoryInboxNudge();
+    const inProgressItem: MemberWorkSyncActionableWorkItem = {
+      ...workItem,
+      reason: 'owned_in_progress_task',
+      evidence: {
+        status: 'in_progress',
+        owner: 'bob',
+      },
+    };
+    const { clock, deps, store } = createDeps({
+      items: [inProgressItem],
+      providerId: 'codex',
+      outboxStore: outbox,
+      inboxNudge: inbox,
+    });
+    store.phase2ReadinessState = 'shadow_ready';
+
+    const reconciler = new MemberWorkSyncReconciler(deps);
+    const reporter = new MemberWorkSyncReporter(deps);
+    const current = await reconciler.execute(
+      { teamName: 'team-a', memberName: 'bob' },
+      { reconciledBy: 'queue', triggerReasons: ['task_changed'] }
+    );
+    await reporter.execute({
+      teamName: 'team-a',
+      memberName: 'bob',
+      state: 'still_working',
+      agendaFingerprint: current.agenda.fingerprint,
+      reportToken: current.reportToken,
+      taskIds: ['task-1'],
+      leaseTtlMs: 120_000,
+      source: 'test',
+    });
+
+    clock.set('2026-04-29T00:10:00.000Z');
+    store.phase2ReadinessState = 'blocked';
+    store.phase2ReadinessReasons = ['would_nudge_rate_high'];
+    store.metricsGeneratedAt = '2026-04-29T00:10:00.000Z';
+    store.recentEvents = [
+      {
+        id: 'old-report-accepted',
+        teamName: 'team-a',
+        memberName: 'bob',
+        kind: 'report_accepted',
+        state: 'still_working',
+        agendaFingerprint: current.agenda.fingerprint,
+        recordedAt: '2026-04-29T00:01:00.000Z',
+        actionableCount: 1,
+        providerId: 'codex',
+      },
+      {
+        id: 'needs-sync-after-lease-expired',
+        teamName: 'team-a',
+        memberName: 'bob',
+        kind: 'status_evaluated',
+        state: 'needs_sync',
+        agendaFingerprint: current.agenda.fingerprint,
+        recordedAt: '2026-04-29T00:04:00.000Z',
+        actionableCount: 1,
+        providerId: 'codex',
+      },
+    ];
+
+    const summary = await new MemberWorkSyncNudgeDispatcher(deps).dispatchDue({
+      teamNames: ['team-a'],
+      claimedBy: 'test-dispatcher',
+    });
+
+    expect(summary).toMatchObject({ claimed: 1, delivered: 1, retryable: 0 });
+    expect(inbox.inserted).toHaveLength(1);
+    expect(
+      outbox.items.get(`member-work-sync:team-a:bob:${current.agenda.fingerprint}`)
+    ).toMatchObject({
+      status: 'delivered',
+    });
   });
 
   it('rate-limits delivered nudges per member per hour', async () => {

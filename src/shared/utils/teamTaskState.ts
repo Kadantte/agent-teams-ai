@@ -5,6 +5,10 @@ export interface TeamTaskStateLike {
   deletedAt?: string | null;
 }
 
+export interface TeamTaskBlockerLike {
+  blockedBy?: string[] | null;
+}
+
 export type TeamTaskWorkflowColumn = 'review' | 'approved';
 
 interface CachedTeamTaskState {
@@ -120,6 +124,22 @@ export function isTeamTaskNeedsFixActionable(task: TeamTaskStateLike): boolean {
 
 export function isTeamTaskFinishedForDependency(task: TeamTaskStateLike): boolean {
   return getCachedTeamTaskState(task).finishedForDependency;
+}
+
+export function isTeamTaskBlockedByUnfinishedDependency(
+  task: TeamTaskBlockerLike,
+  taskStateById: ReadonlyMap<string, TeamTaskStateLike>
+): boolean {
+  const blockedBy =
+    task.blockedBy?.map((taskId) => taskId.trim()).filter((taskId) => taskId.length > 0) ?? [];
+  if (blockedBy.length === 0) {
+    return false;
+  }
+
+  return blockedBy.some((taskId) => {
+    const blocker = taskStateById.get(taskId);
+    return !blocker || (!isTeamTaskFinishedForDependency(blocker) && !isTeamTaskDeleted(blocker));
+  });
 }
 
 export function isTeamTaskTerminalForActionableWork(task: TeamTaskStateLike): boolean {

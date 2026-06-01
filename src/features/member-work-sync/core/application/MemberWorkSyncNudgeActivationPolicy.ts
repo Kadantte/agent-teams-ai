@@ -59,6 +59,29 @@ function parseTime(value: string | undefined): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
+function hasActiveAcceptedWorkLease(status: MemberWorkSyncStatus): boolean {
+  const report = status.report;
+  if (
+    report?.accepted !== true ||
+    report.agendaFingerprint !== status.agenda.fingerprint ||
+    (report.state !== 'still_working' && report.state !== 'blocked')
+  ) {
+    return false;
+  }
+
+  const evaluatedAtMs = parseTime(status.evaluatedAt);
+  const expiresAtMs = parseTime(report.expiresAt);
+  return evaluatedAtMs != null && expiresAtMs != null && expiresAtMs > evaluatedAtMs;
+}
+
+function hasNoCurrentAcceptedWorkProof(status: MemberWorkSyncStatus): boolean {
+  return (
+    status.diagnostics.includes('no_current_report') ||
+    status.diagnostics.includes('report_lease_expired') ||
+    status.diagnostics.includes('report_fingerprint_stale')
+  );
+}
+
 function eventsForMember(
   status: MemberWorkSyncStatus,
   metrics: MemberWorkSyncTeamMetrics
@@ -67,16 +90,6 @@ function eventsForMember(
   return metrics.recentEvents
     .filter((event) => normalizeMemberName(event.memberName) === memberName)
     .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt));
-}
-
-function hasAcceptedReportForCurrentFingerprint(
-  status: MemberWorkSyncStatus,
-  metrics: MemberWorkSyncTeamMetrics
-): boolean {
-  return eventsForMember(status, metrics).some(
-    (event) =>
-      event.kind === 'report_accepted' && event.agendaFingerprint === status.agenda.fingerprint
-  );
 }
 
 function isDifferentFingerprintBoundary(
@@ -104,10 +117,18 @@ function getCurrentFingerprintStableSinceMs(
     return recordedAt != null && recordedAt <= nowMs;
   });
   let latestDifferentFingerprintMs = Number.NEGATIVE_INFINITY;
+  let latestAcceptedReportMs = Number.NEGATIVE_INFINITY;
   for (const event of memberEvents) {
     const recordedAt = parseTime(event.recordedAt);
     if (recordedAt != null && isDifferentFingerprintBoundary(event, currentFingerprint)) {
       latestDifferentFingerprintMs = Math.max(latestDifferentFingerprintMs, recordedAt);
+    }
+    if (
+      recordedAt != null &&
+      event.kind === 'report_accepted' &&
+      event.agendaFingerprint === currentFingerprint
+    ) {
+      latestAcceptedReportMs = Math.max(latestAcceptedReportMs, recordedAt);
     }
   }
 
@@ -117,7 +138,8 @@ function getCurrentFingerprintStableSinceMs(
       event.state === 'needs_sync' &&
       event.agendaFingerprint === currentFingerprint &&
       recordedAt != null &&
-      recordedAt >= latestDifferentFingerprintMs
+      recordedAt >= latestDifferentFingerprintMs &&
+      recordedAt > latestAcceptedReportMs
       ? [recordedAt]
       : [];
   });
@@ -133,12 +155,12 @@ function isNativeStaleInProgressCandidate(input: {
   if (
     status.state !== 'needs_sync' ||
     status.shadow?.wouldNudge !== true ||
-    !status.diagnostics.includes('no_current_report') ||
+    !hasNoCurrentAcceptedWorkProof(status) ||
     !status.providerId ||
     !NATIVE_STALE_IN_PROGRESS_PROVIDERS.has(status.providerId) ||
     isLeadLikeMemberName(status.memberName) ||
     status.agenda.items.length !== 1 ||
-    hasAcceptedReportForCurrentFingerprint(status, metrics)
+    hasActiveAcceptedWorkLease(status)
   ) {
     return false;
   }

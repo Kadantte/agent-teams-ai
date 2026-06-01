@@ -458,6 +458,77 @@ describe('MemberWorkSyncNudgeActivationPolicy', () => {
     ).toEqual({ active: false, reason: 'blocking_metrics' });
   });
 
+  it('activates stale native in-progress recovery when an old accepted report is followed by a new needs_sync window', () => {
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: nativeStaleInProgressStatus(),
+        metrics: staleMetrics({
+          generatedAt: '2026-05-06T00:10:01.000Z',
+          recentEvents: [
+            {
+              id: 'old-report-accepted',
+              teamName: 'team-a',
+              memberName: 'alice',
+              kind: 'report_accepted',
+              state: 'still_working',
+              agendaFingerprint: 'agenda:v1:native-stale',
+              recordedAt: '2026-05-06T00:01:00.000Z',
+              actionableCount: 1,
+              providerId: 'codex',
+            },
+            {
+              id: 'needs-sync-after-old-report',
+              teamName: 'team-a',
+              memberName: 'alice',
+              kind: 'status_evaluated',
+              state: 'needs_sync',
+              agendaFingerprint: 'agenda:v1:native-stale',
+              recordedAt: '2026-05-06T00:04:00.000Z',
+              actionableCount: 1,
+              providerId: 'codex',
+            },
+          ],
+        }),
+      })
+    ).toEqual({ active: true, reason: 'native_stale_in_progress' });
+  });
+
+  it('activates stale native in-progress recovery when an attached accepted report is expired', () => {
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: nativeStaleInProgressStatus({
+          evaluatedAt: '2026-05-06T00:10:01.000Z',
+          diagnostics: ['report_lease_expired'],
+          report: {
+            accepted: true,
+            state: 'still_working',
+            agendaFingerprint: 'agenda:v1:native-stale',
+            memberName: 'alice',
+            teamName: 'team-a',
+            reportedAt: '2026-05-06T00:01:00.000Z',
+            expiresAt: '2026-05-06T00:02:00.000Z',
+          },
+        }),
+        metrics: staleMetrics({
+          generatedAt: '2026-05-06T00:10:01.000Z',
+          recentEvents: [
+            {
+              id: 'needs-sync-after-expired-report',
+              teamName: 'team-a',
+              memberName: 'alice',
+              kind: 'status_evaluated',
+              state: 'needs_sync',
+              agendaFingerprint: 'agenda:v1:native-stale',
+              recordedAt: '2026-05-06T00:04:00.000Z',
+              actionableCount: 1,
+              providerId: 'codex',
+            },
+          ],
+        }),
+      })
+    ).toEqual({ active: true, reason: 'native_stale_in_progress' });
+  });
+
   it('does not activate stale native in-progress recovery when the accepted report state is still current', () => {
     expect(
       decideMemberWorkSyncNudgeActivation({

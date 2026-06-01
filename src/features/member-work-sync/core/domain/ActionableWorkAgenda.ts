@@ -126,8 +126,12 @@ export function buildActionableWorkAgenda(
 
       const owner = normalizeMemberName(task.owner);
       const base = buildBaseItem(task, memberName);
-      const blockedBy = [...(task.blockedBy ?? [])].filter(Boolean).sort();
-      const blocks = [...(task.blocks ?? [])].filter(Boolean).sort();
+      const blockedBy = [
+        ...new Set((task.blockedBy ?? []).map((id) => id.trim()).filter(Boolean)),
+      ].sort();
+      const blocks = [
+        ...new Set((task.blocks ?? []).map((id) => id.trim()).filter(Boolean)),
+      ].sort();
       const brokenDependencyIds: string[] = [];
       const waitingDependencyIds: string[] = [];
       for (const dependencyId of blockedBy) {

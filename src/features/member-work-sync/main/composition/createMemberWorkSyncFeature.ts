@@ -65,6 +65,29 @@ import type { TeamChangeEvent } from '@shared/types';
 const STALE_STATUS_MAX_AGE_MS = 2 * 60_000;
 const PROOF_MISSING_RECOVERY_RECENT_WINDOW_MS = 10 * 60_000;
 
+function statusNeedsBackgroundRefresh(status: MemberWorkSyncStatus, nowMs: number): boolean {
+  if (status.agenda.items.length === 0) {
+    return false;
+  }
+
+  const evaluatedAtMs = Date.parse(status.evaluatedAt);
+  if (!Number.isFinite(evaluatedAtMs)) {
+    return true;
+  }
+
+  if (status.state === 'needs_sync' && nowMs - evaluatedAtMs > STALE_STATUS_MAX_AGE_MS) {
+    return true;
+  }
+
+  const reportExpiresAtMs = Date.parse(status.report?.expiresAt ?? '');
+  return (
+    status.report?.accepted === true &&
+    Number.isFinite(reportExpiresAtMs) &&
+    reportExpiresAtMs <= nowMs &&
+    (status.state === 'still_working' || status.state === 'blocked')
+  );
+}
+
 function getStatusStalenessDiagnostics(status: MemberWorkSyncStatus, nowMs: number): string[] {
   const diagnostics: string[] = [];
   const evaluatedAtMs = Date.parse(status.evaluatedAt);
@@ -290,13 +313,60 @@ export function createMemberWorkSyncFeature(deps: {
     );
     return readiness.filter((item) => item.ready).map((item) => item.teamName);
   };
+  const refreshBackgroundStaleStatuses = async (teamNames: string[]): Promise<void> => {
+    const nowMs = clock.now().getTime();
+    let refreshed = 0;
+    for (const teamName of teamNames) {
+      let memberNames: string[];
+      try {
+        memberNames = await agendaSource.loadActiveMemberNames(teamName);
+      } catch (error) {
+        deps.logger?.warn('member work sync background refresh member scan failed', {
+          teamName,
+          error: String(error),
+        });
+        continue;
+      }
+
+      for (const memberName of memberNames) {
+        try {
+          const status = await store.read({ teamName, memberName });
+          if (status && !statusNeedsBackgroundRefresh(status, nowMs)) {
+            continue;
+          }
+          await reconciler.execute(
+            { teamName, memberName },
+            {
+              reconciledBy: 'queue',
+              triggerReasons: [status ? 'manual_refresh' : 'startup_scan'],
+            }
+          );
+          refreshed += 1;
+        } catch (error) {
+          deps.logger?.warn('member work sync background refresh failed', {
+            teamName,
+            memberName,
+            error: String(error),
+          });
+        }
+      }
+    }
+
+    if (refreshed > 0) {
+      deps.logger?.debug('member work sync background stale refresh completed', { refreshed });
+    }
+  };
   const dispatchNudgesForReadyTeams = async (
     teamNames: string[],
-    claimedBy: string
+    claimedBy: string,
+    options: { refreshBackgroundStaleStatuses?: boolean } = {}
   ): Promise<MemberWorkSyncNudgeDispatchSummary> => {
     const readyTeamNames = await filterNudgeDispatchReadyTeamNames(teamNames);
     if (readyTeamNames.length === 0) {
       return emptyNudgeDispatchSummary();
+    }
+    if (options.refreshBackgroundStaleStatuses !== false) {
+      await refreshBackgroundStaleStatuses(readyTeamNames);
     }
     return nudgeDispatcher.dispatchDue({
       teamNames: readyTeamNames,
@@ -306,7 +376,9 @@ export function createMemberWorkSyncFeature(deps: {
   const queue = new MemberWorkSyncEventQueue({
     reconcile: async (request, context: MemberWorkSyncReconcileContext) => {
       await reconciler.execute(request, context);
-      await dispatchNudgesForReadyTeams([request.teamName], `member-work-sync:${process.pid}`);
+      await dispatchNudgesForReadyTeams([request.teamName], `member-work-sync:${process.pid}`, {
+        refreshBackgroundStaleStatuses: false,
+      });
     },
     isTeamActive: deps.isTeamActive ?? (() => true),
     ...(deps.queueQuietWindowMs != null ? { quietWindowMs: deps.queueQuietWindowMs } : {}),

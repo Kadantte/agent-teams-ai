@@ -1,6 +1,5 @@
-import { describe, expect, it } from 'vitest';
-
 import { buildActionableWorkAgenda } from '@features/member-work-sync/core/domain';
+import { describe, expect, it } from 'vitest';
 
 const hash = (value: string) => `h${value.length}`;
 
@@ -151,7 +150,7 @@ describe('buildActionableWorkAgenda', () => {
           subject: 'Depends on approved task',
           status: 'in_progress',
           owner: 'jack',
-          blockedBy: ['task-approved'],
+          blockedBy: [' task-approved '],
         },
       ],
       hash,

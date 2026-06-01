@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getTeamTaskWorkflowColumn,
   isTeamTaskActivelyWorked,
+  isTeamTaskBlockedByUnfinishedDependency,
   isTeamTaskFinalForCompletionNotification,
   isTeamTaskFinishedForDependency,
   isTeamTaskNeedsFixActionable,
@@ -106,6 +107,40 @@ describe('isTeamTaskActivelyWorked', () => {
 
     expect(isTeamTaskFinishedForDependency(task)).toBe(true);
     expect(isTeamTaskTerminalForActionableWork(task)).toBe(true);
+  });
+});
+
+describe('isTeamTaskBlockedByUnfinishedDependency', () => {
+  it('uses dependency-finished semantics and trims persisted blocker ids', () => {
+    const taskStateById = new Map([
+      ['completed', { status: 'completed' }],
+      ['approved', { status: 'in_progress', reviewState: 'approved' }],
+      ['soft-deleted', { status: 'in_progress', deletedAt: '2026-05-06T00:00:00.000Z' }],
+    ]);
+
+    expect(
+      isTeamTaskBlockedByUnfinishedDependency(
+        { blockedBy: [' completed ', 'approved', 'soft-deleted'] },
+        taskStateById
+      )
+    ).toBe(false);
+  });
+
+  it('fails closed for missing or unfinished blockers', () => {
+    const taskStateById = new Map([
+      ['in-progress', { status: 'in_progress' }],
+      ['completed-review', { status: 'completed', reviewState: 'review' }],
+    ]);
+
+    expect(
+      isTeamTaskBlockedByUnfinishedDependency({ blockedBy: ['in-progress'] }, taskStateById)
+    ).toBe(true);
+    expect(
+      isTeamTaskBlockedByUnfinishedDependency({ blockedBy: ['completed-review'] }, taskStateById)
+    ).toBe(true);
+    expect(
+      isTeamTaskBlockedByUnfinishedDependency({ blockedBy: ['missing'] }, taskStateById)
+    ).toBe(true);
   });
 });
 

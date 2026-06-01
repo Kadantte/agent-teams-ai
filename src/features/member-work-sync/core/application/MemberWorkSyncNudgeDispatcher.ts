@@ -419,8 +419,9 @@ export class MemberWorkSyncNudgeDispatcher {
       inactive: source.inactive || !teamActive,
     });
     const providerId = source.providerId ?? previous.providerId;
+    const { report: _previousReport, ...previousWithoutReport } = previous;
     const revalidatedStatus: MemberWorkSyncStatus = {
-      ...previous,
+      ...previousWithoutReport,
       state: decision.state,
       agenda,
       ...(decision.acceptedReport ? { report: decision.acceptedReport } : {}),
