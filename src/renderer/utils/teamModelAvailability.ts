@@ -365,7 +365,6 @@ function getAnthropicFirstPartySelectorModels(
     return null;
   }
 
-  const catalogModelSet = new Set(catalogModels);
   const seenModels = new Set<string>();
   const seenLabels = new Set<string>();
   const merged: string[] = [];
@@ -391,9 +390,6 @@ function getAnthropicFirstPartySelectorModels(
   };
 
   for (const option of getTeamProviderModelOptions('anthropic')) {
-    if (option.value && !catalogModelSet.has(option.value)) {
-      continue;
-    }
     appendModel(option.value, false);
   }
   for (const model of catalogModels) {
