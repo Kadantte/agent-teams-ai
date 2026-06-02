@@ -2146,17 +2146,8 @@ async function initializeServices(): Promise<void> {
     return Number.isFinite(expiresAtMs) && expiresAtMs > Date.now();
   });
   scheduleStartupTask(() => {
-    void teamDataService
-      .listTeams()
-      .then(async (teams) => {
-        const lifecycleActiveTeamNames = teams
-          .filter(
-            (team) =>
-              !team.deletedAt &&
-              (teamProvisioningService.isTeamAlive(team.teamName) ||
-                teamProvisioningService.hasProvisioningRun(team.teamName))
-          )
-          .map((team) => team.teamName);
+    void listMemberWorkSyncLifecycleActiveTeamNames()
+      .then(async (lifecycleActiveTeamNames) => {
         await memberWorkSyncFeature?.replayPendingReports(lifecycleActiveTeamNames);
         await memberWorkSyncFeature?.enqueueStartupScan(lifecycleActiveTeamNames);
       })

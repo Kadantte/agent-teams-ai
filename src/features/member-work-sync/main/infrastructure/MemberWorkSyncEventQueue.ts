@@ -61,6 +61,7 @@ interface QueueItem {
   maxRunAt: number;
   triggerReasons: Set<MemberWorkSyncTriggerReason>;
   triggerReasonCounts: Map<MemberWorkSyncTriggerReason, number>;
+  retryCount: number;
   recovery?: MemberWorkSyncReconcileContext['recovery'];
 }
 
@@ -87,6 +88,8 @@ export interface MemberWorkSyncEventQueueDeps {
   quietWindowMs?: number;
   triggerTiming?: Partial<Record<MemberWorkSyncTriggerReason, Partial<TriggerTimingPolicy>>>;
   concurrency?: number;
+  retryDelayMs?: number;
+  maxRetryAttempts?: number;
   now?: () => number;
   nowIso?: () => string;
   auditJournal?: MemberWorkSyncAuditJournalPort;
@@ -107,6 +110,8 @@ export class MemberWorkSyncEventQueue {
   private readonly inFlight = new Set<Promise<void>>();
   private readonly quietWindowMs: number;
   private readonly concurrency: number;
+  private readonly retryDelayMs: number;
+  private readonly maxRetryAttempts: number;
   private readonly now: () => number;
   private readonly nowIso: () => string;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -122,6 +127,8 @@ export class MemberWorkSyncEventQueue {
   constructor(private readonly deps: MemberWorkSyncEventQueueDeps) {
     this.quietWindowMs = deps.quietWindowMs ?? 90_000;
     this.concurrency = Math.max(1, deps.concurrency ?? 2);
+    this.retryDelayMs = Math.max(0, deps.retryDelayMs ?? 30_000);
+    this.maxRetryAttempts = Math.max(0, deps.maxRetryAttempts ?? 3);
     this.now = deps.now ?? Date.now;
     this.nowIso = deps.nowIso ?? (() => new Date().toISOString());
   }
@@ -209,6 +216,7 @@ export class MemberWorkSyncEventQueue {
         ? Math.min(existing.runAt, runAt)
         : Math.min(Math.max(existing.runAt, runAt), existing.maxRunAt);
       incrementReasonCount(existing.triggerReasonCounts, input.triggerReason);
+      existing.retryCount = 0;
       this.counters.coalesced += 1;
       this.appendAudit({
         teamName,
@@ -230,6 +238,7 @@ export class MemberWorkSyncEventQueue {
       maxRunAt: now + timing.maxCoalesceWaitMs,
       triggerReasons: new Set([input.triggerReason]),
       triggerReasonCounts: new Map([[input.triggerReason, 1]]),
+      retryCount: 0,
       ...(input.recovery ? { recovery: input.recovery } : {}),
     });
     this.counters.enqueued += 1;
@@ -366,8 +375,10 @@ export class MemberWorkSyncEventQueue {
     };
     this.running.set(key, running);
 
+    let failed = false;
     const promise = this.executeItem(key, item, running)
       .catch((error: unknown) => {
+        failed = true;
         this.counters.failed += 1;
         this.deps.logger?.warn('member work sync queue reconcile failed', {
           teamName: item.teamName,
@@ -380,11 +391,60 @@ export class MemberWorkSyncEventQueue {
         this.inFlight.delete(promise);
         if (running.rerunRequested && !this.stopped) {
           this.enqueueFollowUp(item, running);
+        } else if (failed && !this.stopped) {
+          this.enqueueRetryAfterFailure(key, item, running);
         }
         this.pump();
       });
 
     this.inFlight.add(promise);
+  }
+
+  private enqueueRetryAfterFailure(key: string, item: QueueItem, running: RunningItem): void {
+    if (item.retryCount >= this.maxRetryAttempts) {
+      this.counters.dropped += 1;
+      this.appendAudit({
+        teamName: item.teamName,
+        memberName: item.memberName,
+        event: 'queue_dropped',
+        source: 'event_queue',
+        reason: 'reconcile_failed_max_retries',
+        triggerReasons: [...running.triggerReasons].sort(),
+        metadata: {
+          retryCount: item.retryCount,
+          maxRetryAttempts: this.maxRetryAttempts,
+        },
+      });
+      return;
+    }
+
+    const now = this.now();
+    const retryCount = item.retryCount + 1;
+    const recovery = running.recovery ?? item.recovery;
+    this.items.set(key, {
+      ...item,
+      lastQueuedAt: now,
+      runAt: now + this.retryDelayMs,
+      maxRunAt: now + this.retryDelayMs,
+      triggerReasons: new Set(running.triggerReasons),
+      triggerReasonCounts: new Map(item.triggerReasonCounts),
+      retryCount,
+      ...(recovery ? { recovery } : {}),
+    });
+    this.appendAudit({
+      teamName: item.teamName,
+      memberName: item.memberName,
+      event: 'queue_retry_scheduled',
+      source: 'event_queue',
+      reason: 'reconcile_failed',
+      triggerReasons: [...running.triggerReasons].sort(),
+      metadata: {
+        retryCount,
+        retryDelayMs: this.retryDelayMs,
+        maxRetryAttempts: this.maxRetryAttempts,
+      },
+    });
+    this.schedule();
   }
 
   private enqueueFollowUp(item: QueueItem, running: RunningItem): void {

@@ -6162,6 +6162,27 @@ export class TeamProvisioningService {
     return enabled;
   }
 
+  private async markOpenCodePromptLedgerFailedTerminal(input: {
+    ledger: OpenCodePromptDeliveryLedgerStore;
+    id: string;
+    reason: string;
+    diagnostics?: string[];
+    failedAt: string;
+    eventContext?: Record<string, unknown>;
+  }): Promise<OpenCodePromptDeliveryLedgerRecord> {
+    const failed = await input.ledger.markFailedTerminal({
+      id: input.id,
+      reason: input.reason,
+      ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+      failedAt: input.failedAt,
+    });
+    this.logOpenCodePromptDeliveryEvent('opencode_prompt_delivery_terminal_failure', failed, {
+      reason: input.reason,
+      ...(input.eventContext ?? {}),
+    });
+    return failed;
+  }
+
   private async findOpenCodeVisibleReplyByRelayOfMessageId(input: {
     teamName: string;
     replyRecipient?: string | null;
@@ -7243,7 +7264,8 @@ export class TeamProvisioningService {
         input.ledgerRecord.maxSessionRefreshAttempts ??
         OPENCODE_PROMPT_DELIVERY_SESSION_REFRESH_MAX_ATTEMPTS;
       if ((input.ledgerRecord.sessionRefreshAttempts ?? 0) >= maxSessionRefreshAttempts) {
-        return await input.ledger.markFailedTerminal({
+        return await this.markOpenCodePromptLedgerFailedTerminal({
+          ledger: input.ledger,
           id: input.ledgerRecord.id,
           reason: 'opencode_session_stale_observe_loop_after_accepted_prompt',
           diagnostics: [
@@ -7251,6 +7273,11 @@ export class TeamProvisioningService {
             `OpenCode session stayed stale while observing an accepted prompt after ${maxSessionRefreshAttempts} attempt(s).`,
           ],
           failedAt: now,
+          eventContext: {
+            observeOnlyAfterAcceptedPrompt: true,
+            sessionRefreshAttempts: input.ledgerRecord.sessionRefreshAttempts ?? 0,
+            maxSessionRefreshAttempts,
+          },
         });
       }
       const delayMs = OPENCODE_PROMPT_DELIVERY_RETRY_DELAY_MS;
@@ -7287,7 +7314,8 @@ export class TeamProvisioningService {
         input.ledgerRecord.maxSessionRefreshAttempts ??
         OPENCODE_PROMPT_DELIVERY_SESSION_REFRESH_MAX_ATTEMPTS;
       if ((input.ledgerRecord.sessionRefreshAttempts ?? 0) >= maxSessionRefreshAttempts) {
-        return await input.ledger.markFailedTerminal({
+        return await this.markOpenCodePromptLedgerFailedTerminal({
+          ledger: input.ledger,
           id: input.ledgerRecord.id,
           reason: 'opencode_session_refresh_loop_after_resolved_behavior_changed',
           diagnostics: [
@@ -7295,6 +7323,11 @@ export class TeamProvisioningService {
             `OpenCode session stayed stale after ${maxSessionRefreshAttempts} session refresh attempt(s).`,
           ],
           failedAt: now,
+          eventContext: {
+            retry: true,
+            sessionRefreshAttempts: input.ledgerRecord.sessionRefreshAttempts ?? 0,
+            maxSessionRefreshAttempts,
+          },
         });
       }
       const delayMs = this.getOpenCodeDeliveryNextDelayMs({
@@ -7338,10 +7371,12 @@ export class TeamProvisioningService {
       input.ledgerRecord.attempts >= input.ledgerRecord.maxAttempts &&
       !canScheduleNoAssistantRecoveryRetry
     ) {
-      return await input.ledger.markFailedTerminal({
+      return await this.markOpenCodePromptLedgerFailedTerminal({
+        ledger: input.ledger,
         id: input.ledgerRecord.id,
         reason: input.reason,
         failedAt: now,
+        eventContext: { retry: input.retry },
       });
     }
     const delayMs = this.getOpenCodeDeliveryNextDelayMs({
@@ -23493,6 +23528,29 @@ export class TeamProvisioningService {
         .catch(() => []);
       const targetMessage = inboxMessages.find((message) => message.messageId === onlyMessageId);
       if (targetMessage?.read) {
+        if (targetMessage.messageKind === 'member_work_sync_nudge') {
+          this.scheduleOpenCodeMemberInboxDeliveryWake({
+            teamName,
+            memberName,
+            messageId: onlyMessageId,
+            delayMs: 500,
+          });
+          const diagnostic = `opencode_work_sync_read_commit_waiting_for_active_relay: ${onlyMessageId}`;
+          return {
+            relayed: 0,
+            attempted: 1,
+            delivered: 0,
+            failed: 0,
+            lastDelivery: {
+              delivered: true,
+              accepted: false,
+              responsePending: true,
+              reason: 'opencode_work_sync_read_commit_waiting_for_active_relay',
+              diagnostics: [diagnostic],
+            },
+            diagnostics: [diagnostic],
+          };
+        }
         return {
           relayed: 0,
           attempted: 1,
@@ -23576,7 +23634,7 @@ export class TeamProvisioningService {
       const onlyMessageId = options.onlyMessageId?.trim();
       if (onlyMessageId) {
         const targetMessage = inboxMessages.find((message) => message.messageId === onlyMessageId);
-        if (targetMessage?.read) {
+        if (targetMessage?.read && targetMessage.messageKind !== 'member_work_sync_nudge') {
           return {
             relayed: 0,
             attempted: 1,
@@ -23603,8 +23661,13 @@ export class TeamProvisioningService {
       }
       const unread = inboxMessages
         .filter((message): message is InboxMessage & { messageId: string } => {
-          if (message.read) return false;
           if (onlyMessageId && message.messageId !== onlyMessageId) return false;
+          if (
+            message.read &&
+            (!onlyMessageId || message.messageKind !== 'member_work_sync_nudge')
+          ) {
+            return false;
+          }
           if (typeof message.text !== 'string' || message.text.trim().length === 0) return false;
           return this.hasStableMessageId(message);
         })
@@ -23813,17 +23876,14 @@ export class TeamProvisioningService {
                 pendingRecord
               );
             }
-            failedRecord = await promptLedger.markFailedTerminal({
+            failedRecord = await this.markOpenCodePromptLedgerFailedTerminal({
+              ledger: promptLedger,
               id: pendingRecord.id,
               reason: attachmentPayloads.reason,
               diagnostics: attachmentPayloads.diagnostics,
               failedAt: nowIso(),
+              eventContext: { attachmentPayloadUnavailable: true },
             });
-            this.logOpenCodePromptDeliveryEvent(
-              'opencode_prompt_delivery_response_observed',
-              failedRecord,
-              { attachmentPayloadUnavailable: true }
-            );
           } catch (error) {
             const diagnostic = `opencode_inbox_attachment_terminal_ledger_failed: ${getErrorMessage(
               error

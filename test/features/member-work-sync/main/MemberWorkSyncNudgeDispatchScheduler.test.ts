@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-
 import { MemberWorkSyncNudgeDispatchScheduler } from '@features/member-work-sync/main/infrastructure/MemberWorkSyncNudgeDispatchScheduler';
+import { describe, expect, it, vi } from 'vitest';
 
 describe('MemberWorkSyncNudgeDispatchScheduler', () => {
   it('dispatches due nudges for unique active teams without overlapping runs', async () => {

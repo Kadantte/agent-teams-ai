@@ -71,6 +71,7 @@ export type MemberWorkSyncAuditEventName =
   | 'turn_settled_ignored'
   | 'queue_enqueued'
   | 'queue_coalesced'
+  | 'queue_retry_scheduled'
   | 'queue_reconciled'
   | 'queue_dropped'
   | 'reconcile_started'
