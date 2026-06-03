@@ -463,13 +463,13 @@
         "applyRejections": "申请拒绝"
       },
       "tooltips": {
-        "autoOn": "滚动到末尾时自动将文件 Token 为已查看（打开）",
-        "autoOff": "滚动到末尾时自动将文件 Token 为已查看（关闭）",
+        "autoOn": "滚动到末尾时自动将文件标记为已查看（开启）",
+        "autoOff": "滚动到末尾时自动将文件标记为已查看（关闭）",
         "undo": "撤消上次审阅操作 (Ctrl+Z)",
         "acceptAll": "接受所有文件的所有更改",
         "rejectAll": "拒绝所有文件中所有可安全拒绝的更改",
         "rejectAllDisabled": "没有待处理的文件具有可以拒绝的安全原始基线。",
-        "applyRejections": "将拒绝的帅哥应用到磁盘；接受的更改保持原样"
+        "applyRejections": "将已拒绝的差异片段应用到磁盘；已接受的更改保持原样"
       }
     },
     "diffError": {
@@ -770,7 +770,7 @@
       "optionalLabel": "快速模式（可选）",
       "defaultOff": "默认（关闭）",
       "fast": "快速地",
-      "off": "离开",
+      "off": "关闭",
       "defaultFast": "默认（快速）",
       "defaultResolvesTo": "当前默认解析为 {{mode}}。",
       "runtimeBackedHint": "快速模式是运行时支持的，并且只有在解析的 Anthropic 启动模型支持它时才会解锁。"
@@ -863,7 +863,7 @@
     "actions": {
       "cancel": "取消",
       "delete": "删除",
-      "markResolved": "Token 已解决",
+      "markResolved": "标记为已解决",
       "save": "保存"
     },
     "attachments": {
@@ -1686,7 +1686,7 @@
     "label": "项目",
     "source": {
       "claude": "Claude 发现",
-      "codex": "由食品 Codex 委员会发现",
+      "codex": "由 Codex 发现",
       "mixed": "由 Claude 和 Codex 发现"
     },
     "deleted": {
