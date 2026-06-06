@@ -311,8 +311,13 @@ class InMemoryOutboxStore implements MemberWorkSyncOutboxStorePort {
 
 class InMemoryInboxNudge implements MemberWorkSyncInboxNudgePort {
   readonly inserted: Array<Parameters<MemberWorkSyncInboxNudgePort['insertIfAbsent']>[0]> = [];
+  readonly repaired: Array<
+    Parameters<NonNullable<MemberWorkSyncInboxNudgePort['repairIfPresent']>>[0]
+  > = [];
   fail = false;
   conflict = false;
+  repairFail = false;
+  repairConflict = false;
 
   async insertIfAbsent(input: Parameters<MemberWorkSyncInboxNudgePort['insertIfAbsent']>[0]) {
     if (this.fail) {
@@ -323,6 +328,19 @@ class InMemoryInboxNudge implements MemberWorkSyncInboxNudgePort {
     }
     this.inserted.push(input);
     return { inserted: true, messageId: input.messageId };
+  }
+
+  async repairIfPresent(
+    input: Parameters<NonNullable<MemberWorkSyncInboxNudgePort['repairIfPresent']>>[0]
+  ) {
+    if (this.repairFail) {
+      throw new Error('inbox repair unavailable');
+    }
+    if (this.repairConflict) {
+      return { found: true, repaired: false, conflict: true };
+    }
+    this.repaired.push(input);
+    return { found: true, repaired: true };
   }
 }
 
@@ -1885,6 +1903,19 @@ describe('MemberWorkSync use cases', () => {
         item.payload.workSyncIntentKey?.startsWith('agenda-sync-still-stuck:')
       )
     ).toHaveLength(1);
+    expect(inbox.inserted).toHaveLength(2);
+    expect(inbox.repaired).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          messageId: baseId,
+          payloadHash: outbox.items.get(baseId)?.payloadHash,
+        }),
+        expect.objectContaining({
+          messageId: recovery?.id,
+          payloadHash: recovery?.payloadHash,
+        }),
+      ])
+    );
 
     clock.set('2026-04-29T01:02:00.000Z');
     store.metricsGeneratedAt = '2026-04-29T01:02:00.000Z';
@@ -2007,6 +2038,33 @@ describe('MemberWorkSync use cases', () => {
     expect(summary).toMatchObject({ claimed: 1, delivered: 1, retryable: 0 });
     expect(inbox.inserted).toHaveLength(2);
     expect(inbox.inserted[1]?.messageId).toContain('agenda-sync-still-stuck');
+
+    clock.set('2026-04-29T01:02:00.000Z');
+    store.phase2ReadinessState = 'shadow_ready';
+    store.phase2ReadinessReasons = [];
+    store.metricsGeneratedAt = '2026-04-29T01:02:00.000Z';
+    await reconciler.execute(
+      {
+        teamName: 'team-a',
+        memberName: 'bob',
+      },
+      { reconciledBy: 'queue', triggerReasons: ['config_changed', 'task_changed'] }
+    );
+
+    const recoveryItems = [...outbox.items.values()].filter((item) =>
+      item.payload.workSyncIntentKey?.startsWith('agenda-sync-still-stuck:')
+    );
+    expect(recoveryItems).toHaveLength(2);
+    expect(new Set(recoveryItems.map((item) => item.id)).size).toBe(2);
+
+    const secondSummary = await new MemberWorkSyncNudgeDispatcher(deps).dispatchDue({
+      teamNames: ['team-a'],
+      claimedBy: 'test-dispatcher',
+    });
+
+    expect(secondSummary).toMatchObject({ claimed: 1, delivered: 1, retryable: 0 });
+    expect(inbox.inserted).toHaveLength(3);
+    expect(inbox.inserted[2]?.messageId).toContain('agenda-sync-still-stuck');
   });
 
   it('creates a delivered-still-stuck recovery for mixed review pickup and native work under noisy metrics', async () => {
@@ -2130,6 +2188,15 @@ describe('MemberWorkSync use cases', () => {
         item.payload.workSyncIntentKey?.startsWith('agenda-sync-still-stuck:')
       )
     ).toHaveLength(0);
+    expect(inbox.inserted).toHaveLength(1);
+    expect(inbox.repaired).toEqual([
+      expect.objectContaining({
+        teamName: 'team-a',
+        memberName: 'bob',
+        messageId: baseId,
+        payloadHash: outbox.items.get(baseId)?.payloadHash,
+      }),
+    ]);
     expect(auditEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2943,6 +3010,85 @@ describe('MemberWorkSync use cases', () => {
       processedAt: '2026-04-29T00:00:00.000Z',
     });
     expect(store.writes.at(-1)?.state).toBe('still_working');
+  });
+
+  it('refreshes expired fallback pending report tokens during replay', async () => {
+    const { deps, store } = createDeps();
+    const reader = new MemberWorkSyncReconciler(deps);
+    const current = await reader.execute({ teamName: 'team-a', memberName: 'bob' });
+    const baseReportToken = deps.reportToken!;
+    deps.reportToken = {
+      create: baseReportToken.create,
+      verify: async (input) =>
+        input.token === 'expired-token'
+          ? { ok: false, reason: 'expired' }
+          : baseReportToken.verify(input),
+    };
+    store.pendingIntents.set('intent-1', {
+      id: 'intent-1',
+      teamName: 'team-a',
+      memberName: 'bob',
+      status: 'pending',
+      reason: 'control_api_unavailable',
+      recordedAt: '2026-04-29T00:16:00.000Z',
+      request: {
+        teamName: 'team-a',
+        memberName: 'bob',
+        state: 'still_working',
+        agendaFingerprint: current.agenda.fingerprint,
+        reportToken: 'expired-token',
+        leaseTtlMs: 120_000,
+        source: 'mcp',
+      },
+    });
+
+    const summary = await new MemberWorkSyncPendingReportIntentReplayer(deps).replayTeam('team-a');
+
+    expect(summary).toEqual({ processed: 1, accepted: 1, rejected: 0, superseded: 0 });
+    expect(store.pendingIntents.get('intent-1')).toMatchObject({
+      status: 'accepted',
+      resultCode: 'accepted',
+    });
+    expect(store.writes.at(-1)?.report).toMatchObject({
+      accepted: true,
+      source: 'mcp',
+      state: 'still_working',
+    });
+  });
+
+  it('rejects invalid fallback pending report tokens without refreshing identity', async () => {
+    const { deps, store } = createDeps();
+    const reader = new MemberWorkSyncReconciler(deps);
+    const current = await reader.execute({ teamName: 'team-a', memberName: 'bob' });
+    store.pendingIntents.set('intent-1', {
+      id: 'intent-1',
+      teamName: 'team-a',
+      memberName: 'bob',
+      status: 'pending',
+      reason: 'control_api_unavailable',
+      recordedAt: '2026-04-29T00:00:01.000Z',
+      request: {
+        teamName: 'team-a',
+        memberName: 'bob',
+        state: 'still_working',
+        agendaFingerprint: current.agenda.fingerprint,
+        reportToken: 'invalid-token',
+        leaseTtlMs: 120_000,
+        source: 'mcp',
+      },
+    });
+
+    const summary = await new MemberWorkSyncPendingReportIntentReplayer(deps).replayTeam('team-a');
+
+    expect(summary).toEqual({ processed: 1, accepted: 0, rejected: 1, superseded: 0 });
+    expect(store.pendingIntents.get('intent-1')).toMatchObject({
+      status: 'rejected',
+      resultCode: 'invalid_report_token',
+    });
+    expect(store.writes.at(-1)?.report).toMatchObject({
+      accepted: false,
+      rejectionCode: 'invalid_report_token',
+    });
   });
 
   it('supersedes pending controller intents when the member runtime is inactive', async () => {

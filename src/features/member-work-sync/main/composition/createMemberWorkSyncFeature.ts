@@ -88,6 +88,22 @@ function getAcceptedWorkLeaseStaleness(
   return reportExpiresAtMs <= nowMs ? 'expired' : null;
 }
 
+function getReportTokenStaleness(
+  status: MemberWorkSyncStatus,
+  nowMs: number
+): 'missing' | 'expired' | null {
+  if (!status.reportToken?.trim()) {
+    return 'missing';
+  }
+
+  const tokenExpiresAtMs = Date.parse(status.reportTokenExpiresAt ?? '');
+  if (!Number.isFinite(tokenExpiresAtMs) || !Number.isFinite(nowMs)) {
+    return 'missing';
+  }
+
+  return tokenExpiresAtMs <= nowMs ? 'expired' : null;
+}
+
 function isEmptyAgendaStaleState(status: MemberWorkSyncStatus): boolean {
   return (
     status.agenda.items.length === 0 &&
@@ -99,6 +115,10 @@ function isEmptyAgendaStaleState(status: MemberWorkSyncStatus): boolean {
 }
 
 function statusNeedsBackgroundRefresh(status: MemberWorkSyncStatus, nowMs: number): boolean {
+  if (getReportTokenStaleness(status, nowMs) !== null) {
+    return true;
+  }
+
   if (isEmptyAgendaStaleState(status)) {
     return true;
   }
@@ -125,6 +145,13 @@ function statusNeedsBackgroundRefresh(status: MemberWorkSyncStatus, nowMs: numbe
 
 function getStatusStalenessDiagnostics(status: MemberWorkSyncStatus, nowMs: number): string[] {
   const diagnostics: string[] = [];
+  const tokenStaleness = getReportTokenStaleness(status, nowMs);
+  if (tokenStaleness === 'missing') {
+    diagnostics.push('report_token_missing_refresh_enqueued');
+  } else if (tokenStaleness === 'expired') {
+    diagnostics.push('report_token_expired_refresh_enqueued');
+  }
+
   const evaluatedAtMs = Date.parse(status.evaluatedAt);
   if (!Number.isFinite(evaluatedAtMs)) {
     diagnostics.push('status_evaluated_at_invalid');
@@ -148,6 +175,12 @@ function getStatusStalenessDiagnostics(status: MemberWorkSyncStatus, nowMs: numb
   }
 
   return [...new Set(diagnostics)];
+}
+
+function shouldRefreshStatusSynchronously(stalenessDiagnostics: string[]): boolean {
+  return stalenessDiagnostics.some(
+    (diagnostic) => diagnostic !== 'caught_up_stale_refresh_enqueued'
+  );
 }
 
 export function buildMemberWorkSyncRuntimeTurnSettledEnvironment(input: {
@@ -504,6 +537,21 @@ export function createMemberWorkSyncFeature(deps: {
     const stalenessDiagnostics = getStatusStalenessDiagnostics(status, clock.now().getTime());
     if (stalenessDiagnostics.length === 0) {
       return status;
+    }
+    if (shouldRefreshStatusSynchronously(stalenessDiagnostics)) {
+      try {
+        return await reconciler.execute(request, {
+          reconciledBy: 'request',
+          triggerReasons: ['manual_refresh'],
+        });
+      } catch (error) {
+        deps.logger?.warn('member work sync synchronous status refresh failed', {
+          teamName: status.teamName,
+          memberName: status.memberName,
+          diagnostics: stalenessDiagnostics,
+          error: String(error),
+        });
+      }
     }
     queue.enqueue({
       teamName: status.teamName,

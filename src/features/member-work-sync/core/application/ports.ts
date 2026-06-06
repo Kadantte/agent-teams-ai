@@ -190,6 +190,13 @@ export interface MemberWorkSyncInboxNudgePort {
     payload: MemberWorkSyncOutboxItem['payload'];
     timestamp: string;
   }): Promise<{ inserted: boolean; messageId: string; conflict?: boolean }>;
+  repairIfPresent?(input: {
+    teamName: string;
+    memberName: string;
+    messageId: string;
+    payloadHash: string;
+    payload: MemberWorkSyncOutboxItem['payload'];
+  }): Promise<{ found: boolean; repaired: boolean; conflict?: boolean }>;
 }
 
 export interface MemberWorkSyncWatchdogCooldownPort {

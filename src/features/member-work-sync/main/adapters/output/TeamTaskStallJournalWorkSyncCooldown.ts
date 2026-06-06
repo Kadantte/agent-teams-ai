@@ -12,7 +12,10 @@ interface StallJournalEntry {
   alertedAt?: string;
 }
 
-type WatchdogCooldownResult = { active: boolean; retryAfterIso?: string };
+interface WatchdogCooldownResult {
+  active: boolean;
+  retryAfterIso?: string;
+}
 
 function parseTime(value: string | undefined): number | null {
   if (!value) {

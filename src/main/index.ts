@@ -41,7 +41,7 @@ import {
   buildMemberWorkSyncRuntimeTurnSettledEnvironment,
   createMemberWorkSyncFeature,
   hasUncertainWorkSyncRuntimeActivity,
-  hasWorkSyncActiveRuntime,
+  hasWorkSyncReachableRuntime,
   isRuntimeMemberActivityUncertainForWorkSync,
   isRuntimeMemberActiveForWorkSync,
   type MemberWorkSyncFeatureFacade,
@@ -1919,7 +1919,7 @@ async function initializeServices(): Promise<void> {
       if (!snapshot) {
         return null;
       }
-      const active = hasWorkSyncActiveRuntime(snapshot);
+      const active = hasWorkSyncReachableRuntime(snapshot);
       if (!active && hasUncertainWorkSyncRuntimeActivity(snapshot)) {
         return null;
       }
@@ -2037,7 +2037,12 @@ async function initializeServices(): Promise<void> {
         isBusy: (input) => teamProvisioningService.getOpenCodeMemberDeliveryBusyStatus(input),
       },
     ],
-    resolveControlUrl: async () => getTeamControlApiBaseUrl(),
+    resolveControlUrl: async () => {
+      if (!httpServer.isRunning()) {
+        await startHttpServer(handleModeSwitch);
+      }
+      return getTeamControlApiBaseUrl();
+    },
     proofMissingRecoveryGuard: {
       shouldDispatch: async (input) => {
         const isOpenCodeRecipient = await teamProvisioningService

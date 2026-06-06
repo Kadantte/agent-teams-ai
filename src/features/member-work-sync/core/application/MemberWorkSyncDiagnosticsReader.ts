@@ -1,6 +1,9 @@
 import { decideMemberWorkSyncStatus } from '../domain';
 
-import { finalizeMemberWorkSyncAgenda } from './MemberWorkSyncReconciler';
+import {
+  attachMemberWorkSyncReportToken,
+  finalizeMemberWorkSyncAgenda,
+} from './MemberWorkSyncReconciler';
 import { resolveMemberWorkSyncRuntimeActivity } from './MemberWorkSyncRuntimeActivity';
 
 import type { MemberWorkSyncStatus, MemberWorkSyncStatusRequest } from '../../contracts';
@@ -28,7 +31,7 @@ export class MemberWorkSyncDiagnosticsReader {
       inactive: source.inactive || runtimeActivity.inactive,
     });
 
-    return {
+    return attachMemberWorkSyncReportToken(this.deps, {
       teamName: agenda.teamName,
       memberName: agenda.memberName,
       state: decision.state,
@@ -46,6 +49,6 @@ export class MemberWorkSyncDiagnosticsReader {
         'status_snapshot_not_persisted',
       ],
       ...(source.providerId ? { providerId: source.providerId } : {}),
-    };
+    });
   }
 }

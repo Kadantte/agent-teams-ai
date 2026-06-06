@@ -155,6 +155,21 @@ function shouldPlanDeliveredStillStuckRecovery(input: {
   );
 }
 
+function shouldRepairDeliveredAgendaSyncNudge(input: {
+  status: MemberWorkSyncStatus;
+  requestedInput: MemberWorkSyncOutboxEnsureInput;
+  existingItem: MemberWorkSyncOutboxItem;
+}): boolean {
+  return (
+    input.status.state === 'needs_sync' &&
+    input.requestedInput.payload.workSyncIntent === 'agenda_sync' &&
+    input.existingItem.status === 'delivered' &&
+    input.existingItem.agendaFingerprint === input.requestedInput.agendaFingerprint &&
+    input.existingItem.payloadHash === input.requestedInput.payloadHash &&
+    !hasActiveAcceptedWorkLease(input.status)
+  );
+}
+
 function isOutboxItemAwaitingDelivery(item: MemberWorkSyncOutboxItem): boolean {
   return item.status !== 'delivered' && item.status !== 'failed_terminal';
 }
@@ -296,6 +311,7 @@ export class MemberWorkSyncNudgeOutboxPlanner {
       await this.appendPlanAudit(status, { planned: false, code: 'payload_conflict' });
       return { planned: false, code: 'payload_conflict' };
     }
+    await this.repairDeliveredAgendaSyncNudgeIfNeeded(status, recoveryInput, recoveryResult.item);
 
     if (activationReason) {
       const deliveredStillStuckRecovery = await this.planDeliveredStillStuckRecovery(
@@ -371,6 +387,7 @@ export class MemberWorkSyncNudgeOutboxPlanner {
       await this.appendPlanAudit(status, { planned: false, code: 'payload_conflict' });
       return { planned: false, code: 'payload_conflict' };
     }
+    await this.repairDeliveredAgendaSyncNudgeIfNeeded(status, recoveryInput, recoveryResult.item);
 
     const recoveryPlanned = isOutboxItemAwaitingDelivery(recoveryResult.item);
     const recoveryPlanResult = {
@@ -491,6 +508,11 @@ export class MemberWorkSyncNudgeOutboxPlanner {
           await this.appendPlanAudit(status, { planned: false, code: 'payload_conflict' });
           return { planned: false, code: 'payload_conflict' };
         }
+        await this.repairDeliveredAgendaSyncNudgeIfNeeded(
+          status,
+          recoveryInput,
+          recoveryResult.item
+        );
         if (
           shouldPlanStatusOnlyRecovery({
             status,
@@ -544,6 +566,7 @@ export class MemberWorkSyncNudgeOutboxPlanner {
       await this.appendPlanAudit(status, { planned: false, code });
       return { planned: false, code };
     }
+    await this.repairDeliveredAgendaSyncNudgeIfNeeded(status, input, result.item);
     if (
       shouldPlanStatusOnlyRecovery({
         status,
@@ -578,6 +601,37 @@ export class MemberWorkSyncNudgeOutboxPlanner {
     } as const;
     await this.appendPlanAudit(status, planResult);
     return planResult;
+  }
+
+  private async repairDeliveredAgendaSyncNudgeIfNeeded(
+    status: MemberWorkSyncStatus,
+    requestedInput: MemberWorkSyncOutboxEnsureInput,
+    existingItem: MemberWorkSyncOutboxItem
+  ): Promise<void> {
+    const inboxNudge = this.deps.inboxNudge;
+    if (
+      !inboxNudge?.repairIfPresent ||
+      !shouldRepairDeliveredAgendaSyncNudge({ status, requestedInput, existingItem })
+    ) {
+      return;
+    }
+
+    try {
+      await inboxNudge.repairIfPresent({
+        teamName: status.teamName,
+        memberName: status.memberName,
+        messageId: existingItem.deliveredMessageId ?? existingItem.id,
+        payloadHash: existingItem.payloadHash,
+        payload: existingItem.payload,
+      });
+    } catch (error) {
+      this.deps.logger?.warn('member work sync delivered nudge repair failed', {
+        teamName: status.teamName,
+        memberName: status.memberName,
+        outboxId: existingItem.id,
+        error: String(error),
+      });
+    }
   }
 
   private async appendReviewPickupEscalationAudit(

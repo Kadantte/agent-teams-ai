@@ -11,6 +11,7 @@ export {
 export {
   hasUncertainWorkSyncRuntimeActivity,
   hasWorkSyncActiveRuntime,
+  hasWorkSyncReachableRuntime,
   isRuntimeEntryActiveForWorkSync,
   isRuntimeMemberActiveForWorkSync,
   isRuntimeMemberActivityUncertainForWorkSync,

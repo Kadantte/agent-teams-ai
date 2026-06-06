@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   hasUncertainWorkSyncRuntimeActivity,
   hasWorkSyncActiveRuntime,
+  hasWorkSyncReachableRuntime,
   isRuntimeEntryActiveForWorkSync,
   isRuntimeMemberActiveForWorkSync,
   isRuntimeMemberActivityUncertainForWorkSync,
@@ -85,6 +86,60 @@ describe('member work sync team activity', () => {
         })
       )
     ).toBe(false);
+  });
+
+  it('does not treat lead process evidence as active for ordinary teammates', () => {
+    for (const livenessKind of [undefined, 'runtime_process', 'confirmed_bootstrap'] as const) {
+      const snapshot = createRuntimeSnapshot({
+        alice: createRuntimeEntry({
+          memberName: 'alice',
+          backendType: 'process',
+          livenessKind,
+          pidSource: 'lead_process',
+        }),
+      });
+
+      expect(isRuntimeEntryActiveForWorkSync(snapshot.members.alice)).toBe(false);
+      expect(hasWorkSyncActiveRuntime(snapshot)).toBe(false);
+      expect(hasWorkSyncReachableRuntime(snapshot)).toBe(false);
+      expect(isRuntimeMemberActiveForWorkSync(snapshot, 'alice')).toBe(false);
+    }
+  });
+
+  it('keeps active lead processes reachable for targeted lead work-sync', () => {
+    const snapshot = createRuntimeSnapshot({
+      'team-lead': createRuntimeEntry({
+        memberName: 'team-lead',
+        backendType: 'lead',
+        livenessKind: undefined,
+        pidSource: 'lead_process',
+      }),
+      alice: createRuntimeEntry({
+        memberName: 'alice',
+        alive: false,
+        livenessKind: 'stale_metadata',
+      }),
+    });
+
+    expect(hasWorkSyncActiveRuntime(snapshot)).toBe(false);
+    expect(hasWorkSyncReachableRuntime(snapshot)).toBe(true);
+    expect(isRuntimeMemberActiveForWorkSync(snapshot, 'team-lead')).toBe(true);
+    expect(isRuntimeMemberActiveForWorkSync(snapshot, 'alice')).toBe(false);
+  });
+
+  it('keeps ordinary teammates named lead active from normal agent process evidence', () => {
+    const snapshot = createRuntimeSnapshot({
+      lead: createRuntimeEntry({
+        memberName: 'lead',
+        backendType: 'process',
+        livenessKind: 'confirmed_bootstrap',
+        pidSource: 'agent_process_table',
+      }),
+    });
+
+    expect(hasWorkSyncActiveRuntime(snapshot)).toBe(true);
+    expect(hasWorkSyncReachableRuntime(snapshot)).toBe(true);
+    expect(isRuntimeMemberActiveForWorkSync(snapshot, 'lead')).toBe(true);
   });
 
   it('does not treat inactive liveness diagnostics as active by themselves', () => {
