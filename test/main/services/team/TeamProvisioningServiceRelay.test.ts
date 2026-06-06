@@ -1664,6 +1664,66 @@ Messages:
     expect(payload).not.toContain('MessageId: m-ordinary-11');
   });
 
+  it('keeps native member work-sync rows unread without accepted report proof', async () => {
+    const service = new TeamProvisioningService();
+    const teamName = 'my-team';
+    seedConfig(teamName);
+    service.setMemberWorkSyncAcceptedReportChecker(async () => false);
+    seedMemberInbox(teamName, 'alice', [
+      {
+        from: 'system',
+        text: 'Call member_work_sync_status, then member_work_sync_report.',
+        timestamp: '2026-02-23T10:00:00.000Z',
+        read: false,
+        messageId: 'm-work-sync-unproved',
+        messageKind: 'member_work_sync_nudge',
+        workSyncIntent: 'agenda_sync',
+      },
+    ]);
+
+    const { writeSpy } = attachAliveRun(service, teamName);
+    const firstRelayed = await service.relayMemberInboxMessages(teamName, 'alice');
+    const rowsAfterFirst = JSON.parse(
+      hoisted.files.get(`/mock/teams/${teamName}/inboxes/alice.json`) ?? '[]'
+    ) as Array<{ read?: boolean }>;
+
+    expect(firstRelayed).toBe(1);
+    expect(rowsAfterFirst[0]?.read).toBe(false);
+
+    const secondRelayed = await service.relayMemberInboxMessages(teamName, 'alice');
+
+    expect(secondRelayed).toBe(1);
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('read-commits native member work-sync rows after accepted report proof', async () => {
+    const service = new TeamProvisioningService();
+    const teamName = 'my-team';
+    seedConfig(teamName);
+    service.setMemberWorkSyncAcceptedReportChecker(async () => true);
+    seedMemberInbox(teamName, 'alice', [
+      {
+        from: 'system',
+        text: 'Call member_work_sync_status, then member_work_sync_report.',
+        timestamp: '2026-02-23T10:00:00.000Z',
+        read: false,
+        messageId: 'm-work-sync-proved',
+        messageKind: 'member_work_sync_nudge',
+        workSyncIntent: 'agenda_sync',
+      },
+    ]);
+
+    attachAliveRun(service, teamName);
+    const relayed = await service.relayMemberInboxMessages(teamName, 'alice');
+    const rows = JSON.parse(
+      hoisted.files.get(`/mock/teams/${teamName}/inboxes/alice.json`) ?? '[]'
+    ) as Array<{ read?: boolean }>;
+
+    expect(relayed).toBe(1);
+    expect(rows[0]?.read).toBe(true);
+    await expect(service.relayMemberInboxMessages(teamName, 'alice')).resolves.toBe(0);
+  });
+
   it('retries a work-sync nudge after member relay times out before stdin write completes', async () => {
     vi.useFakeTimers();
     const service = new TeamProvisioningService();
@@ -4170,7 +4230,7 @@ Messages:
     expect(rows[0].read).toBe(true);
   });
 
-  it('leaves OpenCode lead inbox rows unread with an explicit unsupported diagnostic', async () => {
+  it('routes OpenCode lead inbox rows through OpenCode member relay', async () => {
     const service = new TeamProvisioningService();
     const teamName = 'my-team';
     hoisted.files.set(
@@ -4198,19 +4258,50 @@ Messages:
         messageId: 'opencode-lead-unread-1',
       },
     ]);
+    const relaySpy = vi.spyOn(service, 'relayOpenCodeMemberInboxMessages').mockResolvedValue({
+      relayed: 1,
+      attempted: 1,
+      delivered: 1,
+      failed: 0,
+      diagnostics: ['fake OpenCode lead relay ready'],
+      lastDelivery: {
+        delivered: true,
+        accepted: true,
+        responsePending: false,
+      },
+    });
 
-    const relay = await service.relayInboxFileToLiveRecipient(teamName, 'team-lead');
+    const relay = await service.relayInboxFileToLiveRecipient(teamName, 'team-lead', {
+      onlyMessageId: 'opencode-lead-unread-1',
+      source: 'ui-send',
+      deliveryMetadata: {
+        replyRecipient: 'user',
+        actionMode: 'do',
+      },
+    });
 
-    expect(relay).toMatchObject({ kind: 'opencode_lead_unsupported', relayed: 0 });
-    expect(relay.diagnostics?.join('\n')).toContain('opencode_lead_runtime_session_missing');
-    expect(vi.mocked(console.warn).mock.calls[0]?.join(' ')).toContain(
-      'opencode_lead_runtime_session_missing'
+    expect(relay).toMatchObject({
+      kind: 'opencode_member',
+      relayed: 1,
+      diagnostics: ['fake OpenCode lead relay ready'],
+      lastDelivery: {
+        delivered: true,
+        accepted: true,
+        responsePending: false,
+      },
+    });
+    expect(relaySpy).toHaveBeenCalledWith(
+      teamName,
+      'team-lead',
+      expect.objectContaining({
+        onlyMessageId: 'opencode-lead-unread-1',
+        source: 'ui-send',
+        deliveryMetadata: expect.objectContaining({
+          replyRecipient: 'user',
+          actionMode: 'do',
+        }),
+      })
     );
-    vi.mocked(console.warn).mockClear();
-    const rows = JSON.parse(
-      hoisted.files.get(`/mock/teams/${teamName}/inboxes/team-lead.json`) ?? '[]'
-    );
-    expect(rows[0].read).toBe(false);
   });
 
   it('keeps failed OpenCode member inbox relay rows unread for retry', async () => {

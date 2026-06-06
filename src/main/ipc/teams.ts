@@ -3028,9 +3028,10 @@ async function handleSendMessage(
         : leadName !== null && memberName === leadName;
     const actionMode = payload.actionMode;
 
-    const recipientProviderId = !isLeadRecipient
-      ? await provisioning.resolveRuntimeRecipientProviderId(tn, memberName)
-      : undefined;
+    const recipientProviderId = await provisioning.resolveRuntimeRecipientProviderId(
+      tn,
+      memberName
+    );
     const isOpenCodeRecipient = recipientProviderId === 'opencode';
 
     // Attachments are routed through explicit provider transports only.
@@ -3051,7 +3052,7 @@ async function handleSendMessage(
     }
 
     // Smart routing: lead + alive → stdin direct, else → inbox
-    if (isLeadRecipient && isAlive) {
+    if (isLeadRecipient && isAlive && !isOpenCodeRecipient) {
       const resolvedLeadName = leadName ?? memberName;
       const teammateRoster = await getDurableLeadTeammateRoster(tn, resolvedLeadName);
       const rosterContextBlock = buildLeadRosterContextBlock(tn, resolvedLeadName, teammateRoster);

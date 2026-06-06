@@ -251,9 +251,8 @@ liveDescribe('OpenCode semantic messaging live e2e', () => {
             break;
           }
           if (
-            lastRelay.kind === 'opencode_lead_unsupported' ||
-            (lastRelay.lastDelivery?.delivered === false &&
-              lastRelay.lastDelivery.responsePending !== true)
+            lastRelay.lastDelivery?.delivered === false &&
+            lastRelay.lastDelivery.responsePending !== true
           ) {
             break;
           }

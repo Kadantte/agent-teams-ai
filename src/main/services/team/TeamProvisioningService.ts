@@ -3344,12 +3344,7 @@ interface OpenCodeMemberInboxRelayResult {
 }
 
 interface LiveInboxRelayResult {
-  kind:
-    | 'ignored'
-    | 'native_lead'
-    | 'native_member_noop'
-    | 'opencode_member'
-    | 'opencode_lead_unsupported';
+  kind: 'ignored' | 'native_lead' | 'native_member_noop' | 'opencode_member';
   relayed: number;
   diagnostics?: string[];
   lastDelivery?: OpenCodeMemberInboxDelivery;
@@ -14859,7 +14854,13 @@ export class TeamProvisioningService {
       if (!memberName) continue;
 
       const isLead = isLeadMember({ name: memberName, agentType: member.agentType });
-      if (isLead) {
+      const candidateLaunchMember = launchSnapshot?.members[memberName];
+      const candidateRuntimeAdapterEvidence = currentRuntimeAdapterRun?.members?.[memberName];
+      const leadRuntimeProviderId =
+        normalizeOptionalTeamProviderId(candidateRuntimeAdapterEvidence?.providerId) ??
+        normalizeOptionalTeamProviderId(candidateLaunchMember?.providerId) ??
+        normalizeOptionalTeamProviderId(member.providerId);
+      if (isLead && leadRuntimeProviderId !== 'opencode') {
         const pid = run?.child?.pid;
         const usageStats = pid
           ? this.buildRuntimeProcessLoadStatsSafely(teamName, memberName, {
@@ -14929,6 +14930,7 @@ export class TeamProvisioningService {
       const liveRuntimeMember = getLiveRuntimeMember(memberName);
       const spawnStatusMember = getSpawnStatusMember(memberName);
       const launchMember = launchSnapshot?.members[memberName];
+      const runtimeAdapterEvidence = currentRuntimeAdapterRun?.members?.[memberName];
       const activeRunMember = activeRunMemberByName.get(memberName);
       const activeRunModel = activeRunMember?.model?.trim();
       const activeRunProviderId =
@@ -14969,6 +14971,16 @@ export class TeamProvisioningService {
           member.providerBackendId
       );
       const isOpenCodeMember = memberProviderId === 'opencode';
+      const runtimeAdapterSessionId =
+        typeof runtimeAdapterEvidence?.sessionId === 'string'
+          ? runtimeAdapterEvidence.sessionId.trim()
+          : '';
+      const runtimeAdapterPid =
+        typeof runtimeAdapterEvidence?.runtimePid === 'number' &&
+        Number.isFinite(runtimeAdapterEvidence.runtimePid) &&
+        runtimeAdapterEvidence.runtimePid > 0
+          ? runtimeAdapterEvidence.runtimePid
+          : undefined;
       const configuredCwd =
         typeof activeRunMember?.cwd === 'string'
           ? activeRunMember.cwd.trim()
@@ -14985,7 +14997,9 @@ export class TeamProvisioningService {
         metricsPid > 0 &&
         liveRuntimeMember?.pidSource !== 'agent_process_table';
       const rssPid = isSharedOpenCodeHost ? metricsPid : (liveRuntimeMember?.pid ?? metricsPid);
-      const displayPid = isSharedOpenCodeHost ? rssPid : liveRuntimeMember?.pid;
+      const displayPid = isSharedOpenCodeHost
+        ? rssPid
+        : (liveRuntimeMember?.pid ?? runtimeAdapterPid);
       const restartable = isOpenCodeMember
         ? !isSharedOpenCodeHost && Boolean(liveRuntimeMember?.pid)
         : isSharedOpenCodeHost
@@ -14994,6 +15008,8 @@ export class TeamProvisioningService {
       const historicalBootstrapConfirmed =
         launchMember?.bootstrapConfirmed === true ||
         launchMember?.launchState === 'confirmed_alive' ||
+        runtimeAdapterEvidence?.bootstrapConfirmed === true ||
+        runtimeAdapterEvidence?.launchState === 'confirmed_alive' ||
         spawnStatusMember?.bootstrapConfirmed === true ||
         spawnStatusMember?.launchState === 'confirmed_alive';
       const spawnStatusConfirmsBootstrap =
@@ -15003,7 +15019,9 @@ export class TeamProvisioningService {
         isOpenCodeMember &&
         (typeof liveRuntimeMember?.pid === 'number' ||
           typeof liveRuntimeMember?.metricsPid === 'number' ||
-          typeof liveRuntimeMember?.runtimeSessionId === 'string');
+          typeof liveRuntimeMember?.runtimeSessionId === 'string' ||
+          typeof runtimeAdapterPid === 'number' ||
+          runtimeAdapterSessionId.length > 0);
       const confirmedOpenCodeRuntimeAlive =
         isOpenCodeMember &&
         canUseLiveSpawnStatusRuntimeTruth &&
@@ -15012,6 +15030,12 @@ export class TeamProvisioningService {
         spawnStatusMember?.hardFailure !== true &&
         spawnStatusMember?.launchState !== 'failed_to_start' &&
         spawnStatusMember?.launchState !== 'runtime_pending_permission';
+      const confirmedOpenCodeRuntimeAdapterAlive =
+        isOpenCodeMember &&
+        runtimeAdapterEvidence?.bootstrapConfirmed === true &&
+        runtimeAdapterEvidence.runtimeAlive === true &&
+        runtimeAdapterEvidence.hardFailure !== true &&
+        hasOpenCodeRuntimeHandle;
       const confirmedSpawnRuntimeFallback =
         !isOpenCodeMember &&
         spawnStatusConfirmsBootstrap &&
@@ -15026,6 +15050,7 @@ export class TeamProvisioningService {
       const effectiveAlive =
         liveRuntimeMember?.alive === true ||
         confirmedOpenCodeRuntimeAlive ||
+        confirmedOpenCodeRuntimeAdapterAlive ||
         confirmedSpawnRuntimeFallback;
       const effectiveLivenessKind =
         confirmedOpenCodeRuntimeAlive &&
@@ -15154,7 +15179,9 @@ export class TeamProvisioningService {
         ...(liveRuntimeMember?.metricsPid ? { runtimePid: liveRuntimeMember.metricsPid } : {}),
         ...(liveRuntimeMember?.runtimeSessionId
           ? { runtimeSessionId: liveRuntimeMember.runtimeSessionId }
-          : {}),
+          : runtimeAdapterSessionId
+            ? { runtimeSessionId: runtimeAdapterSessionId }
+            : {}),
         ...(liveRuntimeMember?.runtimeLastSeenAt
           ? { runtimeLastSeenAt: liveRuntimeMember.runtimeLastSeenAt }
           : {}),
@@ -19888,6 +19915,29 @@ export class TeamProvisioningService {
     };
   }
 
+  private buildOpenCodeRuntimeAdapterLaunchMembers(
+    request: TeamCreateRequest | TeamLaunchRequest,
+    members: TeamCreateRequest['members']
+  ): TeamCreateRequest['members'] {
+    if (resolveTeamProviderId(request.providerId) !== 'opencode') {
+      return members;
+    }
+    if (members.some((member) => isLeadMember(member))) {
+      return members;
+    }
+
+    return [
+      {
+        name: 'team-lead',
+        role: 'Team Lead',
+        providerId: 'opencode',
+        model: request.model,
+        effort: request.effort,
+      },
+      ...members,
+    ];
+  }
+
   private async resolveOpenCodeMemberWorkspacesForRuntime(params: {
     teamName: string;
     baseCwd: string;
@@ -21530,6 +21580,10 @@ export class TeamProvisioningService {
       leadProviderId: launchRequest.providerId,
       members: materialized.members,
     });
+    const runtimeLaunchMembers = this.buildOpenCodeRuntimeAdapterLaunchMembers(
+      launchRequest,
+      effectiveMembers
+    );
     const teamDir = path.join(getTeamsBasePath(), launchRequest.teamName);
     const tasksDir = path.join(getTasksBasePath(), launchRequest.teamName);
     await fs.promises.mkdir(teamDir, { recursive: true });
@@ -21558,7 +21612,7 @@ export class TeamProvisioningService {
 
     return this.runOpenCodeTeamRuntimeAdapterLaunch({
       request: launchRequest,
-      members: effectiveMembers,
+      members: runtimeLaunchMembers,
       prompt: launchRequest.prompt?.trim() ?? '',
       sourceWarning: undefined,
       onProgress,
@@ -21594,6 +21648,10 @@ export class TeamProvisioningService {
       leadProviderId: launchRequest.providerId,
       members: materialized.members,
     });
+    const runtimeLaunchMembers = this.buildOpenCodeRuntimeAdapterLaunchMembers(
+      launchRequest,
+      effectiveMembers
+    );
     await this.updateConfigProjectPath(launchRequest.teamName, launchRequest.cwd);
 
     let existingTasks: TeamTask[] = [];
@@ -21613,7 +21671,7 @@ export class TeamProvisioningService {
 
     return this.runOpenCodeTeamRuntimeAdapterLaunch({
       request: launchRequest,
-      members: effectiveMembers,
+      members: runtimeLaunchMembers,
       prompt,
       sourceWarning: warning,
       onProgress,
@@ -21901,6 +21959,7 @@ export class TeamProvisioningService {
       teamName: input.teamName,
       expectedMembers: input.expectedMembers.map((member) => member.name),
       bootstrapExpectedMembers: input.expectedMembers.map((member) => member.name),
+      includeLeadMembers: true,
       leadSessionId: result.leadSessionId,
       launchPhase: committedResult.launchPhase,
       members,
@@ -23462,13 +23521,21 @@ export class TeamProvisioningService {
     );
     if (inboxName.trim().toLowerCase() === leadName?.toLowerCase()) {
       if (isOpenCodeRecipient) {
-        const diagnostic =
-          'opencode_lead_runtime_session_missing: OpenCode lead inbox relay is unsupported in v1; leaving inbox unread for durable retry/diagnostics.';
-        logger.warn(`[${teamName}] ${diagnostic} inbox=${inboxName}`);
+        const relayOptions: OpenCodeMemberInboxRelayOptions = {
+          source: options.source ?? 'watcher',
+          ...(options.onlyMessageId ? { onlyMessageId: options.onlyMessageId } : {}),
+          ...(options.deliveryMetadata ? { deliveryMetadata: options.deliveryMetadata } : {}),
+        };
+        const relay = await this.relayOpenCodeMemberInboxMessages(
+          teamName,
+          inboxName,
+          relayOptions
+        );
         return {
-          kind: 'opencode_lead_unsupported',
-          relayed: 0,
-          diagnostics: [diagnostic],
+          kind: 'opencode_member',
+          relayed: relay.relayed,
+          diagnostics: relay.diagnostics,
+          lastDelivery: relay.lastDelivery,
         };
       }
       return {

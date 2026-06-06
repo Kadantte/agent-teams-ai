@@ -223,6 +223,11 @@ describe('Team agent launch matrix safe e2e', () => {
     });
 
     const runtimeSnapshot = await svc.getTeamAgentRuntimeSnapshot('pure-opencode-safe-e2e');
+    expect(runtimeSnapshot.members['team-lead']).toMatchObject({
+      alive: true,
+      providerId: 'opencode',
+      runtimeModel: 'opencode/big-pickle',
+    });
     expect(runtimeSnapshot.members.alice).toMatchObject({
       alive: true,
       providerId: 'opencode',
@@ -240,8 +245,8 @@ describe('Team agent launch matrix safe e2e', () => {
       })
     ) as { expectedMembers: string[]; members: Record<string, unknown>; teamLaunchState: string };
     expect(launchState.teamLaunchState).toBe('clean_success');
-    expect(launchState.expectedMembers).toEqual(['alice', 'bob']);
-    expect(Object.keys(launchState.members)).toEqual(['alice', 'bob']);
+    expect(launchState.expectedMembers).toEqual(['team-lead', 'alice', 'bob']);
+    expect(Object.keys(launchState.members)).toEqual(['team-lead', 'alice', 'bob']);
     await expect(
       readCommittedOpenCodeBootstrapSessionEvidence({
         teamsBasePath: getTeamsBasePath(),
@@ -278,7 +283,7 @@ describe('Team agent launch matrix safe e2e', () => {
     expect(runId).toBe(adapter.launchInputs[0]?.runId);
     expect(adapter.bootstrapCheckins).toEqual([
       {
-        memberName: 'team-lead',
+        memberName: 'alice',
         runId,
         state: 'accepted',
       },
@@ -350,7 +355,6 @@ describe('Team agent launch matrix safe e2e', () => {
 
     expect(runId).toBe(adapter.launchInputs[0]?.runId);
     expect(adapter.launchInputs[0]?.expectedMembers.map((member) => member.name)).toEqual([
-      'team-lead',
       'alice',
       'bob',
     ]);
@@ -11162,6 +11166,94 @@ describe('Team agent launch matrix safe e2e', () => {
       messageId: 'msg-current-pure-opencode',
     });
     expect(adapter.messageInputs[0]?.runId).not.toBe(first.runId);
+  });
+
+  it('delivers pure OpenCode lead inbox messages through the primary runtime lane end-to-end', async () => {
+    const teamName = 'pure-opencode-lead-inbox-delivery-safe-e2e';
+    const adapter = new VisibleReplyOpenCodeRuntimeAdapter({
+      replySource: 'runtime_delivery',
+    });
+    const svc = new TeamProvisioningService();
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const launch = await svc.createTeam(
+      {
+        teamName,
+        cwd: projectPath,
+        providerId: 'opencode',
+        model: 'opencode/big-pickle',
+        skipPermissions: true,
+        members: [{ name: 'alice', role: 'Developer', providerId: 'opencode' }],
+      },
+      () => undefined
+    );
+    const messageId = 'msg-pure-opencode-lead-inbox';
+    const leadInboxPath = path.join(getTeamsBasePath(), teamName, 'inboxes', 'team-lead.json');
+    await fs.mkdir(path.dirname(leadInboxPath), { recursive: true });
+    await fs.writeFile(
+      leadInboxPath,
+      `${JSON.stringify(
+        [
+          {
+            from: 'user',
+            to: 'team-lead',
+            text: 'coordinate this pure opencode team',
+            timestamp: '2026-05-08T10:05:00.000Z',
+            read: false,
+            messageId,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      'utf8'
+    );
+
+    await expect(
+      svc.relayInboxFileToLiveRecipient(teamName, 'team-lead', {
+        onlyMessageId: messageId,
+        source: 'ui-send',
+        deliveryMetadata: {
+          replyRecipient: 'user',
+          actionMode: 'do',
+        },
+      })
+    ).resolves.toMatchObject({
+      kind: 'opencode_member',
+      relayed: 1,
+      lastDelivery: {
+        delivered: true,
+        accepted: true,
+        responsePending: false,
+        responseState: 'responded_visible_message',
+        visibleReplyMessageId: `reply-${messageId}`,
+      },
+    });
+
+    expect(adapter.messageInputs).toHaveLength(1);
+    expect(adapter.messageInputs[0]).toMatchObject({
+      runId: launch.runId,
+      teamName,
+      laneId: 'primary',
+      memberName: 'team-lead',
+      text: 'coordinate this pure opencode team',
+      messageId,
+      replyRecipient: 'user',
+      actionMode: 'do',
+    });
+
+    const leadInbox = await readInboxRows(teamName, 'team-lead');
+    expect(leadInbox[0]).toMatchObject({
+      messageId,
+      read: true,
+    });
+    const userInbox = await readInboxRows(teamName, 'user');
+    expect(userInbox[0]).toMatchObject({
+      from: 'team-lead',
+      to: 'user',
+      source: 'runtime_delivery',
+      messageId: `reply-${messageId}`,
+      relayOfMessageId: messageId,
+    });
   });
 
   it('surfaces pure OpenCode delivery permission blocks as the shared tool approval dialog', async () => {
