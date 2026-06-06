@@ -19003,10 +19003,61 @@ describe('TeamProvisioningService', () => {
       await svc.cancelProvisioning(runId);
     });
 
-    it('rejects multi-member pure OpenCode worktree isolation instead of sharing one projectPath', async () => {
+    it('launches pure OpenCode worktree members through separate runtime lanes', async () => {
       allowConsoleLogs();
-      const adapterLaunch = vi.fn();
-      const { svc } = createSafeLaunchService();
+      const bobWorktree = path.join(tempClaudeRoot, 'worktrees', 'bob');
+      const worktreeManager = {
+        ensureMemberWorktree: vi.fn(async () => ({
+          baseRepoPath: tempClaudeRoot,
+          worktreePath: bobWorktree,
+          branchName: 'agent-teams/test/bob',
+        })),
+      };
+      const adapterLaunch = vi.fn(async (input: Record<string, unknown>) => {
+        const expectedMembers = input.expectedMembers as Array<{ name: string }>;
+        const teamName = String(input.teamName);
+        const laneId = String(input.laneId);
+        const runId = String(input.runId);
+        await writeCommittedOpenCodeSessionStore({
+          teamName,
+          laneId,
+          runId,
+          sessions: expectedMembers.map((member) => ({
+            id: `oc-session-${laneId}-${member.name}`,
+            teamName,
+            memberName: member.name,
+            laneId,
+            runId,
+            source: 'runtime_bootstrap_checkin',
+          })),
+        });
+        return {
+          runId,
+          teamName,
+          launchPhase: 'finished',
+          teamLaunchState: 'clean_success',
+          members: Object.fromEntries(
+            expectedMembers.map((member) => [
+              member.name,
+              {
+                memberName: member.name,
+                providerId: 'opencode',
+                launchState: 'confirmed_alive',
+                agentToolAccepted: true,
+                runtimeAlive: true,
+                bootstrapConfirmed: true,
+                hardFailure: false,
+                diagnostics: [],
+              },
+            ])
+          ),
+          warnings: [],
+          diagnostics: [],
+        };
+      });
+      const { svc } = createSafeLaunchService({
+        memberWorktreeManager: worktreeManager,
+      });
       svc.setRuntimeAdapterRegistry(
         new TeamRuntimeAdapterRegistry([
           {
@@ -19019,32 +19070,71 @@ describe('TeamProvisioningService', () => {
         ])
       );
 
-      await expect(
-        svc.createTeam(
-          {
-            teamName: 'blocked-opencode-multi-worktree',
-            cwd: tempClaudeRoot,
-            providerId: 'opencode',
-            providerBackendId: 'adapter',
-            model: 'big-pickle',
-            members: [
-              {
-                name: 'bob',
-                providerId: 'opencode',
-                model: 'minimax-m2.5-free',
-                isolation: 'worktree',
-              },
-              {
-                name: 'tom',
-                providerId: 'opencode',
-                model: 'nemotron-3-super-free',
-              },
-            ],
-          },
-          () => {}
-        )
-      ).rejects.toThrow('Multiple OpenCode members in one lane cannot use separate worktrees yet');
-      expect(adapterLaunch).not.toHaveBeenCalled();
+      const { runId } = await svc.createTeam(
+        {
+          teamName: 'opencode-multi-worktree-lanes',
+          cwd: tempClaudeRoot,
+          providerId: 'opencode',
+          providerBackendId: 'adapter',
+          model: 'big-pickle',
+          members: [
+            {
+              name: 'bob',
+              providerId: 'opencode',
+              model: 'minimax-m2.5-free',
+              isolation: 'worktree',
+            },
+            {
+              name: 'tom',
+              providerId: 'opencode',
+              model: 'nemotron-3-super-free',
+            },
+          ],
+        },
+        () => {}
+      );
+
+      expect(worktreeManager.ensureMemberWorktree).toHaveBeenCalledWith({
+        teamName: 'opencode-multi-worktree-lanes',
+        memberName: 'bob',
+        baseCwd: tempClaudeRoot,
+      });
+      expect(adapterLaunch).toHaveBeenCalledTimes(2);
+      expect(adapterLaunch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          laneId: 'primary',
+          cwd: tempClaudeRoot,
+          expectedMembers: [
+            expect.objectContaining({
+              name: 'tom',
+              providerId: 'opencode',
+              cwd: tempClaudeRoot,
+            }),
+          ],
+        })
+      );
+      expect(adapterLaunch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          laneId: 'secondary:opencode:bob',
+          cwd: bobWorktree,
+          expectedMembers: [
+            expect.objectContaining({
+              name: 'bob',
+              providerId: 'opencode',
+              isolation: 'worktree',
+              cwd: bobWorktree,
+            }),
+          ],
+        })
+      );
+      const run = (svc as any).runs.get(runId);
+      expect(run?.mixedSecondaryLanes).toEqual([
+        expect.objectContaining({
+          laneId: 'secondary:opencode:bob',
+          state: 'finished',
+          member: expect.objectContaining({ name: 'bob', cwd: bobWorktree }),
+        }),
+      ]);
     });
   });
 

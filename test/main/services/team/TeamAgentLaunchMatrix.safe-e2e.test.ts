@@ -38,6 +38,7 @@ import {
 } from '../../../../src/main/services/team/runtime/TeamRuntimeAdapter';
 import { TeamConfigReader } from '../../../../src/main/services/team/TeamConfigReader';
 import { createPersistedLaunchSnapshot } from '../../../../src/main/services/team/TeamLaunchStateEvaluator';
+import type { TeamMemberWorktreeManager } from '../../../../src/main/services/team/TeamMemberWorktreeManager';
 import {
   getMixedLaunchFallbackRecoveryError,
   TeamProvisioningService,
@@ -256,6 +257,185 @@ describe('Team agent launch matrix safe e2e', () => {
         expect.objectContaining({ memberName: 'bob' }),
       ]),
     });
+  });
+
+  it('launches pure OpenCode worktree members as aggregate worktree-root lanes', async () => {
+    const teamName = 'pure-opencode-worktree-root-lanes-safe-e2e';
+    const bobWorktree = path.join(projectPath, '.agent-teams', 'bob');
+    const tomWorktree = path.join(projectPath, '.agent-teams', 'tom');
+    const worktreeManager: Pick<TeamMemberWorktreeManager, 'ensureMemberWorktree'> = {
+      ensureMemberWorktree: vi.fn(async (input) => ({
+        baseRepoPath: projectPath,
+        worktreePath: input.memberName === 'bob' ? bobWorktree : tomWorktree,
+        branchName: `agent-teams/${teamName}/${input.memberName}`,
+      })),
+    };
+    const adapter = new FakeOpenCodeRuntimeAdapter();
+    const svc = new TeamProvisioningService(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      worktreeManager
+    );
+    svc.setRuntimeAdapterRegistry(new TeamRuntimeAdapterRegistry([adapter]));
+    const progressEvents: TeamProvisioningProgress[] = [];
+
+    const { runId } = await svc.createTeam(
+      {
+        teamName,
+        cwd: projectPath,
+        providerId: 'opencode',
+        model: 'opencode/big-pickle',
+        skipPermissions: true,
+        members: [
+          {
+            name: 'bob',
+            role: 'Developer',
+            providerId: 'opencode',
+            isolation: 'worktree',
+          },
+          {
+            name: 'tom',
+            role: 'Reviewer',
+            providerId: 'opencode',
+            isolation: 'worktree',
+          },
+        ],
+      },
+      (progress) => progressEvents.push(progress)
+    );
+
+    expect(runId).toMatch(/[0-9a-f-]{36}/);
+    expect(worktreeManager.ensureMemberWorktree).toHaveBeenCalledTimes(2);
+    expect(adapter.launchInputs.map((input) => input.laneId).sort()).toEqual([
+      'secondary:opencode:bob',
+      'secondary:opencode:tom',
+    ]);
+    expect(adapter.launchInputs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          laneId: 'secondary:opencode:bob',
+          cwd: bobWorktree,
+          runtimeOnly: true,
+          expectedMembers: [
+            expect.objectContaining({
+              name: 'bob',
+              providerId: 'opencode',
+              isolation: 'worktree',
+              cwd: bobWorktree,
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          laneId: 'secondary:opencode:tom',
+          cwd: tomWorktree,
+          runtimeOnly: true,
+          expectedMembers: [
+            expect.objectContaining({
+              name: 'tom',
+              providerId: 'opencode',
+              isolation: 'worktree',
+              cwd: tomWorktree,
+            }),
+          ],
+        }),
+      ])
+    );
+    expect(progressEvents.at(-1)).toMatchObject({
+      state: 'ready',
+      message: 'OpenCode worktree lanes are ready',
+    });
+    expect(svc.getAliveTeams()).toContain(teamName);
+
+    await expect(readOpenCodeRuntimeLaneIndex(getTeamsBasePath(), teamName)).resolves.toMatchObject(
+      {
+        lanes: {
+          'secondary:opencode:bob': { state: 'active' },
+          'secondary:opencode:tom': { state: 'active' },
+        },
+      }
+    );
+    await expect(
+      readCommittedOpenCodeBootstrapSessionEvidence({
+        teamsBasePath: getTeamsBasePath(),
+        teamName,
+        laneId: 'secondary:opencode:bob',
+      })
+    ).resolves.toMatchObject({
+      committed: true,
+      sessions: [expect.objectContaining({ memberName: 'bob' })],
+    });
+    await expect(
+      readCommittedOpenCodeBootstrapSessionEvidence({
+        teamsBasePath: getTeamsBasePath(),
+        teamName,
+        laneId: 'secondary:opencode:tom',
+      })
+    ).resolves.toMatchObject({
+      committed: true,
+      sessions: [expect.objectContaining({ memberName: 'tom' })],
+    });
+
+    const statuses = await svc.getMemberSpawnStatuses(teamName);
+    expect(statuses.statuses.bob).toMatchObject({
+      launchState: 'confirmed_alive',
+    });
+    expect(statuses.statuses.tom).toMatchObject({
+      launchState: 'confirmed_alive',
+    });
+
+    const launchCountBeforeRestart = adapter.launchInputs.length;
+    await svc.restartMember(teamName, 'bob');
+    expect(adapter.stopInputs).toEqual([
+      expect.objectContaining({
+        laneId: 'secondary:opencode:bob',
+        teamName,
+      }),
+    ]);
+    expect(adapter.launchInputs).toHaveLength(launchCountBeforeRestart + 1);
+    expect(adapter.launchInputs.at(-1)).toMatchObject({
+      laneId: 'secondary:opencode:bob',
+      cwd: bobWorktree,
+      runtimeOnly: true,
+      expectedMembers: [
+        expect.objectContaining({
+          name: 'bob',
+          providerId: 'opencode',
+          isolation: 'worktree',
+          cwd: bobWorktree,
+        }),
+      ],
+    });
+
+    const stopCountBeforeRelaunch = adapter.stopInputs.length;
+    const launchCountBeforeRelaunch = adapter.launchInputs.length;
+    await svc.launchTeam(
+      {
+        teamName,
+        cwd: projectPath,
+        providerId: 'opencode',
+        model: 'opencode/big-pickle',
+        skipPermissions: true,
+      },
+      (progress) => progressEvents.push(progress)
+    );
+    expect(
+      adapter.stopInputs
+        .slice(stopCountBeforeRelaunch)
+        .map((input) => input.laneId)
+        .sort()
+    ).toEqual(['secondary:opencode:bob', 'secondary:opencode:tom']);
+    expect(
+      adapter.launchInputs
+        .slice(launchCountBeforeRelaunch)
+        .map((input) => input.laneId)
+        .sort()
+    ).toEqual(['secondary:opencode:bob', 'secondary:opencode:tom']);
   });
 
   it('accepts pure OpenCode runtime bootstrap check-ins during adapter launch', async () => {

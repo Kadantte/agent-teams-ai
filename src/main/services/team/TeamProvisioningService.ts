@@ -17,8 +17,10 @@ import {
   resolveCodexRuntimeSelection,
 } from '@features/codex-runtime-profile/main';
 import {
+  buildOpenCodeSecondaryLaneId,
   buildPlannedMemberLaneIdentity,
-  isMixedOpenCodeSideLanePlan,
+  isOpenCodeSideLanePlan,
+  isPureOpenCodeWorktreeRootLanePlan,
   type TeamRuntimeLanePlan,
 } from '@features/team-runtime-lanes';
 import { createTeamRuntimeLaneCoordinator } from '@features/team-runtime-lanes/main';
@@ -4042,6 +4044,26 @@ export class TeamProvisioningService {
 
     const canonicalMemberName =
       metaMember?.name?.trim() || configMember?.name?.trim() || normalizedMemberName;
+    const secondaryRuntimeRun = this.getSecondaryRuntimeRuns(teamName).find((run) =>
+      matchesTeamMemberIdentity(run.memberName, canonicalMemberName)
+    );
+    if (secondaryRuntimeRun) {
+      const memberRuntimeCwd =
+        secondaryRuntimeRun.cwd?.trim() || metaMember?.cwd?.trim() || configMember?.cwd?.trim();
+      return {
+        ok: true,
+        canonicalMemberName,
+        laneId: secondaryRuntimeRun.laneId,
+        laneIdentity: {
+          laneId: secondaryRuntimeRun.laneId,
+          laneKind: 'secondary',
+          laneOwnerProviderId: 'opencode',
+        },
+        ...(configMember ? { configMember } : {}),
+        ...(metaMember ? { metaMember } : {}),
+        ...(memberRuntimeCwd ? { memberRuntimeCwd } : {}),
+      };
+    }
     const runtimeRun = this.runtimeAdapterRunByTeam.get(teamName);
     if (runtimeRun?.providerId === 'opencode') {
       const laneIdentity = buildPlannedMemberLaneIdentity({
@@ -9865,11 +9887,13 @@ export class TeamProvisioningService {
 
   private planRuntimeLanesOrThrow(
     leadProviderId: TeamProviderId | undefined,
-    members: TeamCreateRequest['members']
+    members: TeamCreateRequest['members'],
+    baseCwd?: string
   ): TeamRuntimeLanePlan {
     return this.runtimeLaneCoordinator.planProvisioningMembers({
       leadProviderId,
       members,
+      baseCwd,
       hasOpenCodeRuntimeAdapter: this.getOpenCodeRuntimeAdapter() !== null,
     });
   }
@@ -9877,7 +9901,7 @@ export class TeamProvisioningService {
   private createMixedSecondaryLaneStates(
     plan: TeamRuntimeLanePlan
   ): MixedSecondaryRuntimeLaneState[] {
-    if (!isMixedOpenCodeSideLanePlan(plan)) {
+    if (!isOpenCodeSideLanePlan(plan)) {
       return [];
     }
     return plan.sideLanes.map((sideLane) => ({
@@ -9895,11 +9919,42 @@ export class TeamProvisioningService {
   }
 
   private createMixedSecondaryLaneStateForMember(
-    run: Pick<ProvisioningRun, 'request'>,
+    run: Pick<ProvisioningRun, 'request' | 'mixedSecondaryLanes'>,
     member: TeamCreateRequest['members'][number]
   ): MixedSecondaryRuntimeLaneState {
+    const leadProviderId = resolveTeamProviderId(run.request.providerId);
+    const existingLane = (run.mixedSecondaryLanes ?? []).find((lane) =>
+      matchesTeamMemberIdentity(lane.member.name, member.name)
+    );
+    if (leadProviderId === 'opencode') {
+      const memberCwd = member.cwd?.trim();
+      const baseCwd = run.request.cwd?.trim();
+      const laneId =
+        existingLane?.laneId ??
+        (memberCwd && (!baseCwd || memberCwd !== baseCwd)
+          ? buildOpenCodeSecondaryLaneId(member)
+          : null);
+      if (!laneId) {
+        throw new Error(
+          `Member "${member.name}" is not eligible for an OpenCode secondary runtime lane`
+        );
+      }
+      return {
+        laneId,
+        providerId: 'opencode',
+        member: {
+          ...member,
+        },
+        runId: null,
+        state: 'queued',
+        result: null,
+        warnings: [],
+        diagnostics: [],
+      };
+    }
+
     const laneIdentity = buildPlannedMemberLaneIdentity({
-      leadProviderId: resolveTeamProviderId(run.request.providerId),
+      leadProviderId,
       member: {
         name: member.name,
         providerId: normalizeOptionalTeamProviderId(member.providerId),
@@ -17072,9 +17127,11 @@ export class TeamProvisioningService {
   ): Promise<OpenCodeSecondaryRetryCandidate[]> {
     const teamName = run.teamName;
     const leadProviderId = resolveTeamProviderId(run.request.providerId);
-    if (leadProviderId === 'opencode') {
+    const isOpenCodeAggregateRun =
+      leadProviderId === 'opencode' && (run.mixedSecondaryLanes?.length ?? 0) > 0;
+    if (leadProviderId === 'opencode' && !isOpenCodeAggregateRun) {
       throw new Error(
-        'Retrying OpenCode secondary lanes is only supported for mixed teams with a non-OpenCode lead.'
+        'Retrying OpenCode secondary lanes requires an active OpenCode worktree lane run.'
       );
     }
     if (!this.getOpenCodeRuntimeAdapter()) {
@@ -17131,35 +17188,49 @@ export class TeamProvisioningService {
       if (isLeadMember({ name: memberName, agentType: configuredMember.agentType })) {
         continue;
       }
-      if (normalizeOptionalTeamProviderId(configuredMember.providerId) !== 'opencode') {
+      const desiredProviderId =
+        normalizeOptionalTeamProviderId(configuredMember.providerId) ?? leadProviderId;
+      if (desiredProviderId !== 'opencode') {
         continue;
       }
 
-      const laneIdentity = buildPlannedMemberLaneIdentity({
-        leadProviderId,
-        member: {
-          name: memberName,
-          providerId: 'opencode',
-        },
-      });
-      if (
-        laneIdentity.laneKind !== 'secondary' ||
-        laneIdentity.laneOwnerProviderId !== 'opencode'
-      ) {
-        continue;
-      }
-
-      const existingLane = (run.mixedSecondaryLanes ?? []).find(
-        (lane) =>
-          lane.laneId === laneIdentity.laneId ||
-          matchesTeamMemberIdentity(lane.member.name, memberName)
+      const existingLane = (run.mixedSecondaryLanes ?? []).find((lane) =>
+        matchesTeamMemberIdentity(lane.member.name, memberName)
       );
       const liveEntry = run.memberSpawnStatuses.get(memberName);
-      const persistedMember =
+      const persistedMemberByName =
         persistedSnapshot?.members[memberName] ??
-        Object.values(persistedSnapshot?.members ?? {}).find(
-          (member) => member.laneId === laneIdentity.laneId
+        Object.values(persistedSnapshot?.members ?? {}).find((member) =>
+          matchesTeamMemberIdentity(member.name, memberName)
         );
+      let laneId: string | null = null;
+      if (leadProviderId === 'opencode') {
+        const persistedLaneId = persistedMemberByName?.laneId?.startsWith('secondary:opencode:')
+          ? persistedMemberByName.laneId
+          : null;
+        laneId = existingLane?.laneId ?? persistedLaneId;
+        if (!laneId) {
+          continue;
+        }
+      } else {
+        const laneIdentity = buildPlannedMemberLaneIdentity({
+          leadProviderId,
+          member: {
+            name: memberName,
+            providerId: 'opencode',
+          },
+        });
+        if (
+          laneIdentity.laneKind !== 'secondary' ||
+          laneIdentity.laneOwnerProviderId !== 'opencode'
+        ) {
+          continue;
+        }
+        laneId = laneIdentity.laneId;
+      }
+      const persistedMember =
+        persistedMemberByName ??
+        Object.values(persistedSnapshot?.members ?? {}).find((member) => member.laneId === laneId);
 
       if (
         this.isRetryableFailedOpenCodeSecondaryLane({
@@ -17168,7 +17239,7 @@ export class TeamProvisioningService {
           existingLane,
         })
       ) {
-        candidates.push({ memberName, laneId: laneIdentity.laneId });
+        candidates.push({ memberName, laneId });
       }
     }
     return candidates;
@@ -17502,9 +17573,9 @@ export class TeamProvisioningService {
   ): Promise<void> {
     const run = this.getMutableAliveRunOrThrow(teamName);
     const leadProviderId = resolveTeamProviderId(run.request.providerId);
-    if (leadProviderId === 'opencode') {
+    if (leadProviderId === 'opencode' && (run.mixedSecondaryLanes?.length ?? 0) === 0) {
       throw new Error(
-        'OpenCode-led mixed teams are not supported in this phase. Stop the team and relaunch with a non-OpenCode lead.'
+        'OpenCode secondary lane reattach requires an active OpenCode worktree lane run.'
       );
     }
     if (!this.getOpenCodeRuntimeAdapter()) {
@@ -17535,7 +17606,8 @@ export class TeamProvisioningService {
     if (isLeadMember({ name: configuredMember.name, agentType: configuredMember.agentType })) {
       throw new Error('Lead lane reattach is not supported');
     }
-    const desiredProviderId = normalizeOptionalTeamProviderId(configuredMember.providerId);
+    const desiredProviderId =
+      normalizeOptionalTeamProviderId(configuredMember.providerId) ?? leadProviderId;
     if (desiredProviderId !== 'opencode') {
       throw new Error(
         `Controlled reattach is only supported for OpenCode-owned members. "${memberName}" remains on the primary runtime owner.`
@@ -19779,7 +19851,7 @@ export class TeamProvisioningService {
       return memberCwds[0];
     }
     throw new Error(
-      'OpenCode runtime lanes support exactly one project path in this release. Use mixed-team OpenCode side lanes for per-teammate worktree isolation.'
+      'OpenCode runtime lanes support exactly one project path per lane. Use separate OpenCode worktree-root lanes for per-teammate worktree isolation.'
     );
   }
 
@@ -19900,18 +19972,6 @@ export class TeamProvisioningService {
     });
     if (isolatedOpenCodeMembers.length === 0) {
       return params.members;
-    }
-
-    if (
-      isPureOpenCodeProvisioningRequest({
-        providerId: params.leadProviderId,
-        members: params.members,
-      }) &&
-      params.members.length > 1
-    ) {
-      throw new Error(
-        'OpenCode worktree isolation currently supports mixed-team OpenCode side lanes or one-member OpenCode runtime lanes. Multiple OpenCode members in one lane cannot use separate worktrees yet.'
-      );
     }
 
     const nextMembers: TeamCreateRequest['members'] = [];
@@ -20976,7 +21036,11 @@ export class TeamProvisioningService {
           allEffectiveMemberSpecs
         )
       );
-      const lanePlan = this.planRuntimeLanesOrThrow(request.providerId, allEffectiveMemberSpecs);
+      const lanePlan = this.planRuntimeLanesOrThrow(
+        request.providerId,
+        allEffectiveMemberSpecs,
+        request.cwd
+      );
       const primaryMemberNames = new Set(lanePlan.primaryMembers.map((member) => member.name));
       const effectiveMemberSpecs = allEffectiveMemberSpecs.filter((member) =>
         primaryMemberNames.has(member.name)
@@ -21555,6 +21619,21 @@ export class TeamProvisioningService {
       providerBackendId: launchRequest.providerBackendId,
     });
     await this.writeOpenCodeTeamConfig(launchRequest, effectiveMembers);
+    const lanePlan = this.planRuntimeLanesOrThrow(
+      launchRequest.providerId,
+      effectiveMembers,
+      launchRequest.cwd
+    );
+    if (isPureOpenCodeWorktreeRootLanePlan(lanePlan)) {
+      return this.runOpenCodeWorktreeRootAggregateLaunch({
+        request: launchRequest,
+        members: effectiveMembers,
+        lanePlan,
+        prompt: launchRequest.prompt?.trim() ?? '',
+        sourceWarning: undefined,
+        onProgress,
+      });
+    }
 
     return this.runOpenCodeTeamRuntimeAdapterLaunch({
       request: launchRequest,
@@ -21610,6 +21689,21 @@ export class TeamProvisioningService {
       existingTasks,
       false
     );
+    const lanePlan = this.planRuntimeLanesOrThrow(
+      launchRequest.providerId,
+      effectiveMembers,
+      launchRequest.cwd
+    );
+    if (isPureOpenCodeWorktreeRootLanePlan(lanePlan)) {
+      return this.runOpenCodeWorktreeRootAggregateLaunch({
+        request: launchRequest,
+        members: effectiveMembers,
+        lanePlan,
+        prompt,
+        sourceWarning: warning,
+        onProgress,
+      });
+    }
 
     return this.runOpenCodeTeamRuntimeAdapterLaunch({
       request: launchRequest,
@@ -21618,6 +21712,425 @@ export class TeamProvisioningService {
       sourceWarning: warning,
       onProgress,
     });
+  }
+
+  private createOpenCodeAggregateProvisioningRun(params: {
+    runId: string;
+    startedAt: string;
+    progress: TeamProvisioningProgress;
+    request: TeamCreateRequest | TeamLaunchRequest;
+    members: TeamCreateRequest['members'];
+    lanePlan: Extract<TeamRuntimeLanePlan, { mode: 'pure_opencode_worktree_root_lanes' }>;
+    onProgress: (progress: TeamProvisioningProgress) => void;
+  }): ProvisioningRun {
+    return {
+      runId: params.runId,
+      teamName: params.request.teamName,
+      startedAt: params.startedAt,
+      progress: params.progress,
+      stdoutBuffer: '',
+      stderrBuffer: '',
+      claudeLogLines: [],
+      lastClaudeLogStream: null,
+      stdoutLogLineBuf: '',
+      stderrLogLineBuf: '',
+      stdoutParserCarry: '',
+      stdoutParserCarryIsCompleteJson: false,
+      stdoutParserCarryLooksLikeClaudeJson: false,
+      deterministicBootstrapMemberSpawnSeen: false,
+      deterministicBootstrapMemberResultSeen: false,
+      processKilled: false,
+      finalizingByTimeout: false,
+      cancelRequested: false,
+      teamsBasePathsToProbe: getTeamsBasePathsToProbe(),
+      child: null,
+      timeoutHandle: null,
+      fsMonitorHandle: null,
+      onProgress: params.onProgress,
+      expectedMembers: params.members.map((member) => member.name),
+      request: {
+        ...params.request,
+        members: params.members,
+      } as TeamCreateRequest,
+      allEffectiveMembers: params.members,
+      effectiveMembers: params.lanePlan.primaryMembers,
+      launchIdentity: null,
+      mixedSecondaryLanes: this.createMixedSecondaryLaneStates(params.lanePlan),
+      lastLogProgressAt: 0,
+      lastDataReceivedAt: 0,
+      lastStdoutReceivedAt: 0,
+      stallCheckHandle: null,
+      stallWarningIndex: null,
+      preStallMessage: null,
+      lastRetryAt: 0,
+      apiRetryWarningIndex: null,
+      apiErrorWarningEmitted: false,
+      fsPhase: 'all_files_found',
+      waitingTasksSince: null,
+      provisioningComplete: false,
+      processClosed: false,
+      requiresFirstRealTurnSuccess: false,
+      firstRealTurnSucceeded: false,
+      mcpConfigPath: null,
+      memberMcpConfigPaths: [],
+      bootstrapSpecPath: null,
+      bootstrapUserPromptPath: null,
+      isLaunch: true,
+      launchStateClearedForRun: false,
+      deterministicBootstrap: false,
+      workspaceTrustPlan: null,
+      workspaceTrustExecution: null,
+      workspaceTrustDiagnostics: null,
+      workspaceTrustRetryAttempted: false,
+      leadRelayCapture: null,
+      activeCrossTeamReplyHints: [],
+      leadMsgSeq: 0,
+      liveLeadTextBuffer: null,
+      pendingToolCalls: [],
+      activeToolCalls: new Map(),
+      pendingDirectCrossTeamSendRefresh: false,
+      lastLeadTextEmitMs: 0,
+      silentUserDmForward: null,
+      silentUserDmForwardClearHandle: null,
+      pendingInboxRelayCandidates: [],
+      provisioningOutputParts: [],
+      provisioningTraceLines: [],
+      lastProvisioningTraceKey: null,
+      provisioningOutputIndexByMessageId: new Map(),
+      detectedSessionId: null,
+      leadActivityState: 'active',
+      authFailureRetried: false,
+      authRetryInProgress: false,
+      leadContextUsage: null,
+      spawnContext: null,
+      anthropicApiKeyHelper: null,
+      pendingApprovals: new Map(),
+      processedPermissionRequestIds: new Set(),
+      pendingPostCompactReminder: false,
+      postCompactReminderInFlight: false,
+      suppressPostCompactReminderOutput: false,
+      pendingGeminiPostLaunchHydration: false,
+      geminiPostLaunchHydrationInFlight: false,
+      geminiPostLaunchHydrationSent: false,
+      suppressGeminiPostLaunchHydrationOutput: false,
+      memberSpawnStatuses: new Map(),
+      memberSpawnToolUseIds: new Map(),
+      pendingMemberRestarts: new Map(),
+      memberSpawnLeadInboxCursorByMember: new Map(),
+      lastDeterministicBootstrapSeq: 0,
+      lastMemberSpawnAuditAt: 0,
+      lastMemberSpawnAuditConfigReadWarningAt: 0,
+      lastMemberSpawnAuditMissingWarningAt: new Map(),
+    };
+  }
+
+  private async launchOpenCodeAggregatePrimaryLane(params: {
+    run: ProvisioningRun;
+    adapter: TeamLaunchRuntimeAdapter;
+    prompt: string;
+    previousLaunchState: PersistedTeamLaunchSnapshot | null;
+  }): Promise<TeamRuntimeLaunchResult | null> {
+    if (params.run.effectiveMembers.length === 0) {
+      return null;
+    }
+
+    const teamName = params.run.teamName;
+    const runId = params.run.runId;
+    const launchCwd = this.getOpenCodeRuntimeLaunchCwd(
+      params.run.request.cwd,
+      params.run.effectiveMembers
+    );
+    const migration = await migrateLegacyOpenCodeRuntimeState({
+      teamsBasePath: getTeamsBasePath(),
+      teamName,
+      laneId: 'primary',
+    });
+    await upsertOpenCodeRuntimeLaneIndexEntry({
+      teamsBasePath: getTeamsBasePath(),
+      teamName,
+      laneId: 'primary',
+      state: migration.degraded ? 'degraded' : 'active',
+      diagnostics: migration.diagnostics,
+    });
+    await setOpenCodeRuntimeActiveRunManifest({
+      teamsBasePath: getTeamsBasePath(),
+      teamName,
+      laneId: 'primary',
+      runId,
+    });
+
+    const expectedMembers: TeamRuntimeMemberSpec[] = params.run.effectiveMembers.map((member) => ({
+      name: member.name,
+      role: member.role,
+      workflow: member.workflow,
+      isolation: member.isolation === 'worktree' ? ('worktree' as const) : undefined,
+      providerId: 'opencode',
+      model: member.model ?? params.run.request.model,
+      effort: member.effort ?? params.run.request.effort,
+      cwd: member.cwd?.trim() || launchCwd,
+    }));
+    const launchInput: TeamRuntimeLaunchInput = {
+      runId,
+      laneId: 'primary',
+      teamName,
+      cwd: launchCwd,
+      prompt: params.prompt,
+      providerId: 'opencode',
+      model: params.run.request.model,
+      effort: params.run.request.effort,
+      skipPermissions: params.run.request.skipPermissions !== false,
+      expectedMembers,
+      previousLaunchState: params.previousLaunchState,
+    };
+    const launchResult = await params.adapter.launch(launchInput);
+    const { snapshot, result } = await this.persistOpenCodeRuntimeAdapterLaunchResult(
+      launchResult,
+      launchInput
+    );
+    const snapshotStatuses = snapshotToMemberSpawnStatuses(snapshot);
+    for (const member of expectedMembers) {
+      const status = snapshotStatuses[member.name];
+      if (status) {
+        params.run.memberSpawnStatuses.set(member.name, status);
+      }
+    }
+    this.syncOpenCodeRuntimeToolApprovals({
+      teamName,
+      runId,
+      laneId: 'primary',
+      cwd: launchCwd,
+      members: result.members,
+      expectedMembers,
+      teamColor: params.run.request.color,
+      teamDisplayName: params.run.request.displayName,
+    });
+    if (result.teamLaunchState !== 'partial_failure') {
+      this.runtimeAdapterRunByTeam.set(teamName, {
+        runId,
+        providerId: 'opencode',
+        cwd: launchCwd,
+        members: result.members,
+      });
+    }
+    return result;
+  }
+
+  private summarizeOpenCodeAggregateLaunchState(input: {
+    primaryResult: TeamRuntimeLaunchResult | null;
+    lanes: readonly MixedSecondaryRuntimeLaneState[];
+  }): TeamRuntimeLaunchResult['teamLaunchState'] {
+    const states = [
+      input.primaryResult?.teamLaunchState,
+      ...input.lanes.map((lane) => lane.result?.teamLaunchState),
+    ].filter((state): state is TeamRuntimeLaunchResult['teamLaunchState'] => Boolean(state));
+    if (states.length === 0 || states.some((state) => state === 'partial_failure')) {
+      return 'partial_failure';
+    }
+    if (
+      states.some((state) => state === 'partial_pending') ||
+      input.lanes.some((lane) => !lane.result)
+    ) {
+      return 'partial_pending';
+    }
+    return 'clean_success';
+  }
+
+  private async runOpenCodeWorktreeRootAggregateLaunch(input: {
+    request: TeamCreateRequest | TeamLaunchRequest;
+    members: TeamCreateRequest['members'];
+    lanePlan: Extract<TeamRuntimeLanePlan, { mode: 'pure_opencode_worktree_root_lanes' }>;
+    prompt: string;
+    sourceWarning?: string;
+    onProgress: (progress: TeamProvisioningProgress) => void;
+  }): Promise<TeamLaunchResponse> {
+    const adapter = this.getOpenCodeRuntimeAdapter();
+    if (!adapter) {
+      throw new Error('OpenCode runtime adapter is not registered');
+    }
+
+    const stopAllGenerationAtStart = this.stopAllTeamsGeneration;
+    const previousRuntimeRun = this.runtimeAdapterRunByTeam.get(input.request.teamName);
+    if (previousRuntimeRun?.providerId === 'opencode') {
+      await this.stopOpenCodeRuntimeAdapterTeam(input.request.teamName, previousRuntimeRun.runId);
+    }
+    if (this.hasSecondaryRuntimeRuns(input.request.teamName)) {
+      await this.stopMixedSecondaryRuntimeLanes(input.request.teamName);
+    }
+    const previousPendingRunId = this.provisioningRunByTeam.get(input.request.teamName);
+    const previousRuntimeProgress = previousPendingRunId
+      ? this.runtimeAdapterProgressByRunId.get(previousPendingRunId)
+      : null;
+    if (
+      previousPendingRunId &&
+      previousRuntimeProgress &&
+      this.isCancellableRuntimeAdapterProgress(previousRuntimeProgress)
+    ) {
+      await this.cancelRuntimeAdapterProvisioning(previousPendingRunId, previousRuntimeProgress);
+    }
+    if (this.stopAllTeamsGeneration !== stopAllGenerationAtStart) {
+      return this.recordCancelledOpenCodeRuntimeAdapterLaunch(
+        input.request.teamName,
+        input.sourceWarning,
+        input.onProgress
+      );
+    }
+
+    const runId = randomUUID();
+    const startedAt = nowIso();
+    const initialProgress: TeamProvisioningProgress = {
+      runId,
+      teamName: input.request.teamName,
+      state: 'validating',
+      message: 'Validating OpenCode worktree lane launch gate',
+      startedAt,
+      updatedAt: startedAt,
+      warnings: input.sourceWarning ? [input.sourceWarning] : undefined,
+    };
+    this.provisioningRunByTeam.set(input.request.teamName, runId);
+    const initialRuntimeProgress = this.setRuntimeAdapterProgress(
+      initialProgress,
+      input.onProgress
+    );
+    this.resetTeamScopedTransientStateForNewRun(input.request.teamName);
+    const previousLaunchState = await this.launchStateStore.read(input.request.teamName);
+    await this.clearPersistedLaunchState(input.request.teamName);
+
+    const run = this.createOpenCodeAggregateProvisioningRun({
+      runId,
+      startedAt,
+      progress: initialRuntimeProgress,
+      request: input.request,
+      members: input.members,
+      lanePlan: input.lanePlan,
+      onProgress: input.onProgress,
+    });
+    this.runs.set(runId, run);
+    this.invalidateRuntimeSnapshotCaches(input.request.teamName);
+
+    const launching = this.setRuntimeAdapterProgress(
+      {
+        ...initialRuntimeProgress,
+        state: 'spawning',
+        message: 'Starting OpenCode worktree runtime lanes',
+        updatedAt: nowIso(),
+      },
+      input.onProgress
+    );
+    run.progress = launching;
+
+    try {
+      const primaryResult = await this.launchOpenCodeAggregatePrimaryLane({
+        run,
+        adapter,
+        prompt: input.prompt,
+        previousLaunchState,
+      });
+      for (const lane of run.mixedSecondaryLanes) {
+        if (run.cancelRequested || run.processKilled) {
+          break;
+        }
+        await this.launchSingleMixedSecondaryLane(run, lane);
+      }
+
+      run.provisioningComplete = true;
+      const launchState = this.summarizeOpenCodeAggregateLaunchState({
+        primaryResult,
+        lanes: run.mixedSecondaryLanes,
+      });
+      const launchPhase = launchState === 'partial_pending' ? 'active' : 'finished';
+      const snapshot = await this.persistLaunchStateSnapshot(run, launchPhase);
+      if (snapshot) {
+        this.syncRunMemberSpawnStatusesFromSnapshot(run, snapshot);
+      }
+
+      const success = launchState === 'clean_success';
+      const pending = launchState === 'partial_pending';
+      const failed = launchState === 'partial_failure';
+      const finalProgress = this.setRuntimeAdapterProgress(
+        {
+          ...launching,
+          state: success || pending ? 'ready' : 'failed',
+          message: success
+            ? 'OpenCode worktree lanes are ready'
+            : pending
+              ? 'OpenCode worktree lanes are waiting for runtime evidence or permissions'
+              : 'OpenCode worktree lane launch failed readiness gate',
+          messageSeverity: pending ? 'warning' : failed ? 'error' : undefined,
+          updatedAt: nowIso(),
+          error: failed
+            ? run.mixedSecondaryLanes
+                .flatMap((lane) => lane.diagnostics)
+                .filter(Boolean)
+                .join('\n') || 'OpenCode worktree lane launch failed'
+            : undefined,
+          cliLogsTail:
+            run.mixedSecondaryLanes.flatMap((lane) => lane.diagnostics).join('\n') || undefined,
+          configReady: true,
+        },
+        input.onProgress
+      );
+      run.progress = finalProgress;
+      if (success || pending) {
+        this.setAliveRunId(input.request.teamName, runId);
+      } else {
+        this.deleteAliveRunId(input.request.teamName);
+        this.runtimeAdapterRunByTeam.delete(input.request.teamName);
+      }
+      if (this.provisioningRunByTeam.get(input.request.teamName) === runId) {
+        this.provisioningRunByTeam.delete(input.request.teamName);
+      }
+      this.invalidateRuntimeSnapshotCaches(input.request.teamName);
+      this.teamChangeEmitter?.({
+        type: 'process',
+        teamName: input.request.teamName,
+        runId,
+        detail: finalProgress.state,
+      });
+      return { runId };
+    } catch (error) {
+      if (
+        this.cancelledRuntimeAdapterRunIds.delete(runId) ||
+        this.provisioningRunByTeam.get(input.request.teamName) !== runId
+      ) {
+        return { runId };
+      }
+      for (const lane of run.mixedSecondaryLanes) {
+        await clearOpenCodeRuntimeLaneStorage({
+          teamsBasePath: getTeamsBasePath(),
+          teamName: input.request.teamName,
+          laneId: lane.laneId,
+        }).catch(() => undefined);
+        this.deleteSecondaryRuntimeRun(input.request.teamName, lane.laneId);
+      }
+      if (run.effectiveMembers.length > 0) {
+        await clearOpenCodeRuntimeLaneStorage({
+          teamsBasePath: getTeamsBasePath(),
+          teamName: input.request.teamName,
+          laneId: 'primary',
+        }).catch(() => undefined);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const failedProgress = this.setRuntimeAdapterProgress(
+        {
+          ...launching,
+          state: 'failed',
+          message: 'OpenCode worktree lane launch failed',
+          messageSeverity: 'error',
+          updatedAt: nowIso(),
+          error: message,
+          cliLogsTail: message,
+        },
+        input.onProgress
+      );
+      run.progress = failedProgress;
+      if (this.provisioningRunByTeam.get(input.request.teamName) === runId) {
+        this.provisioningRunByTeam.delete(input.request.teamName);
+      }
+      this.runtimeAdapterRunByTeam.delete(input.request.teamName);
+      this.deleteAliveRunId(input.request.teamName);
+      this.invalidateRuntimeSnapshotCaches(input.request.teamName);
+      throw error;
+    }
   }
 
   private async runOpenCodeTeamRuntimeAdapterLaunch(input: {
@@ -22264,7 +22777,11 @@ export class TeamProvisioningService {
           allEffectiveMemberSpecs
         )
       );
-      const lanePlan = this.planRuntimeLanesOrThrow(request.providerId, allEffectiveMemberSpecs);
+      const lanePlan = this.planRuntimeLanesOrThrow(
+        request.providerId,
+        allEffectiveMemberSpecs,
+        request.cwd
+      );
       const primaryMemberNames = new Set(lanePlan.primaryMembers.map((member) => member.name));
       const effectiveMemberSpecs = allEffectiveMemberSpecs.filter((member) =>
         primaryMemberNames.has(member.name)
@@ -25056,6 +25573,9 @@ export class TeamProvisioningService {
     const run = this.runs.get(runId);
     if (!run && this.runtimeAdapterRunByTeam.get(teamName)?.runId === runId) {
       return true;
+    }
+    if (run && this.hasSecondaryRuntimeRuns(teamName)) {
+      return !run.processKilled && !run.cancelRequested;
     }
     return run?.child != null && !run.processKilled && !run.cancelRequested;
   }
@@ -29933,7 +30453,7 @@ export class TeamProvisioningService {
     const leadProviderId =
       normalizeOptionalTeamProviderId(leadLaunchIdentity?.providerId) ??
       normalizeOptionalTeamProviderId(teamMeta?.providerId);
-    if (!leadProviderId || leadProviderId === 'opencode') {
+    if (!leadProviderId) {
       return null;
     }
 
@@ -30011,13 +30531,39 @@ export class TeamProvisioningService {
     let recoveredAny = false;
 
     for (const member of activeMembers) {
-      const laneIdentity = buildPlannedMemberLaneIdentity({
-        leadProviderId,
-        member: {
-          name: member.name,
-          providerId: normalizeOptionalTeamProviderId(member.providerId),
-        },
-      });
+      const persistedMember =
+        persistedSnapshot?.members?.[member.name] ?? bootstrapSnapshot?.members?.[member.name];
+      const laneIdentity =
+        leadProviderId === 'opencode'
+          ? (() => {
+              const persistedLaneId = persistedMember?.laneId?.startsWith('secondary:opencode:')
+                ? persistedMember.laneId
+                : null;
+              const generatedLaneId = buildOpenCodeSecondaryLaneId(member);
+              const memberCwd = member.cwd?.trim();
+              const projectRoot = projectPath?.trim();
+              const hasWorktreeRoot =
+                Boolean(memberCwd) && (!projectRoot || memberCwd !== projectRoot);
+              if (!persistedLaneId && !laneIndex.lanes[generatedLaneId] && !hasWorktreeRoot) {
+                return {
+                  laneId: 'primary',
+                  laneKind: 'primary',
+                  laneOwnerProviderId: leadProviderId,
+                } as const;
+              }
+              return {
+                laneId: persistedLaneId ?? generatedLaneId,
+                laneKind: 'secondary',
+                laneOwnerProviderId: 'opencode',
+              } as const;
+            })()
+          : buildPlannedMemberLaneIdentity({
+              leadProviderId,
+              member: {
+                name: member.name,
+                providerId: normalizeOptionalTeamProviderId(member.providerId),
+              },
+            });
 
       if (
         laneIdentity.laneKind !== 'secondary' ||
@@ -30028,8 +30574,6 @@ export class TeamProvisioningService {
       }
 
       let laneEntry = laneIndex.lanes[laneIdentity.laneId];
-      const persistedMember =
-        persistedSnapshot?.members?.[member.name] ?? bootstrapSnapshot?.members?.[member.name];
       if (
         !laneEntry &&
         persistedMember &&
