@@ -1120,7 +1120,9 @@ function isConfirmedBootstrapStaleRuntimeDiagnostic(reason?: string): boolean {
 
 function isBootstrapProofClearableLaunchFailureReason(reason?: string): boolean {
   return (
-    isAutoClearableLaunchFailureReason(reason) || isProvisionedButNotAliveFailureReason(reason)
+    isAutoClearableLaunchFailureReason(reason) ||
+    isProvisionedButNotAliveFailureReason(reason) ||
+    isConfirmedBootstrapStaleRuntimeDiagnostic(reason)
   );
 }
 

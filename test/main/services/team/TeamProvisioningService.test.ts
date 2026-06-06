@@ -22269,6 +22269,298 @@ describe('TeamProvisioningService', () => {
     expect(result.statuses.tom?.runtimeDiagnosticSeverity).toBeUndefined();
   });
 
+  it('heals issue 209 Codex stale-pid hard failure when bootstrap-state confirms the member', async () => {
+    allowConsoleLogs();
+    const teamName = 'zz-unit-issue-209-codex-stale-pid-bootstrap-heals';
+    const leadSessionId = 'lead-session';
+    const bootstrapRunId = '0ebe3b51-57e5-4281-b872-8184bdea34c7';
+    const memberName = 'business-reviewer-alpha';
+    const runtimePid = 21_580;
+    const stalePidReason = 'persisted runtime pid is not alive';
+
+    writeTeamMeta(teamName, {
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
+      model: 'gpt-5.5',
+    });
+    writeMembersMeta(teamName, [{ name: memberName, providerId: 'codex', model: 'gpt-5.5' }]);
+    writeLaunchConfig(teamName, '/Users/test/proj', leadSessionId, [memberName]);
+    writeMemberBootstrapRunId(teamName, memberName, bootstrapRunId);
+    writeLaunchState(
+      teamName,
+      leadSessionId,
+      {
+        [memberName]: {
+          providerId: 'codex',
+          model: 'gpt-5.5',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'codex',
+          launchState: 'failed_to_start',
+          agentToolAccepted: true,
+          runtimeAlive: false,
+          runtimePid,
+          runtimeRunId: bootstrapRunId,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: stalePidReason,
+          livenessKind: 'stale_metadata',
+          runtimeDiagnostic: stalePidReason,
+          runtimeDiagnosticSeverity: 'warning',
+          firstSpawnAcceptedAt: '2026-06-06T09:49:08.513Z',
+          runtimeLastSeenAt: '2026-06-06T09:51:18.924Z',
+          lastEvaluatedAt: '2026-06-06T09:51:18.924Z',
+        },
+      },
+      { launchPhase: 'finished', updatedAt: '2026-06-06T09:59:23.165Z' }
+    );
+    writeBootstrapState(
+      teamName,
+      [
+        {
+          name: memberName,
+          status: 'bootstrap_confirmed',
+          lastAttemptAt: Date.parse('2026-06-06T09:49:06.287Z'),
+          lastObservedAt: Date.parse('2026-06-06T09:51:53.070Z'),
+        },
+      ],
+      '2026-06-06T09:59:43.154Z',
+      { runId: bootstrapRunId }
+    );
+
+    const svc = new TeamProvisioningService();
+    privateHarness(svc).getLiveTeamAgentRuntimeMetadata = vi.fn(
+      async () =>
+        new Map([
+          [
+            memberName,
+            {
+              alive: false,
+              backendType: 'process',
+              providerId: 'codex',
+              livenessKind: 'stale_metadata',
+              pidSource: 'persisted_metadata',
+              runtimeDiagnostic: stalePidReason,
+              runtimeDiagnosticSeverity: 'warning',
+              metricsPid: runtimePid,
+              model: 'gpt-5.5',
+            },
+          ],
+        ])
+    );
+
+    const result = await svc.getMemberSpawnStatuses(teamName);
+
+    expect(result.teamLaunchState).toBe('clean_success');
+    expect(result.statuses[memberName]).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      bootstrapConfirmed: true,
+      runtimeAlive: false,
+      livenessKind: 'confirmed_bootstrap',
+      hardFailure: false,
+      error: undefined,
+    });
+    expect(result.statuses[memberName]?.hardFailureReason).toBeUndefined();
+    expect(result.statuses[memberName]?.runtimeDiagnostic).toBeUndefined();
+    expect(result.statuses[memberName]?.runtimeDiagnosticSeverity).toBeUndefined();
+  });
+
+  it('heals issue 209 confirmed Codex member without clearing submitted-timeout failures', async () => {
+    allowConsoleLogs();
+    const teamName = 'zz-unit-issue-209-codex-mixed-partial-reconcile';
+    const leadSessionId = 'lead-session';
+    const bootstrapRunId = '0ebe3b51-57e5-4281-b872-8184bdea34c7';
+    const stalePidReason = 'persisted runtime pid is not alive';
+    const submittedTimeoutReason =
+      'Bootstrap prompt was submitted, but teammate did not bootstrap-confirm before submitted-confirmation timeout (3m). Last transport stage: bootstrap_submitted';
+
+    writeTeamMeta(teamName, {
+      providerId: 'codex',
+      providerBackendId: 'codex-native',
+      model: 'gpt-5.5',
+    });
+    writeMembersMeta(teamName, [
+      { name: 'business-reviewer-alpha', providerId: 'codex', model: 'gpt-5.5' },
+      { name: 'business-reviewer-beta', providerId: 'codex', model: 'gpt-5.4' },
+      { name: 'ux-reviewer-beta', providerId: 'codex', model: 'gpt-5.4' },
+    ]);
+    writeLaunchConfig(teamName, '/Users/test/proj', leadSessionId, [
+      'business-reviewer-alpha',
+      'business-reviewer-beta',
+      'ux-reviewer-beta',
+    ]);
+    writeMemberBootstrapRunId(teamName, 'business-reviewer-alpha', bootstrapRunId);
+    writeMemberBootstrapRunId(teamName, 'business-reviewer-beta', bootstrapRunId);
+    writeMemberBootstrapRunId(teamName, 'ux-reviewer-beta', bootstrapRunId);
+    writeLaunchState(
+      teamName,
+      leadSessionId,
+      {
+        'business-reviewer-alpha': {
+          providerId: 'codex',
+          model: 'gpt-5.5',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'codex',
+          launchState: 'failed_to_start',
+          agentToolAccepted: true,
+          runtimeAlive: false,
+          runtimePid: 21_580,
+          runtimeRunId: bootstrapRunId,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: stalePidReason,
+          livenessKind: 'stale_metadata',
+          runtimeDiagnostic: stalePidReason,
+          runtimeDiagnosticSeverity: 'warning',
+          firstSpawnAcceptedAt: '2026-06-06T09:49:08.513Z',
+          runtimeLastSeenAt: '2026-06-06T09:51:18.924Z',
+          lastEvaluatedAt: '2026-06-06T09:51:18.924Z',
+        },
+        'business-reviewer-beta': {
+          providerId: 'codex',
+          model: 'gpt-5.4',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'codex',
+          launchState: 'failed_to_start',
+          agentToolAccepted: true,
+          runtimeAlive: false,
+          runtimePid: 55_336,
+          runtimeRunId: bootstrapRunId,
+          bootstrapConfirmed: false,
+          hardFailure: true,
+          hardFailureReason: submittedTimeoutReason,
+          livenessKind: 'stale_metadata',
+          runtimeDiagnostic: stalePidReason,
+          runtimeDiagnosticSeverity: 'warning',
+          firstSpawnAcceptedAt: '2026-06-06T09:49:11.249Z',
+          runtimeLastSeenAt: '2026-06-06T09:51:18.923Z',
+          lastEvaluatedAt: '2026-06-06T09:52:27.567Z',
+        },
+        'ux-reviewer-beta': {
+          providerId: 'codex',
+          model: 'gpt-5.4',
+          laneId: 'primary',
+          laneKind: 'primary',
+          laneOwnerProviderId: 'codex',
+          launchState: 'confirmed_alive',
+          agentToolAccepted: true,
+          runtimeAlive: true,
+          runtimePid: 2_124,
+          runtimeRunId: bootstrapRunId,
+          bootstrapConfirmed: true,
+          hardFailure: false,
+          firstSpawnAcceptedAt: '2026-06-06T09:49:34.626Z',
+          lastHeartbeatAt: '2026-06-06T09:50:52.188Z',
+          lastRuntimeAliveAt: '2026-06-06T09:59:23.165Z',
+          lastEvaluatedAt: '2026-06-06T09:59:23.165Z',
+        },
+      },
+      { launchPhase: 'finished', updatedAt: '2026-06-06T09:59:23.165Z' }
+    );
+    writeBootstrapState(
+      teamName,
+      [
+        {
+          name: 'business-reviewer-alpha',
+          status: 'bootstrap_confirmed',
+          lastAttemptAt: Date.parse('2026-06-06T09:49:06.287Z'),
+          lastObservedAt: Date.parse('2026-06-06T09:51:53.070Z'),
+        },
+        {
+          name: 'business-reviewer-beta',
+          status: 'failed',
+          lastAttemptAt: Date.parse('2026-06-06T09:49:08.512Z'),
+          lastObservedAt: Date.parse('2026-06-06T09:52:11.246Z'),
+          failureReason: submittedTimeoutReason,
+        },
+        {
+          name: 'ux-reviewer-beta',
+          status: 'bootstrap_confirmed',
+          lastAttemptAt: Date.parse('2026-06-06T09:49:30.803Z'),
+          lastObservedAt: Date.parse('2026-06-06T09:50:52.188Z'),
+        },
+      ],
+      '2026-06-06T09:59:43.154Z',
+      { runId: bootstrapRunId }
+    );
+
+    const svc = new TeamProvisioningService();
+    privateHarness(svc).getLiveTeamAgentRuntimeMetadata = vi.fn(
+      async () =>
+        new Map([
+          [
+            'business-reviewer-alpha',
+            {
+              alive: false,
+              backendType: 'process',
+              providerId: 'codex',
+              livenessKind: 'stale_metadata',
+              pidSource: 'persisted_metadata',
+              runtimeDiagnostic: stalePidReason,
+              runtimeDiagnosticSeverity: 'warning',
+              metricsPid: 21_580,
+              model: 'gpt-5.5',
+            },
+          ],
+          [
+            'business-reviewer-beta',
+            {
+              alive: false,
+              backendType: 'process',
+              providerId: 'codex',
+              livenessKind: 'stale_metadata',
+              pidSource: 'persisted_metadata',
+              runtimeDiagnostic: stalePidReason,
+              runtimeDiagnosticSeverity: 'warning',
+              metricsPid: 55_336,
+              model: 'gpt-5.4',
+            },
+          ],
+          [
+            'ux-reviewer-beta',
+            {
+              alive: true,
+              backendType: 'process',
+              providerId: 'codex',
+              livenessKind: 'runtime_process',
+              pidSource: 'process_table',
+              metricsPid: 2_124,
+              model: 'gpt-5.4',
+            },
+          ],
+        ])
+    );
+
+    const result = await svc.getMemberSpawnStatuses(teamName);
+
+    expect(result.teamLaunchState).toBe('partial_failure');
+    expect(result.statuses['business-reviewer-alpha']).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      bootstrapConfirmed: true,
+      livenessKind: 'confirmed_bootstrap',
+      hardFailure: false,
+    });
+    expect(result.statuses['business-reviewer-alpha']?.hardFailureReason).toBeUndefined();
+    expect(result.statuses['business-reviewer-alpha']?.runtimeDiagnostic).toBeUndefined();
+    expect(result.statuses['business-reviewer-beta']).toMatchObject({
+      status: 'error',
+      launchState: 'failed_to_start',
+      bootstrapConfirmed: false,
+      hardFailure: true,
+      hardFailureReason: submittedTimeoutReason,
+    });
+    expect(result.statuses['ux-reviewer-beta']).toMatchObject({
+      status: 'online',
+      launchState: 'confirmed_alive',
+      bootstrapConfirmed: true,
+      hardFailure: false,
+    });
+  });
+
   it('refreshes cached bootstrap transcript outcome when the transcript file changes', async () => {
     const teamName = 'zz-unit-bootstrap-transcript-cache-refresh';
     const memberName = 'tom';
