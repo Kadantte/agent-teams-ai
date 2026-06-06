@@ -247,8 +247,6 @@ function quoteArg(arg: string): string {
   return quoteWindowsCmdArg(arg);
 }
 
-const WINDOWS_SHELL_UNSAFE_META_CHAR_RE = /[&|<>^]/u;
-
 function containsWindowsShellUnsafeControlChar(part: string): boolean {
   for (let index = 0; index < part.length; index += 1) {
     const code = part.charCodeAt(index);
@@ -262,9 +260,6 @@ function containsWindowsShellUnsafeControlChar(part: string): boolean {
 function assertSafeWindowsShellFallbackPart(part: string): void {
   if (containsWindowsShellUnsafeControlChar(part)) {
     throw new Error('Unsafe Windows shell fallback argument: control characters are not allowed');
-  }
-  if (WINDOWS_SHELL_UNSAFE_META_CHAR_RE.test(part)) {
-    throw new Error('Unsafe Windows shell fallback argument: shell metacharacters are not allowed');
   }
 }
 

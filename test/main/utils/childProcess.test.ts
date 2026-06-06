@@ -326,22 +326,31 @@ describe('cli child process helpers', () => {
       expect(spawnMock.mock.calls[0][2]).not.toHaveProperty('shell');
     });
 
-    it('rejects shell metacharacters only when Windows shell fallback is needed', () => {
+    it('quotes shell metacharacters when Windows shell fallback is needed', () => {
       setPlatform('win32');
       const spawnMock = child.spawn as unknown as Mock;
       spawnMock.mockReturnValue(createMockProcess<SpawnCliChild>());
 
-      for (const unsafeArg of ['safe&bad', 'safe|bad', 'safe<bad', 'safe>bad', 'safe^bad']) {
-        expect(() => spawnCli('C:\\Users\\Алексей\\bin\\claude.cmd', [unsafeArg])).toThrow(
-          'shell metacharacters are not allowed'
-        );
+      expect(() =>
+        spawnCli('C:\\Users\\R&D\\bin\\claude.cmd', [
+          'safe&bad',
+          'safe|bad',
+          'safe<bad',
+          'safe>bad',
+          'safe^bad',
+        ])
+      ).not.toThrow();
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      const shellCmd = spawnMock.mock.calls[0][1][3] as string;
+      expect(shellCmd).toContain('"C:\\Users\\R&D\\bin\\claude.cmd"');
+      for (const shellArg of ['safe&bad', 'safe|bad', 'safe<bad', 'safe>bad', 'safe^bad']) {
+        expect(shellCmd).toContain(`"${shellArg}"`);
       }
-      expect(spawnMock).not.toHaveBeenCalled();
 
       spawnCli('C:\\bin\\claude.exe', ['safe&argv']);
-      expect(spawnMock.mock.calls[0][0]).toBe('C:\\bin\\claude.exe');
-      expect(spawnMock.mock.calls[0][1]).toEqual(['safe&argv']);
-      expect(spawnMock.mock.calls[0][2]).not.toHaveProperty('shell');
+      expect(spawnMock.mock.calls[1][0]).toBe('C:\\bin\\claude.exe');
+      expect(spawnMock.mock.calls[1][1]).toEqual(['safe&argv']);
+      expect(spawnMock.mock.calls[1][2]).not.toHaveProperty('shell');
     });
 
     it('does not use shell when not on windows', () => {
@@ -681,14 +690,33 @@ describe('cli child process helpers', () => {
       expect(execFileMock).toHaveBeenCalledTimes(1);
     });
 
-    it('rejects shell metacharacters when execCli needs Windows shell fallback', async () => {
+    it('quotes shell metacharacters when execCli needs Windows shell fallback', async () => {
       setPlatform('win32');
       const execFileMock = child.execFile as unknown as Mock;
+      execFileMock.mockImplementation(
+        (_cmd: string, _args: string[], _opts: unknown, cb: ExecCallback) => {
+          cb(null, 'ok', '');
+          return createMockProcess<ExecChild>();
+        }
+      );
 
       await expect(
-        execCli('C:\\Users\\Алексей\\bin\\claude.cmd', ['safe&bad'])
-      ).rejects.toThrow('shell metacharacters are not allowed');
-      expect(execFileMock).not.toHaveBeenCalled();
+        execCli('C:\\Users\\R&D\\bin\\claude.cmd', ['safe&bad', 'safe^bad'])
+      ).resolves.toMatchObject({ stdout: 'ok' });
+      expect(execFileMock).toHaveBeenCalledWith(
+        expect.stringMatching(/cmd\.exe$/i),
+        [
+          '/d',
+          '/s',
+          '/c',
+          expect.stringContaining('"C:\\Users\\R&D\\bin\\claude.cmd"'),
+        ],
+        expect.any(Object),
+        expect.any(Function)
+      );
+      const shellCmd = execFileMock.mock.calls[0][1][3] as string;
+      expect(shellCmd).toContain('"safe&bad"');
+      expect(shellCmd).toContain('"safe^bad"');
     });
 
     it('preserves stdout and stderr on execFile failures', async () => {
