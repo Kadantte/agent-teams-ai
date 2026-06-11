@@ -465,7 +465,9 @@ function getRuntimeSelectorModels(
           ? providerStatus.models
           : catalogModels
         : catalogModels;
-    return getVisibleTeamProviderModels(providerId, sourceModels, providerStatus);
+    return getVisibleTeamProviderModels(providerId, sourceModels, providerStatus, {
+      expandOpenCodeSummaryCatalog: false,
+    });
   }
 
   if (providerId === 'anthropic' && isAnthropicCompatibleRuntime(providerStatus)) {

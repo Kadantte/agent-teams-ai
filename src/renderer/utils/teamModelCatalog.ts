@@ -21,6 +21,9 @@ type RuntimeAwareProviderStatus = Pick<
 >;
 type RuntimeModelCatalog = NonNullable<RuntimeAwareProviderStatus['modelCatalog']>;
 type RuntimeCatalogModel = RuntimeModelCatalog['models'][number];
+type VisibleTeamProviderModelsOptions = {
+  expandOpenCodeSummaryCatalog?: boolean;
+};
 
 export interface TeamProviderModelOption {
   value: string;
@@ -709,15 +712,18 @@ function getSupplementalVisibleModels(
 export function getVisibleTeamProviderModels(
   providerId: SupportedProviderId,
   models: readonly string[],
-  providerStatus?: RuntimeAwareProviderStatus | null
+  providerStatus?: RuntimeAwareProviderStatus | null,
+  options: VisibleTeamProviderModelsOptions = {}
 ): string[] {
+  const expandOpenCodeSummaryCatalog = options.expandOpenCodeSummaryCatalog ?? true;
   const hasExplicitModels = models.some((model) => model.trim().length > 0);
   const catalogModels =
     providerId === 'opencode' ? getRuntimeCatalogLaunchModels(providerId, providerStatus) : null;
   const sourceModels =
     providerId === 'opencode' &&
     catalogModels &&
-    (!hasExplicitModels || isOpenCodeSummaryOnlyModelList(models, providerStatus))
+    (!hasExplicitModels ||
+      (expandOpenCodeSummaryCatalog && isOpenCodeSummaryOnlyModelList(models, providerStatus)))
       ? mergeModelLists(catalogModels, models)
       : models;
 
