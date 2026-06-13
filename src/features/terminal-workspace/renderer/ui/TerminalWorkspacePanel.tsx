@@ -113,7 +113,7 @@ interface TerminalTabPreferences {
   colors: Record<string, TerminalTabColorId>;
 }
 
-interface TerminalCommandRunPresentation extends TerminalCommandPresentationMetadata {
+export interface TerminalCommandRunPresentation extends TerminalCommandPresentationMetadata {
   clientEventId: string;
   paneId: string;
   sessionId: string;
@@ -2064,7 +2064,7 @@ function collectPaneIds(node: TerminalMuxPaneTreeNode): string[] {
   return [...collectPaneIds(node.first), ...collectPaneIds(node.second)];
 }
 
-function formatWorkingDirectory(path?: string | null): string {
+export function formatWorkingDirectory(path?: string | null): string {
   const normalizedPath = trimTrailingSlashes(path?.trim() || '');
   if (!normalizedPath) {
     return 'Shell default directory';
@@ -2073,7 +2073,7 @@ function formatWorkingDirectory(path?: string | null): string {
   return compactUserHome(normalizedPath);
 }
 
-function formatTerminalPromptLabel(path?: string | null): string {
+export function formatTerminalPromptLabel(path?: string | null): string {
   const workingDirectory = formatWorkingDirectory(path);
   return workingDirectory === 'Shell default directory' ? 'local shell' : workingDirectory;
 }
@@ -2113,7 +2113,7 @@ function formatFontScaleLabel(fontScale: string): string {
   return 'Default';
 }
 
-function normalizeTerminalCommandRunEventDetail(
+export function normalizeTerminalCommandRunEventDetail(
   event: Event
 ): (TerminalCommandRunPresentation & { durationMs?: number }) | null {
   const detail = (event as CustomEvent<unknown>).detail;
@@ -2153,7 +2153,7 @@ function normalizeTerminalCommandRunEventDetail(
   };
 }
 
-function upsertTerminalCommandRun(
+export function upsertTerminalCommandRun(
   runs: readonly TerminalCommandRunPresentation[],
   nextRun: TerminalCommandRunPresentation,
   status: TerminalCommandRunPresentation['status']
@@ -2171,7 +2171,7 @@ function upsertTerminalCommandRun(
   return merged.slice(-COMMAND_HISTORY_LIMIT);
 }
 
-function settleTerminalCommandRuns(
+export function settleTerminalCommandRuns(
   runs: TerminalCommandRunPresentation[],
   screenLines: readonly string[],
   nowMs: number,
@@ -2212,7 +2212,7 @@ function settleTerminalCommandRuns(
   return changed ? next : runs;
 }
 
-function inferTerminalCommandCompletion(
+export function inferTerminalCommandCompletion(
   lines: readonly string[],
   command: string
 ): { completed: boolean; outputLines: string[] } {
@@ -2294,7 +2294,7 @@ function normalizeCommandForPromptMatch(command: string): string {
   return command.trim().replace(/\s+/g, ' ');
 }
 
-function inferTerminalCommandOutputStatus(
+export function inferTerminalCommandOutputStatus(
   outputLines: readonly string[]
 ): TerminalCommandRunPresentation['status'] {
   const output = outputLines.join('\n').toLowerCase();
