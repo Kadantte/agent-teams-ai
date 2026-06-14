@@ -12,6 +12,7 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')
 const prodDeps = Object.keys(pkg.dependencies || {})
 const terminalPlatformLocalRoot = resolveTerminalPlatformLocalRoot()
 const terminalPlatformSdkAliases = createTerminalPlatformSdkAliases()
+const rendererDependencyEsbuildTarget = 'esnext'
 
 // Fastify and its plugins rely on runtime module resolution that breaks when bundled.
 const runtimeExternalDeps = new Set([
@@ -178,6 +179,11 @@ export default defineConfig({
   renderer: {
     cacheDir: resolve(__dirname, 'node_modules/.vite/electron-renderer'),
     optimizeDeps: {
+      // Electron owns the renderer runtime, so dependency prebundling can keep modern syntax.
+      // This avoids esbuild trying to downlevel large ESM deps like Radix/CodeMirror/xterm.
+      esbuildOptions: {
+        target: rendererDependencyEsbuildTarget,
+      },
       include: ['@codemirror/language-data'],
       exclude: [
         '@claude-teams/agent-graph',
