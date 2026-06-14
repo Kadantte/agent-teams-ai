@@ -1,9 +1,11 @@
 import {
+  closeSupersededTerminalCommandRuns,
   formatTerminalPromptLabel,
   formatWorkingDirectory,
   inferTerminalCommandCompletion,
   inferTerminalCommandOutputStatus,
   normalizeTerminalCommandRunEventDetail,
+  resolveTerminalLocalAutocompleteSuggestion,
   settleTerminalCommandRuns,
   type TerminalCommandRunPresentation,
   upsertTerminalCommandRun,
@@ -24,6 +26,73 @@ describe('terminal workspace panel internals fixture-e2e', () => {
   it('uses a readable local-shell prompt when no cwd is available', () => {
     expect(formatTerminalPromptLabel(null)).toBe('local shell');
     expect(formatTerminalPromptLabel('/Users/belief/dev/quanta')).toBe('~/dev/quanta');
+  });
+
+  it('suggests a local-history autocomplete suffix from recent command prefixes', () => {
+    expect(
+      resolveTerminalLocalAutocompleteSuggestion({
+        candidates: [
+          { command: 'pnpm test', status: 'succeeded' },
+          { command: 'pnpm typecheck', status: 'succeeded', startedAtMs: 1000 },
+        ],
+        draft: 'pnpm t',
+      })
+    ).toBe('pnpm typecheck');
+  });
+
+  it('prefers successful same-pane autocomplete candidates over failed commands', () => {
+    expect(
+      resolveTerminalLocalAutocompleteSuggestion({
+        candidates: [
+          {
+            command: 'pnpm test --broken',
+            paneId: 'pane-1',
+            sessionId: 'session-1',
+            startedAtMs: 5000,
+            status: 'failed',
+          },
+          {
+            command: 'pnpm test --filter renderer',
+            paneId: 'pane-1',
+            sessionId: 'session-1',
+            startedAtMs: 1000,
+            status: 'succeeded',
+          },
+        ],
+        draft: 'pnpm test --',
+        paneId: 'pane-1',
+        sessionId: 'session-1',
+      })
+    ).toBe('pnpm test --filter renderer');
+  });
+
+  it('keeps autocomplete quiet for dismissed, exact, multiline, and unrelated drafts', () => {
+    const candidates = [{ command: 'pnpm typecheck', status: 'succeeded' as const }];
+
+    expect(
+      resolveTerminalLocalAutocompleteSuggestion({
+        candidates,
+        dismissedDraft: 'pnpm t',
+        draft: 'pnpm t',
+      })
+    ).toBeNull();
+    expect(
+      resolveTerminalLocalAutocompleteSuggestion({ candidates, draft: 'pnpm typecheck' })
+    ).toBeNull();
+    expect(resolveTerminalLocalAutocompleteSuggestion({ candidates, draft: 'pnpm\n' })).toBeNull();
+    expect(resolveTerminalLocalAutocompleteSuggestion({ candidates, draft: 'git' })).toBeNull();
+  });
+
+  it('does not aggressively suggest dangerous shell commands from short prefixes', () => {
+    const candidates = [
+      { command: 'rm -rf ./dist', status: 'succeeded' as const },
+      { command: 'git reset --hard HEAD~1', status: 'succeeded' as const },
+    ];
+
+    expect(resolveTerminalLocalAutocompleteSuggestion({ candidates, draft: 'rm' })).toBeNull();
+    expect(resolveTerminalLocalAutocompleteSuggestion({ candidates, draft: 'git reset' })).toBe(
+      'git reset --hard HEAD~1'
+    );
   });
 
   it('normalizes command lifecycle events from the command dock', () => {
@@ -227,6 +296,101 @@ describe('terminal workspace panel internals fixture-e2e', () => {
     ).toEqual({
       completed: true,
       outputLines: ['TP_WRAPPED_OK'],
+    });
+  });
+
+  it('settles long wrapped commands using terminal emulator fragments', () => {
+    const command =
+      "printf 'TP_LONG_1781452725001_%s\\n' 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'";
+    const next = settleTerminalCommandRuns(
+      [createRun({ command, startedAtMs: 1000 })],
+      [
+        "(venv312) shell % printf 'TP_LONG_",
+        "<                      1781452725001_%s\\n' 'abcdefghijklmnop",
+        "<                      abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'",
+        'TP_LONG_1781452725001_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+        'shell %',
+      ],
+      1844,
+      false
+    );
+
+    expect(next[0]).toMatchObject({
+      durationMs: 844,
+      status: 'succeeded',
+    });
+  });
+
+  it('marks visible shell failures as failed before the next prompt is visible', () => {
+    const next = settleTerminalCommandRuns(
+      [createRun({ command: 'ls __tp_missing_1781452725003', startedAtMs: 1000 })],
+      [
+        '(venv312) shell % ls __tp_missing_',
+        '<                      1781452725003',
+        'ls: __tp_missing_1781452725003: No such file or directory',
+      ],
+      2285,
+      false
+    );
+
+    expect(next[0]).toMatchObject({
+      durationMs: 1285,
+      status: 'failed',
+    });
+  });
+
+  it('promotes unknown wrapped shell failures after stderr appears', () => {
+    const next = settleTerminalCommandRuns(
+      [
+        createRun({
+          command: 'ls __tp_missing_verify_1781453698049',
+          durationMs: 1210,
+          status: 'unknown',
+        }),
+      ],
+      [
+        '(venv312) shell % ls __tp_missing_verify_',
+        '<                      1781453698049',
+        'ls: __tp_missing_verify_1781453698049: No such file or directory',
+        'shell %',
+      ],
+      2400,
+      true
+    );
+
+    expect(next[0]).toMatchObject({
+      durationMs: 1210,
+      status: 'failed',
+    });
+  });
+
+  it('closes superseded running commands with a duration when a new command starts', () => {
+    const running = createRun({
+      command:
+        'echo TP_LONG_VERIFY_1781454013183_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      startedAtMs: 1000,
+      status: 'running',
+    });
+    const nextRun = createRun({
+      clientEventId: 'event-next',
+      command: 'sleep 0.4; echo TP_TIMING_VERIFY_1781454013184',
+      startedAtMs: 2600,
+      status: 'running',
+    });
+
+    const next = closeSupersededTerminalCommandRuns(
+      [running],
+      nextRun,
+      [
+        '<                      23456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+        'TP_LONG_VERIFY_1781454013183_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      ],
+      2600
+    );
+
+    expect(next[0]).toMatchObject({
+      durationMs: 1600,
+      status: 'unknown',
     });
   });
 

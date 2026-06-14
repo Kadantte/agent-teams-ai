@@ -288,6 +288,7 @@ export const TerminalWorkspaceBottomSheet = ({
     snapTo(expanded ? TERMINAL_SHEET_PREVIEW_SNAP_INDEX : TERMINAL_SHEET_FULL_SNAP_INDEX);
   }, [expanded, snapTo]);
   const expansionActionLabel = expanded ? 'Restore half-height sheet' : 'Expand terminal sheet';
+  const settingsActionLabel = settingsOpen ? 'Close terminal settings' : 'Open terminal settings';
   const controlledSheetY =
     dragY ?? resolveSheetYForSnap(normalizedSnapIndex, snapPoints, mountHeight);
   const handleDragPointerDown = useCallback(
@@ -436,16 +437,14 @@ export const TerminalWorkspaceBottomSheet = ({
                           ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)]'
                           : '',
                       ].join(' ')}
-                      aria-label={settingsOpen ? 'Show terminal console' : 'Show terminal settings'}
+                      aria-label={settingsActionLabel}
                       aria-pressed={settingsOpen}
                       onClick={() => setSettingsOpen((value) => !value)}
                     >
                       <Settings2 size={15} />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="top">
-                    {settingsOpen ? 'Show terminal console' : 'Show terminal settings'}
-                  </TooltipContent>
+                  <TooltipContent side="top">{settingsActionLabel}</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -501,6 +500,7 @@ export const TerminalWorkspaceBottomSheet = ({
                 isTeamAlive={isTeamAlive}
                 surface="sheet"
                 settingsOpen={settingsOpen}
+                onSettingsOpenChange={setSettingsOpen}
                 terminalHeightClassName="h-full min-h-0 flex-1"
                 tabsPortalElement={headerTabsElement}
                 getBootstrap={getBootstrap}

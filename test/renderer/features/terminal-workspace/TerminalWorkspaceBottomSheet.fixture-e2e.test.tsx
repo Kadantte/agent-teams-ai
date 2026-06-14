@@ -294,7 +294,7 @@ describe('terminal workspace bottom sheet fixture-e2e', () => {
     await renderBottomSheet({ open: true, mountPoint });
 
     expect(sheetFixture.panelProps.at(-1)?.settingsOpen).toBe(false);
-    await clickButton('Show terminal settings');
+    await clickButton('Open terminal settings');
 
     expect(sheetFixture.panelProps.at(-1)?.settingsOpen).toBe(true);
     expect(

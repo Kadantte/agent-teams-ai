@@ -36,7 +36,10 @@ vi.mock('terminal-platform-node', () => ({
   },
 }));
 
-import { createTerminalWorkspaceFeature } from '@features/terminal-workspace/main/composition/createTerminalWorkspaceFeature';
+import {
+  createTerminalWorkspaceFeature,
+  terminalWorkspaceFeatureTestInternals,
+} from '@features/terminal-workspace/main/composition/createTerminalWorkspaceFeature';
 
 import type { Logger } from '@shared/utils/logger';
 
@@ -73,7 +76,7 @@ describe('terminal workspace feature composition fixture-e2e', () => {
     await fs.mkdir(sandboxProjectPath, { recursive: true });
     await fs.writeFile(daemonBinaryPath, '#!/bin/sh\n');
     process.env.CLAUDE_TERMINAL_DAEMON_BINARY = daemonBinaryPath;
-    delete process.env.CLAUDE_TERMINAL_PLATFORM_ROOT;
+    process.env.CLAUDE_TERMINAL_PLATFORM_ROOT = path.join(tempRoot, 'missing-terminal-platform');
     delete process.env.TERMINAL_PLATFORM_ROOT;
     process.env.SHELL = '/bin/zsh';
 
@@ -348,6 +351,55 @@ describe('terminal workspace feature composition fixture-e2e', () => {
 
     await feature.dispose();
   });
+
+  it('resolves a built terminal-platform checkout instead of the install-time node stub', async () => {
+    const terminalNodePackagePath = path.join(
+      tempRoot,
+      'terminal-platform',
+      'crates',
+      'terminal-node-napi',
+      'package',
+      'artifacts',
+      'local',
+      'index.mjs'
+    );
+    await fs.mkdir(path.dirname(terminalNodePackagePath), { recursive: true });
+    await fs.writeFile(terminalNodePackagePath, 'export const TerminalNodeClient = {};\n');
+    process.env.CLAUDE_TERMINAL_PLATFORM_ROOT = path.join(tempRoot, 'terminal-platform');
+
+    expect(terminalWorkspaceFeatureTestInternals.resolveTerminalNodePackageSpecifier()).toBe(
+      `file://${terminalNodePackagePath}`
+    );
+  });
+
+  it('fails daemon readiness fast when only the terminal-platform-node install-time stub is available', async () => {
+    const loadStubClient = async () =>
+      ({
+        fromRuntimeSlug: () =>
+          ({
+            close: vi.fn().mockResolvedValue(undefined),
+            handshakeInfo: vi.fn().mockRejectedValue(
+              new Error(
+                'terminal-platform-node native runtime is not installed. Set CLAUDE_TERMINAL_PLATFORM_ROOT to a built terminal-platform checkout.'
+              )
+            ),
+          }) as TerminalNodeClientLike,
+      }) as unknown as Awaited<
+        ReturnType<Parameters<typeof terminalWorkspaceFeatureTestInternals.probeTerminalNodeClientReadiness>[0]>
+      >;
+    const readiness = await terminalWorkspaceFeatureTestInternals.probeTerminalNodeClientReadiness(
+      loadStubClient,
+      'agent-teams-terminal-fixture'
+    );
+
+    expect(readiness).toMatchObject({
+      fatal: true,
+      ready: false,
+    });
+    expect(readiness.error).toBeInstanceOf(Error);
+    expect((readiness.error as Error).message).toContain('CLAUDE_TERMINAL_PLATFORM_ROOT');
+    expect((readiness.error as Error).message).not.toContain('Timed out waiting');
+  });
 });
 
 interface Deferred<T> {
@@ -383,6 +435,11 @@ interface FakeTerminalClient {
   screenDelta: ReturnType<typeof vi.fn>;
   screenSnapshot: ReturnType<typeof vi.fn>;
   topologySnapshot: ReturnType<typeof vi.fn>;
+}
+
+interface TerminalNodeClientLike {
+  close(): Promise<void>;
+  handshakeInfo(): Promise<unknown>;
 }
 
 interface FakeGatewayHandle {

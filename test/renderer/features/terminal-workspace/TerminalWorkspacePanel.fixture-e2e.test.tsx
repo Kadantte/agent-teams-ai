@@ -353,6 +353,52 @@ describe('terminal workspace panel fixture-e2e', () => {
     );
   });
 
+  it('passes local command-history autocomplete suggestions to the terminal command dock', async () => {
+    vi.useFakeTimers();
+    nextSnapshot = createWorkspaceSnapshot({
+      commandHistoryEntries: ['git status', 'pnpm typecheck', 'pnpm test'],
+    });
+
+    try {
+      await renderPanel();
+
+      await act(async () => {
+        getRequiredElement('mock-terminal-command-dock').dispatchEvent(
+          new CustomEvent('tp-terminal-command-draft-change', {
+            bubbles: true,
+            detail: {
+              value: 'pnpm t',
+            },
+          })
+        );
+        await flushMicrotasks();
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(80);
+        await flushMicrotasks();
+      });
+
+      expect(panelFixture.commandDockProps.at(-1)?.autocompleteSuggestion).toBe('pnpm test');
+
+      await act(async () => {
+        getRequiredElement('mock-terminal-command-dock').dispatchEvent(
+          new CustomEvent('tp-terminal-command-autocomplete-dismiss', {
+            bubbles: true,
+            detail: {
+              draft: 'pnpm t',
+            },
+          })
+        );
+        await flushMicrotasks();
+      });
+
+      expect(panelFixture.commandDockProps.at(-1)?.autocompleteSuggestion).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows cwd, git branch, prompt label, and powered-by GitHub link in the command area', async () => {
     await renderPanel();
 
@@ -619,6 +665,118 @@ describe('terminal workspace panel fixture-e2e', () => {
     expect(document.body.textContent).not.toContain('__tp_prewarmed_shell__');
   });
 
+  it('keeps terminal tab close buttons hover-only and avoids mixed border style shorthands', async () => {
+    window.localStorage.setItem(
+      storageKey('tab-preferences'),
+      JSON.stringify({
+        colors: {
+          'tab-2': 'sky',
+        },
+        order: ['tab-1', 'tab-2'],
+        version: 1,
+      })
+    );
+    nextSnapshot = createWorkspaceSnapshot({
+      focusedTabId: 'tab-2',
+      tabs: [
+        createTab('tab-1', 'Terminal UI Smoke', 'pane-1'),
+        createTab('tab-2', 'Logs', 'pane-2'),
+        createTab('tab-prewarmed', '__tp_prewarmed_shell__', 'pane-prewarmed'),
+      ],
+    });
+
+    await renderPanel();
+
+    const closeButton = getTabCloseButton('Logs');
+    const closeButtonClass = closeButton.getAttribute('class') ?? '';
+    const tabElement = getTabDragElement('Logs');
+
+    expect(closeButtonClass).toContain('opacity-0');
+    expect(closeButtonClass).toContain('group-hover:opacity-100');
+    expect(closeButtonClass).not.toContain('border-l');
+    expect(tabElement.getAttribute('style')).not.toContain('border-color:');
+    expect(tabElement.style.getPropertyValue('--tp-tab-border')).not.toBe('');
+    expect(tabElement.style.getPropertyValue('--tp-tab-border-bottom')).toBe('transparent');
+  });
+
+  it('reorders terminal tabs from a horizontal pointer drag and shows a precise drop indicator', async () => {
+    nextSnapshot = createWorkspaceSnapshot({
+      tabs: [
+        createTab('tab-1', 'Terminal UI Smoke', 'pane-1'),
+        createTab('tab-2', 'Logs', 'pane-2'),
+        createTab('tab-prewarmed', '__tp_prewarmed_shell__', 'pane-prewarmed'),
+      ],
+    });
+
+    await renderPanel();
+
+    const source = getTabDragElement('Terminal UI Smoke');
+    const target = getTabDragElement('Logs');
+    setElementRect(source, { left: 0, width: 120 });
+    setElementRect(target, { left: 128, width: 120 });
+
+    await act(async () => {
+      dispatchMockPointerEvent(source, 'pointerdown', { clientX: 24, clientY: 10 });
+      dispatchMockPointerEvent(source, 'pointermove', { clientX: 240, clientY: 12 });
+      await flushMicrotasks();
+    });
+
+    expect(getVisibleTabLabels()).toEqual(['Logs', 'Terminal UI Smoke']);
+    expect(getRequiredElement('agent-team-terminal-tab-drop-indicator')).toBeTruthy();
+    expect(getTabDragElement('Logs').dataset.dropPlacement).toBe('after');
+    expect(JSON.parse(window.localStorage.getItem(storageKey('tab-preferences')) ?? '{}')).toEqual(
+      expect.objectContaining({
+        order: ['tab-2', 'tab-1'],
+      })
+    );
+
+    await act(async () => {
+      dispatchMockPointerEvent(getTabDragElement('Terminal UI Smoke'), 'pointerup', {
+        clientX: 240,
+        clientY: 12,
+      });
+      await flushMicrotasks();
+    });
+
+    expect(
+      document.querySelector('[data-testid="agent-team-terminal-tab-drop-indicator"]')
+    ).toBeNull();
+    expect(getVisibleTabLabels()).toEqual(['Logs', 'Terminal UI Smoke']);
+  });
+
+  it('shows tab switching progress in the terminal history area instead of the tab label', async () => {
+    nextSnapshot = createWorkspaceSnapshot({
+      tabs: [
+        createTab('tab-1', 'Terminal UI Smoke', 'pane-1'),
+        createTab('tab-2', 'Logs', 'pane-2'),
+        createTab('tab-prewarmed', '__tp_prewarmed_shell__', 'pane-prewarmed'),
+      ],
+    });
+
+    await renderPanel();
+
+    const kernel = currentKernel();
+    const pendingFocus = createDeferred<void>();
+    kernel.commands.dispatchMuxCommand.mockImplementationOnce(() => pendingFocus.promise);
+
+    await act(async () => {
+      getTabButton('Logs').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await flushMicrotasks();
+    });
+
+    expect(getRequiredElement('agent-team-terminal-content-skeleton')).toBeTruthy();
+    expect(getTabButton('Logs').querySelector('.animate-spin')).toBeNull();
+
+    await act(async () => {
+      pendingFocus.resolve();
+      await flushMicrotasks();
+    });
+
+    expect(
+      document.querySelector('[data-testid="agent-team-terminal-content-skeleton"]')
+    ).toBeNull();
+  });
+
   it('forwards command lifecycle metadata into terminal screen presentations and scrolls down', async () => {
     nextSnapshot = createWorkspaceSnapshot({
       tabs: [
@@ -849,7 +1007,7 @@ describe('terminal workspace panel fixture-e2e', () => {
     expect(metadata[0]).toMatchObject({
       clientEventId: 'long-command-15',
       command: 'printf LONG_15\\n',
-      status: 'running',
+      status: 'unknown',
     });
     expect(metadata.at(-1)).toMatchObject({
       clientEventId: 'long-command-94',
@@ -1027,23 +1185,70 @@ describe('terminal workspace panel fixture-e2e', () => {
     );
   });
 
-  it('routes settings controls into kernel commands and runtime actions', async () => {
+  it('renders settings as a tab page and routes appearance, behavior, and runtime actions', async () => {
     await renderPanel({ settingsOpen: true });
     const kernel = currentKernel();
 
-    await clickTextButton('Light');
-    await clickTextButton('Large');
-    await clickTextButton('Wrap');
-    await clickButton('Reconnect terminal workspace');
-    await clickButton('Reload terminal sessions');
-    await clickButton('Stop terminal runtime');
+    expect(
+      document.querySelector('[data-testid="agent-team-terminal-settings-tab"]')
+    ).not.toBeNull();
+    expect(document.querySelector('[data-testid="agent-team-terminal-settings"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="mock-terminal-command-dock"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Terminal theme"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Terminal font preset"]')).not.toBeNull();
+    expect(document.querySelector('#terminal-settings-background-image')).toBeNull();
 
-    expect(kernel.commands.setTheme).toHaveBeenCalledWith('terminal-platform-light');
-    expect(kernel.commands.setTerminalFontScale).toHaveBeenCalledWith('large');
+    await updateInputValue('#terminal-settings-font-size', '18');
+    await updateInputValue('#terminal-settings-opacity', '63');
+    await clickCheckboxLabel('Wrap long command output');
+    await clickTextButton('Reconnect');
+    await clickTextButton('Sessions');
+    await clickTextButton('Stop');
+
+    const consoleElement = document.querySelector<HTMLElement>('.agent-team-terminal-console');
+    expect(consoleElement?.style.getPropertyValue('--agent-terminal-font-size')).toBe('18px');
+    expect(consoleElement?.style.getPropertyValue('--agent-terminal-panel-opacity')).toBe('0.63');
+    expect(
+      JSON.parse(window.localStorage.getItem(storageKey('appearance-settings')) ?? '{}')
+    ).toEqual(
+      expect.objectContaining({
+        fontSizePx: 18,
+        opacityPercent: 63,
+      })
+    );
     expect(kernel.commands.setTerminalLineWrap).toHaveBeenCalledWith(true);
     expect(kernel.commands.bootstrap).toHaveBeenCalled();
     expect(kernel.commands.refreshSessions).toHaveBeenCalled();
     expect(stopTeamRuntime).toHaveBeenCalledWith(TEAM_NAME);
+  });
+
+  it('shows image-only background controls and applies image blur when image mode is selected', async () => {
+    window.localStorage.setItem(
+      storageKey('appearance-settings'),
+      JSON.stringify({
+        backgroundColor: '#080c14',
+        backgroundImageFit: 'cover',
+        backgroundImageUrl: 'https://example.test/background.jpg',
+        backgroundMode: 'image',
+        backdropBlurPx: 4,
+        dimBackgroundImage: true,
+        fontSizePx: 15,
+        opacityPercent: 74,
+        version: 1,
+      })
+    );
+
+    await renderPanel({ settingsOpen: true });
+
+    expect(document.querySelector('#terminal-settings-background-image')).not.toBeNull();
+    expect(document.querySelector('#terminal-settings-blur')).not.toBeNull();
+
+    await updateInputValue('#terminal-settings-blur', '22');
+
+    const consoleElement = document.querySelector<HTMLElement>('.agent-team-terminal-console');
+    expect(consoleElement?.style.getPropertyValue('--agent-terminal-background-image-blur')).toBe(
+      '22px'
+    );
   });
 
   it('reattaches sessions after connection loss and recovery without duplicating stable attaches', async () => {
@@ -1389,6 +1594,88 @@ function getTabButton(label: string): HTMLButtonElement {
   return button;
 }
 
+function getTabDragElement(label: string): HTMLDivElement {
+  const element = getTabButton(label).closest<HTMLDivElement>('[data-terminal-tab-id]');
+  if (!element) {
+    throw new Error(`Missing draggable tab element: ${label}`);
+  }
+  return element;
+}
+
+function getTabCloseButton(label: string): HTMLButtonElement {
+  const closeButton = getTabDragElement(label).querySelector<HTMLButtonElement>(
+    '[data-testid="agent-team-terminal-close-mux-tab"]'
+  );
+  if (!closeButton) {
+    throw new Error(`Missing close button for tab: ${label}`);
+  }
+  return closeButton;
+}
+
+function setElementRect(element: HTMLElement, rect: { left: number; width: number }): void {
+  element.getBoundingClientRect = vi.fn(
+    () =>
+      ({
+        bottom: 27,
+        height: 27,
+        left: rect.left,
+        right: rect.left + rect.width,
+        top: 0,
+        width: rect.width,
+        x: rect.left,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect
+  );
+}
+
+function dispatchMockPointerEvent(
+  element: HTMLElement,
+  type: string,
+  options: { clientX?: number; clientY?: number; pointerId?: number }
+): void {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clientX', {
+    configurable: true,
+    value: options.clientX ?? 0,
+  });
+  Object.defineProperty(event, 'clientY', {
+    configurable: true,
+    value: options.clientY ?? 0,
+  });
+  Object.defineProperty(event, 'button', {
+    configurable: true,
+    value: 0,
+  });
+  Object.defineProperty(event, 'buttons', {
+    configurable: true,
+    value: type === 'pointerup' ? 0 : 1,
+  });
+  Object.defineProperty(event, 'isPrimary', {
+    configurable: true,
+    value: true,
+  });
+  Object.defineProperty(event, 'pointerId', {
+    configurable: true,
+    value: options.pointerId ?? 1,
+  });
+  element.dispatchEvent(event);
+}
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  reject: (reason?: unknown) => void;
+  resolve: (value: T | PromiseLike<T>) => void;
+} {
+  let resolve: (value: T | PromiseLike<T>) => void = () => undefined;
+  let reject: (reason?: unknown) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 async function clickButton(label: string): Promise<void> {
   const button = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
     (candidate) => candidate.getAttribute('aria-label') === label
@@ -1413,6 +1700,37 @@ async function clickTextButton(text: string): Promise<void> {
 
   await act(async () => {
     button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+  });
+}
+
+async function updateInputValue(selector: string, value: string): Promise<void> {
+  const input = document.querySelector<HTMLInputElement>(selector);
+  if (!input) {
+    throw new Error(`Missing input: ${selector}`);
+  }
+
+  await act(async () => {
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value'
+    )?.set;
+    valueSetter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    await flushMicrotasks();
+  });
+}
+
+async function clickCheckboxLabel(labelText: string): Promise<void> {
+  const checkbox = Array.from(document.querySelectorAll<HTMLElement>('[role="checkbox"]')).find(
+    (candidate) => candidate.closest('label')?.textContent?.includes(labelText)
+  );
+  if (!checkbox) {
+    throw new Error(`Missing checkbox: ${labelText}`);
+  }
+
+  await act(async () => {
+    checkbox.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     await flushMicrotasks();
   });
 }

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,6 +25,8 @@ const SHUTDOWN_TIMEOUT_MS = 5_000;
 const TERMINAL_PLATFORM_ROOT_ENV = 'CLAUDE_TERMINAL_PLATFORM_ROOT';
 const LEGACY_TERMINAL_PLATFORM_ROOT_ENV = 'TERMINAL_PLATFORM_ROOT';
 const TERMINAL_DAEMON_BINARY_ENV = 'CLAUDE_TERMINAL_DAEMON_BINARY';
+const TERMINAL_NODE_STUB_UNAVAILABLE_MESSAGE =
+  'terminal-platform-node native runtime is not installed';
 
 type TerminalDaemonChildProcess = ReturnType<typeof spawn>;
 
@@ -279,31 +282,91 @@ class TeamTerminalDaemonSupervisor {
 
   private async waitUntilReady(): Promise<void> {
     const startedAt = Date.now();
+    let lastError: unknown = null;
+
     while (Date.now() - startedAt < READY_TIMEOUT_MS) {
       if (this.#child && this.#child.exitCode !== null) {
         throw new Error(`terminal-daemon exited before ready with code ${this.#child.exitCode}`);
       }
 
-      if (await this.isReady()) {
+      const readiness = await this.checkReadiness();
+      if (readiness.ready) {
         return;
+      }
+      lastError = readiness.error;
+      if (readiness.fatal) {
+        throw readiness.error;
       }
 
       await sleep(READY_POLL_MS);
     }
 
-    throw new Error('Timed out waiting for terminal-daemon');
+    throw new Error(
+      lastError instanceof Error
+        ? `Timed out waiting for terminal-daemon: ${lastError.message}`
+        : 'Timed out waiting for terminal-daemon'
+    );
   }
 
   private async isReady(): Promise<boolean> {
-    try {
-      const TerminalNodeClient = await loadTerminalNodeClientConstructor();
-      const client = TerminalNodeClient.fromRuntimeSlug(this.#runtimeSlug);
-      await client.handshakeInfo();
-      await client.close().catch(() => undefined);
-      return true;
-    } catch {
-      return false;
+    const readiness = await this.checkReadiness();
+    if (readiness.fatal) {
+      throw readiness.error;
     }
+    return readiness.ready;
+  }
+
+  private async checkReadiness(): Promise<{
+    error?: unknown;
+    fatal: boolean;
+    ready: boolean;
+  }> {
+    return probeTerminalNodeClientReadiness(loadTerminalNodeClientConstructor, this.#runtimeSlug);
+  }
+}
+
+function isTerminalNodeStubUnavailableError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    typeof error.message === 'string' &&
+    error.message.includes(TERMINAL_NODE_STUB_UNAVAILABLE_MESSAGE)
+  );
+}
+
+function createTerminalNodeClientReadinessError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(
+    `${message}. Set ${TERMINAL_PLATFORM_ROOT_ENV} to a built terminal-platform checkout, or keep a built ../terminal-platform sibling checkout for local development.`
+  );
+}
+
+function isFatalTerminalNodeReadinessError(error: unknown): boolean {
+  return isTerminalNodeStubUnavailableError(error);
+}
+
+async function probeTerminalNodeClientReadiness(
+  loadClient: () => Promise<TerminalNodeClientConstructor>,
+  runtimeSlug: string
+): Promise<{
+  error?: unknown;
+  fatal: boolean;
+  ready: boolean;
+}> {
+  try {
+    const TerminalNodeClient = await loadClient();
+    const client = TerminalNodeClient.fromRuntimeSlug(runtimeSlug);
+    await client.handshakeInfo();
+    await client.close().catch(() => undefined);
+    return { fatal: false, ready: true };
+  } catch (error) {
+    if (isFatalTerminalNodeReadinessError(error)) {
+      return {
+        error: createTerminalNodeClientReadinessError(error),
+        fatal: true,
+        ready: false,
+      };
+    }
+    return { error, fatal: false, ready: false };
   }
 }
 
@@ -431,22 +494,25 @@ async function importTerminalNodeClientConstructor(): Promise<TerminalNodeClient
 }
 
 function resolveTerminalNodePackageSpecifier(): string {
-  const explicitRoot = resolveExplicitTerminalPlatformRoot();
-  if (!explicitRoot) {
-    return 'terminal-platform-node';
+  const localPackagePath = resolveTerminalNodeLocalPackagePath();
+  if (localPackagePath) {
+    return pathToFileURL(localPackagePath).href;
   }
 
-  return pathToFileURL(
-    path.join(
-      explicitRoot,
-      'crates',
-      'terminal-node-napi',
-      'package',
-      'artifacts',
-      'local',
-      'index.mjs'
-    )
-  ).href;
+  return 'terminal-platform-node';
+}
+
+function resolveTerminalNodeLocalPackagePath(): string | null {
+  const candidate = path.join(
+    resolveTerminalPlatformRoot(),
+    'crates',
+    'terminal-node-napi',
+    'package',
+    'artifacts',
+    'local',
+    'index.mjs'
+  );
+  return fsSync.existsSync(candidate) ? candidate : null;
 }
 
 async function resolveExistingDirectory(value: string | null | undefined): Promise<string | null> {
@@ -515,3 +581,10 @@ function isChildRunning(child: TerminalDaemonChildProcess): boolean {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+export const terminalWorkspaceFeatureTestInternals = {
+  createTerminalNodeClientReadinessError,
+  isTerminalNodeStubUnavailableError,
+  probeTerminalNodeClientReadiness,
+  resolveTerminalNodePackageSpecifier,
+};

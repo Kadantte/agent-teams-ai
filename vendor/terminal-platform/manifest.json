@@ -1,6 +1,6 @@
 {
   "sourceRepository": "https://github.com/777genius/terminal-platform",
-  "sourceRef": "ff6156127b650129581243d9680f2e7490b97cb1",
+  "sourceRef": "ccf000bb9cb6147e72cc38dc6028e8c584258193",
   "packages": [
     "@terminal-platform/design-tokens",
     "@terminal-platform/foundation",
