@@ -3521,12 +3521,16 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
       },
     });
 
-    expect(getConfiguredAnthropicApiKeyForTeamRuntime).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ANTHROPIC_BASE_URL: 'http://localhost:1234',
-        ANTHROPIC_API_KEY: '',
-      })
-    );
+    if (process.platform === 'win32') {
+      expect(getConfiguredAnthropicApiKeyForTeamRuntime).not.toHaveBeenCalled();
+    } else {
+      expect(getConfiguredAnthropicApiKeyForTeamRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ANTHROPIC_BASE_URL: 'http://localhost:1234',
+          ANTHROPIC_API_KEY: '',
+        })
+      );
+    }
     expect(result.authSource).toBe('none');
     expect(result.providerArgs).toEqual([]);
   });
@@ -3546,9 +3550,11 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
     expect(result.env.ANTHROPIC_API_KEY).toBe('real-key');
   });
 
-  it('does not leak Vitest NODE_ENV into real team runtime children', async () => {
+  it('normalizes inherited Node runtime env for real team runtime children', async () => {
     const previousNodeEnv = process.env.NODE_ENV;
+    const previousNodeOptions = process.env.NODE_OPTIONS;
     process.env.NODE_ENV = 'test';
+    process.env.NODE_OPTIONS = '--max-old-space-size=64 --trace-warnings';
     try {
       const svc = new TeamProvisioningService();
       const buildProvisioningEnv = (
@@ -3560,9 +3566,13 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
       const result = await buildProvisioningEnv();
 
       expect(result.env.NODE_ENV).toBe('development');
+      expect(result.env.NODE_OPTIONS).toBe('--max-old-space-size=2048 --trace-warnings');
       expect(buildProviderAwareCliEnvMock).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          env: expect.objectContaining({ NODE_ENV: 'development' }),
+          env: expect.objectContaining({
+            NODE_ENV: 'development',
+            NODE_OPTIONS: '--max-old-space-size=2048 --trace-warnings',
+          }),
         })
       );
     } finally {
@@ -3570,6 +3580,11 @@ describe('TeamProvisioningService prepare/auth behavior', () => {
         delete process.env.NODE_ENV;
       } else {
         process.env.NODE_ENV = previousNodeEnv;
+      }
+      if (previousNodeOptions === undefined) {
+        delete process.env.NODE_OPTIONS;
+      } else {
+        process.env.NODE_OPTIONS = previousNodeOptions;
       }
     }
   });

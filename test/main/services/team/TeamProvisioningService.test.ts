@@ -301,6 +301,41 @@ function withRuntimePidusageTelemetryEnv(
   });
 }
 
+let restoreRuntimeTelemetryPlatformForTest: (() => void) | undefined;
+
+function setRuntimeTelemetryPlatformForTest(platform: NodeJS.Platform): () => void {
+  restoreRuntimeTelemetryPlatformForTest?.();
+  const previous = process.platform;
+  Object.defineProperty(process, 'platform', {
+    value: platform,
+    configurable: true,
+  });
+  const restore = () => {
+    Object.defineProperty(process, 'platform', {
+      value: previous,
+      configurable: true,
+    });
+    if (restoreRuntimeTelemetryPlatformForTest === restore) {
+      restoreRuntimeTelemetryPlatformForTest = undefined;
+    }
+  };
+  restoreRuntimeTelemetryPlatformForTest = restore;
+  return restore;
+}
+
+function restoreRuntimeTelemetryPlatformAfterTest(): void {
+  restoreRuntimeTelemetryPlatformForTest?.();
+}
+
+function mockRuntimeUsageProcessRows(rows: RuntimeTelemetryProcessTableRow[]): void {
+  if (process.platform === 'win32') {
+    vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([]);
+    vi.mocked(listWindowsProcessTable).mockResolvedValue(rows);
+    return;
+  }
+  vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue(rows);
+}
+
 function allowConsoleLogs() {
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -945,6 +980,7 @@ describe('TeamProvisioningService', () => {
   });
 
   afterEach(() => {
+    restoreRuntimeTelemetryPlatformAfterTest();
     restoreRuntimePidusageTelemetryEnv();
     clearAutoResumeService();
     vi.useRealTimers();
@@ -3802,6 +3838,7 @@ describe('TeamProvisioningService', () => {
     });
 
     it('uses batched pidusage rss values for lead and teammates', async () => {
+      setRuntimeTelemetryPlatformForTest('linux');
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
@@ -3862,6 +3899,7 @@ describe('TeamProvisioningService', () => {
     });
 
     it('uses process table CPU and RSS values before falling back to pidusage', async () => {
+      setRuntimeTelemetryPlatformForTest('linux');
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
@@ -4055,6 +4093,7 @@ describe('TeamProvisioningService', () => {
     });
 
     it('falls back to pidusage for root pids missing from an otherwise available process table', async () => {
+      setRuntimeTelemetryPlatformForTest('linux');
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
@@ -4219,7 +4258,7 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+      mockRuntimeUsageProcessRows([
         { pid: 111, ppid: 1, command: 'claude' },
         { pid: 222, ppid: 111, command: 'node tool.js' },
         { pid: 333, ppid: 222, command: 'python worker.py' },
@@ -4293,7 +4332,7 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+      mockRuntimeUsageProcessRows([
         { pid: 111, ppid: 1, command: 'lead' },
         { pid: 222, ppid: 111, command: 'lead-tool' },
         { pid: 333, ppid: 111, command: 'alice-runtime' },
@@ -4352,7 +4391,7 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+      mockRuntimeUsageProcessRows([
         { pid: 111, ppid: 1, command: 'lead' },
         { pid: 222, ppid: 111, command: 'lead-tool' },
         {
@@ -4434,7 +4473,7 @@ describe('TeamProvisioningService', () => {
             ],
           ])
       );
-      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+      mockRuntimeUsageProcessRows([
         {
           pid: 333,
           ppid: 1,
@@ -4492,7 +4531,7 @@ describe('TeamProvisioningService', () => {
             ],
           ])
       );
-      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+      mockRuntimeUsageProcessRows([
         { pid: 555, ppid: 1, command: 'opencode serve' },
         { pid: 556, ppid: 555, command: 'node openrouter-worker.js' },
       ]);
@@ -4539,7 +4578,7 @@ describe('TeamProvisioningService', () => {
         cancelRequested: false,
         spawnContext: null,
       });
-      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+      mockRuntimeUsageProcessRows([
         { pid: 111, ppid: 1, command: 'claude' },
         { pid: 222, ppid: 111, command: 'node finished-tool.js' },
       ]);
@@ -4791,6 +4830,50 @@ describe('TeamProvisioningService', () => {
       }
     });
 
+    it('retries WSL process rows when a Windows host telemetry read follows a cached failure', async () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', {
+        value: 'win32',
+        configurable: true,
+      });
+      try {
+        const svc = new TeamProvisioningService();
+        vi.mocked(listRuntimeProcessTableForCurrentPlatform)
+          .mockRejectedValueOnce(new Error('wsl process table unavailable'))
+          .mockResolvedValueOnce([{ pid: 111, ppid: 1, command: 'wsl-runtime' }]);
+        vi.mocked(listWindowsProcessTable).mockResolvedValueOnce([
+          { pid: 333, ppid: 1, command: 'opencode.exe serve' },
+        ]);
+
+        const failedRows = await (svc as any).readRuntimeProcessRowsForUsageSnapshot(
+          'runtime-team'
+        );
+        const recoveredRows = await (svc as any).readRuntimeProcessRowsForUsageSnapshot(
+          'runtime-team',
+          {
+            includeWindowsHostRows: true,
+          }
+        );
+
+        expect(failedRows).toBeNull();
+        expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(2);
+        expect(recoveredRows).toEqual([
+          { pid: 111, ppid: 1, command: 'wsl-runtime', runtimeTelemetrySource: 'wsl' },
+          {
+            pid: 333,
+            ppid: 1,
+            command: 'opencode.exe serve',
+            runtimeTelemetrySource: 'windows-host',
+          },
+        ]);
+      } finally {
+        Object.defineProperty(process, 'platform', {
+          value: originalPlatform,
+          configurable: true,
+        });
+      }
+    });
+
     it('does not mix WSL and Windows PID namespaces when building telemetry trees on Windows', () => {
       const originalPlatform = process.platform;
       Object.defineProperty(process, 'platform', {
@@ -4906,6 +4989,7 @@ describe('TeamProvisioningService', () => {
     });
 
     it('ignores malformed process table rows before building runtime telemetry trees', async () => {
+      setRuntimeTelemetryPlatformForTest('linux');
       const svc = new TeamProvisioningService();
       vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValueOnce([
         { pid: 111, ppid: 1, command: 'claude' },
@@ -4984,7 +5068,9 @@ describe('TeamProvisioningService', () => {
       try {
         const snapshot = await svc.getTeamAgentRuntimeSnapshot('runtime-team');
 
-        expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
+        expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(
+          process.platform === 'win32' ? 2 : 1
+        );
         expect(snapshot.members['team-lead']).toMatchObject({
           alive: true,
           pid: 111,
@@ -5023,6 +5109,115 @@ describe('TeamProvisioningService', () => {
         cpuPercent: 69,
         rssBytes: 100_000_069,
       });
+    });
+
+    it('throttles runtime resource history samples within the minimum interval', () => {
+      const svc = new TeamProvisioningService();
+
+      const firstHistory = (svc as any).recordAgentRuntimeResourceSample({
+        teamName: 'runtime-team',
+        memberName: 'alice',
+        timestamp: '2026-04-24T12:00:00.000Z',
+        cpuPercent: 4,
+        rssBytes: 100_000_000,
+        pidSource: 'tmux_child',
+        pid: 222,
+      });
+      const throttledHistory = (svc as any).recordAgentRuntimeResourceSample({
+        teamName: 'runtime-team',
+        memberName: 'alice',
+        timestamp: '2026-04-24T12:00:01.000Z',
+        cpuPercent: 99,
+        rssBytes: 999_000_000,
+        pidSource: 'tmux_child',
+        pid: 222,
+      });
+
+      expect(firstHistory).toEqual(throttledHistory);
+      expect(throttledHistory).toHaveLength(1);
+      expect(throttledHistory?.[0]).toMatchObject({
+        cpuPercent: 4,
+        rssBytes: 100_000_000,
+      });
+    });
+
+    it('ignores invalid runtime resource metrics while preserving existing history', () => {
+      const svc = new TeamProvisioningService();
+
+      const firstHistory = (svc as any).recordAgentRuntimeResourceSample({
+        teamName: 'runtime-team',
+        memberName: 'alice',
+        timestamp: '2026-04-24T12:00:00.000Z',
+        cpuPercent: 4,
+        rssBytes: 100_000_000,
+        pidSource: 'tmux_child',
+        pid: 222,
+      });
+      const invalidHistory = (svc as any).recordAgentRuntimeResourceSample({
+        teamName: 'runtime-team',
+        memberName: 'alice',
+        timestamp: '2026-04-24T12:01:00.000Z',
+        cpuPercent: Number.NaN,
+        rssBytes: -1,
+        pidSource: 'tmux_child',
+        pid: 222,
+      });
+      const missingHistory = (svc as any).recordAgentRuntimeResourceSample({
+        teamName: 'runtime-team',
+        memberName: 'bob',
+        timestamp: '2026-04-24T12:01:00.000Z',
+        cpuPercent: Number.NaN,
+        rssBytes: -1,
+        pidSource: 'tmux_child',
+        pid: 333,
+      });
+
+      expect(invalidHistory).toEqual(firstHistory);
+      expect(missingHistory).toBeUndefined();
+    });
+
+    it('prunes inactive runtime resource history keys', () => {
+      const svc = new TeamProvisioningService();
+      const activeKeys = new Set<string>();
+
+      (svc as any).recordAgentRuntimeResourceSample({
+        teamName: 'runtime-team',
+        memberName: 'alice',
+        timestamp: '2026-04-24T12:00:00.000Z',
+        cpuPercent: 4,
+        rssBytes: 100_000_000,
+        pidSource: 'tmux_child',
+        pid: 222,
+        activeKeys,
+      });
+      (svc as any).recordAgentRuntimeResourceSample({
+        teamName: 'runtime-team',
+        memberName: 'bob',
+        timestamp: '2026-04-24T12:00:00.000Z',
+        cpuPercent: 5,
+        rssBytes: 200_000_000,
+        pidSource: 'agent_process_table',
+        pid: 333,
+      });
+
+      (svc as any).pruneAgentRuntimeResourceHistory('runtime-team', activeKeys);
+      const aliceHistory = (svc as any).recordAgentRuntimeResourceSample({
+        teamName: 'runtime-team',
+        memberName: 'alice',
+        timestamp: '2026-04-24T12:01:00.000Z',
+        pidSource: 'tmux_child',
+        pid: 222,
+      });
+      const bobHistory = (svc as any).recordAgentRuntimeResourceSample({
+        teamName: 'runtime-team',
+        memberName: 'bob',
+        timestamp: '2026-04-24T12:01:00.000Z',
+        pidSource: 'agent_process_table',
+        pid: 333,
+      });
+
+      expect(aliceHistory).toHaveLength(1);
+      expect(bobHistory).toBeUndefined();
     });
 
     it('does not send legacy process backend pane markers to tmux liveness lookup', async () => {
@@ -5151,6 +5346,7 @@ describe('TeamProvisioningService', () => {
     });
 
     it('falls back to per-pid pidusage reads when batched sampling fails', async () => {
+      setRuntimeTelemetryPlatformForTest('linux');
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
@@ -5331,6 +5527,7 @@ describe('TeamProvisioningService', () => {
     });
 
     it('keeps RSS visible for bootstrap-confirmed Anthropic teammates with a verified process', async () => {
+      setRuntimeTelemetryPlatformForTest('linux');
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
         getConfig: vi.fn(async () => ({
@@ -6022,7 +6219,7 @@ describe('TeamProvisioningService', () => {
       ];
       (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
       (svc as any).runs.set('run-1', run);
-      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+      mockRuntimeUsageProcessRows([
         { pid: 333, ppid: 1, command: 'opencode runtime host' },
       ]);
       vi.mocked(pidusage).mockReset();
@@ -6107,7 +6304,7 @@ describe('TeamProvisioningService', () => {
         ),
       };
       vi.mocked(pidusage).mockReset();
-      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+      mockRuntimeUsageProcessRows([
         { pid: 333, ppid: 1, command: 'opencode runtime host' },
       ]);
       vi.mocked(pidusage).mockImplementation(
@@ -8547,7 +8744,7 @@ describe('TeamProvisioningService', () => {
           },
         ]),
       };
-      vi.mocked(listRuntimeProcessTableForCurrentPlatform).mockResolvedValue([
+      mockRuntimeUsageProcessRows([
         {
           pid: 456,
           ppid: 1,
@@ -26323,10 +26520,14 @@ describe('TeamProvisioningService', () => {
     );
     expect(memberWorktrees[0]).toMatchObject({
       cwd: worktreeDir,
-      gitRootConfigKey: repoDir,
       memberId: 'alice',
     });
-    expect(memberWorktrees.every((workspace) => workspace.gitRootConfigKey === repoDir)).toBe(true);
+    expect(path.normalize(memberWorktrees[0]?.gitRootConfigKey ?? '')).toBe(path.normalize(repoDir));
+    expect(
+      memberWorktrees.every(
+        (workspace) => path.normalize(workspace.gitRootConfigKey ?? '') === path.normalize(repoDir)
+      )
+    ).toBe(true);
   });
 
   it('degrades workspace trust planning failures without blocking launch preparation', async () => {
