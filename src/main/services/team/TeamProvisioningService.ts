@@ -1240,6 +1240,7 @@ const LIVE_LEAD_PROCESS_MESSAGE_TEXT_LIMIT = 256 * 1024;
 // slow the cadence to ~1s so Zustand can keep up on large teams.
 const LOG_PROGRESS_THROTTLE_MS = 1000;
 const UI_LOGS_TAIL_LIMIT = 128 * 1024;
+const PROBE_OUTPUT_BUFFER_LIMIT = UI_LOGS_TAIL_LIMIT;
 const PROBE_CACHE_TTL_MS = 36 * 60 * 60 * 1000;
 const PREFLIGHT_BINARY_TIMEOUT_MS = 8000;
 const PREFLIGHT_AUTH_RETRY_DELAY_MS = 2000;
@@ -2840,6 +2841,20 @@ function boundStdoutParserCarry(carry: string): string {
     return carry;
   }
   return carry.slice(-STDOUT_PARSER_CARRY_LIMIT);
+}
+
+function boundProbeOutputBuffer(text: string): string {
+  if (text.length <= PROBE_OUTPUT_BUFFER_LIMIT) {
+    return text;
+  }
+  const marker = '...[truncated probe output]';
+  if (PROBE_OUTPUT_BUFFER_LIMIT <= marker.length) {
+    return text.slice(-PROBE_OUTPUT_BUFFER_LIMIT);
+  }
+  const retainedChars = PROBE_OUTPUT_BUFFER_LIMIT - marker.length;
+  const headChars = Math.floor(retainedChars / 2);
+  const tailChars = retainedChars - headChars;
+  return `${text.slice(0, headChars)}${marker}${text.slice(-tailChars)}`;
 }
 
 function boundLiveLeadProcessText(text: string): string {
@@ -39267,11 +39282,12 @@ export class TeamProvisioningService {
           }
           parseStdoutLine(line);
         }
+        stdoutBuffer = boundProbeOutputBuffer(stdoutBuffer);
       });
 
       child.stderr?.setEncoding('utf8');
       child.stderr?.on('data', (chunk: string | Buffer) => {
-        stderrBuffer += chunk.toString();
+        stderrBuffer = boundProbeOutputBuffer(stderrBuffer + chunk.toString());
       });
 
       child.once('error', (error) => {
@@ -39534,11 +39550,11 @@ export class TeamProvisioningService {
       };
 
       child.stdout?.on('data', (chunk: Buffer) => {
-        stdoutText += chunk.toString('utf8');
+        stdoutText = boundProbeOutputBuffer(stdoutText + chunk.toString('utf8'));
         maybeResolveEarly();
       });
       child.stderr?.on('data', (chunk: Buffer) => {
-        stderrText += chunk.toString('utf8');
+        stderrText = boundProbeOutputBuffer(stderrText + chunk.toString('utf8'));
         maybeResolveEarly();
       });
       child.once('error', (error) => {
