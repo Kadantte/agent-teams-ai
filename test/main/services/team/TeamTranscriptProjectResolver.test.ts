@@ -1319,6 +1319,41 @@ describe('TeamTranscriptProjectResolver', () => {
     expect(await resolver.fileBelongsToTeam(jsonlPath, 'missing-team', fileStat)).toBe(false);
   });
 
+  it('does not retain full normalized text content in cached head metadata', async () => {
+    await setupClaudeRoot();
+    const resolver = new TeamTranscriptProjectResolver() as unknown as ResolverProbe;
+    const team = 'memory-safe-team';
+    const projectDir = path.join(tmpDir!, 'projects', encodePath('/repo/head-cache-text-retention'));
+    await fs.mkdir(projectDir, { recursive: true });
+    const jsonlPath = path.join(projectDir, 'large-line.jsonl');
+    await fs.writeFile(
+      jsonlPath,
+      `${JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `${'x'.repeat(100_000)}\nCurrent durable team context:\n- Team name: ${team}\n${'y'.repeat(100_000)}`,
+            },
+          ],
+        },
+      })}\n`,
+      'utf8'
+    );
+
+    const fileStat = await fs.stat(jsonlPath);
+    expect(await resolver.fileBelongsToTeam(jsonlPath, team, fileStat)).toBe(true);
+    const cachedHead = resolver.teamAffinityHeadMetadataCache.get(jsonlPath);
+    const cachedLine = cachedHead?.lines[0] as
+      | { normalizedTextContent?: unknown; textMentionTeamNames?: Set<string> }
+      | undefined;
+
+    expect(cachedLine?.normalizedTextContent).toBeUndefined();
+    expect(cachedLine?.textMentionTeamNames?.has(team)).toBe(true);
+  });
+
   it('keeps cached head metadata bounded to 40 lines when the first lookup matches early', async () => {
     await setupClaudeRoot();
     const resolver = new TeamTranscriptProjectResolver() as unknown as ResolverProbe;
