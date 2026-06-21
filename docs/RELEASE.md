@@ -1,5 +1,79 @@
 # Release Guide
 
+## Draft: v2.5.1 (2026-06-21)
+
+Target branch: `dev`.
+
+Target code range: `v2.5.0..origin/dev` through `9e1edc66944ef69d148ec9b3f55b377deac2e68a`.
+
+Runtime gate:
+
+- Agent Teams runtime: `v0.0.54`; `777genius/agent_teams_orchestrator@main` currently matches `v0.0.54`.
+- Terminal Platform runtime: `v0.2.0`; this is the latest published `777genius/terminal-platform` release. The newer `terminal-platform@main` commit is unreleased and is not bundled in this patch release.
+
+Draft body source for GitHub release:
+
+<!-- RELEASE_BODY_START v2.5.1 -->
+Patch release focused on memory stability and safer long-running team sessions, especially large Unreal Engine workspaces and active multi-agent teams. It reduces retained transcript text, bounds runtime and provisioning buffers, and prevents duplicate runtime health probes from piling up during heavy work-sync activity.
+
+### Improvements
+
+- Reduce memory pressure from long team transcripts, runtime telemetry, provisioning logs, provider output, MCP probe output, and timeout snapshots.
+- Keep runtime status checks single-flight during rapid invalidation storms so slow probes do not stack up.
+- Compact team/project affinity matching so large normalized message text is not retained after transcript scans.
+- Improve launch resilience on low-heap systems by raising runtime Node heap settings where the app controls MCP and launch processes.
+
+### Bug Fixes
+
+- Fix a heap retention path where transcript affinity metadata could keep full normalized message text alive after scanning large JSONL sessions.
+- Fix duplicate runtime snapshot probes during cache invalidation and timeout storms.
+- Fix runaway work-sync nudge loops that could keep generating repeated low-value activity.
+- Fix team launch crashes on low-memory setups and improve handling of bounded stdout/stderr carry buffers.
+- Fix IME composition so pressing Enter while composing text does not submit too early.
+- Fix draft launch roster updates so team setup edits are preserved correctly.
+- Update vulnerable dependencies from the post-v2.5.0 security audit.
+
+### Downloads
+
+<table>
+<tr>
+<td align="center">
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/Agent.Teams.AI-2.5.1-arm64.dmg">
+    <img src="https://img.shields.io/badge/macOS_Apple_Silicon-.dmg-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Apple Silicon" />
+  </a>
+  <br />
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/Agent.Teams.AI-2.5.1-x64.dmg">
+    <img src="https://img.shields.io/badge/macOS_Intel-.dmg-434343?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Intel" />
+  </a>
+</td>
+<td align="center">
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/Agent.Teams.AI.Setup.2.5.1.exe">
+    <img src="https://img.shields.io/badge/Windows-Download_.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
+  </a>
+  <br />
+  <sub>May trigger SmartScreen - click "More info" then "Run anyway"</sub>
+  <br />
+  <sub><strong>Windows required:</strong> launch Agent Teams AI as Administrator, especially when using OpenCode runtimes.</sub>
+</td>
+<td align="center">
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/Agent.Teams.AI-2.5.1.AppImage">
+    <img src="https://img.shields.io/badge/Linux-Download_.AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux AppImage" />
+  </a>
+  <br />
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/agent-teams-ai_2.5.1_amd64.deb">
+    <img src="https://img.shields.io/badge/.deb-E95420?style=flat-square&logo=ubuntu&logoColor=white" alt=".deb" />
+  </a>&nbsp;
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/agent-teams-ai-2.5.1.x86_64.rpm">
+    <img src="https://img.shields.io/badge/.rpm-294172?style=flat-square&logo=redhat&logoColor=white" alt=".rpm" />
+  </a>&nbsp;
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/agent-teams-ai-2.5.1.pacman">
+    <img src="https://img.shields.io/badge/.pacman-1793D1?style=flat-square&logo=archlinux&logoColor=white" alt=".pacman" />
+  </a>
+</td>
+</tr>
+</table>
+<!-- RELEASE_BODY_END v2.5.1 -->
+
 ## Published: v2.5.0 (2026-06-15)
 
 GitHub release: [v2.5.0](https://github.com/777genius/agent-teams-ai/releases/tag/v2.5.0).
