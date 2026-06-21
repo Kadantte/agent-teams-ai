@@ -3809,10 +3809,11 @@ export class TeamProvisioningService {
       this.getRuntimeSnapshotCacheGeneration(teamName) + 1
     );
     this.agentRuntimeSnapshotCache.delete(teamName);
-    this.agentRuntimeSnapshotInFlightByTeam.delete(teamName);
     this.liveTeamAgentRuntimeMetadataCache.delete(teamName);
-    this.liveTeamAgentRuntimeMetadataInFlightByTeam.delete(teamName);
     this.persistedTeamConfigCache.delete(teamName);
+    // Keep in-flight runtime probes alive. Active teams can invalidate runtime
+    // caches faster than expensive process-table/snapshot probes complete; the
+    // generation guard in each builder prevents stale results from being cached.
     // Process table rows are TTL-bound. Resource telemetry can use the longer
     // TTL, while liveness only reuses rows through a short age gate.
   }
@@ -14664,10 +14665,7 @@ export class TeamProvisioningService {
 
     const generationAtStart = this.getRuntimeSnapshotCacheGeneration(teamName);
     const existingRequest = this.agentRuntimeSnapshotInFlightByTeam.get(teamName);
-    if (
-      existingRequest?.generationAtStart === generationAtStart &&
-      existingRequest.runIdAtStart === runId
-    ) {
+    if (existingRequest?.runIdAtStart === runId) {
       return existingRequest.promise;
     }
 
@@ -26908,10 +26906,7 @@ export class TeamProvisioningService {
 
     const generationAtStart = this.getRuntimeSnapshotCacheGeneration(teamName);
     const existingRequest = this.liveTeamAgentRuntimeMetadataInFlightByTeam.get(teamName);
-    if (
-      existingRequest?.generationAtStart === generationAtStart &&
-      existingRequest.runIdAtStart === runId
-    ) {
+    if (existingRequest?.runIdAtStart === runId) {
       return this.cloneLiveTeamAgentRuntimeMetadata(await existingRequest.promise);
     }
 

@@ -3811,6 +3811,40 @@ describe('TeamProvisioningService', () => {
       expect(secondSnapshot.members.alice?.pid).toBe(222);
     });
 
+    it('keeps runtime snapshot probes single-flight across cache invalidation for the same run', async () => {
+      const svc = new TeamProvisioningService();
+      const firstProbe = createDeferred<unknown>();
+      const secondProbe = createDeferred<unknown>();
+      const firstSnapshot = {
+        teamName: 'runtime-team',
+        updatedAt: '2026-06-20T17:19:11.000Z',
+        runId: null,
+        members: {},
+      };
+      const secondSnapshot = {
+        ...firstSnapshot,
+        updatedAt: '2026-06-20T17:20:11.000Z',
+      };
+      const buildSnapshot = vi
+        .spyOn(svc as any, 'buildTeamAgentRuntimeSnapshot')
+        .mockReturnValueOnce(firstProbe.promise)
+        .mockReturnValueOnce(secondProbe.promise);
+
+      const first = svc.getTeamAgentRuntimeSnapshot('runtime-team');
+      (svc as any).invalidateRuntimeSnapshotCaches('runtime-team');
+      const second = svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(buildSnapshot).toHaveBeenCalledTimes(1);
+      firstProbe.resolve(firstSnapshot);
+      await expect(first).resolves.toBe(firstSnapshot);
+      await expect(second).resolves.toBe(firstSnapshot);
+
+      const fresh = svc.getTeamAgentRuntimeSnapshot('runtime-team');
+      expect(buildSnapshot).toHaveBeenCalledTimes(2);
+      secondProbe.resolve(secondSnapshot);
+      await expect(fresh).resolves.toBe(secondSnapshot);
+    });
+
     it('does not cache live runtime metadata when invalidated while the probe is in flight', async () => {
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
@@ -3833,6 +3867,41 @@ describe('TeamProvisioningService', () => {
       (svc as any).invalidateRuntimeSnapshotCaches('runtime-team');
       processRows.resolve([]);
       await first;
+
+      await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
+
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps live runtime metadata probes single-flight across cache invalidation for the same run', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
+          ],
+        })),
+      };
+      const processRows =
+        createDeferred<Awaited<ReturnType<typeof listRuntimeProcessTableForCurrentPlatform>>>();
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform)
+        .mockReturnValueOnce(processRows.promise)
+        .mockResolvedValueOnce([]);
+
+      const first = (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team') as Promise<
+        Map<string, unknown>
+      >;
+      await vi.waitFor(() => expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1));
+      (svc as any).invalidateRuntimeSnapshotCaches('runtime-team');
+      const second = (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team') as Promise<
+        Map<string, unknown>
+      >;
+
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
+      processRows.resolve([]);
+      await Promise.all([first, second]);
 
       await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
 
