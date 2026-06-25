@@ -36,7 +36,7 @@ const ruNotes: Record<string, string> = {
   'Plan, assign, work, and review': 'Планирует, назначает, работает и ревьюит',
   'Coordinator, grouped work, recovery': 'Координатор, группировка работ, восстановление',
   'Wake-up runs + governance': 'Отложенные запуски и управление',
-  'Background agents, not teams': 'Фоновые агенты, не команды',
+  'Cloud agents, not teams': 'Cloud agents, не команды',
   'Experimental CLI teams': 'Экспериментальные CLI-команды',
   'Tasks wait for blockers automatically': 'Задачи автоматически ждут блокеры',
   'Dependency waves': 'Волны зависимостей',
@@ -72,12 +72,12 @@ const ruNotes: Record<string, string> = {
   'Per-action approvals + notifications': 'Подтверждения и уведомления для каждого действия',
   'Проверки, эскалация, восстановление': 'Проверки, эскалация, восстановление',
   'Подтверждения на доске, пауза, остановка': 'Подтверждения на доске, пауза, остановка',
-  'Background agents auto-run commands': 'Фоновые агенты сами запускают команды',
+  'Cloud agents run commands': 'Cloud agents запускают команды',
   'Permissions + hooks': 'Permissions и hooks',
   'Optional': 'Опционально',
   'Core primitive': 'Ключевая примитивная модель',
   'Worktrees / branches': 'Worktrees / branches',
-  'Background branches/VMs': 'Фоновые branches/VMs',
+  'Agents Window worktrees': 'Worktrees в Agents Window',
   'Manual worktrees': 'Ручные worktrees',
   'Claude, Codex, and OpenCode in one team': 'Claude, Codex и OpenCode в одной команде',
   'Many providers, terminal-first': 'Много провайдеров, terminal-first',
@@ -90,7 +90,7 @@ const ruNotes: Record<string, string> = {
   'Watch teammates work and message them directly': 'Смотрите работу участников и пишите им напрямую',
   'Terminal-based agent sessions': 'Терминальные сессии агентов',
   'Agents wake up for runs, then sleep': 'Агенты просыпаются для запусков, потом засыпают',
-  'Background agents per task': 'Фоновые агенты на задачу',
+  'Cloud agents per task': 'Cloud agents на задачу',
   'CLI teams, no desktop view': 'CLI-команды, без desktop-экрана',
   'Tasks, logs, Kanban, review, and teammates in one app': 'Задачи, логи, канбан, ревью и участники в одном приложении',
   'Mail/feed/dashboard across tools': 'Почта, лента и панель между tools',
@@ -108,7 +108,7 @@ const ruNotes: Record<string, string> = {
   'Cost/token visibility, no hard caps': 'Видимость стоимости/токенов, без жёстких лимитов',
   'Cost tiers + digest, no hard caps': 'Тарифные уровни и дайджест, без жёстких лимитов',
   'Per-agent budgets + hard stops': 'Бюджеты на агента и жёсткие остановки',
-  'Usage + BG spend limits': 'Usage и лимиты фоновых расходов',
+  'Usage + cloud spend limits': 'Usage и лимиты cloud-расходов',
   '/usage + workspace limits': '/usage и лимиты workspace',
   'OSS + free model with no auth, paid providers optional': 'OSS и бесплатная модель без авторизации, платные провайдеры опциональны',
   'OSS, runtime plans needed': 'OSS, нужны тарифы runtime',
@@ -123,8 +123,8 @@ function note(text: string): string {
 
 const sourcesPrefix = computed(() => (
   locale.value === 'ru'
-    ? 'Источники фактов проверены 18 мая 2026:'
-    : 'Fact sources checked on May 18, 2026:'
+    ? 'Источники фактов проверены 25 июня 2026:'
+    : 'Fact sources checked on June 25, 2026:'
 ))
 
 const ruSourceLabels: Record<string, string> = {
@@ -142,9 +142,11 @@ const ruSourceLabels: Record<string, string> = {
   'Paperclip Kanban source': 'исходники Kanban Paperclip',
   'Paperclip work products': 'work products Paperclip',
   'Paperclip release': 'релиз Paperclip',
-  'Cursor Background Agents': 'фоновые агенты Cursor',
-  'Cursor Diffs & Review': 'diffs и review Cursor',
-  'Cursor pricing': 'цены Cursor',
+  'Cursor Cloud Agents': 'cloud agents Cursor',
+  'Cursor Agent Review': 'agent review Cursor',
+  'Cursor worktrees': 'worktrees Cursor',
+  'Cursor Models & Pricing': 'модели и цены Cursor',
+  'Cursor Team Pricing': 'team pricing Cursor',
   'Claude Code agent teams': 'команды агентов Claude Code',
   'Claude Code subagents': 'сабагенты Claude Code',
   'Claude Code workflows': 'workflows Claude Code',
@@ -234,7 +236,7 @@ const rows = computed<ComparisonRow[]>(() => [
     us: { status: 'yes', note: note('Plan, assign, work, and review') },
     gastown: { status: 'yes', note: note('Coordinator, grouped work, recovery') },
     paperclip: { status: 'yes', note: note('Wake-up runs + governance') },
-    cursor: { status: 'partial', note: note('Background agents, not teams') },
+    cursor: { status: 'partial', note: note('Cloud agents, not teams') },
     claudeCli: { status: 'yes', note: note('Experimental CLI teams') },
   },
   {
@@ -306,7 +308,7 @@ const rows = computed<ComparisonRow[]>(() => [
     us: { status: 'yes', note: note('Per-action approvals + notifications') },
     gastown: { status: 'yes', note: note('Проверки, эскалация, восстановление') },
     paperclip: { status: 'yes', note: note('Подтверждения на доске, пауза, остановка') },
-    cursor: { status: 'partial', note: note('Background agents auto-run commands') },
+    cursor: { status: 'partial', note: note('Cloud agents run commands') },
     claudeCli: { status: 'yes', note: note('Permissions + hooks') },
   },
   {
@@ -314,7 +316,7 @@ const rows = computed<ComparisonRow[]>(() => [
     us: { status: 'yes', note: note('Optional') },
     gastown: { status: 'yes', note: note('Core primitive') },
     paperclip: { status: 'yes', note: note('Worktrees / branches') },
-    cursor: { status: 'partial', note: note('Background branches/VMs') },
+    cursor: { status: 'yes', note: note('Agents Window worktrees') },
     claudeCli: { status: 'partial', note: note('Manual worktrees') },
   },
   {
@@ -338,7 +340,7 @@ const rows = computed<ComparisonRow[]>(() => [
     us: { status: 'yes', note: note('Watch teammates work and message them directly') },
     gastown: { status: 'partial', note: note('Terminal-based agent sessions') },
     paperclip: { status: 'partial', note: note('Agents wake up for runs, then sleep') },
-    cursor: { status: 'partial', note: note('Background agents per task') },
+    cursor: { status: 'partial', note: note('Cloud agents per task') },
     claudeCli: { status: 'partial', note: note('CLI teams, no desktop view') },
   },
   {
@@ -370,7 +372,7 @@ const rows = computed<ComparisonRow[]>(() => [
     us: { status: 'partial', note: note('Cost/token visibility, no hard caps') },
     gastown: { status: 'partial', note: note('Cost tiers + digest, no hard caps') },
     paperclip: { status: 'yes', note: note('Per-agent budgets + hard stops') },
-    cursor: { status: 'partial', note: note('Usage + BG spend limits') },
+    cursor: { status: 'partial', note: note('Usage + cloud spend limits') },
     claudeCli: { status: 'partial', note: note('/usage + workspace limits') },
   },
   {
@@ -394,7 +396,7 @@ const competitors = [
 const sourceLinks = [
   {
     label: 'detailed research notes',
-    href: 'https://github.com/777genius/agent-teams-ai/blob/main/docs/research/gastown-paperclip-comparison-2026-05-16.md',
+    href: 'https://github.com/777genius/agent-teams-ai/blob/main/docs/research/gastown-paperclip-comparison-2026-06-25.md',
   },
   { label: 'Gastown README', href: 'https://github.com/gastownhall/gastown' },
   {
@@ -409,7 +411,7 @@ const sourceLinks = [
     label: 'Gastown dashboard source',
     href: 'https://github.com/gastownhall/gastown/blob/main/internal/web/templates/convoy.html',
   },
-  { label: 'Gastown release', href: 'https://github.com/gastownhall/gastown/releases/tag/v1.1.0' },
+  { label: 'Gastown release', href: 'https://github.com/gastownhall/gastown/releases/tag/v1.2.1' },
   { label: 'Paperclip README', href: 'https://github.com/paperclipai/paperclip' },
   {
     label: 'Paperclip adapters',
@@ -440,11 +442,13 @@ const sourceLinks = [
     label: 'Paperclip work products',
     href: 'https://github.com/paperclipai/paperclip/blob/master/packages/shared/src/validators/work-product.ts',
   },
-  { label: 'Paperclip release', href: 'https://github.com/paperclipai/paperclip/releases/tag/v2026.517.0' },
-  { label: 'Cursor Background Agents', href: 'https://docs.cursor.com/en/background-agents' },
-  { label: 'Cursor Diffs & Review', href: 'https://docs.cursor.com/en/agent/review' },
-  { label: 'Cursor Bugbot', href: 'https://docs.cursor.com/en/bugbot' },
-  { label: 'Cursor pricing', href: 'https://docs.cursor.com/en/account/usage' },
+  { label: 'Paperclip release', href: 'https://github.com/paperclipai/paperclip/releases/tag/v2026.618.0' },
+  { label: 'Cursor Cloud Agents', href: 'https://cursor.com/docs/cloud-agent' },
+  { label: 'Cursor Agent Review', href: 'https://cursor.com/docs/agent/agent-review' },
+  { label: 'Cursor Bugbot', href: 'https://cursor.com/docs/bugbot' },
+  { label: 'Cursor worktrees', href: 'https://cursor.com/docs/configuration/worktrees' },
+  { label: 'Cursor Models & Pricing', href: 'https://cursor.com/docs/models-and-pricing' },
+  { label: 'Cursor Team Pricing', href: 'https://cursor.com/docs/account/teams/pricing' },
   { label: 'Claude Code agent teams', href: 'https://code.claude.com/docs/en/agent-teams' },
   { label: 'Claude Code subagents', href: 'https://code.claude.com/docs/en/sub-agents' },
   { label: 'Claude Code workflows', href: 'https://code.claude.com/docs/en/common-workflows' },
