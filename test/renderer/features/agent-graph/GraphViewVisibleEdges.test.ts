@@ -63,4 +63,19 @@ describe('filterVisibleGraphEdges', () => {
       )
     ).toEqual([parentEdge.id, messageEdge.id]);
   });
+
+  it('keeps always-visible routes when static edges are hidden', () => {
+    const visibleNodeIds = new Set(['member:team:alice', 'member:team:bob']);
+    const alwaysVisibleMessageEdge: GraphEdge = {
+      ...messageEdge,
+      id: 'edge:msg:always-visible',
+      alwaysVisible: true,
+    };
+
+    expect(
+      filterVisibleGraphEdges([messageEdge, alwaysVisibleMessageEdge], visibleNodeIds, false).map(
+        (edge) => edge.id
+      )
+    ).toEqual([alwaysVisibleMessageEdge.id]);
+  });
 });

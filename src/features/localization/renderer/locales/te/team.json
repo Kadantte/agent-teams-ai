@@ -140,7 +140,19 @@
       "launchSettingsTitle": "ఐచ్ఛిక లాంచ్ సెట్టింగ్‌లు",
       "launchSettingsDescription": "మీకు అవసరమైనప్పుడు ప్రాంప్ట్, భద్రత మరియు CLI ఓవర్‌రైడ్‌లు ఇక్కడ ఉంటాయి.",
       "teamDetailsTitle": "ఐచ్ఛిక టీమ్ వివరాలు",
-      "teamDetailsDescription": "డిఫాల్ట్ ఫ్లోను కాంపాక్ట్‌గా ఉంచండి మరియు మీకు అదనపు కాంటెక్స్ట్ లేదా కస్టమ్ రంగు కావలసినప్పుడు మాత్రమే దీన్ని తెరవండి."
+      "teamDetailsDescription": "డిఫాల్ట్ ఫ్లోను కాంపాక్ట్‌గా ఉంచండి మరియు మీకు అదనపు కాంటెక్స్ట్ లేదా కస్టమ్ రంగు కావలసినప్పుడు మాత్రమే దీన్ని తెరవండి.",
+      "summary": {
+        "leadPrompt": "Lead promptu",
+        "autoApproveTools": "Araclari otomatik onayla",
+        "fastMode": "Hizli mod",
+        "fastDisabled": "Hizli kapali",
+        "fastDefault": "Hizli varsayilan",
+        "anthropicLimitedContext": "Anthropic 200K baglamla sinirli",
+        "worktree": "Worktree పేరు: {{name}}",
+        "customCliArgs": "Ozel CLI argumanlari",
+        "description": "Aciklama",
+        "color": "Renk: {{color}}"
+      }
     },
     "prepare": {
       "unsupportedPreload": "ప్రస్తుత ప్రీలోడ్ వెర్షన్ team:prepareProvisioning కు మద్దతు ఇవ్వదు. dev యాప్‌ను పునఃప్రారంభించండి.",
@@ -152,7 +164,10 @@
       "checkingProviders": "ఎంచుకున్న ప్రొవైడర్లను తనిఖీ చేస్తోంది...",
       "preparingEnvironment": "ఎన్విరాన్‌మెంట్‌ను సిద్ధం చేస్తోంది...",
       "selectedProvidersReadyWithNotes": "ఎంచుకున్న ప్రొవైడర్లు సిద్ధం (గమనికలతో)",
-      "selectedProvidersReady": "ఎంచుకున్న ప్రొవైడర్లు సిద్ధం"
+      "selectedProvidersReady": "ఎంచుకున్న ప్రొవైడర్లు సిద్ధం",
+      "providerStatusLoading": "{{provider}} provider స్థితి ఇంకా లోడ్ అవుతోంది. Model checks స్వయంచాలకంగా ప్రారంభమవుతాయి.",
+      "selectedProvidersLabel": "ఎంచుకున్న providers",
+      "readyStatus": "సిద్ధం"
     },
     "validation": {
       "nameMustContainLetterOrDigit": "పేరులో కనీసం ఒక అక్షరం లేదా అంకె ఉండాలి",
@@ -166,7 +181,30 @@
       "teamLaunching": "టీమ్ ప్రస్తుతం లాంచ్ అవుతోంది",
       "teamNameExists": "టీమ్ పేరు ఇప్పటికే ఉంది",
       "checkFormFields": "ఫారం ఫీల్డ్‌లను తనిఖీ చేయండి"
-    }
+    },
+    "organizationPlacement": {
+      "title": "సంస్థలో స్థానం",
+      "description": "సంస్థను ఎంచుకుని, team చేరే root లేదా group ను ఎంచుకోండి.",
+      "addToOrganization": "సంస్థకు జోడించు",
+      "organizationLabel": "సంస్థ",
+      "organizationHelp": "ఈ team కు యజమాని అయిన సంస్థను ఎంచుకోండి.",
+      "organizationPlaceholder": "సంస్థ",
+      "groupOrRootLabel": "Group లేదా root",
+      "groupOrRootHelp": "సంస్థను ఎంచుకుని, team చేరే root లేదా group ను ఎంచుకోండి.",
+      "groupOrRootPlaceholder": "Root లేదా group",
+      "kind": {
+        "root": "మూలం",
+        "group": "గుంపు"
+      }
+    },
+    "defaultDescription": {
+      "fallback": "Provisioning akisi icin ekip",
+      "named": "Provisioning akisi icin {{teamName}} ekibi"
+    },
+    "defaultWorkflows": {
+      "reviewer": "Projede tamamlanan her gorevi incele. Kod degisikliklerini oku, dogruluk, stil ve olasi sorunlari kontrol et. Gorevi onayla veya net geri bildirimle degisiklik iste."
+    },
+    "memberModelLockReason": "Bu ekip uyesi lead modeliyle senkronize. Ozel saglayici, model veya effort ayarlamak icin senkronizasyonu kapat."
   },
   "editTeam": {
     "actions": {
@@ -1374,6 +1412,7 @@
     "actions": {
       "copyTeam": "టీమ్‌ను కాపీ చేయి",
       "createTeam": "టీమ్‌ను సృష్టించు",
+      "organizationMap": "సంస్థ మ్యాప్",
       "deleteForever": "శాశ్వతంగా తొలగించు",
       "deletePermanently": "శాశ్వతంగా తొలగించు",
       "deleteTeam": "టీమ్‌ను తొలగించు",
@@ -2595,5 +2634,225 @@
     "tabColorOrange": "Orange",
     "tabColorRose": "Rose",
     "tabColorViolet": "Violet"
+  },
+  "organizations": {
+    "map": {
+      "allOrganizationsTitle": "అన్ని సంస్థలు",
+      "defaultTitle": "సంస్థ మ్యాప్",
+      "organizationPlaceholder": "సంస్థ",
+      "loading": "సంస్థ మ్యాప్ లోడ్ అవుతోంది...",
+      "noOrganizationData": "సంస్థ డేటా లేదు",
+      "scope": {
+        "currentOrg": "ప్రస్తుత org",
+        "allOrgs": "అన్ని orgs"
+      },
+      "actions": {
+        "edit": "సవరించు",
+        "editing": "సవరించు",
+        "refresh": "రిఫ్రెష్"
+      },
+      "stats": {
+        "orgs": "{{count}} org",
+        "orgs_one": "{{count}} సంస్థ",
+        "orgs_other": "{{count}} org",
+        "teams": "{{count}} ekip",
+        "teams_one": "{{count}} ekip",
+        "teams_other": "{{count}} ekip",
+        "relations": "{{count}} iliski",
+        "relations_one": "{{count}} iliski",
+        "relations_other": "{{count}} iliski",
+        "messages": "{{count}} mesaj",
+        "messages_one": "{{count}} mesaj",
+        "messages_other": "{{count}} mesaj",
+        "orgs_few": "{{count}} org",
+        "orgs_many": "{{count}} org",
+        "teams_few": "{{count}} ekip",
+        "teams_many": "{{count}} ekip",
+        "relations_few": "{{count}} iliski",
+        "relations_many": "{{count}} iliski",
+        "messages_few": "{{count}} mesaj",
+        "messages_many": "{{count}} mesaj",
+        "agents": "{{count}} ajan",
+        "agents_one": "{{count}} ajan",
+        "agents_few": "{{count}} ajan",
+        "agents_many": "{{count}} ajan",
+        "agents_other": "{{count}} ajan",
+        "runtimeLinks": "{{count}} runtime links",
+        "runtimeLinks_one": "{{count}} runtime link",
+        "runtimeLinks_few": "{{count}} runtime links",
+        "runtimeLinks_many": "{{count}} runtime links",
+        "runtimeLinks_other": "{{count}} runtime links"
+      }
+    },
+    "editor": {
+      "title": "సంస్థ సెటప్",
+      "loadingOrganization": "Organizasyon yukleniyor",
+      "fallbackOrganization": "organizasyon",
+      "saving": "Kaydediliyor...",
+      "source": {
+        "loading": "yukleniyor",
+        "configured": "yapilandirildi",
+        "generated": "uretildi"
+      },
+      "badges": {
+        "groups": "{{count}} grup",
+        "groups_one": "{{count}} grup",
+        "groups_other": "{{count}} grup",
+        "placed": "{{count}} yerlesti",
+        "placed_one": "{{count}} yerlesti",
+        "placed_other": "{{count}} yerlesti",
+        "unplaced": "{{count}} yerlesmedi",
+        "unplaced_one": "{{count}} yerlesmedi",
+        "unplaced_other": "{{count}} yerlesmedi",
+        "groups_few": "{{count}} grup",
+        "groups_many": "{{count}} grup",
+        "placed_few": "{{count}} yerlesti",
+        "placed_many": "{{count}} yerlesti",
+        "unplaced_few": "{{count}} yerlesmedi",
+        "unplaced_many": "{{count}} yerlesmedi"
+      },
+      "tabs": {
+        "structure": "నిర్మాణం",
+        "teams": "జట్లు",
+        "links": "లింకులు",
+        "organizations": "అన్ని orgs"
+      },
+      "newOrganization": "Yeni organizasyon",
+      "parentOrganization": "Ust organizasyon",
+      "topLevel": "Ust seviye",
+      "underLabel": "{{label}} altinda",
+      "selectedLocation": "Secili konum",
+      "organizationTree": "సంస్థ చెట్టు",
+      "noOrganizationUnits": "Henuz organizasyon birimi yok",
+      "dropHere": "Buraya birak",
+      "createGroup": "Grup olustur",
+      "groupPlaceholder": "Departman, Squad, Urun Alani",
+      "createUnderPlaceholder": "Altinda olustur",
+      "placeExistingTeam": "Mevcut ekibi yerlestir",
+      "teamPlaceholder": "Ekip",
+      "placeUnderPlaceholder": "Altina yerlestir",
+      "selectedItem": "Secili oge",
+      "rootSelected": "Organizasyon koku secildi",
+      "moveUnderPlaceholder": "Altina tasi",
+      "manualRelation": "Manuel iliski",
+      "sourcePlaceholder": "Kaynak",
+      "targetPlaceholder": "Hedef",
+      "kindPlaceholder": "Tur",
+      "kind": {
+        "org": "సంస్థ",
+        "group": "grup",
+        "team": "ekip"
+      },
+      "relationKind": {
+        "dependsOn": "Bagimli",
+        "delegates": "Devreder",
+        "observes": "Izler"
+      },
+      "actions": {
+        "create": "Olustur",
+        "teamHere": "Ekip burada",
+        "addGroup": "Grup ekle",
+        "assignTeam": "Ekibi ata",
+        "move": "Tasi",
+        "remove": "Kaldir",
+        "addRelation": "Iliski ekle"
+      }
+    },
+    "inspector": {
+      "closeSelection": "Secimi kapat",
+      "kind": {
+        "group": "grup",
+        "organization": "organizasyon"
+      },
+      "childNodes": "{{count}} alt dugum",
+      "childNodes_one": "{{count}} alt dugum",
+      "childNodes_other": "{{count}} alt dugum",
+      "agents": "{{count}} ajan",
+      "agents_one": "{{count}} ajan",
+      "agents_other": "{{count}} ajan",
+      "status": {
+        "online": "cevrimici",
+        "offline": "cevrimdisi"
+      },
+      "taskCounts": {
+        "active": "aktif",
+        "pending": "bekliyor",
+        "done": "bitti"
+      },
+      "actions": {
+        "expand": "Genislet",
+        "collapse": "Daralt",
+        "open": "Ac",
+        "graph": "Graf",
+        "expandSubtree": "Alt agaci genislet",
+        "collapseSubtree": "Alt agaci daralt"
+      },
+      "inProgress": "పనిలో ఉంది",
+      "noActiveAgentTasks": "సక్రియ agent tasks లేవు",
+      "childNodes_few": "{{count}} alt dugum",
+      "childNodes_many": "{{count}} alt dugum",
+      "agents_few": "{{count}} ajan",
+      "agents_many": "{{count}} ajan",
+      "tags": {
+        "system": "sistem",
+        "unassigned": "atanmamis"
+      },
+      "descriptions": {
+        "allOrganizations": "అన్ని సంస్థలు",
+        "unassignedTeams": "Henuz bir organizasyona yerlestirilmemis ekipler."
+      }
+    },
+    "graph": {
+      "actions": {
+        "createTeamIn": "సంస్థ {{label}}"
+      },
+      "canvas": {
+        "organizationMap": "సంస్థ మ్యాప్",
+        "allOrganizations": "అన్ని సంస్థలు",
+        "unassignedTeams": "Atanmamis Ekipler",
+        "agents": "{{count}} ajan",
+        "agents_one": "{{count}} ajan",
+        "agents_few": "{{count}} ajan",
+        "agents_many": "{{count}} ajan",
+        "agents_other": "{{count}} ajan",
+        "activeAgents": "{{count}} aktif ajan",
+        "activeAgents_one": "{{count}} aktif ajan",
+        "activeAgents_few": "{{count}} aktif ajan",
+        "activeAgents_many": "{{count}} aktif ajan",
+        "activeAgents_other": "{{count}} aktif ajan",
+        "teams": "{{count}} ekip",
+        "teams_one": "{{count}} ekip",
+        "teams_few": "{{count}} ekip",
+        "teams_many": "{{count}} ekip",
+        "teams_other": "{{count}} ekip",
+        "orgsAndTeams": "{{orgCount}} org - {{teamCount}} ekip",
+        "teamRole": "{{memberCount}} ajan - {{activeCount}} aktif",
+        "teamReference": "ekip referansi",
+        "notFound": "bulunamadi",
+        "online": "cevrimici",
+        "offline": "cevrimdisi",
+        "agentStatus": {
+          "active": "aktif",
+          "idle": "bosta",
+          "offline": "cevrimdisi",
+          "unknown": "bilinmiyor"
+        }
+      },
+      "edgeOverlay": {
+        "runtimeMessages": "లింకులు",
+        "manualRelation": "లింకులు",
+        "close": "Iliski detaylarini kapat",
+        "messages": "{{count}} mesaj",
+        "messages_one": "{{count}} mesaj",
+        "messages_other": "{{count}} mesaj",
+        "weight": "agirlik {{count}}",
+        "weight_one": "agirlik {{count}}",
+        "weight_other": "agirlik {{count}}",
+        "messages_few": "{{count}} mesaj",
+        "messages_many": "{{count}} mesaj",
+        "weight_few": "agirlik {{count}}",
+        "weight_many": "agirlik {{count}}"
+      }
+    }
   }
 }

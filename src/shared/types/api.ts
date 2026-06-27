@@ -113,6 +113,7 @@ import type {
   MemberWorkSyncStatusRequest,
   MemberWorkSyncTeamMetrics,
 } from '@features/member-work-sync/contracts';
+import type { OrganizationsElectronApi } from '@features/organizations/contracts';
 import type { RecentProjectsElectronApi } from '@features/recent-projects/contracts';
 import type { RuntimeProviderManagementApi } from '@features/runtime-provider-management/contracts';
 import type { TerminalWorkspaceElectronApi } from '@features/terminal-workspace/contracts';
@@ -981,6 +982,9 @@ export interface ElectronAPI extends RecentProjectsElectronApi, CodexAccountElec
 
   // Member log stream API
   memberLogStream: MemberLogStreamApi;
+
+  // Organization map API
+  organizations: OrganizationsElectronApi;
 
   // tmux runtime diagnostics API
   tmux: TmuxAPI;

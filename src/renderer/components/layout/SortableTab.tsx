@@ -56,6 +56,7 @@ const TAB_ICONS = {
   settings: Settings,
   session: FileText,
   teams: Users,
+  organizations: Network,
   team: Users,
   report: Activity,
   extensions: Puzzle,

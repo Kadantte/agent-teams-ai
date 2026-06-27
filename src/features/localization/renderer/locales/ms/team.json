@@ -140,7 +140,19 @@
       "launchSettingsTitle": "Tetapan pelancaran pilihan",
       "launchSettingsDescription": "Prompt, keselamatan, dan penggantian CLI berada di sini apabila anda memerlukannya.",
       "teamDetailsTitle": "Butiran pasukan pilihan",
-      "teamDetailsDescription": "Kekalkan aliran lalai padat dan buka ini hanya apabila anda mahukan konteks tambahan atau warna tersuai."
+      "teamDetailsDescription": "Kekalkan aliran lalai padat dan buka ini hanya apabila anda mahukan konteks tambahan atau warna tersuai.",
+      "summary": {
+        "leadPrompt": "Lead prompt",
+        "autoApproveTools": "Auto-approve tools",
+        "fastMode": "Fast mode",
+        "fastDisabled": "Fast disabled",
+        "fastDefault": "Fast default",
+        "anthropicLimitedContext": "Anthropic limited to 200K context",
+        "worktree": "Worktree: {{name}}",
+        "customCliArgs": "Custom CLI args",
+        "description": "Description",
+        "color": "Color: {{color}}"
+      }
     },
     "prepare": {
       "unsupportedPreload": "Versi preload semasa tidak menyokong team:prepareProvisioning. Mulakan semula aplikasi dev.",
@@ -152,7 +164,10 @@
       "checkingProviders": "Menyemak pembekal yang dipilih...",
       "preparingEnvironment": "Menyediakan persekitaran...",
       "selectedProvidersReadyWithNotes": "Pembekal yang dipilih sedia (dengan nota)",
-      "selectedProvidersReady": "Pembekal yang dipilih sedia"
+      "selectedProvidersReady": "Pembekal yang dipilih sedia",
+      "providerStatusLoading": "{{provider}} provider status is still loading. Model checks will start automatically.",
+      "selectedProvidersLabel": "Selected providers",
+      "readyStatus": "Ready"
     },
     "validation": {
       "nameMustContainLetterOrDigit": "Nama mesti mengandungi sekurang-kurangnya satu huruf atau digit",
@@ -166,7 +181,30 @@
       "teamLaunching": "Pasukan sedang dilancarkan",
       "teamNameExists": "Nama pasukan sudah wujud",
       "checkFormFields": "Semak medan borang"
-    }
+    },
+    "organizationPlacement": {
+      "title": "Organization placement",
+      "description": "Choose the organization, then choose the root or group where the team belongs.",
+      "addToOrganization": "Add to organization",
+      "organizationLabel": "Organization",
+      "organizationHelp": "Choose the organization that owns this team.",
+      "organizationPlaceholder": "Organization",
+      "groupOrRootLabel": "Group or root",
+      "groupOrRootHelp": "Choose a group, or keep the organization root.",
+      "groupOrRootPlaceholder": "Root or group",
+      "kind": {
+        "root": "Root",
+        "group": "Group"
+      }
+    },
+    "defaultDescription": {
+      "fallback": "Team for provisioning flow",
+      "named": "{{teamName}} team for provisioning flow"
+    },
+    "defaultWorkflows": {
+      "reviewer": "Review every completed task in the project. Read the code changes, check for correctness, style, and potential issues. Approve the task or request changes with clear feedback."
+    },
+    "memberModelLockReason": "This teammate is synced with the lead model. Turn off sync to set a custom provider, model, or effort."
   },
   "editTeam": {
     "actions": {
@@ -1374,6 +1412,7 @@
     "actions": {
       "copyTeam": "Salin pasukan",
       "createTeam": "Cipta Pasukan",
+      "organizationMap": "Org Map",
       "deleteForever": "Padam selama-lamanya",
       "deletePermanently": "Padam secara kekal",
       "deleteTeam": "Padam pasukan",
@@ -2595,5 +2634,225 @@
     "tabColorOrange": "Orange",
     "tabColorRose": "Rose",
     "tabColorViolet": "Violet"
+  },
+  "organizations": {
+    "map": {
+      "allOrganizationsTitle": "All Organizations",
+      "defaultTitle": "Organization Map",
+      "organizationPlaceholder": "Organization",
+      "loading": "Loading organization map...",
+      "noOrganizationData": "No organization data",
+      "scope": {
+        "currentOrg": "Current org",
+        "allOrgs": "All orgs"
+      },
+      "actions": {
+        "edit": "Edit",
+        "editing": "Editing",
+        "refresh": "Refresh"
+      },
+      "stats": {
+        "orgs": "{{count}} orgs",
+        "orgs_one": "{{count}} org",
+        "orgs_other": "{{count}} orgs",
+        "teams": "{{count}} teams",
+        "teams_one": "{{count}} team",
+        "teams_other": "{{count}} teams",
+        "relations": "{{count}} relations",
+        "relations_one": "{{count}} relation",
+        "relations_other": "{{count}} relations",
+        "messages": "{{count}} messages",
+        "messages_one": "{{count}} message",
+        "messages_other": "{{count}} messages",
+        "orgs_few": "{{count}} orgs",
+        "orgs_many": "{{count}} orgs",
+        "teams_few": "{{count}} teams",
+        "teams_many": "{{count}} teams",
+        "relations_few": "{{count}} relations",
+        "relations_many": "{{count}} relations",
+        "messages_few": "{{count}} messages",
+        "messages_many": "{{count}} messages",
+        "agents": "{{count}} agents",
+        "agents_one": "{{count}} agent",
+        "agents_few": "{{count}} agents",
+        "agents_many": "{{count}} agents",
+        "agents_other": "{{count}} agents",
+        "runtimeLinks": "{{count}} pautan runtime",
+        "runtimeLinks_one": "{{count}} pautan runtime",
+        "runtimeLinks_other": "{{count}} pautan runtime",
+        "runtimeLinks_few": "{{count}} pautan runtime",
+        "runtimeLinks_many": "{{count}} pautan runtime"
+      }
+    },
+    "editor": {
+      "title": "Organization setup",
+      "loadingOrganization": "Loading organization",
+      "fallbackOrganization": "organization",
+      "saving": "Saving...",
+      "source": {
+        "loading": "loading",
+        "configured": "configured",
+        "generated": "generated"
+      },
+      "badges": {
+        "groups": "{{count}} groups",
+        "groups_one": "{{count}} group",
+        "groups_other": "{{count}} groups",
+        "placed": "{{count}} placed",
+        "placed_one": "{{count}} placed",
+        "placed_other": "{{count}} placed",
+        "unplaced": "{{count}} unplaced",
+        "unplaced_one": "{{count}} unplaced",
+        "unplaced_other": "{{count}} unplaced",
+        "groups_few": "{{count}} groups",
+        "groups_many": "{{count}} groups",
+        "placed_few": "{{count}} placed",
+        "placed_many": "{{count}} placed",
+        "unplaced_few": "{{count}} unplaced",
+        "unplaced_many": "{{count}} unplaced"
+      },
+      "tabs": {
+        "structure": "Structure",
+        "teams": "Teams",
+        "links": "Links",
+        "organizations": "Orgs"
+      },
+      "newOrganization": "New organization",
+      "parentOrganization": "Parent organization",
+      "topLevel": "Top level",
+      "underLabel": "under {{label}}",
+      "selectedLocation": "Selected location",
+      "organizationTree": "Organization tree",
+      "noOrganizationUnits": "No organization units yet",
+      "dropHere": "Drop here",
+      "createGroup": "Create group",
+      "groupPlaceholder": "Department, Squad, Product Area",
+      "createUnderPlaceholder": "Create under",
+      "placeExistingTeam": "Place existing team",
+      "teamPlaceholder": "Team",
+      "placeUnderPlaceholder": "Place under",
+      "selectedItem": "Selected item",
+      "rootSelected": "Organization root selected",
+      "moveUnderPlaceholder": "Move under",
+      "manualRelation": "Manual relation",
+      "sourcePlaceholder": "Source",
+      "targetPlaceholder": "Target",
+      "kindPlaceholder": "Kind",
+      "kind": {
+        "org": "org",
+        "group": "group",
+        "team": "team"
+      },
+      "relationKind": {
+        "dependsOn": "Depends on",
+        "delegates": "Delegates",
+        "observes": "Observes"
+      },
+      "actions": {
+        "create": "Create",
+        "teamHere": "Team here",
+        "addGroup": "Add group",
+        "assignTeam": "Assign team",
+        "move": "Move",
+        "remove": "Remove",
+        "addRelation": "Add relation"
+      }
+    },
+    "inspector": {
+      "closeSelection": "Close selection",
+      "kind": {
+        "group": "group",
+        "organization": "organization"
+      },
+      "childNodes": "{{count}} child nodes",
+      "childNodes_one": "{{count}} child node",
+      "childNodes_other": "{{count}} child nodes",
+      "agents": "{{count}} agents",
+      "agents_one": "{{count}} agent",
+      "agents_other": "{{count}} agents",
+      "status": {
+        "online": "online",
+        "offline": "offline"
+      },
+      "taskCounts": {
+        "active": "active",
+        "pending": "pending",
+        "done": "done"
+      },
+      "actions": {
+        "expand": "Expand",
+        "collapse": "Collapse",
+        "open": "Open",
+        "graph": "Graph",
+        "expandSubtree": "Expand subtree",
+        "collapseSubtree": "Collapse subtree"
+      },
+      "inProgress": "In progress",
+      "noActiveAgentTasks": "No active agent tasks",
+      "childNodes_few": "{{count}} child nodes",
+      "childNodes_many": "{{count}} child nodes",
+      "agents_few": "{{count}} agents",
+      "agents_many": "{{count}} agents",
+      "tags": {
+        "system": "system",
+        "unassigned": "unassigned"
+      },
+      "descriptions": {
+        "allOrganizations": "All configured organizations.",
+        "unassignedTeams": "Teams that are not placed in an organization yet."
+      }
+    },
+    "graph": {
+      "actions": {
+        "createTeamIn": "Create team in {{label}}"
+      },
+      "canvas": {
+        "organizationMap": "Organization Map",
+        "allOrganizations": "All Organizations",
+        "unassignedTeams": "Unassigned Teams",
+        "agents": "{{count}} agents",
+        "agents_one": "{{count}} agent",
+        "agents_few": "{{count}} agents",
+        "agents_many": "{{count}} agents",
+        "agents_other": "{{count}} agents",
+        "activeAgents": "{{count}} active agents",
+        "activeAgents_one": "{{count}} active agent",
+        "activeAgents_few": "{{count}} active agents",
+        "activeAgents_many": "{{count}} active agents",
+        "activeAgents_other": "{{count}} active agents",
+        "teams": "{{count}} teams",
+        "teams_one": "{{count}} team",
+        "teams_few": "{{count}} teams",
+        "teams_many": "{{count}} teams",
+        "teams_other": "{{count}} teams",
+        "orgsAndTeams": "{{orgCount}} orgs - {{teamCount}} teams",
+        "teamRole": "{{memberCount}} agents - {{activeCount}} active",
+        "teamReference": "team reference",
+        "notFound": "not found",
+        "online": "online",
+        "offline": "offline",
+        "agentStatus": {
+          "active": "active",
+          "idle": "idle",
+          "offline": "offline",
+          "unknown": "unknown"
+        }
+      },
+      "edgeOverlay": {
+        "runtimeMessages": "Runtime cross-team messages",
+        "manualRelation": "Manual organization relation",
+        "close": "Close relation details",
+        "messages": "{{count}} messages",
+        "messages_one": "{{count}} message",
+        "messages_other": "{{count}} messages",
+        "weight": "weight {{count}}",
+        "weight_one": "weight {{count}}",
+        "weight_other": "weight {{count}}",
+        "messages_few": "{{count}} messages",
+        "messages_many": "{{count}} messages",
+        "weight_few": "weight {{count}}",
+        "weight_many": "weight {{count}}"
+      }
+    }
   }
 }

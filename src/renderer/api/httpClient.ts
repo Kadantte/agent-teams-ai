@@ -11,6 +11,27 @@ import {
   createEmptyMemberLogStreamResponse,
   createEmptyMemberRuntimeLogTailResponse,
 } from '@features/member-log-stream/contracts';
+import {
+  type AssignOrganizationTeamRequest,
+  type CreateOrganizationRequest,
+  type DeleteOrganizationRelationRequest,
+  type MoveOrganizationUnitRequest,
+  type OrganizationMapPayload,
+  type OrganizationMapRequest,
+  ORGANIZATIONS_MAP_ROUTE,
+  ORGANIZATIONS_ORGANIZATIONS_ROUTE,
+  ORGANIZATIONS_RELATIONS_ROUTE,
+  ORGANIZATIONS_STRUCTURE_ROUTE,
+  ORGANIZATIONS_TEAM_ASSIGNMENT_ROUTE,
+  ORGANIZATIONS_UNIT_MOVE_ROUTE,
+  ORGANIZATIONS_UNITS_ROUTE,
+  type OrganizationsElectronApi,
+  type OrganizationStructurePayload,
+  type RemoveOrganizationTeamRequest,
+  type RemoveOrganizationUnitRequest,
+  type UpsertOrganizationRelationRequest,
+  type UpsertOrganizationUnitRequest,
+} from '@features/organizations/contracts';
 
 import type {
   CodexAccountSnapshotDto,
@@ -281,6 +302,67 @@ export class HttpAPIClient implements ElectronAPI {
 
   getDashboardRecentProjects = (): Promise<DashboardRecentProjectsPayload> =>
     this.get<DashboardRecentProjectsPayload>('/api/dashboard/recent-projects');
+
+  organizations: OrganizationsElectronApi = {
+    getOrganizationMap: (request?: OrganizationMapRequest): Promise<OrganizationMapPayload> => {
+      const query = new URLSearchParams();
+      if (request?.scope) query.set('scope', request.scope);
+      if (request?.organizationId) query.set('organizationId', request.organizationId);
+      if (request?.includeDeletedTeams) query.set('includeDeletedTeams', 'true');
+      if (request?.maxTeams) query.set('maxTeams', String(request.maxTeams));
+      if (request?.maxAgentsPerTeam) {
+        query.set('maxAgentsPerTeam', String(request.maxAgentsPerTeam));
+      }
+      if (request?.maxTasksPerAgent) {
+        query.set('maxTasksPerAgent', String(request.maxTasksPerAgent));
+      }
+      if (request?.maxCrossTeamMessages) {
+        query.set('maxCrossTeamMessages', String(request.maxCrossTeamMessages));
+      }
+      const suffix = query.toString() ? `?${query.toString()}` : '';
+      return this.get<OrganizationMapPayload>(`${ORGANIZATIONS_MAP_ROUTE}${suffix}`);
+    },
+    getOrganizationStructure: (
+      request?: OrganizationMapRequest
+    ): Promise<OrganizationStructurePayload> => {
+      const query = new URLSearchParams();
+      if (request?.organizationId) query.set('organizationId', request.organizationId);
+      const suffix = query.toString() ? `?${query.toString()}` : '';
+      return this.get<OrganizationStructurePayload>(`${ORGANIZATIONS_STRUCTURE_ROUTE}${suffix}`);
+    },
+    createOrganization: (
+      request: CreateOrganizationRequest
+    ): Promise<OrganizationStructurePayload> =>
+      this.post<OrganizationStructurePayload>(ORGANIZATIONS_ORGANIZATIONS_ROUTE, request),
+    upsertOrganizationUnit: (
+      request: UpsertOrganizationUnitRequest
+    ): Promise<OrganizationStructurePayload> =>
+      this.put<OrganizationStructurePayload>(ORGANIZATIONS_UNITS_ROUTE, request),
+    moveOrganizationUnit: (
+      request: MoveOrganizationUnitRequest
+    ): Promise<OrganizationStructurePayload> =>
+      this.put<OrganizationStructurePayload>(ORGANIZATIONS_UNIT_MOVE_ROUTE, request),
+    removeOrganizationUnit: (
+      request: RemoveOrganizationUnitRequest
+    ): Promise<OrganizationStructurePayload> =>
+      this.del<OrganizationStructurePayload>(ORGANIZATIONS_UNITS_ROUTE, request),
+    assignTeamToUnit: (
+      request: AssignOrganizationTeamRequest
+    ): Promise<OrganizationStructurePayload> =>
+      this.put<OrganizationStructurePayload>(ORGANIZATIONS_TEAM_ASSIGNMENT_ROUTE, request),
+    removeTeamFromOrganization: (
+      request: RemoveOrganizationTeamRequest
+    ): Promise<OrganizationStructurePayload> =>
+      this.del<OrganizationStructurePayload>(ORGANIZATIONS_TEAM_ASSIGNMENT_ROUTE, request),
+    upsertOrganizationRelation: (
+      request: UpsertOrganizationRelationRequest
+    ): Promise<OrganizationStructurePayload> =>
+      this.put<OrganizationStructurePayload>(ORGANIZATIONS_RELATIONS_ROUTE, request),
+    deleteOrganizationRelation: (
+      request: DeleteOrganizationRelationRequest
+    ): Promise<OrganizationStructurePayload> =>
+      this.del<OrganizationStructurePayload>(ORGANIZATIONS_RELATIONS_ROUTE, request),
+  };
 
   memberLogStream: MemberLogStreamApi = {
     getMemberLogStream: async () => {

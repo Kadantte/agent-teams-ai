@@ -3811,6 +3811,36 @@ describe('TeamProvisioningService', () => {
       expect(secondSnapshot.members.alice?.pid).toBe(222);
     });
 
+    it('starts a fresh runtime snapshot probe after cache invalidation for the same run', async () => {
+      const svc = new TeamProvisioningService();
+      const firstProbe = createDeferred<unknown>();
+      const secondProbe = createDeferred<unknown>();
+      const firstSnapshot = {
+        teamName: 'runtime-team',
+        updatedAt: '2026-06-20T17:19:11.000Z',
+        runId: null,
+        members: {},
+      };
+      const secondSnapshot = {
+        ...firstSnapshot,
+        updatedAt: '2026-06-20T17:20:11.000Z',
+      };
+      const buildSnapshot = vi
+        .spyOn(svc as any, 'buildTeamAgentRuntimeSnapshot')
+        .mockReturnValueOnce(firstProbe.promise)
+        .mockReturnValueOnce(secondProbe.promise);
+
+      const first = svc.getTeamAgentRuntimeSnapshot('runtime-team');
+      (svc as any).invalidateRuntimeSnapshotCaches('runtime-team');
+      const second = svc.getTeamAgentRuntimeSnapshot('runtime-team');
+
+      expect(buildSnapshot).toHaveBeenCalledTimes(2);
+      firstProbe.resolve(firstSnapshot);
+      secondProbe.resolve(secondSnapshot);
+      await expect(first).resolves.toBe(firstSnapshot);
+      await expect(second).resolves.toBe(secondSnapshot);
+    });
+
     it('does not cache live runtime metadata when invalidated while the probe is in flight', async () => {
       const svc = new TeamProvisioningService();
       (svc as any).configReader = {
@@ -3833,6 +3863,43 @@ describe('TeamProvisioningService', () => {
       (svc as any).invalidateRuntimeSnapshotCaches('runtime-team');
       processRows.resolve([]);
       await first;
+
+      await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
+
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps live runtime metadata probes single-flight across cache invalidation for the same run', async () => {
+      const svc = new TeamProvisioningService();
+      (svc as any).configReader = {
+        getConfig: vi.fn(async () => ({
+          members: [
+            { name: 'team-lead', agentType: 'team-lead' },
+            { name: 'alice', model: 'gpt-5.4-mini', agentId: 'alice@runtime-team' },
+          ],
+        })),
+      };
+      const processRows =
+        createDeferred<Awaited<ReturnType<typeof listRuntimeProcessTableForCurrentPlatform>>>();
+      vi.mocked(listRuntimeProcessTableForCurrentPlatform)
+        .mockReturnValueOnce(processRows.promise)
+        .mockResolvedValueOnce([]);
+
+      const first = (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team') as Promise<
+        Map<string, unknown>
+      >;
+      await vi.waitFor(() =>
+        expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1)
+      );
+      (svc as any).invalidateRuntimeSnapshotCaches('runtime-team');
+      const second = (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team') as Promise<
+        Map<string, unknown>
+      >;
+
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(listRuntimeProcessTableForCurrentPlatform).toHaveBeenCalledTimes(1);
+      processRows.resolve([]);
+      await Promise.all([first, second]);
 
       await (svc as any).getLiveTeamAgentRuntimeMetadata('runtime-team');
 
@@ -6394,9 +6461,7 @@ describe('TeamProvisioningService', () => {
       ];
       (svc as any).aliveRunByTeam.set('runtime-team', 'run-1');
       (svc as any).runs.set('run-1', run);
-      mockRuntimeUsageProcessRows([
-        { pid: 333, ppid: 1, command: 'opencode runtime host' },
-      ]);
+      mockRuntimeUsageProcessRows([{ pid: 333, ppid: 1, command: 'opencode runtime host' }]);
       vi.mocked(pidusage).mockReset();
       vi.mocked(pidusage).mockImplementation(
         async (target: number | string | Array<number | string>) => {
@@ -6479,9 +6544,7 @@ describe('TeamProvisioningService', () => {
         ),
       };
       vi.mocked(pidusage).mockReset();
-      mockRuntimeUsageProcessRows([
-        { pid: 333, ppid: 1, command: 'opencode runtime host' },
-      ]);
+      mockRuntimeUsageProcessRows([{ pid: 333, ppid: 1, command: 'opencode runtime host' }]);
       vi.mocked(pidusage).mockImplementation(
         async (target: number | string | Array<number | string>) => {
           if (Array.isArray(target)) {
@@ -26697,7 +26760,9 @@ describe('TeamProvisioningService', () => {
       cwd: worktreeDir,
       memberId: 'alice',
     });
-    expect(path.normalize(memberWorktrees[0]?.gitRootConfigKey ?? '')).toBe(path.normalize(repoDir));
+    expect(path.normalize(memberWorktrees[0]?.gitRootConfigKey ?? '')).toBe(
+      path.normalize(repoDir)
+    );
     expect(
       memberWorktrees.every(
         (workspace) => path.normalize(workspace.gitRootConfigKey ?? '') === path.normalize(repoDir)

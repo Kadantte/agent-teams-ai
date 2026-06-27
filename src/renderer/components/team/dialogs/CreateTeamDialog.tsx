@@ -43,6 +43,13 @@ import {
 import { Input } from '@renderer/components/ui/input';
 import { Label } from '@renderer/components/ui/label';
 import { MentionableTextarea } from '@renderer/components/ui/MentionableTextarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@renderer/components/ui/select';
 import { getTeamColorSet, getThemedBadge } from '@renderer/constants/teamColors';
 import { useChipDraftPersistence } from '@renderer/hooks/useChipDraftPersistence';
 import { useCreateTeamDraft } from '@renderer/hooks/useCreateTeamDraft';
@@ -147,6 +154,11 @@ import {
   WorktreeGitReadinessBanner,
 } from './WorktreeGitReadinessBanner';
 
+import type {
+  OrganizationPlacementSelection,
+  OrganizationStructurePayload,
+  OrganizationStructureUnitDto,
+} from '@features/organizations/contracts';
 import type { MemberDraft } from '@renderer/components/team/members/MembersEditorSection';
 import type {
   CliProviderId,
@@ -215,6 +227,91 @@ export interface ActiveTeamRef {
   projectPath: string;
 }
 
+interface OrganizationPlacementUnitOption {
+  unit: OrganizationStructureUnitDto;
+  depth: number;
+}
+
+function compareOrganizationPlacementUnits(
+  left: OrganizationStructureUnitDto,
+  right: OrganizationStructureUnitDto
+): number {
+  if (left.kind === 'organization' && right.kind !== 'organization') return -1;
+  if (right.kind === 'organization' && left.kind !== 'organization') return 1;
+  return getOrganizationUnitLabel(left).localeCompare(getOrganizationUnitLabel(right));
+}
+
+function getOrganizationPlacementUnitOptions(
+  structure: OrganizationStructurePayload | null,
+  organizationId: string
+): OrganizationPlacementUnitOption[] {
+  if (!structure) return [];
+  const units = structure.units.filter(
+    (unit) => unit.organizationId === organizationId && unit.kind !== 'team'
+  );
+  const unitById = new Map(units.map((unit) => [unit.id, unit]));
+  const organizationRootId =
+    structure.organizations.find((organization) => organization.id === organizationId)
+      ?.rootNodeId ?? null;
+  const rootUnit =
+    (organizationRootId ? unitById.get(organizationRootId) : undefined) ??
+    units.find((unit) => unit.kind === 'organization') ??
+    null;
+  const childrenByParentId = new Map<string | null, OrganizationStructureUnitDto[]>();
+
+  for (const unit of units) {
+    const parentId =
+      unit.parentId && unitById.has(unit.parentId)
+        ? unit.parentId
+        : unit.kind !== 'organization' && rootUnit && unit.id !== rootUnit.id
+          ? rootUnit.id
+          : null;
+    const children = childrenByParentId.get(parentId) ?? [];
+    children.push(unit);
+    childrenByParentId.set(parentId, children);
+  }
+
+  for (const children of childrenByParentId.values()) {
+    children.sort(compareOrganizationPlacementUnits);
+  }
+
+  const ordered: OrganizationPlacementUnitOption[] = [];
+  const visited = new Set<string>();
+  const visit = (unit: OrganizationStructureUnitDto, depth: number): void => {
+    if (visited.has(unit.id)) return;
+    visited.add(unit.id);
+    ordered.push({ unit, depth });
+    for (const child of childrenByParentId.get(unit.id) ?? []) {
+      visit(child, depth + 1);
+    }
+  };
+
+  for (const root of childrenByParentId.get(null) ?? []) {
+    visit(root, 0);
+  }
+  for (const unit of units.sort(compareOrganizationPlacementUnits)) {
+    visit(unit, 0);
+  }
+
+  return ordered;
+}
+
+function getOrganizationUnitLabel(unit: OrganizationStructureUnitDto): string {
+  return unit.title ? `${unit.label} - ${unit.title}` : unit.label;
+}
+
+type OrganizationPlacementUnitKindKey =
+  | 'create.organizationPlacement.kind.root'
+  | 'create.organizationPlacement.kind.group';
+
+function getOrganizationPlacementUnitKindKey(
+  unit: OrganizationStructureUnitDto
+): OrganizationPlacementUnitKindKey {
+  return unit.kind === 'organization'
+    ? 'create.organizationPlacement.kind.root'
+    : 'create.organizationPlacement.kind.group';
+}
+
 interface CreateTeamDialogProps {
   open: boolean;
   canCreate: boolean;
@@ -225,9 +322,13 @@ interface CreateTeamDialogProps {
   provisioningTeamNames?: string[];
   activeTeams?: ActiveTeamRef[];
   initialData?: TeamCopyData;
+  initialOrganizationPlacement?: OrganizationPlacementSelection | null;
   defaultProjectPath?: string | null;
   onClose: () => void;
-  onCreate: (request: TeamCreateRequest) => Promise<void>;
+  onCreate: (
+    request: TeamCreateRequest,
+    placement?: OrganizationPlacementSelection
+  ) => Promise<void>;
   onOpenTeam: (teamName: string, projectPath?: string) => void;
 }
 
@@ -242,12 +343,11 @@ interface ValidationResult {
 
 import { CUSTOM_ROLE, PRESET_ROLES } from '@renderer/constants/teamRoles';
 
-const DEFAULT_MEMBERS: { name: string; roleSelection: string; workflow?: string }[] = [
+const DEFAULT_MEMBERS: { name: string; roleSelection: string; workflowKind?: 'reviewer' }[] = [
   {
     name: 'alice',
     roleSelection: 'reviewer',
-    workflow:
-      'Review every completed task in the project. Read the code changes, check for correctness, style, and potential issues. Approve the task or request changes with clear feedback.',
+    workflowKind: 'reviewer',
   },
   {
     name: 'tom',
@@ -285,11 +385,14 @@ function validateTeamNameInline(
   return null;
 }
 
-function buildDefaultTeamDescription(teamName: string): string {
+function buildDefaultTeamDescription(
+  teamName: string,
+  t: ReturnType<typeof useAppTranslation>['t']
+): string {
   const trimmedName = teamName.trim();
   return trimmedName.length > 0
-    ? `${trimmedName} team for provisioning flow`
-    : 'Team for provisioning flow';
+    ? t('create.defaultDescription.named', { teamName: trimmedName })
+    : t('create.defaultDescription.fallback');
 }
 
 function validateRequest(
@@ -401,6 +504,7 @@ export const CreateTeamDialog = ({
   provisioningTeamNames = [],
   activeTeams,
   initialData,
+  initialOrganizationPlacement,
   defaultProjectPath,
   onClose,
   onCreate,
@@ -500,6 +604,14 @@ export const CreateTeamDialog = ({
     cwd?: string;
   }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [organizationStructure, setOrganizationStructure] =
+    useState<OrganizationStructurePayload | null>(null);
+  const [organizationStructureLoading, setOrganizationStructureLoading] = useState(false);
+  const [organizationPlacementEnabled, setOrganizationPlacementEnabled] = useState(false);
+  const [organizationPlacementOrganizationId, setOrganizationPlacementOrganizationId] =
+    useState('');
+  const [organizationPlacementParentId, setOrganizationPlacementParentId] = useState('');
+  const [organizationPlacementError, setOrganizationPlacementError] = useState<string | null>(null);
   const [conflictDismissed, setConflictDismissed] = useState(false);
   const [selectedProviderId, setSelectedProviderIdRaw] = useState<TeamProviderId>(() =>
     normalizeLeadProviderForMode(getStoredTeamProvider(), multimodelEnabled)
@@ -528,6 +640,50 @@ export const CreateTeamDialog = ({
       setProviderSettingsProviderId(null);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      setOrganizationPlacementEnabled(false);
+      setOrganizationPlacementError(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const preferredPlacement = initialOrganizationPlacement ?? null;
+    setOrganizationStructureLoading(true);
+    void api.organizations
+      .getOrganizationStructure()
+      .then((payload) => {
+        if (cancelled) return;
+        setOrganizationStructure(payload);
+        const organization =
+          (preferredPlacement
+            ? payload.organizations.find(
+                (candidate) => candidate.id === preferredPlacement.organizationId
+              )
+            : undefined) ??
+          payload.organizations[0] ??
+          null;
+        setOrganizationPlacementEnabled(Boolean(preferredPlacement));
+        setOrganizationPlacementOrganizationId(organization?.id ?? '');
+        setOrganizationPlacementParentId(
+          preferredPlacement?.parentUnitId ?? organization?.rootNodeId ?? ''
+        );
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setOrganizationPlacementError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setOrganizationStructureLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialOrganizationPlacement, open]);
 
   // Re-read localStorage when advancedKey changes
   useEffect(() => {
@@ -1142,7 +1298,7 @@ export const CreateTeamDialog = ({
         status: 'checking',
         backendSummary: runtimeBackendSummaryByProviderRef.current.get(providerId) ?? null,
         details: [
-          `${getProviderLabel(providerId)} provider status is still loading. Model checks will start automatically.`,
+          t('create.prepare.providerStatusLoading', { provider: getProviderLabel(providerId) }),
         ],
         supportDiagnostics: undefined,
       });
@@ -1413,7 +1569,8 @@ export const CreateTeamDialog = ({
       createMemberDraft({
         name: member.name,
         roleSelection: member.roleSelection,
-        workflow: member.workflow,
+        workflow:
+          member.workflowKind === 'reviewer' ? t('create.defaultWorkflows.reviewer') : undefined,
       })
     );
     setMembers(
@@ -1422,7 +1579,7 @@ export const CreateTeamDialog = ({
         : applyStoredCreateTeamMemberRuntimePreferences(nextDefaultMembers)
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initialData is checked once on open/draftLoaded
-  }, [open, draftLoaded]);
+  }, [open, draftLoaded, t]);
 
   useEffect(() => {
     if (!open || !draftLoaded || initialData || syncModelsWithLead || members.length === 0) {
@@ -1452,7 +1609,7 @@ export const CreateTeamDialog = ({
       return;
     }
     const resolvedTeamName = teamName.trim() || suggestedTeamName;
-    const nextAutoDescription = buildDefaultTeamDescription(resolvedTeamName);
+    const nextAutoDescription = buildDefaultTeamDescription(resolvedTeamName, t);
     const currentDescription = descriptionDraft.value.trim();
     const previousAutoDescription = lastAutoDescriptionRef.current?.trim() ?? '';
     const shouldSyncDescription =
@@ -1467,7 +1624,7 @@ export const CreateTeamDialog = ({
     if (currentDescription === nextAutoDescription) {
       lastAutoDescriptionRef.current = nextAutoDescription;
     }
-  }, [descriptionDraft, initialData, open, suggestedTeamName, teamName]);
+  }, [descriptionDraft, initialData, open, suggestedTeamName, t, teamName]);
 
   // Pre-select defaultProjectPath when projects loaded (only while dialog is open)
   useEffect(() => {
@@ -1544,12 +1701,12 @@ export const CreateTeamDialog = ({
             {
               id: 'team-lead',
               name: 'team-lead',
-              subtitle: 'Team Lead',
+              subtitle: t('editTeam.teamLead.role'),
               color: resolveTeamLeadColorName(),
             },
           ]
         : buildMemberDraftSuggestions(members, memberColorMap),
-    [memberColorMap, members, soloTeam]
+    [memberColorMap, members, soloTeam, t]
   );
 
   const effectiveModel = useMemo(
@@ -1934,20 +2091,22 @@ export const CreateTeamDialog = ({
 
   const launchOptionalSummary = useMemo(() => {
     const summary: string[] = [];
-    if (prompt.trim()) summary.push('Lead prompt');
-    if (skipPermissions) summary.push('Auto-approve tools');
+    if (prompt.trim()) summary.push(t('create.optional.summary.leadPrompt'));
+    if (skipPermissions) summary.push(t('create.optional.summary.autoApproveTools'));
     if (selectedProviderId === 'anthropic' || selectedProviderId === 'codex') {
-      if (selectedFastMode === 'on') summary.push('Fast mode');
-      else if (selectedFastMode === 'off') summary.push('Fast disabled');
+      if (selectedFastMode === 'on') summary.push(t('create.optional.summary.fastMode'));
+      else if (selectedFastMode === 'off') summary.push(t('create.optional.summary.fastDisabled'));
       else if (selectedProviderId === 'anthropic' && anthropicProviderFastModeDefault) {
-        summary.push('Fast default');
+        summary.push(t('create.optional.summary.fastDefault'));
       }
     }
     if (effectiveAnthropicRuntimeLimitContext) {
-      summary.push('Anthropic limited to 200K context');
+      summary.push(t('create.optional.summary.anthropicLimitedContext'));
     }
-    if (worktreeEnabled && worktreeName.trim()) summary.push(`Worktree: ${worktreeName.trim()}`);
-    if (customArgs.trim()) summary.push('Custom CLI args');
+    if (worktreeEnabled && worktreeName.trim()) {
+      summary.push(t('create.optional.summary.worktree', { name: worktreeName.trim() }));
+    }
+    if (customArgs.trim()) summary.push(t('create.optional.summary.customCliArgs'));
     return summary;
   }, [
     anthropicProviderFastModeDefault,
@@ -1957,16 +2116,17 @@ export const CreateTeamDialog = ({
     selectedFastMode,
     selectedProviderId,
     skipPermissions,
+    t,
     worktreeEnabled,
     worktreeName,
   ]);
 
   const teamDetailsSummary = useMemo(() => {
     const summary: string[] = [];
-    if (description.trim()) summary.push('Description');
-    if (teamColor) summary.push(`Color: ${teamColor}`);
+    if (description.trim()) summary.push(t('create.optional.summary.description'));
+    if (teamColor) summary.push(t('create.optional.summary.color', { color: teamColor }));
     return summary;
-  }, [description, teamColor]);
+  }, [description, t, teamColor]);
 
   const handleSyncModelsWithLeadChange = useCallback(
     (checked: boolean): void => {
@@ -2018,6 +2178,43 @@ export const CreateTeamDialog = ({
   });
   const canOpenExistingTeam =
     activeError?.includes('Team already exists') === true && request.teamName.length > 0;
+
+  const organizationPlacementOrganizations = organizationStructure?.organizations ?? [];
+  const activePlacementOrganization =
+    organizationPlacementOrganizations.find(
+      (organization) => organization.id === organizationPlacementOrganizationId
+    ) ??
+    organizationPlacementOrganizations[0] ??
+    null;
+  const organizationPlacementParentOptions = useMemo(
+    () =>
+      getOrganizationPlacementUnitOptions(
+        organizationStructure,
+        activePlacementOrganization?.id ?? ''
+      ),
+    [activePlacementOrganization?.id, organizationStructure]
+  );
+  const activePlacementParent =
+    organizationPlacementParentOptions.find(
+      (option) => option.unit.id === organizationPlacementParentId
+    )?.unit ??
+    organizationPlacementParentOptions[0]?.unit ??
+    null;
+  const selectedOrganizationPlacement = useMemo<OrganizationPlacementSelection | null>(() => {
+    if (!organizationPlacementEnabled || !activePlacementOrganization || !activePlacementParent) {
+      return null;
+    }
+    return {
+      organizationId: activePlacementOrganization.id,
+      parentUnitId: activePlacementParent.id,
+    };
+  }, [activePlacementOrganization, activePlacementParent, organizationPlacementEnabled]);
+  const organizationPlacementSummary = selectedOrganizationPlacement
+    ? [
+        activePlacementOrganization?.name ?? selectedOrganizationPlacement.organizationId,
+        activePlacementParent ? getOrganizationUnitLabel(activePlacementParent) : '',
+      ].filter(Boolean)
+    : [];
 
   const conflictingTeam = useMemo(() => {
     if (!launchTeam) return null;
@@ -2088,6 +2285,17 @@ export const CreateTeamDialog = ({
             worktree: request.worktree,
             extraCliArgs: request.extraCliArgs,
           });
+          if (selectedOrganizationPlacement) {
+            try {
+              await api.organizations.assignTeamToUnit({
+                ...selectedOrganizationPlacement,
+                teamName: request.teamName,
+                label: request.displayName || request.teamName,
+              });
+            } catch (error) {
+              console.warn('[Organizations] Failed to place created team in organization', error);
+            }
+          }
           onOpenTeam(request.teamName, effectiveCwd || undefined);
           resetFormState();
           onClose();
@@ -2107,12 +2315,14 @@ export const CreateTeamDialog = ({
         if (!syncModelsWithLead) {
           persistCurrentMemberRuntimePreferences(members);
         }
-        await onCreate(request);
+        await onCreate(request, selectedOrganizationPlacement ?? undefined);
         onOpenTeam(request.teamName, effectiveCwd || undefined);
         resetFormState();
         onClose();
-      } catch {
-        // error is shown via provisioningError prop
+      } catch (error) {
+        if (error instanceof Error) {
+          setLocalError(error.message);
+        }
       } finally {
         setIsSubmitting(false);
       }
@@ -2318,7 +2528,7 @@ export const CreateTeamDialog = ({
               inheritModelSettingsByDefault
               lockProviderModel={syncModelsWithLead}
               forceInheritedModelSettings={syncModelsWithLead}
-              modelLockReason="This teammate is synced with the lead model. Turn off sync to set a custom provider, model, or effort."
+              modelLockReason={t('create.memberModelLockReason')}
               hideMembersContent={soloTeam}
               providerId={selectedProviderId}
               model={selectedModel}
@@ -2503,6 +2713,124 @@ export const CreateTeamDialog = ({
 
           <div className="md:col-span-2">
             <OptionalSettingsSection
+              title={t('create.organizationPlacement.title')}
+              description={t('create.organizationPlacement.description')}
+              summary={organizationPlacementSummary}
+            >
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    id="organization-placement-enabled"
+                    className="mt-1 shrink-0"
+                    checked={organizationPlacementEnabled}
+                    disabled={
+                      organizationStructureLoading ||
+                      organizationPlacementOrganizations.length === 0
+                    }
+                    onCheckedChange={(checked) => setOrganizationPlacementEnabled(checked === true)}
+                  />
+                  <div className="min-w-0 space-y-1">
+                    <Label
+                      htmlFor="organization-placement-enabled"
+                      className="cursor-pointer text-sm font-semibold"
+                    >
+                      {t('create.organizationPlacement.addToOrganization')}
+                    </Label>
+                    {organizationPlacementError ? (
+                      <p className="text-[11px]" style={{ color: 'var(--field-error-text)' }}>
+                        {organizationPlacementError}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <div className="space-y-0.5">
+                      <Label className="text-xs">
+                        {t('create.organizationPlacement.organizationLabel')}
+                      </Label>
+                      <p className="text-[11px] text-[var(--color-text-muted)]">
+                        {t('create.organizationPlacement.organizationHelp')}
+                      </p>
+                    </div>
+                    <Select
+                      value={activePlacementOrganization?.id ?? ''}
+                      disabled={
+                        !organizationPlacementEnabled ||
+                        organizationPlacementOrganizations.length === 0
+                      }
+                      onValueChange={(value) => {
+                        setOrganizationPlacementOrganizationId(value);
+                        const organization = organizationPlacementOrganizations.find(
+                          (candidate) => candidate.id === value
+                        );
+                        setOrganizationPlacementParentId(organization?.rootNodeId ?? '');
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue
+                          placeholder={t('create.organizationPlacement.organizationPlaceholder')}
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {organizationPlacementOrganizations.map((organization) => (
+                          <SelectItem key={organization.id} value={organization.id}>
+                            {organization.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="space-y-0.5">
+                      <Label className="text-xs">
+                        {t('create.organizationPlacement.groupOrRootLabel')}
+                      </Label>
+                      <p className="text-[11px] text-[var(--color-text-muted)]">
+                        {t('create.organizationPlacement.groupOrRootHelp')}
+                      </p>
+                    </div>
+                    <Select
+                      value={activePlacementParent?.id ?? ''}
+                      disabled={
+                        !organizationPlacementEnabled ||
+                        organizationPlacementParentOptions.length === 0
+                      }
+                      onValueChange={setOrganizationPlacementParentId}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue
+                          placeholder={t('create.organizationPlacement.groupOrRootPlaceholder')}
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {organizationPlacementParentOptions.map((option) => (
+                          <SelectItem key={option.unit.id} value={option.unit.id}>
+                            <span
+                              className="flex min-w-0 items-center gap-2"
+                              style={{ paddingLeft: `${Math.min(option.depth, 6) * 12}px` }}
+                            >
+                              <span className="truncate">
+                                {getOrganizationUnitLabel(option.unit)}
+                              </span>
+                              <span className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                                {t(getOrganizationPlacementUnitKindKey(option.unit))}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            </OptionalSettingsSection>
+          </div>
+
+          <div className="md:col-span-2">
+            <OptionalSettingsSection
               title={t('create.optional.teamDetailsTitle')}
               description={t('create.optional.teamDetailsDescription')}
               summary={teamDetailsSummary}
@@ -2588,12 +2916,12 @@ export const CreateTeamDialog = ({
                 codexSnapshotPending={codexSnapshotPending}
                 providerIds={selectedMemberProviders}
                 className="mb-2"
-                label="Selected providers"
+                label={t('create.prepare.selectedProvidersLabel')}
                 layout="stacked"
                 showReadyProviders={
                   effectivePrepare.state === 'idle' || effectivePrepare.state === 'loading'
                 }
-                readyStatusText="Ready"
+                readyStatusText={t('create.prepare.readyStatus')}
               />
             ) : null}
             {canCreate &&

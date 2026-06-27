@@ -1,18 +1,19 @@
+export type { GraphConfigPort } from './GraphConfigPort';
 export type { GraphDataPort } from './GraphDataPort';
 export type { GraphEventPort } from './GraphEventPort';
-export type { GraphConfigPort } from './GraphConfigPort';
 export type {
-  GraphNode,
-  GraphEdge,
-  GraphParticle,
   GraphActivityItem,
+  GraphDomainRef,
+  GraphEdge,
+  GraphEdgeType,
+  GraphGroupFrame,
+  GraphLayoutMode,
+  GraphLayoutPort,
+  GraphLayoutVersion,
+  GraphNode,
   GraphNodeKind,
   GraphNodeState,
-  GraphEdgeType,
-  GraphParticleKind,
-  GraphDomainRef,
   GraphOwnerSlotAssignment,
-  GraphLayoutPort,
-  GraphLayoutMode,
-  GraphLayoutVersion,
+  GraphParticle,
+  GraphParticleKind,
 } from './types';

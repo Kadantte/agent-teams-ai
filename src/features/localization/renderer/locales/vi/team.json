@@ -140,7 +140,19 @@
       "launchSettingsTitle": "Cài đặt khởi chạy tùy chọn",
       "launchSettingsDescription": "Prompt, an toàn và ghi đè CLI nằm ở đây khi bạn cần.",
       "teamDetailsTitle": "Chi tiết đội ngũ tùy chọn",
-      "teamDetailsDescription": "Giữ luồng mặc định gọn gàng và chỉ mở phần này khi bạn muốn thêm ngữ cảnh hoặc một màu tùy chỉnh."
+      "teamDetailsDescription": "Giữ luồng mặc định gọn gàng và chỉ mở phần này khi bạn muốn thêm ngữ cảnh hoặc một màu tùy chỉnh.",
+      "summary": {
+        "leadPrompt": "Lead promptu",
+        "autoApproveTools": "Araclari otomatik onayla",
+        "fastMode": "Hizli mod",
+        "fastDisabled": "Hizli kapali",
+        "fastDefault": "Hizli varsayilan",
+        "anthropicLimitedContext": "Anthropic 200K baglamla sinirli",
+        "worktree": "Cay lam viec: {{name}}",
+        "customCliArgs": "Ozel CLI argumanlari",
+        "description": "Aciklama",
+        "color": "Renk: {{color}}"
+      }
     },
     "prepare": {
       "unsupportedPreload": "Phiên bản preload hiện tại không hỗ trợ team:prepareProvisioning. Hãy khởi động lại ứng dụng dev.",
@@ -152,7 +164,10 @@
       "checkingProviders": "Đang kiểm tra các nhà cung cấp đã chọn...",
       "preparingEnvironment": "Đang chuẩn bị môi trường...",
       "selectedProvidersReadyWithNotes": "Nhà cung cấp đã chọn sẵn sàng (kèm ghi chú)",
-      "selectedProvidersReady": "Nhà cung cấp đã chọn sẵn sàng"
+      "selectedProvidersReady": "Nhà cung cấp đã chọn sẵn sàng",
+      "providerStatusLoading": "Nha cung cap {{provider}} van dang tai. Kiem tra model se tu dong bat dau.",
+      "selectedProvidersLabel": "Nha cung cap da chon",
+      "readyStatus": "San sang"
     },
     "validation": {
       "nameMustContainLetterOrDigit": "Tên phải chứa ít nhất một chữ cái hoặc chữ số",
@@ -166,7 +181,30 @@
       "teamLaunching": "Đội ngũ đang khởi chạy",
       "teamNameExists": "Tên đội ngũ đã tồn tại",
       "checkFormFields": "Kiểm tra các trường biểu mẫu"
-    }
+    },
+    "organizationPlacement": {
+      "title": "Vi tri trong to chuc",
+      "description": "Chon to chuc, sau do chon goc hoac nhom ma team thuoc ve.",
+      "addToOrganization": "Them vao to chuc",
+      "organizationLabel": "To chuc",
+      "organizationHelp": "Chon to chuc so huu team nay.",
+      "organizationPlaceholder": "To chuc",
+      "groupOrRootLabel": "Nhom hoac goc",
+      "groupOrRootHelp": "Chon to chuc, sau do chon goc hoac nhom ma team thuoc ve.",
+      "groupOrRootPlaceholder": "Goc hoac nhom",
+      "kind": {
+        "root": "Goc",
+        "group": "Nhom"
+      }
+    },
+    "defaultDescription": {
+      "fallback": "Provisioning akisi icin ekip",
+      "named": "Provisioning akisi icin {{teamName}} ekibi"
+    },
+    "defaultWorkflows": {
+      "reviewer": "Projede tamamlanan her gorevi incele. Kod degisikliklerini oku, dogruluk, stil ve olasi sorunlari kontrol et. Gorevi onayla veya net geri bildirimle degisiklik iste."
+    },
+    "memberModelLockReason": "Bu ekip uyesi lead modeliyle senkronize. Ozel saglayici, model veya effort ayarlamak icin senkronizasyonu kapat."
   },
   "editTeam": {
     "actions": {
@@ -1374,6 +1412,7 @@
     "actions": {
       "copyTeam": "Sao chép đội ngũ",
       "createTeam": "Tạo đội ngũ",
+      "organizationMap": "Ban do to chuc",
       "deleteForever": "Xóa vĩnh viễn",
       "deletePermanently": "Xóa vĩnh viễn",
       "deleteTeam": "Xóa đội ngũ",
@@ -2595,5 +2634,225 @@
     "tabColorOrange": "Orange",
     "tabColorRose": "Rose",
     "tabColorViolet": "Violet"
+  },
+  "organizations": {
+    "map": {
+      "allOrganizationsTitle": "Tat ca to chuc",
+      "defaultTitle": "Ban do to chuc",
+      "organizationPlaceholder": "To chuc",
+      "loading": "Dang tai ban do to chuc...",
+      "noOrganizationData": "Khong co du lieu to chuc",
+      "scope": {
+        "currentOrg": "To chuc hien tai",
+        "allOrgs": "Tat ca org"
+      },
+      "actions": {
+        "edit": "Chinh sua",
+        "editing": "Chinh sua",
+        "refresh": "Lam moi"
+      },
+      "stats": {
+        "orgs": "{{count}} org",
+        "orgs_one": "{{count}} to chuc",
+        "orgs_other": "{{count}} org",
+        "teams": "{{count}} ekip",
+        "teams_one": "{{count}} ekip",
+        "teams_other": "{{count}} ekip",
+        "relations": "{{count}} iliski",
+        "relations_one": "{{count}} iliski",
+        "relations_other": "{{count}} iliski",
+        "messages": "{{count}} mesaj",
+        "messages_one": "{{count}} mesaj",
+        "messages_other": "{{count}} mesaj",
+        "orgs_few": "{{count}} org",
+        "orgs_many": "{{count}} org",
+        "teams_few": "{{count}} ekip",
+        "teams_many": "{{count}} ekip",
+        "relations_few": "{{count}} iliski",
+        "relations_many": "{{count}} iliski",
+        "messages_few": "{{count}} mesaj",
+        "messages_many": "{{count}} mesaj",
+        "agents": "{{count}} ajan",
+        "agents_one": "{{count}} ajan",
+        "agents_few": "{{count}} ajan",
+        "agents_many": "{{count}} ajan",
+        "agents_other": "{{count}} ajan",
+        "runtimeLinks": "{{count}} liên kết runtime",
+        "runtimeLinks_one": "{{count}} liên kết runtime",
+        "runtimeLinks_other": "{{count}} liên kết runtime",
+        "runtimeLinks_few": "{{count}} liên kết runtime",
+        "runtimeLinks_many": "{{count}} liên kết runtime"
+      }
+    },
+    "editor": {
+      "title": "Cau hinh to chuc",
+      "loadingOrganization": "Organizasyon yukleniyor",
+      "fallbackOrganization": "organizasyon",
+      "saving": "Kaydediliyor...",
+      "source": {
+        "loading": "yukleniyor",
+        "configured": "yapilandirildi",
+        "generated": "uretildi"
+      },
+      "badges": {
+        "groups": "{{count}} grup",
+        "groups_one": "{{count}} grup",
+        "groups_other": "{{count}} grup",
+        "placed": "{{count}} yerlesti",
+        "placed_one": "{{count}} yerlesti",
+        "placed_other": "{{count}} yerlesti",
+        "unplaced": "{{count}} yerlesmedi",
+        "unplaced_one": "{{count}} yerlesmedi",
+        "unplaced_other": "{{count}} yerlesmedi",
+        "groups_few": "{{count}} grup",
+        "groups_many": "{{count}} grup",
+        "placed_few": "{{count}} yerlesti",
+        "placed_many": "{{count}} yerlesti",
+        "unplaced_few": "{{count}} yerlesmedi",
+        "unplaced_many": "{{count}} yerlesmedi"
+      },
+      "tabs": {
+        "structure": "Cau truc",
+        "teams": "Teams",
+        "links": "Lien ket",
+        "organizations": "Tat ca org"
+      },
+      "newOrganization": "Yeni organizasyon",
+      "parentOrganization": "Ust organizasyon",
+      "topLevel": "Ust seviye",
+      "underLabel": "{{label}} altinda",
+      "selectedLocation": "Secili konum",
+      "organizationTree": "Cay to chuc",
+      "noOrganizationUnits": "Henuz organizasyon birimi yok",
+      "dropHere": "Buraya birak",
+      "createGroup": "Grup olustur",
+      "groupPlaceholder": "Departman, Squad, Urun Alani",
+      "createUnderPlaceholder": "Altinda olustur",
+      "placeExistingTeam": "Mevcut ekibi yerlestir",
+      "teamPlaceholder": "Ekip",
+      "placeUnderPlaceholder": "Altina yerlestir",
+      "selectedItem": "Secili oge",
+      "rootSelected": "Organizasyon koku secildi",
+      "moveUnderPlaceholder": "Altina tasi",
+      "manualRelation": "Manuel iliski",
+      "sourcePlaceholder": "Kaynak",
+      "targetPlaceholder": "Hedef",
+      "kindPlaceholder": "Tur",
+      "kind": {
+        "org": "to chuc",
+        "group": "grup",
+        "team": "ekip"
+      },
+      "relationKind": {
+        "dependsOn": "Bagimli",
+        "delegates": "Devreder",
+        "observes": "Izler"
+      },
+      "actions": {
+        "create": "Olustur",
+        "teamHere": "Ekip burada",
+        "addGroup": "Grup ekle",
+        "assignTeam": "Ekibi ata",
+        "move": "Tasi",
+        "remove": "Kaldir",
+        "addRelation": "Iliski ekle"
+      }
+    },
+    "inspector": {
+      "closeSelection": "Secimi kapat",
+      "kind": {
+        "group": "grup",
+        "organization": "organizasyon"
+      },
+      "childNodes": "{{count}} alt dugum",
+      "childNodes_one": "{{count}} alt dugum",
+      "childNodes_other": "{{count}} alt dugum",
+      "agents": "{{count}} ajan",
+      "agents_one": "{{count}} ajan",
+      "agents_other": "{{count}} ajan",
+      "status": {
+        "online": "cevrimici",
+        "offline": "cevrimdisi"
+      },
+      "taskCounts": {
+        "active": "aktif",
+        "pending": "bekliyor",
+        "done": "bitti"
+      },
+      "actions": {
+        "expand": "Genislet",
+        "collapse": "Daralt",
+        "open": "Ac",
+        "graph": "Graf",
+        "expandSubtree": "Alt agaci genislet",
+        "collapseSubtree": "Alt agaci daralt"
+      },
+      "inProgress": "Dang tien hanh",
+      "noActiveAgentTasks": "Khong co tac vu agent dang hoat dong",
+      "childNodes_few": "{{count}} alt dugum",
+      "childNodes_many": "{{count}} alt dugum",
+      "agents_few": "{{count}} ajan",
+      "agents_many": "{{count}} ajan",
+      "tags": {
+        "system": "sistem",
+        "unassigned": "atanmamis"
+      },
+      "descriptions": {
+        "allOrganizations": "Tat ca to chuc",
+        "unassignedTeams": "Henuz bir organizasyona yerlestirilmemis ekipler."
+      }
+    },
+    "graph": {
+      "actions": {
+        "createTeamIn": "To chuc {{label}}"
+      },
+      "canvas": {
+        "organizationMap": "Ban do to chuc",
+        "allOrganizations": "Tat ca to chuc",
+        "unassignedTeams": "Atanmamis Ekipler",
+        "agents": "{{count}} ajan",
+        "agents_one": "{{count}} ajan",
+        "agents_few": "{{count}} ajan",
+        "agents_many": "{{count}} ajan",
+        "agents_other": "{{count}} ajan",
+        "activeAgents": "{{count}} aktif ajan",
+        "activeAgents_one": "{{count}} aktif ajan",
+        "activeAgents_few": "{{count}} aktif ajan",
+        "activeAgents_many": "{{count}} aktif ajan",
+        "activeAgents_other": "{{count}} aktif ajan",
+        "teams": "{{count}} ekip",
+        "teams_one": "{{count}} ekip",
+        "teams_few": "{{count}} ekip",
+        "teams_many": "{{count}} ekip",
+        "teams_other": "{{count}} ekip",
+        "orgsAndTeams": "{{orgCount}} org - {{teamCount}} ekip",
+        "teamRole": "{{memberCount}} ajan - {{activeCount}} aktif",
+        "teamReference": "ekip referansi",
+        "notFound": "bulunamadi",
+        "online": "cevrimici",
+        "offline": "cevrimdisi",
+        "agentStatus": {
+          "active": "aktif",
+          "idle": "bosta",
+          "offline": "cevrimdisi",
+          "unknown": "bilinmiyor"
+        }
+      },
+      "edgeOverlay": {
+        "runtimeMessages": "Lien ket",
+        "manualRelation": "Lien ket",
+        "close": "Iliski detaylarini kapat",
+        "messages": "{{count}} mesaj",
+        "messages_one": "{{count}} mesaj",
+        "messages_other": "{{count}} mesaj",
+        "weight": "agirlik {{count}}",
+        "weight_one": "agirlik {{count}}",
+        "weight_other": "agirlik {{count}}",
+        "messages_few": "{{count}} mesaj",
+        "messages_many": "{{count}} mesaj",
+        "weight_few": "agirlik {{count}}",
+        "weight_many": "agirlik {{count}}"
+      }
+    }
   }
 }

@@ -140,7 +140,19 @@
       "launchSettingsTitle": "Необов'язкові налаштування запуску",
       "launchSettingsDescription": "Промпт, безпека та перевизначення CLI знаходяться тут, коли вони вам потрібні.",
       "teamDetailsTitle": "Необов'язкові деталі команди",
-      "teamDetailsDescription": "Тримайте стандартний процес компактним і відкривайте це, лише коли хочете додатковий контекст чи власний колір."
+      "teamDetailsDescription": "Тримайте стандартний процес компактним і відкривайте це, лише коли хочете додатковий контекст чи власний колір.",
+      "summary": {
+        "leadPrompt": "Промпт лідера",
+        "autoApproveTools": "Автосхвалення tools",
+        "fastMode": "Fast mode увімкнено",
+        "fastDisabled": "Fast mode вимкнено",
+        "fastDefault": "Fast mode за замовчуванням",
+        "anthropicLimitedContext": "Anthropic обмежено контекстом 200K",
+        "worktree": "Робоче дерево: {{name}}",
+        "customCliArgs": "Власні аргументи CLI",
+        "description": "Опис",
+        "color": "Колір: {{color}}"
+      }
     },
     "prepare": {
       "unsupportedPreload": "Поточна версія preload не підтримує team:prepareProvisioning. Перезапустіть dev-застосунок.",
@@ -152,7 +164,10 @@
       "checkingProviders": "Перевірка вибраних провайдерів...",
       "preparingEnvironment": "Підготовка середовища...",
       "selectedProvidersReadyWithNotes": "Вибрані провайдери готові (з примітками)",
-      "selectedProvidersReady": "Вибрані провайдери готові"
+      "selectedProvidersReady": "Вибрані провайдери готові",
+      "providerStatusLoading": "Статус провайдера {{provider}} ще завантажується. Перевірка моделей почнеться автоматично.",
+      "selectedProvidersLabel": "Вибрані провайдери",
+      "readyStatus": "Готово"
     },
     "validation": {
       "nameMustContainLetterOrDigit": "Назва має містити щонайменше одну літеру чи цифру",
@@ -166,7 +181,30 @@
       "teamLaunching": "Команда зараз запускається",
       "teamNameExists": "Назва команди вже існує",
       "checkFormFields": "Перевірте поля форми"
-    }
+    },
+    "organizationPlacement": {
+      "title": "Розміщення в організації",
+      "description": "Виберіть організацію, потім корінь або групу, до якої належить команда.",
+      "addToOrganization": "Додати до організації",
+      "organizationLabel": "Організація",
+      "organizationHelp": "Виберіть організацію, якій належить команда.",
+      "organizationPlaceholder": "Організація",
+      "groupOrRootLabel": "Група або корінь",
+      "groupOrRootHelp": "Виберіть групу або залиште корінь організації.",
+      "groupOrRootPlaceholder": "Корінь або група",
+      "kind": {
+        "root": "Корінь",
+        "group": "Група"
+      }
+    },
+    "defaultDescription": {
+      "fallback": "Команда для потоку підготовки",
+      "named": "Команда {{teamName}} для потоку підготовки"
+    },
+    "defaultWorkflows": {
+      "reviewer": "Перевіряй кожну завершену задачу в проєкті. Читай зміни в коді, перевіряй коректність, стиль і можливі проблеми. Схвалюй задачу або запитуй виправлення з чітким фідбеком."
+    },
+    "memberModelLockReason": "Цей учасник синхронізований з моделлю лідера. Вимкніть синхронізацію, щоб вибрати окремого провайдера, модель або effort."
   },
   "editTeam": {
     "actions": {
@@ -274,8 +312,8 @@
       "saved": "Збережено"
     },
     "worktree": {
-      "description": "Запустити цього учасника в окремому git worktree. Застосування/відхилення змін націлене на той worktree, а не на робочий простір лідера.",
-      "label": "Worktree"
+      "description": "Запустити цього учасника в окремому git worktree. Застосування та відхилення змін буде працювати з цим worktree, а не з робочим простором лідера.",
+      "label": "Робоче дерево"
     },
     "addMembers": {
       "title": "Додати учасників",
@@ -1374,6 +1412,7 @@
     "actions": {
       "copyTeam": "Копіювати команду",
       "createTeam": "Створити команду",
+      "organizationMap": "Карта орг.",
       "deleteForever": "Видалити назавжди",
       "deletePermanently": "Видалити остаточно",
       "deleteTeam": "Видалити команду",
@@ -1709,7 +1748,7 @@
   },
   "members": {
     "badges": {
-      "worktree": "worktree"
+      "worktree": "робоче дерево"
     },
     "runtimeTelemetry": {
       "title": "Локальне навантаження середовища",
@@ -1725,7 +1764,7 @@
       "title": "Учасники",
       "addMember": "Додати учасника",
       "editAsJson": "Редагувати як JSON",
-      "runInSeparateWorktrees": "Запускати учасників в окремих worktree",
+      "runInSeparateWorktrees": "Запускати учасників в окремих робочих деревах",
       "agentTeamsMcpOnly": "Лише Agent Teams MCP",
       "removedCount": "Видалено ({{count}})",
       "removedModelLockReason": "Видалені учасники зберігаються для історії м'якого видалення. Відновіть їх, щоб редагувати налаштування.",
@@ -2595,5 +2634,225 @@
     "tabColorOrange": "Orange",
     "tabColorRose": "Rose",
     "tabColorViolet": "Violet"
+  },
+  "organizations": {
+    "map": {
+      "allOrganizationsTitle": "Усі організації",
+      "defaultTitle": "Карта організації",
+      "organizationPlaceholder": "Організація",
+      "loading": "Завантаження карти організації...",
+      "noOrganizationData": "Немає даних організації",
+      "scope": {
+        "currentOrg": "Поточна організація",
+        "allOrgs": "Усі організації"
+      },
+      "actions": {
+        "edit": "Редагувати",
+        "editing": "Редагування",
+        "refresh": "Оновити"
+      },
+      "stats": {
+        "orgs": "{{count}} організацій",
+        "orgs_one": "{{count}} організація",
+        "orgs_few": "{{count}} організації",
+        "orgs_many": "{{count}} організацій",
+        "orgs_other": "{{count}} організації",
+        "teams": "{{count}} команд",
+        "teams_one": "{{count}} команда",
+        "teams_few": "{{count}} команди",
+        "teams_many": "{{count}} команд",
+        "teams_other": "{{count}} команди",
+        "relations": "{{count}} звʼязків",
+        "relations_one": "{{count}} звʼязок",
+        "relations_few": "{{count}} звʼязки",
+        "relations_many": "{{count}} звʼязків",
+        "relations_other": "{{count}} звʼязки",
+        "messages": "{{count}} повідомлень",
+        "messages_one": "{{count}} повідомлення",
+        "messages_few": "{{count}} повідомлення",
+        "messages_many": "{{count}} повідомлень",
+        "messages_other": "{{count}} повідомлення",
+        "agents": "{{count}} агентів",
+        "agents_one": "{{count}} агент",
+        "agents_few": "{{count}} агенти",
+        "agents_many": "{{count}} агентів",
+        "agents_other": "{{count}} агенти",
+        "runtimeLinks": "{{count}} runtime-звʼязків",
+        "runtimeLinks_one": "{{count}} runtime-звʼязок",
+        "runtimeLinks_few": "{{count}} runtime-звʼязки",
+        "runtimeLinks_many": "{{count}} runtime-звʼязків",
+        "runtimeLinks_other": "{{count}} runtime-звʼязки"
+      }
+    },
+    "editor": {
+      "title": "Налаштування організації",
+      "loadingOrganization": "Завантаження організації",
+      "fallbackOrganization": "організація",
+      "saving": "Збереження...",
+      "source": {
+        "loading": "завантаження",
+        "configured": "налаштовано",
+        "generated": "створено автоматично"
+      },
+      "badges": {
+        "groups": "{{count}} груп",
+        "groups_one": "{{count}} група",
+        "groups_few": "{{count}} групи",
+        "groups_many": "{{count}} груп",
+        "groups_other": "{{count}} групи",
+        "placed": "{{count}} розміщено",
+        "placed_one": "{{count}} розміщена",
+        "placed_few": "{{count}} розміщені",
+        "placed_many": "{{count}} розміщено",
+        "placed_other": "{{count}} розміщено",
+        "unplaced": "{{count}} не розміщено",
+        "unplaced_one": "{{count}} не розміщена",
+        "unplaced_few": "{{count}} не розміщені",
+        "unplaced_many": "{{count}} не розміщено",
+        "unplaced_other": "{{count}} не розміщено"
+      },
+      "tabs": {
+        "structure": "Структура",
+        "teams": "Команди",
+        "links": "Звʼязки",
+        "organizations": "Орг."
+      },
+      "newOrganization": "Нова організація",
+      "parentOrganization": "Батьківська організація",
+      "topLevel": "Верхній рівень",
+      "underLabel": "у {{label}}",
+      "selectedLocation": "Вибране місце",
+      "organizationTree": "Дерево організації",
+      "noOrganizationUnits": "В організації ще немає елементів",
+      "dropHere": "Сюди",
+      "createGroup": "Створити групу",
+      "groupPlaceholder": "Відділ, сквад, продуктова зона",
+      "createUnderPlaceholder": "Створити всередині",
+      "placeExistingTeam": "Розмістити наявну команду",
+      "teamPlaceholder": "Команда",
+      "placeUnderPlaceholder": "Розмістити всередині",
+      "selectedItem": "Вибраний елемент",
+      "rootSelected": "Вибрано корінь організації",
+      "moveUnderPlaceholder": "Перемістити всередину",
+      "manualRelation": "Ручний звʼязок",
+      "sourcePlaceholder": "Джерело",
+      "targetPlaceholder": "Ціль",
+      "kindPlaceholder": "Тип",
+      "kind": {
+        "org": "орг.",
+        "group": "група",
+        "team": "команда"
+      },
+      "relationKind": {
+        "dependsOn": "Залежить від",
+        "delegates": "Делегує",
+        "observes": "Спостерігає"
+      },
+      "actions": {
+        "create": "Створити",
+        "teamHere": "Команда тут",
+        "addGroup": "Додати групу",
+        "assignTeam": "Призначити команду",
+        "move": "Перемістити",
+        "remove": "Видалити",
+        "addRelation": "Додати звʼязок"
+      }
+    },
+    "inspector": {
+      "closeSelection": "Закрити вибір",
+      "kind": {
+        "group": "група",
+        "organization": "організація"
+      },
+      "childNodes": "{{count}} дочірніх елементів",
+      "childNodes_one": "{{count}} дочірній елемент",
+      "childNodes_few": "{{count}} дочірні елементи",
+      "childNodes_many": "{{count}} дочірніх елементів",
+      "childNodes_other": "{{count}} дочірні елементи",
+      "agents": "{{count}} агентів",
+      "agents_one": "{{count}} агент",
+      "agents_few": "{{count}} агенти",
+      "agents_many": "{{count}} агентів",
+      "agents_other": "{{count}} агенти",
+      "status": {
+        "online": "онлайн",
+        "offline": "офлайн"
+      },
+      "taskCounts": {
+        "active": "активно",
+        "pending": "очікує",
+        "done": "готово"
+      },
+      "actions": {
+        "expand": "Розгорнути",
+        "collapse": "Згорнути",
+        "open": "Відкрити",
+        "graph": "Граф",
+        "expandSubtree": "Розгорнути гілку",
+        "collapseSubtree": "Згорнути гілку"
+      },
+      "inProgress": "У роботі",
+      "noActiveAgentTasks": "Немає активних задач агентів",
+      "tags": {
+        "system": "системне",
+        "unassigned": "не розміщено"
+      },
+      "descriptions": {
+        "allOrganizations": "Усі налаштовані організації.",
+        "unassignedTeams": "Команди, які ще не розміщені в організації."
+      }
+    },
+    "graph": {
+      "actions": {
+        "createTeamIn": "Створити команду в {{label}}"
+      },
+      "canvas": {
+        "organizationMap": "Карта організації",
+        "allOrganizations": "Усі організації",
+        "unassignedTeams": "Нерозміщені команди",
+        "agents": "{{count}} агентів",
+        "agents_one": "{{count}} агент",
+        "agents_few": "{{count}} агенти",
+        "agents_many": "{{count}} агентів",
+        "agents_other": "{{count}} агенти",
+        "activeAgents": "{{count}} активних агентів",
+        "activeAgents_one": "{{count}} активний агент",
+        "activeAgents_few": "{{count}} активні агенти",
+        "activeAgents_many": "{{count}} активних агентів",
+        "activeAgents_other": "{{count}} активні агенти",
+        "teams": "{{count}} команд",
+        "teams_one": "{{count}} команда",
+        "teams_few": "{{count}} команди",
+        "teams_many": "{{count}} команд",
+        "teams_other": "{{count}} команди",
+        "orgsAndTeams": "{{orgCount}} орг. - {{teamCount}} команд",
+        "teamRole": "{{memberCount}} учасників - {{activeCount}} активних",
+        "teamReference": "посилання на команду",
+        "notFound": "не знайдена",
+        "online": "онлайн",
+        "offline": "офлайн",
+        "agentStatus": {
+          "active": "активний",
+          "idle": "очікує",
+          "offline": "офлайн",
+          "unknown": "невідомо"
+        }
+      },
+      "edgeOverlay": {
+        "runtimeMessages": "Runtime-повідомлення між командами",
+        "manualRelation": "Ручний звʼязок організації",
+        "close": "Закрити деталі звʼязку",
+        "messages": "{{count}} повідомлень",
+        "messages_one": "{{count}} повідомлення",
+        "messages_few": "{{count}} повідомлення",
+        "messages_many": "{{count}} повідомлень",
+        "messages_other": "{{count}} повідомлення",
+        "weight": "вага {{count}}",
+        "weight_one": "вага {{count}}",
+        "weight_few": "вага {{count}}",
+        "weight_many": "вага {{count}}",
+        "weight_other": "вага {{count}}"
+      }
+    }
   }
 }

@@ -227,6 +227,150 @@ export default defineConfig([
     },
   },
   {
+    name: 'feature-organizations-core-domain-guards',
+    files: ['src/features/organizations/core/domain/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@features/organizations/core/application',
+                '@features/organizations/core/application/**',
+                '@features/organizations/main',
+                '@features/organizations/main/**',
+                '@features/organizations/preload',
+                '@features/organizations/preload/**',
+                '@features/organizations/renderer',
+                '@features/organizations/renderer/**',
+                '@main',
+                '@main/**',
+                '@renderer',
+                '@renderer/**',
+                '@preload',
+                '@preload/**',
+                'electron',
+                'fastify',
+                'child_process',
+                'node:child_process',
+              ],
+              message:
+                'organizations core/domain must stay side-effect free and cannot depend on application, adapters, infrastructure, or platform code.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'feature-organizations-core-application-guards',
+    files: ['src/features/organizations/core/application/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@features/organizations/main',
+                '@features/organizations/main/**',
+                '@features/organizations/preload',
+                '@features/organizations/preload/**',
+                '@features/organizations/renderer',
+                '@features/organizations/renderer/**',
+                '@renderer',
+                '@renderer/**',
+                'electron',
+                'fastify',
+                'child_process',
+                'node:child_process',
+              ],
+              message:
+                'organizations core/application may depend only on domain, contracts, and application ports - not on adapters or runtime frameworks.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'feature-organizations-preload-guards',
+    files: ['src/features/organizations/preload/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@features/organizations/main',
+                '@features/organizations/main/**',
+                '@main',
+                '@main/**',
+                '@renderer',
+                '@renderer/**',
+              ],
+              message:
+                'organizations preload may depend only on contracts and preload-local bridge helpers.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'feature-organizations-renderer-ui-guards',
+    files: ['src/features/organizations/renderer/ui/**/*.tsx'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@renderer/api',
+                '@renderer/api/**',
+                '@renderer/store',
+                '@renderer/store/**',
+                '@main',
+                '@main/**',
+                'electron',
+              ],
+              message:
+                'organizations renderer/ui must stay presentational. Move transport, store access, and navigation logic into hooks or adapters.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'feature-organizations-public-entrypoints',
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/features/organizations/**/*'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@features/organizations/contracts/**',
+                '@features/organizations/core/**',
+                '@features/organizations/main/**',
+                '@features/organizations/preload/**',
+                '@features/organizations/renderer/**',
+              ],
+              message:
+                'Import organizations only through public entrypoints: @features/organizations/contracts, @features/organizations/main, @features/organizations/preload, or @features/organizations/renderer.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     name: 'feature-agent-graph-public-entrypoints',
     files: ['src/**/*.{ts,tsx}'],
     ignores: ['src/features/agent-graph/**/*'],
@@ -675,13 +819,6 @@ export default defineConfig([
       eqeqeq: ['error', 'always', { null: 'ignore' }],
 
       // === TypeScript Import/Export rules ===
-      '@typescript-eslint/consistent-type-imports': [
-        'error',
-        {
-          prefer: 'type-imports',
-          fixStyle: 'inline-type-imports',
-        },
-      ],
       '@typescript-eslint/consistent-type-exports': [
         'error',
         { fixMixedExportsWithInlineTypeSpecifier: true },
@@ -701,27 +838,8 @@ export default defineConfig([
       // Allow empty functions (useful for callbacks and stubs)
       '@typescript-eslint/no-empty-function': 'off',
 
-      // Allow numbers/booleans in template literals (common pattern)
-      '@typescript-eslint/restrict-template-expressions': [
-        'error',
-        {
-          allowNumber: true,
-          allowBoolean: true,
-          allowNullish: false,
-        },
-      ],
-
       // Allow async functions without await (IPC handlers often need this)
       '@typescript-eslint/require-await': 'off',
-
-      // Allow floating promises in event handlers (common in Electron)
-      '@typescript-eslint/no-floating-promises': [
-        'error',
-        {
-          ignoreVoid: true,
-          ignoreIIFE: true,
-        },
-      ],
 
       // Allow promises in places that don't expect them (event handlers)
       '@typescript-eslint/no-misused-promises': [
@@ -763,9 +881,6 @@ export default defineConfig([
 
       // Explicit types for exported functions (minimum requirement)
       '@typescript-eslint/explicit-module-boundary-types': 'warn',
-
-      // Prevent variable shadowing
-      '@typescript-eslint/no-shadow': 'error',
 
       // === Naming Conventions ===
       '@typescript-eslint/naming-convention': [

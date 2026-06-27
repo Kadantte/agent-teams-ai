@@ -19,7 +19,10 @@ process.env.UV_THREADPOOL_SIZE ??= '16';
 // Keep userData stable before any integration can initialize Electron storage.
 // Sentry must stay near the top to capture early errors after storage migration.
 // eslint-disable-next-line simple-import-sort/imports -- userData migration must run before Sentry initializes Electron storage.
-import { earlyElectronUserDataMigrationResult } from './bootstrapUserDataMigration';
+import {
+  earlyElectronDevPathOverrideResult,
+  earlyElectronUserDataMigrationResult,
+} from './bootstrapUserDataMigration';
 import './sentry';
 
 import {
@@ -48,6 +51,12 @@ import {
   registerMemberWorkSyncIpc,
   removeMemberWorkSyncIpc,
 } from '@features/member-work-sync/main';
+import {
+  createOrganizationsFeature,
+  type OrganizationsFeatureFacade,
+  registerOrganizationsIpc,
+  removeOrganizationsIpc,
+} from '@features/organizations/main';
 import {
   createRecentProjectsFeature,
   type RecentProjectsFeatureFacade,
@@ -269,6 +278,19 @@ let openCodeLifecycleBridge: OpenCodeReadinessBridge | null = null;
 if (process.env.AGENT_TEAMS_DISABLE_GPU?.trim() === '1') {
   app.disableHardwareAcceleration();
   logger.info('Hardware acceleration disabled by AGENT_TEAMS_DISABLE_GPU=1');
+}
+
+if (
+  earlyElectronDevPathOverrideResult.userDataDir ||
+  earlyElectronDevPathOverrideResult.claudeRoot
+) {
+  logger.warn('Electron dev path overrides enabled', {
+    userDataDir: earlyElectronDevPathOverrideResult.userDataDir,
+    claudeRoot: earlyElectronDevPathOverrideResult.claudeRoot,
+  });
+}
+for (const warning of earlyElectronDevPathOverrideResult.warnings) {
+  logger.warn(warning);
 }
 
 function hasWarningRelayDiagnostics(diagnostics: readonly string[]): boolean {
@@ -928,6 +950,7 @@ let sshConnectionManager: SshConnectionManager;
 let codexAccountFeature: CodexAccountFeatureFacade | null = null;
 let codexModelCatalogFeature: CodexModelCatalogFeatureFacade | null = null;
 let recentProjectsFeature: RecentProjectsFeatureFacade;
+let organizationsFeature: OrganizationsFeatureFacade;
 let runtimeProviderManagementFeature: RuntimeProviderManagementFeatureFacade;
 let terminalWorkspaceFeature: TerminalWorkspaceFeatureFacade | null = null;
 let memberWorkSyncFeature: MemberWorkSyncFeatureFacade | null = null;
@@ -1889,6 +1912,11 @@ async function initializeServices(): Promise<void> {
     getLocalContext: () => contextRegistry.get('local'),
     logger: createLogger('Feature:RecentProjects'),
   });
+  organizationsFeature = createOrganizationsFeature({
+    teamDataService,
+    crossTeamService,
+    logger: createLogger('Feature:Organizations'),
+  });
   runtimeProviderManagementFeature = createRuntimeProviderManagementFeature();
   terminalWorkspaceFeature = createTerminalWorkspaceFeature({
     teamsBasePath: getTeamsBasePath(),
@@ -2350,6 +2378,7 @@ async function initializeServices(): Promise<void> {
   );
   registerCodexAccountIpc(ipcMain, codexAccountFeature);
   registerRecentProjectsIpc(ipcMain, recentProjectsFeature);
+  registerOrganizationsIpc(ipcMain, organizationsFeature);
   registerRuntimeProviderManagementIpc(ipcMain, runtimeProviderManagementFeature);
   registerTerminalWorkspaceIpc(ipcMain, terminalWorkspaceFeature);
   registerMemberWorkSyncIpc(ipcMain, memberWorkSyncFeature);
@@ -2411,6 +2440,7 @@ async function startHttpServer(
         chunkBuilder: activeContext.chunkBuilder,
         dataCache: activeContext.dataCache,
         recentProjectsFeature,
+        organizationsFeature,
         memberWorkSyncFeature: memberWorkSyncFeature ?? undefined,
         updaterService,
         sshConnectionManager,
@@ -2559,6 +2589,7 @@ async function shutdownServices(): Promise<void> {
       removeIpcHandlers();
       removeCodexAccountIpc(ipcMain);
       removeRecentProjectsIpc(ipcMain);
+      removeOrganizationsIpc(ipcMain);
       removeRuntimeProviderManagementIpc(ipcMain);
       removeTerminalWorkspaceIpc(ipcMain);
       removeMemberWorkSyncIpc(ipcMain);

@@ -140,7 +140,19 @@
       "launchSettingsTitle": "Mipangilio ya uzinduzi ya hiari",
       "launchSettingsDescription": "Kidokezo, usalama, na ubatilishaji wa CLI vinakaa hapa unapovihitaji.",
       "teamDetailsTitle": "Maelezo ya timu ya hiari",
-      "teamDetailsDescription": "Weka mtiririko wa chaguo-msingi ukiwa mfupi na ufungue hii tu unapotaka muktadha wa ziada au rangi maalum."
+      "teamDetailsDescription": "Weka mtiririko wa chaguo-msingi ukiwa mfupi na ufungue hii tu unapotaka muktadha wa ziada au rangi maalum.",
+      "summary": {
+        "leadPrompt": "Maagizo ya lead",
+        "autoApproveTools": "Idhinisha zana kiotomatiki",
+        "fastMode": "Hali ya haraka",
+        "fastDisabled": "Haraka imezimwa",
+        "fastDefault": "Haraka chaguomsingi",
+        "anthropicLimitedContext": "Anthropic imewekewa muktadha 200K",
+        "worktree": "Mti wa kazi: {{name}}",
+        "customCliArgs": "Hoja maalum za CLI",
+        "description": "Maelezo",
+        "color": "Rangi: {{color}}"
+      }
     },
     "prepare": {
       "unsupportedPreload": "Toleo la sasa la preload haliungi mkono team:prepareProvisioning. Anzisha upya programu ya maendeleo.",
@@ -152,7 +164,10 @@
       "checkingProviders": "Inakagua watoa huduma waliochaguliwa...",
       "preparingEnvironment": "Inaandaa mazingira...",
       "selectedProvidersReadyWithNotes": "Watoa huduma waliochaguliwa wako tayari (wakiwa na madokezo)",
-      "selectedProvidersReady": "Watoa huduma waliochaguliwa wako tayari"
+      "selectedProvidersReady": "Watoa huduma waliochaguliwa wako tayari",
+      "providerStatusLoading": "Hali ya mtoa huduma {{provider}} bado inapakiwa. Ukaguzi wa modeli utaanza kiotomatiki.",
+      "selectedProvidersLabel": "Watoa huduma waliochaguliwa",
+      "readyStatus": "Tayari"
     },
     "validation": {
       "nameMustContainLetterOrDigit": "Jina lazima liwe na angalau herufi moja au tarakimu moja",
@@ -166,7 +181,30 @@
       "teamLaunching": "Timu kwa sasa inazinduliwa",
       "teamNameExists": "Jina la timu tayari lipo",
       "checkFormFields": "Kagua sehemu za fomu"
-    }
+    },
+    "organizationPlacement": {
+      "title": "Mahali pa shirika",
+      "description": "Chagua shirika, kisha chagua mzizi au kikundi ambako timu inapaswa kuwekwa.",
+      "addToOrganization": "Ongeza kwenye shirika",
+      "organizationLabel": "Shirika",
+      "organizationHelp": "Chagua shirika linalomiliki timu hii.",
+      "organizationPlaceholder": "Shirika",
+      "groupOrRootLabel": "Kikundi au mzizi",
+      "groupOrRootHelp": "Chagua kikundi, au acha mzizi wa shirika.",
+      "groupOrRootPlaceholder": "Mzizi au kikundi",
+      "kind": {
+        "root": "Mzizi",
+        "group": "Kikundi"
+      }
+    },
+    "defaultDescription": {
+      "fallback": "Timu ya mtiririko wa provisioning",
+      "named": "Timu ya {{teamName}} kwa mtiririko wa provisioning"
+    },
+    "defaultWorkflows": {
+      "reviewer": "Kagua kila kazi iliyokamilika kwenye mradi. Soma mabadiliko ya msimbo, kagua usahihi, mtindo, na matatizo yanayowezekana. Idhinisha kazi au omba mabadiliko kwa maoni yaliyo wazi."
+    },
+    "memberModelLockReason": "Mwanatimu huyu amesawazishwa na modeli ya lead. Zima usawazishaji ili kuweka mtoa huduma, modeli, au effort maalum."
   },
   "editTeam": {
     "actions": {
@@ -1374,6 +1412,7 @@
     "actions": {
       "copyTeam": "Nakili timu",
       "createTeam": "Unda Timu",
+      "organizationMap": "Ramani ya shirika",
       "deleteForever": "Futa kabisa",
       "deletePermanently": "Futa kwa kudumu",
       "deleteTeam": "Futa timu",
@@ -2595,5 +2634,225 @@
     "tabColorOrange": "Orange",
     "tabColorRose": "Rose",
     "tabColorViolet": "Violet"
+  },
+  "organizations": {
+    "map": {
+      "allOrganizationsTitle": "Mashirika yote",
+      "defaultTitle": "Ramani ya shirika",
+      "organizationPlaceholder": "Shirika",
+      "loading": "Inapakia ramani ya shirika...",
+      "noOrganizationData": "Hakuna data ya shirika",
+      "scope": {
+        "currentOrg": "Shirika la sasa",
+        "allOrgs": "Mashirika yote"
+      },
+      "actions": {
+        "edit": "Hariri",
+        "editing": "Inahariri",
+        "refresh": "Onyesha upya"
+      },
+      "stats": {
+        "orgs": "mashirika {{count}}",
+        "orgs_one": "shirika {{count}}",
+        "orgs_other": "mashirika {{count}}",
+        "teams": "timu {{count}}",
+        "teams_one": "timu {{count}}",
+        "teams_other": "timu {{count}}",
+        "relations": "mahusiano {{count}}",
+        "relations_one": "uhusiano {{count}}",
+        "relations_other": "mahusiano {{count}}",
+        "messages": "ujumbe {{count}}",
+        "messages_one": "ujumbe {{count}}",
+        "messages_other": "ujumbe {{count}}",
+        "orgs_few": "mashirika {{count}}",
+        "orgs_many": "mashirika {{count}}",
+        "teams_few": "timu {{count}}",
+        "teams_many": "timu {{count}}",
+        "relations_few": "mahusiano {{count}}",
+        "relations_many": "mahusiano {{count}}",
+        "messages_few": "ujumbe {{count}}",
+        "messages_many": "ujumbe {{count}}",
+        "agents": "mawakala {{count}}",
+        "agents_one": "wakala {{count}}",
+        "agents_few": "mawakala {{count}}",
+        "agents_many": "mawakala {{count}}",
+        "agents_other": "mawakala {{count}}",
+        "runtimeLinks": "runtime links {{count}}",
+        "runtimeLinks_one": "runtime link {{count}}",
+        "runtimeLinks_few": "runtime links {{count}}",
+        "runtimeLinks_many": "runtime links {{count}}",
+        "runtimeLinks_other": "runtime links {{count}}"
+      }
+    },
+    "editor": {
+      "title": "Usanidi wa shirika",
+      "loadingOrganization": "Inapakia shirika",
+      "fallbackOrganization": "shirika",
+      "saving": "Inahifadhi...",
+      "source": {
+        "loading": "inapakia",
+        "configured": "imesanidiwa",
+        "generated": "imezalishwa"
+      },
+      "badges": {
+        "groups": "vikundi {{count}}",
+        "groups_one": "kikundi {{count}}",
+        "groups_other": "vikundi {{count}}",
+        "placed": "zimewekwa {{count}}",
+        "placed_one": "zimewekwa {{count}}",
+        "placed_other": "zimewekwa {{count}}",
+        "unplaced": "hazijawekwa {{count}}",
+        "unplaced_one": "hazijawekwa {{count}}",
+        "unplaced_other": "hazijawekwa {{count}}",
+        "groups_few": "vikundi {{count}}",
+        "groups_many": "vikundi {{count}}",
+        "placed_few": "zimewekwa {{count}}",
+        "placed_many": "zimewekwa {{count}}",
+        "unplaced_few": "hazijawekwa {{count}}",
+        "unplaced_many": "hazijawekwa {{count}}"
+      },
+      "tabs": {
+        "structure": "Muundo",
+        "teams": "Timu",
+        "links": "Viungo",
+        "organizations": "Mashirika yote"
+      },
+      "newOrganization": "Shirika jipya",
+      "parentOrganization": "Shirika mzazi",
+      "topLevel": "Kiwango cha juu",
+      "underLabel": "chini ya {{label}}",
+      "selectedLocation": "Mahali palipochaguliwa",
+      "organizationTree": "Mti wa shirika",
+      "noOrganizationUnits": "Hakuna vitengo vya shirika bado",
+      "dropHere": "Weka hapa",
+      "createGroup": "Unda kikundi",
+      "groupPlaceholder": "Idara, Squad, Eneo la bidhaa",
+      "createUnderPlaceholder": "Unda chini ya",
+      "placeExistingTeam": "Weka timu iliyopo",
+      "teamPlaceholder": "Timu",
+      "placeUnderPlaceholder": "Weka chini ya",
+      "selectedItem": "Kipengee kilichochaguliwa",
+      "rootSelected": "Mzizi wa shirika umechaguliwa",
+      "moveUnderPlaceholder": "Hamisha chini ya",
+      "manualRelation": "Uhusiano wa mwongozo",
+      "sourcePlaceholder": "Chanzo",
+      "targetPlaceholder": "Lengo",
+      "kindPlaceholder": "Aina",
+      "kind": {
+        "org": "shirika",
+        "group": "kikundi",
+        "team": "timu"
+      },
+      "relationKind": {
+        "dependsOn": "Inategemea",
+        "delegates": "Inakabidhi",
+        "observes": "Inafuatilia"
+      },
+      "actions": {
+        "create": "Unda",
+        "teamHere": "Timu hapa",
+        "addGroup": "Ongeza kikundi",
+        "assignTeam": "Kabidhi timu",
+        "move": "Hamisha",
+        "remove": "Ondoa",
+        "addRelation": "Ongeza uhusiano"
+      }
+    },
+    "inspector": {
+      "closeSelection": "Funga uteuzi",
+      "kind": {
+        "group": "kikundi",
+        "organization": "shirika"
+      },
+      "childNodes": "nodi watoto {{count}}",
+      "childNodes_one": "nodi mtoto {{count}}",
+      "childNodes_other": "nodi watoto {{count}}",
+      "agents": "mawakala {{count}}",
+      "agents_one": "wakala {{count}}",
+      "agents_other": "mawakala {{count}}",
+      "status": {
+        "online": "mtandaoni",
+        "offline": "nje ya mtandao"
+      },
+      "taskCounts": {
+        "active": "inafanya kazi",
+        "pending": "inasubiri",
+        "done": "imekamilika"
+      },
+      "actions": {
+        "expand": "Panua",
+        "collapse": "Kunja",
+        "open": "Fungua",
+        "graph": "Grafu",
+        "expandSubtree": "Panua mti mdogo",
+        "collapseSubtree": "Kunja mti mdogo"
+      },
+      "inProgress": "Inaendelea",
+      "noActiveAgentTasks": "Hakuna kazi za mawakala zinazoendelea",
+      "childNodes_few": "nodi watoto {{count}}",
+      "childNodes_many": "nodi watoto {{count}}",
+      "agents_few": "mawakala {{count}}",
+      "agents_many": "mawakala {{count}}",
+      "tags": {
+        "system": "mfumo",
+        "unassigned": "haijakabidhiwa"
+      },
+      "descriptions": {
+        "allOrganizations": "Mashirika yote yaliyosanidiwa.",
+        "unassignedTeams": "Timu ambazo bado hazijawekwa kwenye shirika."
+      }
+    },
+    "graph": {
+      "actions": {
+        "createTeamIn": "Unda timu ndani ya {{label}}"
+      },
+      "canvas": {
+        "organizationMap": "Ramani ya shirika",
+        "allOrganizations": "Mashirika yote",
+        "unassignedTeams": "Timu zisizowekwa",
+        "agents": "mawakala {{count}}",
+        "agents_one": "wakala {{count}}",
+        "agents_few": "mawakala {{count}}",
+        "agents_many": "mawakala {{count}}",
+        "agents_other": "mawakala {{count}}",
+        "activeAgents": "mawakala active {{count}}",
+        "activeAgents_one": "wakala active {{count}}",
+        "activeAgents_few": "mawakala active {{count}}",
+        "activeAgents_many": "mawakala active {{count}}",
+        "activeAgents_other": "mawakala active {{count}}",
+        "teams": "timu {{count}}",
+        "teams_one": "timu {{count}}",
+        "teams_few": "timu {{count}}",
+        "teams_many": "timu {{count}}",
+        "teams_other": "timu {{count}}",
+        "orgsAndTeams": "mashirika {{orgCount}} - timu {{teamCount}}",
+        "teamRole": "mawakala {{memberCount}} - active {{activeCount}}",
+        "teamReference": "rejeleo la timu",
+        "notFound": "haijapatikana",
+        "online": "mtandaoni",
+        "offline": "nje ya mtandao",
+        "agentStatus": {
+          "active": "inafanya kazi",
+          "idle": "tulia",
+          "offline": "nje ya mtandao",
+          "unknown": "haijulikani"
+        }
+      },
+      "edgeOverlay": {
+        "runtimeMessages": "Ujumbe wa runtime kati ya timu",
+        "manualRelation": "Uhusiano wa shirika wa mwongozo",
+        "close": "Funga maelezo ya uhusiano",
+        "messages": "ujumbe {{count}}",
+        "messages_one": "ujumbe {{count}}",
+        "messages_other": "ujumbe {{count}}",
+        "weight": "uzito {{count}}",
+        "weight_one": "uzito {{count}}",
+        "weight_other": "uzito {{count}}",
+        "messages_few": "ujumbe {{count}}",
+        "messages_many": "ujumbe {{count}}",
+        "weight_few": "uzito {{count}}",
+        "weight_many": "uzito {{count}}"
+      }
+    }
   }
 }

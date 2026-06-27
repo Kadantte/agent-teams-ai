@@ -1,4 +1,4 @@
-import type { GraphDomainRef, GraphEdge } from './types';
+import type { GraphDomainRef, GraphEdge, GraphGroupFrame } from './types';
 
 /**
  * Event callback port — graph fires these when user interacts with nodes/edges.
@@ -11,6 +11,10 @@ export interface GraphEventPort {
   onNodeDoubleClick?: (ref: GraphDomainRef) => void;
   /** Click on an edge */
   onEdgeClick?: (edge: GraphEdge) => void;
+  /** Single click on a group frame */
+  onGroupFrameClick?: (frame: GraphGroupFrame) => void;
+  /** Double click on a group frame */
+  onGroupFrameDoubleClick?: (frame: GraphGroupFrame) => void;
   /** Click on empty canvas background */
   onBackgroundClick?: () => void;
   /** "Send Message" action from node popover */

@@ -42,7 +42,8 @@ export const TeamSidebarHost = ({
   );
   const snapshot = useTeamSidebarPortalSnapshot();
   const isVisible = messagesPanelMode === 'sidebar';
-  const isOwner = isVisible && snapshot.activeHostIdByTeam[teamName] === hostId;
+  const hasActiveSource = Boolean(snapshot.activeSourceIdByTeam[teamName]);
+  const isOwner = isVisible && hasActiveSource && snapshot.activeHostIdByTeam[teamName] === hostId;
 
   useLayoutEffect(() => {
     upsertTeamSidebarHost(hostId, {

@@ -8,6 +8,7 @@ import { useCallback, useState } from 'react';
 import { GraphView } from '@claude-teams/agent-graph';
 import { TerminalWorkspaceFloatingLauncher } from '@features/terminal-workspace/renderer';
 import { TeamSidebarHost } from '@renderer/components/team/sidebar/TeamSidebarHost';
+import { useTeamSidebarPortalSnapshot } from '@renderer/components/team/sidebar/TeamSidebarPortalManager';
 
 import { useGraphMessagesPanel } from '../hooks/useGraphMessagesPanel';
 import { useGraphSidebarVisibility } from '../hooks/useGraphSidebarVisibility';
@@ -58,8 +59,13 @@ export const TeamGraphOverlay = ({
   const [messagesPanelMountPoint, setMessagesPanelMountPoint] = useState<HTMLDivElement | null>(
     null
   );
-  const effectiveSidebarVisible = sidebarVisible ?? persistedSidebarVisible;
-  const handleToggleSidebar = onToggleSidebar ?? toggleSidebarVisible;
+  const sidebarSnapshot = useTeamSidebarPortalSnapshot();
+  const hasSidebarSource = Boolean(sidebarSnapshot.activeSourceIdByTeam[teamName]);
+  const requestedSidebarVisible = sidebarVisible ?? persistedSidebarVisible;
+  const effectiveSidebarVisible = requestedSidebarVisible && hasSidebarSource;
+  const handleToggleSidebar = hasSidebarSource
+    ? (onToggleSidebar ?? toggleSidebarVisible)
+    : undefined;
   const graphMessagesPanel = useGraphMessagesPanel({
     teamName,
     enabled: messagesPanelEnabled,

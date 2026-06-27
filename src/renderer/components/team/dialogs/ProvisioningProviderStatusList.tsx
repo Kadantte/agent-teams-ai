@@ -271,6 +271,76 @@ function getLocalizedStatusLabel(
   }
 }
 
+function localizeFormattedModelName(modelName: string, t: TeamTranslator): string {
+  return modelName.trim().toLowerCase() === 'default'
+    ? t('modelSelector.defaultModel')
+    : modelName.trim();
+}
+
+function localizeFormattedModelStatus(rawStatus: string, t: TeamTranslator): string {
+  const normalized = rawStatus.trim();
+  const lower = normalized.toLowerCase();
+
+  if (lower === 'checking...') {
+    return t('provisioning.providerStatus.status.checking');
+  }
+  if (lower === 'verified') {
+    return t('provisioning.providerStatus.detailSummary.selectedModelVerified');
+  }
+  if (lower === 'available for launch') {
+    return t('provisioning.providerStatus.detailSummary.selectedModelAvailable');
+  }
+  if (lower === 'compatible for launch') {
+    return t('provisioning.providerStatus.detailSummary.selectedModelCompatible');
+  }
+  if (lower === 'compatible, deep verification pending') {
+    return t('provisioning.providerStatus.detailSummary.selectedModelCompatibilityPending');
+  }
+  if (lower === 'verification deferred') {
+    return t('provisioning.providerStatus.detailSummary.selectedModelDeferred');
+  }
+  if (lower === 'ping not confirmed') {
+    return t('provisioning.providerStatus.detailSummary.selectedModelPingNotConfirmed');
+  }
+
+  const detailWithReason = /^(unavailable|check failed)\s+-\s+(.+)$/i.exec(normalized);
+  if (detailWithReason) {
+    const [, status, reason] = detailWithReason;
+    const label =
+      status.toLowerCase() === 'unavailable'
+        ? t('provisioning.providerStatus.detailSummary.selectedModelUnavailable')
+        : t('provisioning.providerStatus.detailSummary.selectedModelCheckFailed');
+    return `${label}: ${reason}`;
+  }
+
+  if (lower === 'unavailable') {
+    return t('provisioning.providerStatus.detailSummary.selectedModelUnavailable');
+  }
+  if (lower === 'check failed') {
+    return t('provisioning.providerStatus.detailSummary.selectedModelCheckFailed');
+  }
+
+  return normalized;
+}
+
+function localizeFormattedModelDetail(detail: string, t: TeamTranslator): string | null {
+  const match = /^(.+?)\s+-\s+(.+)$/.exec(detail.trim());
+  if (!match) {
+    return null;
+  }
+
+  const [, modelName, status] = match;
+  if (!isFormattedModelDetail(detail.toLowerCase())) {
+    return null;
+  }
+
+  return `${localizeFormattedModelName(modelName, t)} - ${localizeFormattedModelStatus(status, t)}`;
+}
+
+function localizeProvisioningDetail(detail: string, t: TeamTranslator): string {
+  return localizeFormattedModelDetail(detail, t) ?? detail;
+}
+
 function summarizeDetail(
   detail: string,
   status: ProvisioningProviderCheckStatus,
@@ -982,7 +1052,7 @@ export const ProvisioningProviderStatusList = ({
                       check.providerId
                     )}`}
                   >
-                    {detail}
+                    {localizeProvisioningDetail(detail, t)}
                   </p>
                 ))}
               </div>

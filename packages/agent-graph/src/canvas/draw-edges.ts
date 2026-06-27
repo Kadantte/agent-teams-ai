@@ -8,6 +8,10 @@ import { COLORS } from '../constants/colors';
 
 import type { GraphEdge, GraphEdgeType, GraphNode } from '../ports/types';
 
+const ALWAYS_VISIBLE_EDGE_ALPHA = 0.42;
+const ALWAYS_VISIBLE_EDGE_MAX_WIDTH_SCALE = 6;
+const ALWAYS_VISIBLE_EDGE_MIN_SCREEN_WIDTH_SCALE = 0.9;
+
 // ─── Edge Type → Color/Width Mapping ────────────────────────────────────────
 
 const EDGE_STYLES: Record<
@@ -94,11 +98,12 @@ export function drawEdges(
     const isActive = hasActiveParticles.has(edge.id);
     const isSelected = selectedEdgeId === edge.id;
     const isHovered = !isSelected && hoveredEdgeId === edge.id;
-    if (edge.type === 'message' && !isActive && !isSelected && !isHovered) {
+    if (edge.type === 'message' && !isActive && !isSelected && !isHovered && !edge.alwaysVisible) {
       continue;
     }
     // Pulse alpha when particles are travelling: base 0.3 + 0.2 * sin wave
-    const alpha = isActive ? BEAM.activeAlpha + 0.2 * Math.sin(_time * 6) : BEAM.idleAlpha;
+    const idleAlpha = edge.alwaysVisible ? ALWAYS_VISIBLE_EDGE_ALPHA : BEAM.idleAlpha;
+    const alpha = isActive ? BEAM.activeAlpha + 0.2 * Math.sin(_time * 6) : idleAlpha;
     const focusAlpha = focusEdgeIds && !focusEdgeIds.has(edge.id) ? 0.1 : 1;
     const interactionAlpha = isSelected ? 0.95 : isHovered ? 0.6 : 0;
     const finalAlpha = Math.max(alpha * focusAlpha, interactionAlpha);
@@ -106,6 +111,12 @@ export function drawEdges(
     if (finalAlpha < MIN_VISIBLE_OPACITY) continue;
 
     const cp = computeControlPoints(source.x, source.y, target.x, target.y);
+    const widthScale = edge.alwaysVisible
+      ? Math.min(
+          ALWAYS_VISIBLE_EDGE_MAX_WIDTH_SCALE,
+          Math.max(1, ALWAYS_VISIBLE_EDGE_MIN_SCREEN_WIDTH_SCALE / Math.max(zoom, 0.05))
+        )
+      : 1;
 
     ctx.save();
     ctx.globalAlpha = finalAlpha;
@@ -124,7 +135,10 @@ export function drawEdges(
         cp,
         target.x,
         target.y,
-        (style.startW + style.endW) * 0.5 * (isSelected ? 1.35 : isHovered ? 1.15 : 1),
+        (style.startW + style.endW) *
+          0.5 *
+          widthScale *
+          (isSelected ? 1.35 : isHovered ? 1.15 : 1),
         edge.color ?? style.color,
         style.dash
       );
@@ -137,8 +151,8 @@ export function drawEdges(
         cp,
         target.x,
         target.y,
-        style.startW,
-        style.endW,
+        style.startW * widthScale,
+        style.endW * widthScale,
         edge.color ?? style.color,
         style.dash
       );

@@ -94,12 +94,12 @@
       "create": "Создать",
       "creating": "Создание...",
       "openExisting": "Открыть существующую команду",
-      "skipPreflightAndCreate": "Пропустить preflight и создать"
+      "skipPreflightAndCreate": "Пропустить предварительную проверку и создать"
     },
     "conflict": {
-      "description": "Запуск двух команд в одной директории рискован - они могут конфликтовать при изменении одних и тех же файлов. Лучше выбрать другую директорию или git worktree для изоляции.",
-      "title": "Другая команда \"{{team}}\" уже работает в этой working directory",
-      "workingDirectory": "Working directory:"
+      "description": "Запуск двух команд в одной директории рискован - они могут конфликтовать при изменении одних и тех же файлов. Лучше выбрать другую директорию или отдельное рабочее дерево Git для изоляции.",
+      "title": "Другая команда \"{{team}}\" уже работает в этой рабочей директории",
+      "workingDirectory": "Рабочая директория:"
     },
     "description": {
       "copy": "Создать новую команду на основе существующей.",
@@ -112,25 +112,25 @@
       "loadProjectsFailed": "Не удалось загрузить проекты"
     },
     "fields": {
-      "color": "Цвет (optional)",
-      "description": "Описание (optional)",
-      "prompt": "Prompt для team lead (optional)",
+      "color": "Цвет (необязательно)",
+      "description": "Описание (необязательно)",
+      "prompt": "Промпт для лида команды (необязательно)",
       "teamName": "Имя команды"
     },
     "launchAfterCreate": {
       "description": "Сразу запустить команду через локальный Claude CLI.",
       "label": "Выполнить команду после создания"
     },
-    "localOnly": "Доступно только в локальном Electron mode.",
+    "localOnly": "Доступно только в локальном режиме Electron.",
     "onDisk": "На диске:",
     "placeholders": {
       "description": "Краткое описание назначения команды",
-      "prompt": "Инструкции для team lead во время provisioning..."
+      "prompt": "Инструкции для лида команды во время подготовки..."
     },
     "saved": "Сохранено",
     "solo": {
-      "description": "Будет запущен только team lead (main process) - teammates не будут созданы. Работает как обычная agent session в выбранном runtime (Claude Code, Codex, OpenCode, Gemini), но с доступом к task board для планирования. Экономит tokens за счёт отсутствия coordination overhead между teammates. Участников можно добавить позже в настройках команды.",
-      "label": "Solo team"
+      "description": "Будет запущен только лид команды (основной процесс), без дополнительных участников. Работает как обычная сессия агента в выбранной среде выполнения (Claude Code, Codex, OpenCode, Gemini), но с доступом к доске задач для планирования. Экономит токены за счет отсутствия координации между участниками. Участников можно добавить позже в настройках команды.",
+      "label": "Соло-команда"
     },
     "title": {
       "copy": "Копировать команду",
@@ -140,19 +140,34 @@
       "launchSettingsTitle": "Опциональные настройки запуска",
       "launchSettingsDescription": "Промпт, безопасность и переопределения CLI находятся здесь, когда они нужны.",
       "teamDetailsTitle": "Опциональные детали команды",
-      "teamDetailsDescription": "Основной поток остаётся компактным. Открывайте этот блок, когда нужен дополнительный контекст или свой цвет."
+      "teamDetailsDescription": "Основной поток остаётся компактным. Открывайте этот блок, когда нужен дополнительный контекст или свой цвет.",
+      "summary": {
+        "leadPrompt": "Промпт лида",
+        "autoApproveTools": "Автоодобрение инструментов",
+        "fastMode": "Быстрый режим включен",
+        "fastDisabled": "Быстрый режим выключен",
+        "fastDefault": "Быстрый режим по умолчанию",
+        "anthropicLimitedContext": "Anthropic ограничен контекстом 200K",
+        "worktree": "Рабочее дерево: {{name}}",
+        "customCliArgs": "Свои аргументы CLI",
+        "description": "Описание",
+        "color": "Цвет: {{color}}"
+      }
     },
     "prepare": {
-      "unsupportedPreload": "Текущая версия preload не поддерживает team:prepareProvisioning. Перезапустите dev app.",
+      "unsupportedPreload": "Текущая версия preload не поддерживает team:prepareProvisioning. Перезапустите dev-приложение.",
       "selectWorkingDirectory": "Выберите рабочую директорию, чтобы проверить окружение запуска.",
-      "someProvidersNeedAttention": "Некоторым выбранным providers нужно внимание.",
-      "readyWithNotes": "Все выбранные providers готовы, есть заметки.",
-      "ready": "Все выбранные providers готовы.",
-      "failed": "Не удалось подготовить выбранных providers",
-      "checkingProviders": "Проверка выбранных providers...",
+      "someProvidersNeedAttention": "Некоторым выбранным провайдерам нужно внимание.",
+      "readyWithNotes": "Все выбранные провайдеры готовы, есть заметки.",
+      "ready": "Все выбранные провайдеры готовы.",
+      "failed": "Не удалось подготовить выбранных провайдеров",
+      "checkingProviders": "Проверка выбранных провайдеров...",
       "preparingEnvironment": "Подготовка окружения...",
-      "selectedProvidersReadyWithNotes": "Выбранные providers готовы (есть заметки)",
-      "selectedProvidersReady": "Выбранные providers готовы"
+      "selectedProvidersReadyWithNotes": "Выбранные провайдеры готовы (есть заметки)",
+      "selectedProvidersReady": "Выбранные провайдеры готовы",
+      "providerStatusLoading": "Статус провайдера {{provider}} еще загружается. Проверка моделей начнется автоматически.",
+      "selectedProvidersLabel": "Выбранные провайдеры",
+      "readyStatus": "Готово"
     },
     "validation": {
       "nameMustContainLetterOrDigit": "Имя должно содержать хотя бы одну букву или цифру",
@@ -161,12 +176,35 @@
       "memberNameRequired": "Имя участника не может быть пустым",
       "memberNameInvalid": "Имя участника должно начинаться с буквы или цифры и содержать только [a-zA-Z0-9._-], максимум 128 символов",
       "memberNamesUnique": "Имена участников должны быть уникальными",
-      "openCodeLeadModelRequired": "Для lead на OpenCode нужно выбрать модель.",
-      "openCodeTeammateRequired": "Для lead на OpenCode нужен хотя бы один teammate OpenCode.",
+      "openCodeLeadModelRequired": "Для лида на OpenCode нужно выбрать модель.",
+      "openCodeTeammateRequired": "Для лида на OpenCode нужен хотя бы один участник OpenCode.",
       "teamLaunching": "Команда сейчас запускается",
       "teamNameExists": "Команда с таким именем уже существует",
       "checkFormFields": "Проверьте поля формы"
-    }
+    },
+    "organizationPlacement": {
+      "title": "Размещение в организации",
+      "description": "Выберите организацию, затем корень или группу, куда относится команда.",
+      "addToOrganization": "Добавить в организацию",
+      "organizationLabel": "Организация",
+      "organizationHelp": "Выберите организацию, которой принадлежит команда.",
+      "organizationPlaceholder": "Организация",
+      "groupOrRootLabel": "Группа или корень",
+      "groupOrRootHelp": "Выберите группу или оставьте корень организации.",
+      "groupOrRootPlaceholder": "Корень или группа",
+      "kind": {
+        "root": "Корень",
+        "group": "Группа"
+      }
+    },
+    "defaultDescription": {
+      "fallback": "Команда для потока подготовки",
+      "named": "Команда {{teamName}} для потока подготовки"
+    },
+    "defaultWorkflows": {
+      "reviewer": "Проверяй каждую завершенную задачу в проекте. Читай изменения в коде, проверяй корректность, стиль и возможные проблемы. Одобряй задачу или запрашивай исправления с понятным фидбеком."
+    },
+    "memberModelLockReason": "Этот участник синхронизирован с моделью лида. Отключите синхронизацию, чтобы выбрать отдельного провайдера, модель или уровень усилий."
   },
   "editTeam": {
     "actions": {
@@ -218,7 +256,7 @@
       "changeRuntimeDescription": "Откройте Relaunch Team, чтобы изменить provider, model или effort для lead.",
       "modelLockReason": "Runtime team lead управляется через Relaunch Team.",
       "readOnlyHint": "Имя и роль team lead здесь доступны только для чтения. Откройте runtime panel в строке lead, чтобы изменить provider, model или effort.",
-      "role": "Team Lead"
+      "role": "Лид команды"
     },
     "title": "Редактировать команду"
   },
@@ -231,51 +269,51 @@
     },
     "anthropicContext": {
       "defaultSetting": "настройка контекста по умолчанию",
-      "description": "Контекст Anthropic действует на всю команду для этого запуска: {{mode}}. Используйте checkbox Limit context в runtime panel lead, чтобы изменить это.",
+      "description": "Контекст Anthropic действует на всю команду для этого запуска: {{mode}}. Используйте чекбокс ограничения контекста в панели среды выполнения лида, чтобы изменить это.",
       "limitEnabled": "лимит 200K включён"
     },
     "mcp": {
-      "buttonInherit": "MCP inherit",
-      "buttonScopes": "MCP scopes",
-      "chooseScopes": "Выбрать scopes",
-      "inheritLead": "Наследовать lead",
-      "lockedInfo": "Для всех teammates включён режим только Agent Teams MCP. Этот teammate запустится только с Agent Teams server.",
-      "mode": "MCP mode",
+      "buttonInherit": "Наследовать MCP",
+      "buttonScopes": "Области MCP",
+      "chooseScopes": "Выбрать области",
+      "inheritLead": "Наследовать от лида",
+      "lockedInfo": "Для всех участников включен режим только Agent Teams MCP. Этот участник запустится только с сервером Agent Teams.",
+      "mode": "Режим MCP",
       "scopes": {
-        "local": "local",
-        "project": "project",
-        "user": "user"
+        "local": "локальная",
+        "project": "проект",
+        "user": "пользователь"
       },
-      "serverNames": "Имена servers",
-      "settingInfo": "Agent Teams MCP запускает этого teammate только с Agent Teams server. Scope и allowlist modes применяются только к запуску этого teammate.",
-      "strictAllowlist": "Строгий allowlist",
-      "tooltip": "{{label}}: управление MCP inheritance policy этого участника",
+      "serverNames": "Имена серверов",
+      "settingInfo": "Agent Teams MCP запускает этого участника только с сервером Agent Teams. Режимы областей и allowlist применяются только к запуску этого участника.",
+      "strictAllowlist": "Строгий список разрешений",
+      "tooltip": "{{label}}: управление политикой наследования MCP этого участника",
       "agentTeamsMcp": "Agent Teams MCP"
     },
     "model": {
-      "ariaLabel": "{{provider}} provider, {{model}}",
-      "currentLeadRuntime": "Текущий runtime lead",
+      "ariaLabel": "Провайдер {{provider}}, {{model}}",
+      "currentLeadRuntime": "Текущая среда выполнения лида",
       "default": "По умолчанию",
-      "inheritedTooltip": "Provider, model и effort наследуются от lead, пока включена синхронизация.",
-      "leadSuffix": "{{label}} (lead)",
-      "liveDisabled": "Изменения provider, model и effort отключены, пока команда работает. Переподключите команду, чтобы применить их безопасно.",
-      "lockedActionFallback": "Изменения runtime lead открывают Relaunch Team, где можно обновить provider, model и effort.",
-      "restartWholeTeam": "Сохранение этих runtime changes перезапустит всю команду."
+      "inheritedTooltip": "Провайдер, модель и уровень усилий наследуются от лида, пока включена синхронизация.",
+      "leadSuffix": "{{label}} (лид)",
+      "liveDisabled": "Изменения провайдера, модели и уровня усилий отключены, пока команда работает. Переподключите команду, чтобы применить их безопасно.",
+      "lockedActionFallback": "Изменения среды выполнения лида открывают перезапуск команды, где можно обновить провайдера, модель и уровень усилий.",
+      "restartWholeTeam": "Сохранение этих изменений среды выполнения перезапустит всю команду."
     },
     "nameAria": "Имя участника {{index}}",
     "nameFallback": "участник {{index}}",
     "noRole": "Без роли",
     "removed": "Удалён",
     "workflow": {
-      "addTooltip": "Добавить workflow teammate",
-      "editTooltip": "Редактировать workflow teammate",
-      "label": "Workflow (необязательно)",
-      "placeholder": "Как этот agent должен работать и взаимодействовать с другими...",
+      "addTooltip": "Добавить сценарий работы участника",
+      "editTooltip": "Редактировать сценарий работы участника",
+      "label": "Сценарий работы (необязательно)",
+      "placeholder": "Как этот агент должен работать и взаимодействовать с другими...",
       "saved": "Сохранено"
     },
     "worktree": {
-      "description": "Запускать этого teammate в отдельном git worktree. Apply/reject changes будут работать с этим worktree, а не с workspace lead.",
-      "label": "Worktree"
+      "description": "Запускать этого участника в отдельном рабочем дереве Git. Применение и отклонение изменений будет работать с этим рабочим деревом, а не с рабочей областью лида.",
+      "label": "Рабочее дерево"
     },
     "addMembers": {
       "title": "Добавить участников",
@@ -744,36 +782,36 @@
       "unavailable": "Недоступно",
       "issue": "Проблема"
     },
-    "customModelId": "Custom model id",
-    "label": "Модель (optional)",
-    "multimodelRequired": "Codex и Gemini требуют Multimodel mode.",
+    "customModelId": "ID своей модели",
+    "label": "Модель (необязательно)",
+    "multimodelRequired": "Для Codex и Gemini нужен режим Multimodel.",
     "openCode": {
-      "allSources": "Все OpenCode sources",
+      "allSources": "Все источники OpenCode",
       "filterSource": "Фильтровать {{source}}",
-      "filterSources": "Фильтровать OpenCode sources",
+      "filterSources": "Фильтровать источники OpenCode",
       "freeOnly": "Только бесплатные",
       "freeTooltip": "OpenCode помечает эту модель как бесплатную.",
       "loadingModels": "Загрузка моделей OpenCode...",
-      "noSourcesFound": "Sources не найдены.",
+      "noSourcesFound": "Источники не найдены.",
       "recommendedOnly": "Только рекомендованные",
-      "searchSources": "Поиск sources",
-      "sourcesCount": "OpenCode sources: {{count}}",
-      "sourcesCount_few": "OpenCode sources: {{count}}",
-      "sourcesCount_many": "OpenCode sources: {{count}}",
-      "sourcesCount_one": "OpenCode source: {{count}}",
-      "sourcesCount_other": "OpenCode sources: {{count}}"
+      "searchSources": "Поиск источников",
+      "sourcesCount": "Источники OpenCode: {{count}}",
+      "sourcesCount_few": "Источники OpenCode: {{count}}",
+      "sourcesCount_many": "Источники OpenCode: {{count}}",
+      "sourcesCount_one": "Источник OpenCode: {{count}}",
+      "sourcesCount_other": "Источники OpenCode: {{count}}"
     },
     "reason": "Причина: {{reason}}",
-    "runtimeModelsSyncing": "Явные модели загружаются из текущего runtime. Default остаётся доступным, пока список синхронизируется.",
+    "runtimeModelsSyncing": "Явные модели загружаются из текущего рантайма. Модель по умолчанию остаётся доступной, пока список синхронизируется.",
     "fastMode": {
-      "codexLabel": "Быстрый режим (2x credits)",
+      "codexLabel": "Быстрый режим (2x кредиты)",
       "optionalLabel": "Быстрый режим (опционально)",
       "defaultOff": "По умолчанию (выкл.)",
-      "fast": "Fast",
+      "fast": "Быстро",
       "off": "Выкл.",
-      "defaultFast": "По умолчанию (Fast)",
-      "defaultResolvesTo": "Сейчас default resolves to {{mode}}.",
-      "runtimeBackedHint": "Fast mode зависит от runtime и доступен только когда resolved Anthropic launch model его поддерживает."
+      "defaultFast": "По умолчанию (быстро)",
+      "defaultResolvesTo": "Сейчас значение по умолчанию: {{mode}}.",
+      "runtimeBackedHint": "Быстрый режим зависит от рантайма и доступен только когда выбранная модель запуска Anthropic его поддерживает."
     },
     "anthropicExtraUsage": {
       "pricingDocs": "Открыть документацию Anthropic по ценам"
@@ -782,48 +820,48 @@
     "defaultModel": "По умолчанию",
     "empty": {
       "noSearchMatches": "По этому поиску модели не найдены.",
-      "recommendedFreeOpenCode": "В текущем списке runtime нет рекомендованных бесплатных моделей OpenCode.",
-      "freeOpenCode": "В текущем списке runtime нет бесплатных моделей OpenCode.",
-      "recommendedOpenCode": "В текущем списке runtime нет рекомендованных моделей OpenCode.",
-      "noModels": "В текущем списке runtime нет моделей."
+      "recommendedFreeOpenCode": "В текущем списке рантайма нет рекомендованных бесплатных моделей OpenCode.",
+      "freeOpenCode": "В текущем списке рантайма нет бесплатных моделей OpenCode.",
+      "recommendedOpenCode": "В текущем списке рантайма нет рекомендованных моделей OpenCode.",
+      "noModels": "В текущем списке рантайма нет моделей."
     },
     "openCodeStatus": {
       "notReadyTitle": "OpenCode не готов к запуску команды",
       "freeModelsAvailableTitle": "Доступны бесплатные модели OpenCode",
-      "providerNotConnectedTitle": "Provider OpenCode не подключён",
+      "providerNotConnectedTitle": "Провайдер OpenCode не подключён",
       "readyTitle": "OpenCode готов",
-      "readyMessage": "OpenCode прошёл проверку готовности provider. Выберите его, чтобы использовать модели OpenCode для этой команды.",
+      "readyMessage": "OpenCode прошёл проверку готовности провайдера. Выберите его, чтобы использовать модели OpenCode для этой команды.",
       "useOpenCode": "Использовать OpenCode",
       "badges": {
         "check": "Проверка",
         "install": "Установить",
-        "free": "Free",
+        "free": "Бесплатно",
         "setup": "Настроить"
       },
       "summary": {
-        "checking": "Статус OpenCode: проверка runtime",
+        "checking": "Статус OpenCode: проверка рантайма",
         "status": "Статус OpenCode: {{parts}}"
       },
       "summaryParts": {
         "teamLaunchBlocked": "запуск команды заблокирован",
-        "providerOptional": "подключение provider необязательно",
-        "providerModelsNeedSetup": "provider-backed модели требуют настройки",
+        "providerOptional": "подключение провайдера необязательно",
+        "providerModelsNeedSetup": "модели провайдера требуют настройки",
         "teamLaunchReady": "запуск команды готов",
-        "runtimeDetected": "runtime найден",
-        "runtimeMissing": "runtime не найден",
-        "freeWithoutAuth": "free модели доступны без auth",
-        "providerConnected": "provider подключён",
-        "providerNotConnected": "provider не подключён"
+        "runtimeDetected": "рантайм найден",
+        "runtimeMissing": "рантайм не найден",
+        "freeWithoutAuth": "бесплатные модели доступны без авторизации",
+        "providerConnected": "провайдер подключён",
+        "providerNotConnected": "провайдер не подключён"
       },
       "messages": {
-        "checking": "Приложение ещё проверяет OpenCode runtime. Дождитесь завершения проверки provider status и попробуйте снова.",
+        "checking": "Приложение ещё проверяет рантайм OpenCode. Дождитесь завершения проверки статуса провайдера и попробуйте снова.",
         "unsupported": "OpenCode не установлен, не найден или найденный runtime не поддерживается. Установите или обновите OpenCode, затем обновите статус provider. Также можно использовать кнопку Install на домашней странице.",
-        "freeAvailable": "OpenCode найден. Можно использовать free модели OpenCode, например Big Pickle, без подключения provider. Подключайте provider только если нужны provider-backed модели.",
-        "noFreeListed": "OpenCode найден, но free модель OpenCode пока не указана. Обновите provider status или подключите provider в OpenCode для provider-backed моделей.",
+        "freeAvailable": "OpenCode найден. Можно использовать бесплатные модели OpenCode, например Big Pickle, без подключения провайдера. Подключайте провайдера только если нужны модели провайдера.",
+        "noFreeListed": "OpenCode найден, но бесплатная модель OpenCode пока не указана. Обновите статус провайдера или подключите провайдера в OpenCode для моделей провайдера.",
         "launchBlocked": "OpenCode установлен и authenticated, но готовность Agent Teams launch заблокирована.",
         "ready": "OpenCode готов к запуску команды."
       },
-      "loadingRuntime": "Статус OpenCode runtime ещё загружается."
+      "loadingRuntime": "Статус рантайма OpenCode ещё загружается."
     },
     "advisory": {
       "pingNotConfirmed": "Ping не подтверждён",
@@ -835,7 +873,7 @@
     "routeGroups": {
       "openCodeConfig": "Конфиг OpenCode",
       "builtinFree": "Бесплатные встроенные",
-      "connectedProviders": "Подключённые providers",
+      "connectedProviders": "Подключённые провайдеры",
       "otherCatalog": "Другой каталог OpenCode"
     },
     "pricing": {
@@ -849,15 +887,15 @@
       "cacheWriteTitle": "Cache write: {{rate}} за 1M tokens"
     },
     "defaultTooltip": {
-      "anthropicCompatibleWithResolved": "Использует default model Anthropic-compatible endpoint.\nСейчас resolves to {{model}}.",
-      "anthropicCompatible": "Использует default model Anthropic-compatible endpoint.",
-      "anthropic": "Использует default model команды Claude.\nResolves to {{longContextModel}} с 1M context или {{limitedContextModel}} с 200K context, когда включён Limit context.",
-      "openCodeWithResolved": "Использует default model OpenCode.\nСейчас resolves to {{model}}.",
-      "openCode": "Использует runtime default model OpenCode.",
-      "runtime": "Использует runtime default для выбранного provider."
+      "anthropicCompatibleWithResolved": "Использует модель по умолчанию Anthropic-compatible endpoint.\nСейчас выбирается {{model}}.",
+      "anthropicCompatible": "Использует модель по умолчанию Anthropic-compatible endpoint.",
+      "anthropic": "Использует модель команды Claude по умолчанию.\nВыбирает {{longContextModel}} с контекстом 1M или {{limitedContextModel}} с контекстом 200K, когда включено ограничение контекста.",
+      "openCodeWithResolved": "Использует модель OpenCode по умолчанию.\nСейчас выбирается {{model}}.",
+      "openCode": "Использует модель OpenCode по умолчанию из рантайма.",
+      "runtime": "Использует значение по умолчанию из рантайма для выбранного провайдера."
     },
     "multimodelOff": "Multimodel выключен",
-    "unavailableInRuntime": "Недоступно в текущем runtime"
+    "unavailableInRuntime": "Недоступно в текущем рантайме"
   },
   "taskDetail": {
     "actions": {
@@ -1287,9 +1325,9 @@
       "suffix": "и Agent SDK из ежемесячного Agent SDK credit отдельно от интерактивных лимитов Claude Code. Credit обновляется каждый billing cycle, неиспользованный остаток не переносится."
     },
     "conflict": {
-      "description": "Запуск двух команд в одной директории рискован - они могут конфликтовать при изменении одних и тех же файлов. Лучше выбрать другую директорию или git worktree для изоляции.",
-      "title": "Другая команда \"{{team}}\" уже работает в этой working directory",
-      "workingDirectory": "Working directory:"
+      "description": "Запуск двух команд в одной директории рискован - они могут конфликтовать при изменении одних и тех же файлов. Лучше выбрать другую директорию или отдельное рабочее дерево Git для изоляции.",
+      "title": "Другая команда \"{{team}}\" уже работает в этой рабочей директории",
+      "workingDirectory": "Рабочая директория:"
     },
     "description": {
       "createSchedule": "Настроить автоматическое выполнение Claude task",
@@ -1305,25 +1343,25 @@
         "launch": "запуск",
         "relaunch": "перезапуск"
       },
-      "blocked": "Runtime environment недоступен - {{action}} заблокирован",
-      "checkingProviders": "Проверка выбранных providers...",
-      "failed": "Не удалось подготовить выбранных providers",
-      "preflight": "Pre-flight проверка, чтобы поймать ошибки до действия: {{action}}",
-      "preparingEnvironment": "Подготовка environment...",
-      "ready": "Все выбранные providers готовы.",
-      "readyWithNotes": "Все выбранные providers готовы, есть заметки.",
-      "unsupportedPreload": "Текущая версия preload не поддерживает team:prepareProvisioning. Перезапустите dev app.",
+      "blocked": "Среда выполнения недоступна - {{action}} заблокирован",
+      "checkingProviders": "Проверка выбранных провайдеров...",
+      "failed": "Не удалось подготовить выбранных провайдеров",
+      "preflight": "Предварительная проверка, чтобы поймать ошибки до действия: {{action}}",
+      "preparingEnvironment": "Подготовка окружения...",
+      "ready": "Все выбранные провайдеры готовы.",
+      "readyWithNotes": "Все выбранные провайдеры готовы, есть заметки.",
+      "unsupportedPreload": "Текущая версия preload не поддерживает team:prepareProvisioning. Перезапустите dev-приложение.",
       "selectWorkingDirectory": "Выберите рабочую директорию, чтобы проверить окружение запуска.",
-      "someProvidersNeedAttention": "Некоторым выбранным providers нужно внимание."
+      "someProvidersNeedAttention": "Некоторым выбранным провайдерам нужно внимание."
     },
     "prompt": {
-      "label": "Prompt",
-      "oneShotPrefix": "Этот prompt будет передан в",
-      "oneShotSuffix": "для one-shot выполнения",
+      "label": "Промпт",
+      "oneShotPrefix": "Этот промпт будет передан в",
+      "oneShotSuffix": "для одноразового выполнения",
       "saved": "Сохранено",
       "schedulePlaceholder": "Инструкции для Claude, которые нужно выполнить по расписанию...",
-      "teamLeadOptional": "Prompt для team lead (optional)",
-      "teamLeadPlaceholder": "Инструкции для team lead..."
+      "teamLeadOptional": "Промпт для лида команды (необязательно)",
+      "teamLeadPlaceholder": "Инструкции для лида команды..."
     },
     "providerChanged": "Provider изменён с {{from}} на {{to}}. Предыдущая lead session не будет возобновлена, lead начнёт с fresh context, чтобы новый runtime применился корректно.",
     "relaunchFreshSession": "Team relaunch запускает fresh lead session. Durable team state, task board и настройки участников будут rehydrated в launch prompt.",
@@ -1374,6 +1412,7 @@
     "actions": {
       "copyTeam": "Скопировать команду",
       "createTeam": "Создать команду",
+      "organizationMap": "Карта орг.",
       "deleteForever": "Удалить навсегда",
       "deletePermanently": "Удалить окончательно",
       "deleteTeam": "Удалить команду",
@@ -1709,7 +1748,7 @@
   },
   "members": {
     "badges": {
-      "worktree": "worktree"
+      "worktree": "рабочее дерево"
     },
     "runtimeTelemetry": {
       "title": "Локальная нагрузка runtime",
@@ -1725,7 +1764,7 @@
       "title": "Участники",
       "addMember": "Добавить участника",
       "editAsJson": "Редактировать как JSON",
-      "runInSeparateWorktrees": "Запускать участников в отдельных worktree",
+      "runInSeparateWorktrees": "Запускать участников в отдельных рабочих деревьях",
       "agentTeamsMcpOnly": "Только Agent Teams MCP",
       "removedCount": "Удалённые ({{count}})",
       "removedModelLockReason": "Удалённые участники сохранены для истории soft delete. Восстановите их, чтобы редактировать настройки.",
@@ -1978,17 +2017,17 @@
         "pending": "ожидание"
       },
       "detailSummary": {
-        "cliBinaryMissing": "CLI binary не найден",
-        "openCodeRuntimeMissing": "OpenCode runtime отсутствует",
+        "cliBinaryMissing": "Бинарь CLI не найден",
+        "openCodeRuntimeMissing": "Рантайм OpenCode отсутствует",
         "openCodeWindowsAccessBlocked": "Доступ OpenCode в Windows заблокирован",
-        "openCodeNoOutput": "Проверка OpenCode runtime не вернула вывод",
+        "openCodeNoOutput": "Проверка рантайма OpenCode не вернула вывод",
         "openCodeMcpUnreachable": "OpenCode app MCP недоступен",
-        "workingDirectoryMissing": "Working directory отсутствует",
-        "cliBinaryCouldNotStart": "CLI binary не удалось запустить",
-        "cliPreflightIncomplete": "CLI preflight не завершился",
+        "workingDirectoryMissing": "Рабочая директория отсутствует",
+        "cliBinaryCouldNotStart": "Бинарь CLI не удалось запустить",
+        "cliPreflightIncomplete": "Предварительная проверка CLI не завершилась",
         "authenticationRequired": "Требуется аутентификация",
-        "runtimeProviderNotConfigured": "Runtime provider не настроен",
-        "cliPreflightFailed": "CLI preflight завершился с ошибкой",
+        "runtimeProviderNotConfigured": "Провайдер рантайма не настроен",
+        "cliPreflightFailed": "Предварительная проверка CLI завершилась с ошибкой",
         "selectedModelCompatible": "Выбранная модель совместима",
         "selectedModelCompatibilityPending": "Совместимость выбранной модели ещё проверяется",
         "selectedModelAvailable": "Выбранная модель доступна",
@@ -2065,15 +2104,15 @@
       },
       "failureHints": {
         "openCodeAccessDenied": "Исправьте права на папку или перенесите проект в папку, доступную пользователю для записи. Запуск от администратора - только временный обходной путь.",
-        "openCodeBridgeNoOutput": "Перезапустите приложение и runtime OpenCode, затем повторите. Если повторится, скопируйте diagnostics.",
+        "openCodeBridgeNoOutput": "Перезапустите приложение и рантайм OpenCode, затем повторите. Если повторится, скопируйте диагностику.",
         "workingDirectoryMissing": "Выберите существующую рабочую папку, затем откройте этот диалог заново.",
         "authenticationRequired": "Авторизуйте нужного провайдера в Claude CLI, затем откройте этот диалог заново.",
-        "runtimeProviderNotConfigured": "Настройте выбранный provider runtime, затем откройте этот диалог заново.",
-        "openCodeRuntimeMissing": "Установите или повторите запуск runtime OpenCode из карточки статуса провайдера, затем откройте этот диалог заново.",
-        "openCodeAppMcpUnreachable": "Повторите launch, чтобы обновить OpenCode app MCP bridge. Если повторится, перезапустите приложение и runtime OpenCode.",
+        "runtimeProviderNotConfigured": "Настройте выбранный провайдер рантайма, затем откройте этот диалог заново.",
+        "openCodeRuntimeMissing": "Установите или повторите запуск рантайма OpenCode из карточки статуса провайдера, затем откройте этот диалог заново.",
+        "openCodeAppMcpUnreachable": "Повторите запуск, чтобы обновить OpenCode app MCP bridge. Если повторится, перезапустите приложение и рантайм OpenCode.",
         "cliBinaryMissing": "Убедитесь, что локальный бинарь Claude CLI существует и может запускаться, затем откройте этот диалог заново.",
         "default": "Исправьте проблему выше, затем откройте этот диалог заново.",
-        "openCodeNodeModulesSymlinkPermission": "Запустите Agent Teams AI от имени администратора, затем повторите launch."
+        "openCodeNodeModulesSymlinkPermission": "Запустите Agent Teams AI от имени администратора, затем повторите запуск."
       }
     },
     "presentation": {
@@ -2595,5 +2634,225 @@
     "tabColorOrange": "Orange",
     "tabColorRose": "Rose",
     "tabColorViolet": "Violet"
+  },
+  "organizations": {
+    "map": {
+      "allOrganizationsTitle": "Все организации",
+      "defaultTitle": "Карта организации",
+      "organizationPlaceholder": "Организация",
+      "loading": "Загрузка карты организации...",
+      "noOrganizationData": "Нет данных организации",
+      "scope": {
+        "currentOrg": "Текущая организация",
+        "allOrgs": "Все организации"
+      },
+      "actions": {
+        "edit": "Редактировать",
+        "editing": "Редактирование",
+        "refresh": "Обновить"
+      },
+      "stats": {
+        "orgs": "{{count}} организаций",
+        "orgs_one": "{{count}} организация",
+        "orgs_few": "{{count}} организации",
+        "orgs_many": "{{count}} организаций",
+        "orgs_other": "{{count}} организаций",
+        "teams": "{{count}} команд",
+        "teams_one": "{{count}} команда",
+        "teams_few": "{{count}} команды",
+        "teams_many": "{{count}} команд",
+        "teams_other": "{{count}} команд",
+        "relations": "{{count}} связей",
+        "relations_one": "{{count}} связь",
+        "relations_few": "{{count}} связи",
+        "relations_many": "{{count}} связей",
+        "relations_other": "{{count}} связей",
+        "messages": "{{count}} сообщений",
+        "messages_one": "{{count}} сообщение",
+        "messages_few": "{{count}} сообщения",
+        "messages_many": "{{count}} сообщений",
+        "messages_other": "{{count}} сообщений",
+        "agents": "{{count}} агентов",
+        "agents_one": "{{count}} агент",
+        "agents_few": "{{count}} агента",
+        "agents_many": "{{count}} агентов",
+        "agents_other": "{{count}} агентов",
+        "runtimeLinks": "{{count}} runtime-связей",
+        "runtimeLinks_one": "{{count}} runtime-связь",
+        "runtimeLinks_few": "{{count}} runtime-связи",
+        "runtimeLinks_many": "{{count}} runtime-связей",
+        "runtimeLinks_other": "{{count}} runtime-связей"
+      }
+    },
+    "editor": {
+      "title": "Настройка организации",
+      "loadingOrganization": "Загрузка организации",
+      "fallbackOrganization": "организация",
+      "saving": "Сохранение...",
+      "source": {
+        "loading": "загрузка",
+        "configured": "настроено",
+        "generated": "создано автоматически"
+      },
+      "badges": {
+        "groups": "{{count}} групп",
+        "groups_one": "{{count}} группа",
+        "groups_few": "{{count}} группы",
+        "groups_many": "{{count}} групп",
+        "groups_other": "{{count}} групп",
+        "placed": "{{count}} размещено",
+        "placed_one": "{{count}} размещена",
+        "placed_few": "{{count}} размещены",
+        "placed_many": "{{count}} размещено",
+        "placed_other": "{{count}} размещено",
+        "unplaced": "{{count}} не размещено",
+        "unplaced_one": "{{count}} не размещена",
+        "unplaced_few": "{{count}} не размещены",
+        "unplaced_many": "{{count}} не размещено",
+        "unplaced_other": "{{count}} не размещено"
+      },
+      "tabs": {
+        "structure": "Структура",
+        "teams": "Команды",
+        "links": "Связи",
+        "organizations": "Орг."
+      },
+      "newOrganization": "Новая организация",
+      "parentOrganization": "Родительская организация",
+      "topLevel": "Верхний уровень",
+      "underLabel": "в {{label}}",
+      "selectedLocation": "Выбранное место",
+      "organizationTree": "Дерево организации",
+      "noOrganizationUnits": "В организации пока нет элементов",
+      "dropHere": "Сюда",
+      "createGroup": "Создать группу",
+      "groupPlaceholder": "Отдел, сквад, продуктовая зона",
+      "createUnderPlaceholder": "Создать внутри",
+      "placeExistingTeam": "Разместить существующую команду",
+      "teamPlaceholder": "Команда",
+      "placeUnderPlaceholder": "Разместить внутри",
+      "selectedItem": "Выбранный элемент",
+      "rootSelected": "Выбран корень организации",
+      "moveUnderPlaceholder": "Переместить внутрь",
+      "manualRelation": "Ручная связь",
+      "sourcePlaceholder": "Источник",
+      "targetPlaceholder": "Цель",
+      "kindPlaceholder": "Тип",
+      "kind": {
+        "org": "орг.",
+        "group": "группа",
+        "team": "команда"
+      },
+      "relationKind": {
+        "dependsOn": "Зависит от",
+        "delegates": "Делегирует",
+        "observes": "Наблюдает"
+      },
+      "actions": {
+        "create": "Создать",
+        "teamHere": "Команда здесь",
+        "addGroup": "Добавить группу",
+        "assignTeam": "Назначить команду",
+        "move": "Переместить",
+        "remove": "Удалить",
+        "addRelation": "Добавить связь"
+      }
+    },
+    "inspector": {
+      "closeSelection": "Закрыть выбор",
+      "kind": {
+        "group": "группа",
+        "organization": "организация"
+      },
+      "childNodes": "{{count}} дочерних элементов",
+      "childNodes_one": "{{count}} дочерний элемент",
+      "childNodes_few": "{{count}} дочерних элемента",
+      "childNodes_many": "{{count}} дочерних элементов",
+      "childNodes_other": "{{count}} дочерних элементов",
+      "agents": "{{count}} агентов",
+      "agents_one": "{{count}} агент",
+      "agents_few": "{{count}} агента",
+      "agents_many": "{{count}} агентов",
+      "agents_other": "{{count}} агентов",
+      "status": {
+        "online": "онлайн",
+        "offline": "офлайн"
+      },
+      "taskCounts": {
+        "active": "активно",
+        "pending": "ожидает",
+        "done": "готово"
+      },
+      "actions": {
+        "expand": "Развернуть",
+        "collapse": "Свернуть",
+        "open": "Открыть",
+        "graph": "Граф",
+        "expandSubtree": "Развернуть ветку",
+        "collapseSubtree": "Свернуть ветку"
+      },
+      "inProgress": "В работе",
+      "noActiveAgentTasks": "Нет активных задач агентов",
+      "tags": {
+        "system": "системное",
+        "unassigned": "не размещено"
+      },
+      "descriptions": {
+        "allOrganizations": "Все настроенные организации.",
+        "unassignedTeams": "Команды, которые пока не размещены в организации."
+      }
+    },
+    "graph": {
+      "actions": {
+        "createTeamIn": "Создать команду в {{label}}"
+      },
+      "canvas": {
+        "organizationMap": "Карта организации",
+        "allOrganizations": "Все организации",
+        "unassignedTeams": "Неразмещенные команды",
+        "agents": "{{count}} агентов",
+        "agents_one": "{{count}} агент",
+        "agents_few": "{{count}} агента",
+        "agents_many": "{{count}} агентов",
+        "agents_other": "{{count}} агентов",
+        "activeAgents": "{{count}} активных агентов",
+        "activeAgents_one": "{{count}} активный агент",
+        "activeAgents_few": "{{count}} активных агента",
+        "activeAgents_many": "{{count}} активных агентов",
+        "activeAgents_other": "{{count}} активных агентов",
+        "teams": "{{count}} команд",
+        "teams_one": "{{count}} команда",
+        "teams_few": "{{count}} команды",
+        "teams_many": "{{count}} команд",
+        "teams_other": "{{count}} команд",
+        "orgsAndTeams": "{{orgCount}} орг. - {{teamCount}} команд",
+        "teamRole": "{{memberCount}} участников - {{activeCount}} активных",
+        "teamReference": "ссылка на команду",
+        "notFound": "не найдена",
+        "online": "онлайн",
+        "offline": "офлайн",
+        "agentStatus": {
+          "active": "активен",
+          "idle": "ожидает",
+          "offline": "офлайн",
+          "unknown": "неизвестно"
+        }
+      },
+      "edgeOverlay": {
+        "runtimeMessages": "Runtime-сообщения между командами",
+        "manualRelation": "Ручная связь организации",
+        "close": "Закрыть детали связи",
+        "messages": "{{count}} сообщений",
+        "messages_one": "{{count}} сообщение",
+        "messages_few": "{{count}} сообщения",
+        "messages_many": "{{count}} сообщений",
+        "messages_other": "{{count}} сообщений",
+        "weight": "вес {{count}}",
+        "weight_one": "вес {{count}}",
+        "weight_few": "вес {{count}}",
+        "weight_many": "вес {{count}}",
+        "weight_other": "вес {{count}}"
+      }
+    }
   }
 }

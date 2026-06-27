@@ -268,7 +268,7 @@ export function buildStableSlotLayoutSnapshot({
   const memberSlotLayout =
     (layout?.mode ?? 'radial') === 'grid-under-lead'
       ? {
-          frames: planGridUnderLeadOwnerSlots(ownerFootprints, centralCollisionRects),
+          frames: planGridUnderLeadOwnerSlots(ownerFootprints, centralCollisionRects, layout),
           kind: 'grid-under-lead' as const,
         }
       : planOwnerSlots(ownerFootprints, centralCollisionRects, runtimeCentralExclusion, layout);
@@ -351,6 +351,7 @@ export function computeOwnerFootprints(
   const ownerNodes = nodes.filter((node) => node.kind === 'member');
   const showActivity = layout?.showActivity ?? true;
   const showLogs = layout?.showLogs ?? showActivity;
+  const showTasks = layout?.showTasks ?? true;
   const ownerNodeById = new Map(ownerNodes.map((node) => [node.id, node] as const));
   const taskColumnsByOwnerId = new Map<string, Set<string>>();
   const processCountByOwnerId = new Map<string, number>();
@@ -382,10 +383,11 @@ export function computeOwnerFootprints(
     return [
       buildOwnerFootprint({
         ownerId,
-        taskColumnCount: taskColumnsByOwnerId.get(ownerId)?.size ?? 0,
+        taskColumnCount: showTasks ? (taskColumnsByOwnerId.get(ownerId)?.size ?? 0) : 0,
         processCount: processCountByOwnerId.get(ownerId) ?? 0,
         showActivity,
         showLogs,
+        showTasks,
       }),
     ];
   });
@@ -414,6 +416,7 @@ function computeOwnerFootprintForOwnerId(
     processCount,
     showActivity: layout?.showActivity ?? true,
     showLogs: layout?.showLogs ?? layout?.showActivity ?? true,
+    showTasks: layout?.showTasks ?? true,
   });
 }
 
@@ -423,6 +426,7 @@ function buildOwnerFootprint(args: {
   processCount: number;
   showActivity: boolean;
   showLogs: boolean;
+  showTasks: boolean;
 }): OwnerFootprint {
   const activityColumnWidth = args.showActivity ? SLOT_GEOMETRY.activityColumnWidth : 0;
   const activityColumnHeight = args.showActivity ? SLOT_GEOMETRY.activityColumnHeight : 0;
@@ -431,18 +435,23 @@ function buildOwnerFootprint(args: {
   const activityToLogGap =
     activityColumnWidth > 0 && logColumnWidth > 0 ? SLOT_GEOMETRY.boardColumnGap : 0;
   const feedToKanbanGap =
-    activityColumnWidth > 0 || logColumnWidth > 0 ? SLOT_GEOMETRY.boardColumnGap : 0;
-  const kanbanBandWidth =
-    args.taskColumnCount <= 1
+    args.showTasks && (activityColumnWidth > 0 || logColumnWidth > 0)
+      ? SLOT_GEOMETRY.boardColumnGap
+      : 0;
+  const kanbanBandWidth = args.showTasks
+    ? args.taskColumnCount <= 1
       ? TASK_PILL.width
-      : TASK_PILL.width + (args.taskColumnCount - 1) * KANBAN_ZONE.columnWidth;
+      : TASK_PILL.width + (args.taskColumnCount - 1) * KANBAN_ZONE.columnWidth
+    : 0;
+  const kanbanBandHeight = args.showTasks ? SLOT_GEOMETRY.kanbanBandHeight : 0;
   const processBandWidth = computeProcessBandWidth(args.processCount);
   const boardBandWidth =
     activityColumnWidth + activityToLogGap + logColumnWidth + feedToKanbanGap + kanbanBandWidth;
   const boardBandHeight = Math.max(
     activityColumnHeight,
     logColumnHeight,
-    SLOT_GEOMETRY.kanbanBandHeight + getKanbanBandTopInset({ activityColumnWidth, logColumnWidth })
+    kanbanBandHeight +
+      (args.showTasks ? getKanbanBandTopInset({ activityColumnWidth, logColumnWidth }) : 0)
   );
   const innerContentWidth = Math.max(SLOT_GEOMETRY.ownerMinWidth, processBandWidth, boardBandWidth);
   const slotWidth = innerContentWidth + SLOT_GEOMETRY.memberSlotInnerPadding * 2;
@@ -475,7 +484,7 @@ function buildOwnerFootprint(args: {
     logColumnHeight,
     processBandWidth,
     kanbanBandWidth,
-    kanbanBandHeight: SLOT_GEOMETRY.kanbanBandHeight,
+    kanbanBandHeight,
     boardBandWidth,
     boardBandHeight,
     taskColumnCount: args.taskColumnCount,
@@ -1647,8 +1656,20 @@ function getRowOrbitRowHeight(row: readonly RowOrbitSlotConfig[]): number {
 
 function planGridUnderLeadOwnerSlots(
   ownerFootprints: readonly OwnerFootprint[],
-  centralCollisionRects: readonly StableRect[]
+  centralCollisionRects: readonly StableRect[],
+  layout?: GraphLayoutPort
 ): SlotFrame[] {
+  if (layout?.alignGridColumns) {
+    const alignedFrames = planAlignedGridUnderLeadOwnerSlots(
+      ownerFootprints,
+      centralCollisionRects,
+      layout
+    );
+    if (alignedFrames) {
+      return alignedFrames;
+    }
+  }
+
   const frames: SlotFrame[] = [];
   const centralBlock = unionRects([...centralCollisionRects]);
   let rowTop = centralBlock.bottom + GRID_UNDER_LEAD_LEAD_GAP;
@@ -1687,6 +1708,78 @@ function planGridUnderLeadOwnerSlots(
   }
 
   return frames;
+}
+
+function planAlignedGridUnderLeadOwnerSlots(
+  ownerFootprints: readonly OwnerFootprint[],
+  centralCollisionRects: readonly StableRect[],
+  layout: GraphLayoutPort
+): SlotFrame[] | null {
+  const assignedFootprints = ownerFootprints
+    .map((footprint) => {
+      const assignment = layout.slotAssignments[footprint.ownerId];
+      return assignment ? { footprint, assignment } : null;
+    })
+    .filter(
+      (
+        config
+      ): config is {
+        footprint: OwnerFootprint;
+        assignment: GraphOwnerSlotAssignment;
+      } => config !== null
+    );
+  if (assignedFootprints.length !== ownerFootprints.length || assignedFootprints.length === 0) {
+    return null;
+  }
+
+  const columnCount =
+    Math.max(...assignedFootprints.map(({ assignment }) => assignment.sectorIndex)) + 1;
+  const rowCount = Math.max(...assignedFootprints.map(({ assignment }) => assignment.ringIndex)) + 1;
+  if (columnCount <= 0 || rowCount <= 0) {
+    return null;
+  }
+
+  const columnWidths = Array.from({ length: columnCount }, () => 0);
+  const rowHeights = Array.from({ length: rowCount }, () => 0);
+  for (const { footprint, assignment } of assignedFootprints) {
+    columnWidths[assignment.sectorIndex] = Math.max(
+      columnWidths[assignment.sectorIndex] ?? 0,
+      footprint.slotWidth
+    );
+    rowHeights[assignment.ringIndex] = Math.max(
+      rowHeights[assignment.ringIndex] ?? 0,
+      footprint.slotHeight
+    );
+  }
+
+  const totalWidth =
+    columnWidths.reduce((sum, width) => sum + width, 0) +
+    Math.max(0, columnCount - 1) * SLOT_GEOMETRY.slotHorizontalGap;
+  const columnLefts: number[] = [];
+  let nextLeft = -totalWidth / 2;
+  for (const width of columnWidths) {
+    columnLefts.push(nextLeft);
+    nextLeft += width + SLOT_GEOMETRY.slotHorizontalGap;
+  }
+
+  const rowTops: number[] = [];
+  let nextTop = unionRects([...centralCollisionRects]).bottom + GRID_UNDER_LEAD_LEAD_GAP;
+  for (const height of rowHeights) {
+    rowTops.push(nextTop);
+    nextTop += height + GRID_UNDER_LEAD_ROW_GAP;
+  }
+
+  return assignedFootprints.map(({ footprint, assignment }) => {
+    const columnLeft = columnLefts[assignment.sectorIndex] ?? 0;
+    const columnWidth = columnWidths[assignment.sectorIndex] ?? footprint.slotWidth;
+    const rowTop = rowTops[assignment.ringIndex] ?? rowTops[0] ?? 0;
+    return buildSlotFrameAtOwnerAnchor(
+      footprint,
+      assignment,
+      columnLeft + columnWidth / 2,
+      rowTop + getOwnerAnchorTopOffset()
+    );
+  });
 }
 
 function getGridUnderLeadColumnCount(ownerCount: number): number {

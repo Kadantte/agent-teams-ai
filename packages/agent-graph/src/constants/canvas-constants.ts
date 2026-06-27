@@ -31,7 +31,7 @@ export const ANIM_SPEED = {
 export const CAMERA = {
   zoomStepDown: 0.92,
   zoomStepUp: 1.08,
-  minZoom: 0.15,
+  minZoom: 0.02,
   maxZoom: 5,
   velocityScale: 0.016,
 } as const;
@@ -241,6 +241,8 @@ export const HIT_DETECTION = {
   taskPadding: 4,
   /** Extra padding around curved edges for easier inspection */
   edgePadding: 6,
+  /** Minimum screen-space hit target for runtime message edges */
+  messageEdgeMinScreenRadius: 12,
 } as const;
 
 // ─── Background ─────────────────────────────────────────────────────────────
