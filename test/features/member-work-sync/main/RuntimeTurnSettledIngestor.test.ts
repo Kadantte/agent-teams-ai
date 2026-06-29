@@ -434,4 +434,65 @@ describe('RuntimeTurnSettledIngestor', () => {
       });
     }
   );
+
+  it.each(['success', 'error'])(
+    'ignores terminal OpenCode outcome %s with turnId but without runtime prompt identity',
+    async (outcome) => {
+      const payload = makeOpenCodePayload(
+        JSON.stringify({
+          schemaVersion: 1,
+          provider: 'opencode',
+          source: 'agent-teams-orchestrator-opencode',
+          eventName: 'runtime_turn_settled',
+          hookEventName: 'Stop',
+          sessionId: 'ses-opencode-1',
+          turnId: 'msg_launch_or_bootstrap',
+          laneId: 'secondary:opencode:jack',
+          memberName: 'jack',
+          teamName: 'team-a',
+          outcome,
+          recordedAt: '2026-04-29T12:00:00.000Z',
+        })
+      );
+      const processed: RuntimeTurnSettledProcessedResult[] = [];
+      const store: RuntimeTurnSettledEventStorePort = {
+        claimPending: vi.fn(async () => [payload]),
+        markProcessed: vi.fn(async (_payload, result) => {
+          processed.push(result);
+        }),
+        markInvalid: vi.fn(),
+      };
+      const resolver: RuntimeTurnSettledTargetResolverPort = {
+        resolve: vi.fn(),
+      };
+      const enqueueRuntimeTurnSettled = vi.fn();
+
+      const ingestor = new RuntimeTurnSettledIngestor({
+        eventStore: store,
+        normalizer: new OpenCodeTurnSettledPayloadNormalizer(new NodeHashAdapter()),
+        targetResolver: resolver,
+        reconcileQueue: { enqueueRuntimeTurnSettled },
+        clock: { now: () => new Date('2026-04-29T12:01:00.000Z') },
+      });
+
+      await expect(ingestor.drainPending()).resolves.toMatchObject({
+        claimed: 1,
+        enqueued: 0,
+        unresolved: 0,
+        ignored: 1,
+        invalid: 0,
+      });
+      expect(resolver.resolve).not.toHaveBeenCalled();
+      expect(enqueueRuntimeTurnSettled).not.toHaveBeenCalled();
+      expect(processed[0]).toMatchObject({
+        event: expect.objectContaining({
+          provider: 'opencode',
+          turnId: 'msg_launch_or_bootstrap',
+          outcome,
+        }),
+        outcome: 'ignored',
+        reason: 'opencode_missing_prompt_identity',
+      });
+    }
+  );
 });

@@ -1359,7 +1359,16 @@ describe('createMemberWorkSyncFeature composition', () => {
     }
   );
 
-  it('does not deliver recovery for OpenCode non-terminal events with turnId only', async () => {
+  it.each([
+    {
+      outcome: 'idle_without_assistant_activity',
+      expectedReason: 'opencode_non_terminal_outcome:idle_without_assistant_activity',
+    },
+    {
+      outcome: 'success',
+      expectedReason: 'opencode_missing_prompt_identity',
+    },
+  ])('does not deliver recovery for OpenCode $outcome events with turnId only', async (scenario) => {
     const claudeRoot = makeTempRoot();
     setClaudeBasePathOverride(claudeRoot);
     const teamsBasePath = getTeamsBasePath();
@@ -1429,7 +1438,7 @@ describe('createMemberWorkSyncFeature composition', () => {
           memberName,
           teamName,
           cwd: claudeRoot,
-          outcome: 'idle_without_assistant_activity',
+          outcome: scenario.outcome,
           recordedAt: '2026-05-05T12:00:02.000Z',
         })}\n`,
         'utf8'
@@ -1463,7 +1472,7 @@ describe('createMemberWorkSyncFeature composition', () => {
       ) as { outcome?: string; reason?: string; event?: { turnId?: string; threadId?: string } };
       expect(processedMeta).toMatchObject({
         outcome: 'ignored',
-        reason: 'opencode_non_terminal_outcome:idle_without_assistant_activity',
+        reason: scenario.expectedReason,
         event: { turnId: 'msg_launch_or_bootstrap' },
       });
       expect(processedMeta.event).not.toHaveProperty('threadId');
