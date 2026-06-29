@@ -1025,8 +1025,27 @@ function invalidateTeamChangeMessageFeed(event: TeamChangeEvent): void {
 }
 
 function forwardTeamChangeToRendererAndHttp(event: TeamChangeEvent): void {
-  safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
-  httpServer?.broadcast('team-change', event);
+  try {
+    safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
+  } catch (error) {
+    warnTeamChangeForwardFailure('renderer send', error);
+  }
+
+  try {
+    httpServer?.broadcast('team-change', event);
+  } catch (error) {
+    warnTeamChangeForwardFailure('http broadcast', error);
+  }
+}
+
+function warnTeamChangeForwardFailure(target: string, error: unknown): void {
+  try {
+    logger.warn(`team-change ${target} failed`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } catch {
+    // Keep team-change wake processing best-effort even if failure logging fails.
+  }
 }
 
 function notifyCoreTeamChangeObservers(event: TeamChangeEvent): void {
@@ -1353,17 +1372,15 @@ function wireFileWatcherEvents(context: ServiceContext): void {
 
   // Forward team-change events to renderer and HTTP SSE
   const teamChangeHandler = (event: unknown): void => {
-    safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
+    try {
+      safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
+    } catch (error) {
+      warnTeamChangeForwardFailure('renderer send', error);
+    }
     try {
       httpServer?.broadcast('team-change', event);
     } catch (error) {
-      try {
-        logger.warn('team-change broadcast failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      } catch {
-        // Keep watcher processing best-effort even if failure logging fails.
-      }
+      warnTeamChangeForwardFailure('http broadcast', error);
     }
 
     // Process inbox and task change events.
