@@ -185,6 +185,7 @@ import { getTeamDataWorkerClient } from './services/team/TeamDataWorkerClient';
 import { getTeamFsWorkerClient } from './services/team/TeamFsWorkerClient';
 import { TeamInboxReader } from './services/team/TeamInboxReader';
 import { TeamMemberRuntimeAdvisoryService } from './services/team/TeamMemberRuntimeAdvisoryService';
+import { notifyTeamChangeObserversSafely } from './services/team/TeamChangeFanout';
 import {
   createTeamReconcileDrainScheduler,
   type TeamReconcileTrigger,
@@ -986,6 +987,67 @@ let appStartupStatus: AppStartupStatus = {
   steps: appStartupSteps,
 };
 
+function invalidateTeamChangeCaches(event: TeamChangeEvent): void {
+  if (event.type === 'config') {
+    if (event.detail === 'config.json') {
+      TeamConfigReader.invalidateTeam(event.teamName);
+      getTeamDataWorkerClient().invalidateTeamConfig(event.teamName);
+      teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
+      getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
+    } else if (event.detail === 'team.meta.json' || event.detail === 'members.meta.json') {
+      TeamConfigReader.invalidateListTeamsCache();
+      getTeamDataWorkerClient().invalidateTeamConfig(event.teamName);
+      teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
+      getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
+    }
+  }
+  if (event.type === 'task') {
+    TeamTaskReader.invalidateAllTasksCache();
+    teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
+    getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
+  }
+  if (event.type === 'member-advisory') {
+    teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
+    getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
+  }
+}
+
+function invalidateTeamChangeMessageFeed(event: TeamChangeEvent): void {
+  if (
+    teamDataService &&
+    (event.type === 'inbox' || event.type === 'lead-message' || event.type === 'config')
+  ) {
+    teamDataService.invalidateMessageFeed(event.teamName);
+    if (event.type === 'inbox' || event.type === 'lead-message') {
+      getTeamDataWorkerClient().invalidateTeamMessageFeed(event.teamName);
+    }
+  }
+}
+
+function forwardTeamChangeToRendererAndHttp(event: TeamChangeEvent): void {
+  safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
+  httpServer?.broadcast('team-change', event);
+}
+
+function notifyCoreTeamChangeObservers(event: TeamChangeEvent): void {
+  notifyTeamChangeObserversSafely(
+    event,
+    [
+      {
+        name: 'launchIoGovernor',
+        notify: (teamChange) => launchIoGovernor?.noteTeamChange(teamChange),
+      },
+      { name: 'team-change-cache-invalidation', notify: invalidateTeamChangeCaches },
+      {
+        name: 'memberWorkSyncFeature',
+        notify: (teamChange) => memberWorkSyncFeature?.noteTeamChange(teamChange),
+      },
+      { name: 'team-message-feed-invalidation', notify: invalidateTeamChangeMessageFeed },
+    ],
+    logger
+  );
+}
+
 function isShutdownStarted(): boolean {
   return shutdownComplete || shutdownPromise !== null;
 }
@@ -1292,7 +1354,13 @@ function wireFileWatcherEvents(context: ServiceContext): void {
   // Forward team-change events to renderer and HTTP SSE
   const teamChangeHandler = (event: unknown): void => {
     safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
-    httpServer?.broadcast('team-change', event);
+    try {
+      httpServer?.broadcast('team-change', event);
+    } catch (error) {
+      logger.warn('team-change broadcast failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
 
     // Process inbox and task change events.
     try {
@@ -1301,44 +1369,7 @@ function wireFileWatcherEvents(context: ServiceContext): void {
       if (typeof row.teamName !== 'string' || row.teamName.trim().length === 0) return;
       const teamName = row.teamName.trim();
       const detail = typeof row.detail === 'string' ? row.detail : '';
-      launchIoGovernor?.noteTeamChange(row as TeamChangeEvent);
-
-      if (row.type === 'config') {
-        if (detail === 'config.json') {
-          TeamConfigReader.invalidateTeam(teamName);
-          getTeamDataWorkerClient().invalidateTeamConfig(teamName);
-          teamDataService?.invalidateTeamRuntimeAdvisories(teamName);
-          getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(teamName);
-        } else if (detail === 'team.meta.json' || detail === 'members.meta.json') {
-          TeamConfigReader.invalidateListTeamsCache();
-          getTeamDataWorkerClient().invalidateTeamConfig(teamName);
-          teamDataService?.invalidateTeamRuntimeAdvisories(teamName);
-          getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(teamName);
-        }
-      }
-
-      if (row.type === 'task') {
-        TeamTaskReader.invalidateAllTasksCache();
-        teamDataService?.invalidateTeamRuntimeAdvisories(teamName);
-        getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(teamName);
-      }
-
-      if (row.type === 'member-advisory') {
-        teamDataService?.invalidateTeamRuntimeAdvisories(teamName);
-        getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(teamName);
-      }
-
-      memberWorkSyncFeature?.noteTeamChange(row as TeamChangeEvent);
-
-      if (
-        teamDataService &&
-        (row.type === 'inbox' || row.type === 'lead-message' || row.type === 'config')
-      ) {
-        teamDataService.invalidateMessageFeed(teamName);
-        if (row.type === 'inbox' || row.type === 'lead-message') {
-          getTeamDataWorkerClient().invalidateTeamMessageFeed(teamName);
-        }
-      }
+      notifyCoreTeamChangeObservers(row as TeamChangeEvent);
 
       // --- Inbox change events: relay to lead + native OS notifications ---
       if (row.type === 'inbox') {
@@ -1792,57 +1823,62 @@ async function initializeServices(): Promise<void> {
   });
 
   const forwardTeamChange = (event: TeamChangeEvent): void => {
-    launchIoGovernor?.noteTeamChange(event);
-    if (event.type === 'config') {
-      if (event.detail === 'config.json') {
-        TeamConfigReader.invalidateTeam(event.teamName);
-        getTeamDataWorkerClient().invalidateTeamConfig(event.teamName);
-        teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
-        getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
-      } else if (event.detail === 'team.meta.json' || event.detail === 'members.meta.json') {
-        TeamConfigReader.invalidateListTeamsCache();
-        getTeamDataWorkerClient().invalidateTeamConfig(event.teamName);
-        teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
-        getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
-      }
-    }
-    if (event.type === 'task') {
-      TeamTaskReader.invalidateAllTasksCache();
-      teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
-      getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
-    }
-    if (event.type === 'member-advisory') {
-      teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
-      getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
-    }
-    if (
-      teamDataService &&
-      (event.type === 'inbox' || event.type === 'lead-message' || event.type === 'config')
-    ) {
-      teamDataService.invalidateMessageFeed(event.teamName);
-      if (event.type === 'inbox' || event.type === 'lead-message') {
-        getTeamDataWorkerClient().invalidateTeamMessageFeed(event.teamName);
-      }
-    }
-    safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
-    httpServer?.broadcast('team-change', event);
+    notifyTeamChangeObserversSafely(
+      event,
+      [
+        {
+          name: 'launchIoGovernor',
+          notify: (teamChange) => launchIoGovernor?.noteTeamChange(teamChange),
+        },
+        { name: 'team-change-cache-invalidation', notify: invalidateTeamChangeCaches },
+        { name: 'team-message-feed-invalidation', notify: invalidateTeamChangeMessageFeed },
+        { name: 'team-change-renderer-http-forward', notify: forwardTeamChangeToRendererAndHttp },
+      ],
+      logger
+    );
   };
   teammateToolTracker = new TeammateToolTracker(
     teamMemberLogsFinder,
     teamLogSourceTracker,
     (event) => {
-      forwardTeamChange(event);
-      memberWorkSyncFeature?.noteTeamChange(event);
+      notifyTeamChangeObserversSafely(
+        event,
+        [
+          { name: 'forwardTeamChange', notify: forwardTeamChange },
+          {
+            name: 'memberWorkSyncFeature',
+            notify: (teamChange) => memberWorkSyncFeature?.noteTeamChange(teamChange),
+          },
+        ],
+        logger
+      );
     }
   );
   // Allow TeamProvisioningService to trigger team refresh events (e.g. live lead replies).
   const teamChangeEmitter = (event: TeamChangeEvent): void => {
-    forwardTeamChange(event);
-    teamTaskStallMonitor?.noteTeamChange(event);
-    memberWorkSyncFeature?.noteTeamChange(event);
-    if (event.type === 'lead-activity' && event.detail === 'offline') {
-      teammateToolTracker?.handleTeamOffline(event.teamName);
-    }
+    notifyTeamChangeObserversSafely(
+      event,
+      [
+        { name: 'forwardTeamChange', notify: forwardTeamChange },
+        {
+          name: 'teamTaskStallMonitor',
+          notify: (teamChange) => teamTaskStallMonitor?.noteTeamChange(teamChange),
+        },
+        {
+          name: 'memberWorkSyncFeature',
+          notify: (teamChange) => memberWorkSyncFeature?.noteTeamChange(teamChange),
+        },
+        {
+          name: 'teammateToolTrackerOffline',
+          notify: (teamChange) => {
+            if (teamChange.type === 'lead-activity' && teamChange.detail === 'offline') {
+              teammateToolTracker?.handleTeamOffline(teamChange.teamName);
+            }
+          },
+        },
+      ],
+      logger
+    );
   };
   teamProvisioningService.setTeamChangeEmitter(teamChangeEmitter);
   teamLogSourceTracker.setEmitter(teamChangeEmitter);
