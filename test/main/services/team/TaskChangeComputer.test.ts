@@ -136,7 +136,10 @@ function createNoLogTaskChangeComputer(): TaskChangeComputer {
   return new TaskChangeComputer(logsFinder as never, boundaryParser as never);
 }
 
-function createNoBoundaryTaskChangeComputer(logPath: string): TaskChangeComputer {
+function createNoBoundaryTaskChangeComputer(
+  logPath: string,
+  options?: { maxSummaryJsonlParseBytes?: number }
+): TaskChangeComputer {
   const logsFinder = {
     findLogFileRefsForTask: () => Promise.resolve([{ filePath: logPath, memberName: 'team-lead' }]),
   };
@@ -149,7 +152,7 @@ function createNoBoundaryTaskChangeComputer(logPath: string): TaskChangeComputer
         detectedMechanism: 'none' as const,
       }),
   };
-  return new TaskChangeComputer(logsFinder as never, boundaryParser as never);
+  return new TaskChangeComputer(logsFinder as never, boundaryParser as never, options);
 }
 
 async function writeNoBoundaryTaskMentionLog(tmpDir: string, content: string): Promise<string> {
@@ -200,10 +203,10 @@ describe('TaskChangeComputer', () => {
   it('omits raw tool payload text in summary mode while preserving line counts', async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'task-change-computer-'));
     const logPath = path.join(tmpDir, 'lead-large-summary.jsonl');
-    const largeContent = [
-      'oom-retention-marker',
-      ...Array.from({ length: 1000 }, (_, index) => `line-${index}`),
-    ].join('\n') + '\n';
+    const largeContent =
+      ['oom-retention-marker', ...Array.from({ length: 1000 }, (_, index) => `line-${index}`)].join(
+        '\n'
+      ) + '\n';
     await writeJsonl(logPath, [writeToolUse('tool-1', '/repo/src/large.ts', largeContent)]);
 
     const computer = createNoBoundaryTaskChangeComputer(logPath);
@@ -221,6 +224,33 @@ describe('TaskChangeComputer', () => {
     expect(result.files[0]?.linesAdded).toBe(1001);
     expect(result.files[0]?.snippets).toEqual([]);
     expect(JSON.stringify(result)).not.toContain('oom-retention-marker');
+  });
+
+  it('extracts summary metadata from oversized JSONL tool events without full parsing', async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'task-change-computer-'));
+    const logPath = path.join(tmpDir, 'lead-oversized-summary.jsonl');
+    const oversizedContent = `${Array.from({ length: 250 }, (_, index) => `line-${index}`).join('\n')}\n`;
+    await writeJsonl(logPath, [
+      writeToolUse('tool-oversized', '/repo/src/oversized.ts', oversizedContent),
+    ]);
+
+    const computer = createNoBoundaryTaskChangeComputer(logPath, {
+      maxSummaryJsonlParseBytes: 256,
+    });
+    const result = await computer.computeTaskChanges({
+      teamName: 'team-a',
+      taskId: 'task-1',
+      taskMeta: { status: 'completed', reviewState: 'none' },
+      effectiveOptions: { status: 'completed' },
+      projectPath: '/repo',
+      includeDetails: false,
+    });
+
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0]?.relativePath).toBe('src/oversized.ts');
+    expect(result.files[0]?.linesAdded).toBe(250);
+    expect(result.files[0]?.snippets).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain('line-249');
   });
 
   it('keeps newly created pending tasks without logs quiet', async () => {

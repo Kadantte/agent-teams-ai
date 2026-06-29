@@ -66,6 +66,8 @@ function shouldWarnAboutUnavailableTaskChangeEvidence(
   return stateBucket === 'completed' || stateBucket === 'review' || stateBucket === 'approved';
 }
 
+const DEFAULT_MAX_SUMMARY_JSONL_PARSE_BYTES = 2 * 1024 * 1024;
+
 export class TaskChangeComputer {
   private parsedSnippetsCache = new Map<string, ParsedSnippetsCacheEntry>();
   private parsedSnippetsInFlight = new Map<string, Promise<ParsedSnippetsResult>>();
@@ -73,12 +75,17 @@ export class TaskChangeComputer {
   private readonly parsedSnippetsCacheTtl = 20 * 1000;
   private readonly maxParsedSnippetsCacheEntries = 1_000;
   private readonly maxParsedSnippetsCacheBytes = 8 * 1024 * 1024;
+  private readonly maxSummaryJsonlParseBytes: number;
   private static readonly JSONL_PARSE_CONCURRENCY = 6;
 
   constructor(
     private readonly logsFinder: TeamMemberLogsFinder,
-    private readonly boundaryParser: TaskBoundaryParser
-  ) {}
+    private readonly boundaryParser: TaskBoundaryParser,
+    options: { maxSummaryJsonlParseBytes?: number } = {}
+  ) {
+    this.maxSummaryJsonlParseBytes =
+      options.maxSummaryJsonlParseBytes ?? DEFAULT_MAX_SUMMARY_JSONL_PARSE_BYTES;
+  }
 
   async computeAgentChanges(
     teamName: string,
@@ -579,8 +586,13 @@ export class TaskChangeComputer {
       }
     };
 
-    const addSnippet = (lineNumber: number, snippet: SnippetDiff): void => {
-      const { added, removed } = countLineChanges(snippet.oldString, snippet.newString);
+    const addSnippet = (
+      lineNumber: number,
+      snippet: SnippetDiff,
+      lineCounts?: { added: number; removed: number }
+    ): void => {
+      const { added, removed } =
+        lineCounts ?? countLineChanges(snippet.oldString, snippet.newString);
       const record: ParsedSnippetRecord = {
         snippet: includeDetails ? snippet : { ...snippet, oldString: '', newString: '' },
         sourceLine: lineNumber,
@@ -608,6 +620,17 @@ export class TaskChangeComputer {
         const trimmed = line.trim();
         if (!trimmed) continue;
         let entry: Record<string, unknown>;
+        if (
+          !includeDetails &&
+          this.maxSummaryJsonlParseBytes > 0 &&
+          Buffer.byteLength(trimmed, 'utf8') > this.maxSummaryJsonlParseBytes
+        ) {
+          const oversized = this.extractOversizedSummarySnippet(lineNumber, trimmed, seenFiles);
+          if (oversized) {
+            addSnippet(lineNumber, oversized.snippet, oversized.lineCounts);
+          }
+          continue;
+        }
         try {
           entry = JSON.parse(trimmed) as Record<string, unknown>;
         } catch {
@@ -672,7 +695,9 @@ export class TaskChangeComputer {
                 replaceAll,
                 timestamp,
                 isError,
-                contextHash: this.computeContextHash(oldString, newString),
+                contextHash: includeDetails
+                  ? this.computeContextHash(oldString, newString)
+                  : undefined,
               });
             }
           } else if (toolName === 'Write') {
@@ -693,7 +718,7 @@ export class TaskChangeComputer {
                 replaceAll: false,
                 timestamp,
                 isError,
-                contextHash: this.computeContextHash('', writeContent),
+                contextHash: includeDetails ? this.computeContextHash('', writeContent) : undefined,
               });
             }
           } else if (toolName === 'MultiEdit') {
@@ -717,7 +742,9 @@ export class TaskChangeComputer {
                   replaceAll: false,
                   timestamp,
                   isError,
-                  contextHash: this.computeContextHash(oldString, newString),
+                  contextHash: includeDetails
+                    ? this.computeContextHash(oldString, newString)
+                    : undefined,
                 });
               }
             }
@@ -735,6 +762,204 @@ export class TaskChangeComputer {
     this.setParsedSnippetsCache(filePath, includeDetails, fileMtime, snippets);
 
     return { snippets, mtime: fileMtime };
+  }
+
+  private extractOversizedSummarySnippet(
+    lineNumber: number,
+    rawLine: string,
+    seenFiles: Set<string>
+  ): { snippet: SnippetDiff; lineCounts: { added: number; removed: number } } | null {
+    if (!this.rawLineLooksLikeAssistantToolUse(rawLine)) {
+      return null;
+    }
+
+    const toolUseIndex = rawLine.indexOf('"tool_use"');
+    const rawToolName = this.extractRawJsonStringValue(rawLine, 'name', toolUseIndex)?.value ?? '';
+    const toolName = rawToolName.startsWith('proxy_') ? rawToolName.slice(6) : rawToolName;
+    if (toolName !== 'Write' && toolName !== 'Edit' && toolName !== 'MultiEdit') {
+      return null;
+    }
+
+    const filePath =
+      this.extractRawJsonStringValue(rawLine, 'file_path', toolUseIndex)?.value ?? '';
+    if (!filePath) {
+      return null;
+    }
+
+    const timestamp =
+      this.extractRawJsonStringValue(rawLine, 'timestamp')?.value ?? new Date().toISOString();
+    const toolUseId =
+      this.extractRawJsonStringValue(rawLine, 'id', toolUseIndex)?.value ??
+      `oversized-${lineNumber}`;
+
+    let added = 0;
+    let removed = 0;
+    let snippetType: SnippetDiff['type'] = 'edit';
+    if (toolName === 'Write') {
+      added = this.countRawJsonStringDiffLines(rawLine, 'content', toolUseIndex) ?? 0;
+      const normalizedTargetPath = this.normalizeFilePathKey(filePath);
+      snippetType = seenFiles.has(normalizedTargetPath) ? 'write-update' : 'write-new';
+      seenFiles.add(normalizedTargetPath);
+    } else if (toolName === 'MultiEdit') {
+      added = this.countAllRawJsonStringDiffLines(rawLine, 'new_string', toolUseIndex);
+      removed = this.countAllRawJsonStringDiffLines(rawLine, 'old_string', toolUseIndex);
+      snippetType = 'multi-edit';
+      seenFiles.add(this.normalizeFilePathKey(filePath));
+    } else {
+      added = this.countRawJsonStringDiffLines(rawLine, 'new_string', toolUseIndex) ?? 0;
+      removed = this.countRawJsonStringDiffLines(rawLine, 'old_string', toolUseIndex) ?? 0;
+      seenFiles.add(this.normalizeFilePathKey(filePath));
+    }
+
+    return {
+      snippet: {
+        toolUseId,
+        filePath,
+        toolName,
+        type: snippetType,
+        oldString: '',
+        newString: '',
+        replaceAll: false,
+        timestamp,
+        isError: false,
+      },
+      lineCounts: { added, removed },
+    };
+  }
+
+  private rawLineLooksLikeAssistantToolUse(rawLine: string): boolean {
+    return (
+      rawLine.includes('"tool_use"') &&
+      (rawLine.includes('"role":"assistant"') || rawLine.includes('"role": "assistant"'))
+    );
+  }
+
+  private extractRawJsonStringValue(
+    rawLine: string,
+    key: string,
+    startIndex = 0
+  ): { value: string; nextIndex: number } | null {
+    const quoteIndex = this.findRawJsonStringValueQuote(rawLine, key, startIndex);
+    if (quoteIndex == null) {
+      return null;
+    }
+    const endQuoteIndex = this.findRawJsonStringEnd(rawLine, quoteIndex);
+    if (endQuoteIndex == null) {
+      return null;
+    }
+    try {
+      return {
+        value: JSON.parse(rawLine.slice(quoteIndex, endQuoteIndex + 1)) as string,
+        nextIndex: endQuoteIndex + 1,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private countRawJsonStringDiffLines(rawLine: string, key: string, startIndex = 0): number | null {
+    const quoteIndex = this.findRawJsonStringValueQuote(rawLine, key, startIndex);
+    if (quoteIndex == null) {
+      return null;
+    }
+    return this.countRawJsonStringLines(rawLine, quoteIndex)?.lines ?? null;
+  }
+
+  private countAllRawJsonStringDiffLines(rawLine: string, key: string, startIndex = 0): number {
+    let total = 0;
+    let index = Math.max(0, startIndex);
+    while (index < rawLine.length) {
+      const quoteIndex = this.findRawJsonStringValueQuote(rawLine, key, index);
+      if (quoteIndex == null) {
+        break;
+      }
+      const counted = this.countRawJsonStringLines(rawLine, quoteIndex);
+      if (!counted) {
+        break;
+      }
+      total += counted.lines;
+      index = counted.nextIndex;
+    }
+    return total;
+  }
+
+  private findRawJsonStringValueQuote(rawLine: string, key: string, startIndex = 0): number | null {
+    const keyIndex = rawLine.indexOf(`"${key}"`, Math.max(0, startIndex));
+    if (keyIndex < 0) {
+      return null;
+    }
+    let index = keyIndex + key.length + 2;
+    while (index < rawLine.length && /\s/.test(rawLine[index] ?? '')) index += 1;
+    if (rawLine[index] !== ':') {
+      return null;
+    }
+    index += 1;
+    while (index < rawLine.length && /\s/.test(rawLine[index] ?? '')) index += 1;
+    return rawLine[index] === '"' ? index : null;
+  }
+
+  private findRawJsonStringEnd(rawLine: string, quoteIndex: number): number | null {
+    let index = quoteIndex + 1;
+    while (index < rawLine.length) {
+      const char = rawLine.charCodeAt(index);
+      if (char === 34) {
+        return index;
+      }
+      if (char === 92) {
+        index += 2;
+      } else {
+        index += 1;
+      }
+    }
+    return null;
+  }
+
+  private countRawJsonStringLines(
+    rawLine: string,
+    quoteIndex: number
+  ): { lines: number; nextIndex: number } | null {
+    let index = quoteIndex + 1;
+    let hasContent = false;
+    let lines = 1;
+    let lastDecodedWasNewline = false;
+
+    while (index < rawLine.length) {
+      const char = rawLine.charCodeAt(index);
+      if (char === 34) {
+        return {
+          lines: hasContent ? (lastDecodedWasNewline ? lines - 1 : lines) : 0,
+          nextIndex: index + 1,
+        };
+      }
+      hasContent = true;
+      if (char === 92) {
+        const escaped = rawLine[index + 1];
+        if (escaped === 'n') {
+          lines += 1;
+          lastDecodedWasNewline = true;
+          index += 2;
+          continue;
+        }
+        if (escaped === 'u' && rawLine.slice(index + 2, index + 6).toLowerCase() === '000a') {
+          lines += 1;
+          lastDecodedWasNewline = true;
+          index += 6;
+          continue;
+        }
+        lastDecodedWasNewline = false;
+        index += 2;
+        continue;
+      }
+      if (char === 10) {
+        lines += 1;
+        lastDecodedWasNewline = true;
+      } else {
+        lastDecodedWasNewline = false;
+      }
+      index += 1;
+    }
+
+    return null;
   }
 
   private buildParsedSnippetsCacheKey(filePath: string, includeDetails: boolean): string {
