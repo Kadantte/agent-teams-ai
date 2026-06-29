@@ -403,6 +403,7 @@ export class TeamDataService {
   /** Tracks notified task-start transitions to avoid duplicate lead notifications. */
   private notifiedTaskStarts = new Set<string>();
   private taskCommentNotificationInitialization: Promise<void> | null = null;
+  private taskCommentNotificationProcessInFlight = new Map<string, Promise<void>>();
   private taskCommentNotificationInFlight = new Set<string>();
   private taskChangePresenceRepository: TaskChangePresenceRepository | null = null;
   private teamLogSourceTracker: TeamLogSourceTracker | null = null;
@@ -2274,7 +2275,7 @@ export class TeamDataService {
   async notifyLeadOnTeammateTaskComment(teamName: string, taskId: string): Promise<void> {
     try {
       await this.waitForTaskCommentNotificationInitialization();
-      await this.processTaskCommentNotifications(teamName, taskId, {
+      await this.runTaskCommentNotificationsCoalesced(teamName, taskId, {
         seedHistoricalIfJournalMissing: true,
         recoverPending: true,
       });
@@ -2518,7 +2519,7 @@ export class TeamDataService {
       for (const team of teams) {
         if (team.deletedAt) continue;
         try {
-          await this.processTaskCommentNotifications(team.teamName, undefined, {
+          await this.runTaskCommentNotificationsCoalesced(team.teamName, undefined, {
             seedHistoricalIfJournalMissing: true,
             recoverPending: true,
             teamContext: {
@@ -2565,6 +2566,37 @@ export class TeamDataService {
 
   private buildTaskCommentNotificationClaimKey(teamName: string, notificationKey: string): string {
     return `${teamName}:${notificationKey}`;
+  }
+
+  private buildTaskCommentNotificationProcessKey(teamName: string, taskId?: string): string {
+    return `${teamName}:${taskId?.trim() || '*'}`;
+  }
+
+  private runTaskCommentNotificationsCoalesced(
+    teamName: string,
+    taskId: string | undefined,
+    options: {
+      seedHistoricalIfJournalMissing?: boolean;
+      recoverPending?: boolean;
+      teamContext?: TaskCommentNotificationTeamContext;
+    }
+  ): Promise<void> {
+    const key = this.buildTaskCommentNotificationProcessKey(teamName, taskId);
+    const teamWideKey = this.buildTaskCommentNotificationProcessKey(teamName, undefined);
+    const existing =
+      this.taskCommentNotificationProcessInFlight.get(key) ??
+      (taskId ? this.taskCommentNotificationProcessInFlight.get(teamWideKey) : undefined);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = this.processTaskCommentNotifications(teamName, taskId, options).finally(() => {
+      if (this.taskCommentNotificationProcessInFlight.get(key) === promise) {
+        this.taskCommentNotificationProcessInFlight.delete(key);
+      }
+    });
+    this.taskCommentNotificationProcessInFlight.set(key, promise);
+    return promise;
   }
 
   private buildTaskRef(teamName: string, task: Pick<TeamTask, 'id' | 'displayId'>): TaskRef {

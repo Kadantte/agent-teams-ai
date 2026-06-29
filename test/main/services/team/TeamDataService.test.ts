@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import * as os from 'os';
@@ -8,9 +9,14 @@ import { gitIdentityResolver } from '../../../../src/main/services/parsing/GitId
 import { buildTaskChangePresenceDescriptor } from '../../../../src/main/services/team/taskChangePresenceUtils';
 import { TeamConfigReader } from '../../../../src/main/services/team/TeamConfigReader';
 import { TeamDataService } from '../../../../src/main/services/team/TeamDataService';
+import { getEffectiveInboxMessageId } from '../../../../src/main/services/team/inboxMessageIdentity';
 import { TeamTaskReader } from '../../../../src/main/services/team/TeamTaskReader';
 import { encodePath, setClaudeBasePathOverride } from '../../../../src/main/utils/pathDecoder';
 
+import type {
+  InboxMessageCursor,
+  InboxMessagesWindow,
+} from '../../../../src/main/services/team/TeamInboxReader';
 import type { TeamMetaFile } from '../../../../src/main/services/team/TeamMetaStore';
 import type {
   InboxMessage,
@@ -44,6 +50,68 @@ type TeamDataServicePrivate = {
 
 function teamDataServicePrivate(service: TeamDataService): TeamDataServicePrivate {
   return service as unknown as TeamDataServicePrivate;
+}
+
+function normalizeMockInboxMessage(message: InboxMessage): InboxMessage {
+  const messageId = getEffectiveInboxMessageId(message);
+  return messageId ? { ...message, messageId } : { ...message };
+}
+
+function isMockMessageAfterCursor(
+  message: InboxMessage,
+  cursor: InboxMessageCursor | null | undefined
+): boolean {
+  if (!cursor) return true;
+  const messageMs = Date.parse(message.timestamp);
+  if (messageMs < cursor.timestampMs) return true;
+  if (messageMs > cursor.timestampMs) return false;
+  const messageId = getEffectiveInboxMessageId(message);
+  return messageId ? messageId.localeCompare(cursor.messageId) > 0 : false;
+}
+
+function sortMockMessagesNewestFirst(messages: InboxMessage[]): InboxMessage[] {
+  messages.sort((left, right) => {
+    const timeDiff = Date.parse(right.timestamp) - Date.parse(left.timestamp);
+    if (timeDiff !== 0) return timeDiff;
+    return (getEffectiveInboxMessageId(left) ?? '').localeCompare(
+      getEffectiveInboxMessageId(right) ?? ''
+    );
+  });
+  return messages;
+}
+
+function buildMockInboxSourceRevision(messages: readonly InboxMessage[]): string {
+  const hash = createHash('sha256');
+  for (const message of messages) {
+    hash.update(
+      `${message.from ?? ''}\0${message.timestamp ?? ''}\0${message.text ?? ''}\0${
+        getEffectiveInboxMessageId(message) ?? ''
+      }\n`
+    );
+  }
+  return hash.digest('hex').slice(0, 24);
+}
+
+function createMockInboxMessagesWindowReader(
+  getMessages: (teamName: string) => Promise<InboxMessage[]>
+): (
+  teamName: string,
+  options: { cursor?: InboxMessageCursor | null; limit: number }
+) => Promise<InboxMessagesWindow> {
+  return async (teamName, options) => {
+    const limit = Math.max(1, Math.floor(options.limit));
+    const messages = (await getMessages(teamName)).map(normalizeMockInboxMessage);
+    const filtered = messages.filter((message) =>
+      isMockMessageAfterCursor(message, options.cursor ?? null)
+    );
+    sortMockMessagesNewestFirst(filtered);
+    return {
+      messages: filtered.slice(0, limit),
+      truncated: filtered.length > limit,
+      sourceRevision: buildMockInboxSourceRevision(messages),
+      sourceMessageCount: messages.length,
+    };
+  };
 }
 
 function createLeadAssistantEntry(
@@ -215,6 +283,7 @@ function createResolverBackedService(): TeamDataService {
     {
       listInboxNames: vi.fn(async () => []),
       getMessages: vi.fn(async () => []),
+      getMessagesWindow: vi.fn(createMockInboxMessagesWindowReader(async () => [])),
     } as never,
     {} as never,
     {} as never,
@@ -698,6 +767,7 @@ function createGetTeamDataHarness(
   const inboxReader = {
     listInboxNames: vi.fn(listInboxNames),
     getMessages: vi.fn(getMessages),
+    getMessagesWindow: vi.fn(createMockInboxMessagesWindowReader(getMessages)),
   };
   const membersMetaStore = {
     getMembers: vi.fn(getMembers),
@@ -3510,6 +3580,7 @@ describe('TeamDataService', () => {
       await second;
 
       expect(inboxWriter.sendMessage).toHaveBeenCalledTimes(1);
+      expect(journal.withEntries).toHaveBeenCalledTimes(2);
       expect(journalEntries[0]).toMatchObject({
         state: 'sent',
       });
@@ -6380,7 +6451,7 @@ describe('TeamDataService', () => {
         text: string;
         timestamp: string;
         messageId?: string;
-        source?: string;
+        source?: InboxMessage['source'];
         leadSessionId?: string;
       }>
     ) {
@@ -6397,6 +6468,11 @@ describe('TeamDataService', () => {
         {
           listInboxNames: vi.fn(async () => []),
           getMessages: vi.fn(async () => messages.map((m) => ({ ...m, read: true }))),
+          getMessagesWindow: vi.fn(
+            createMockInboxMessagesWindowReader(async () =>
+              messages.map((message) => ({ ...message, read: true }))
+            )
+          ),
         } as never,
         {} as never,
         {} as never,
@@ -6457,7 +6533,7 @@ describe('TeamDataService', () => {
           text: '/cost',
           timestamp: '2026-01-01T00:00:00.000Z',
           messageId: 'cmd1',
-          source: 'user_sent',
+          source: 'user_sent' as const,
           leadSessionId: 'lead-1',
         },
         {
@@ -6465,7 +6541,7 @@ describe('TeamDataService', () => {
           text: 'Total cost: $1.05',
           timestamp: '2026-01-01T00:00:01.000Z',
           messageId: 'resp1',
-          source: 'lead_process',
+          source: 'lead_process' as const,
           leadSessionId: 'lead-1',
         },
       ];

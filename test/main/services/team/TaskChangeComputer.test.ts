@@ -197,6 +197,32 @@ describe('TaskChangeComputer', () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it('omits raw tool payload text in summary mode while preserving line counts', async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'task-change-computer-'));
+    const logPath = path.join(tmpDir, 'lead-large-summary.jsonl');
+    const largeContent = [
+      'oom-retention-marker',
+      ...Array.from({ length: 1000 }, (_, index) => `line-${index}`),
+    ].join('\n') + '\n';
+    await writeJsonl(logPath, [writeToolUse('tool-1', '/repo/src/large.ts', largeContent)]);
+
+    const computer = createNoBoundaryTaskChangeComputer(logPath);
+    const result = await computer.computeTaskChanges({
+      teamName: 'team-a',
+      taskId: 'task-1',
+      taskMeta: { status: 'completed', reviewState: 'none' },
+      effectiveOptions: { status: 'completed' },
+      projectPath: '/repo',
+      includeDetails: false,
+    });
+
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0]?.relativePath).toBe('src/large.ts');
+    expect(result.files[0]?.linesAdded).toBe(1001);
+    expect(result.files[0]?.snippets).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain('oom-retention-marker');
+  });
+
   it('keeps newly created pending tasks without logs quiet', async () => {
     const computer = createNoLogTaskChangeComputer();
 

@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskChangeWorkerClient } from '../../../../src/main/services/team/TaskChangeWorkerClient';
 
-import type { TaskChangeSetV2 } from '../../../../src/shared/types';
 import type { TaskChangeWorkerRequest, TaskChangeWorkerResponse } from '../../../../src/main/services/team/taskChangeWorkerTypes';
+import type { TaskChangeSetV2 } from '../../../../src/shared/types';
 
 class FakeWorker {
   readonly posted: TaskChangeWorkerRequest[] = [];
@@ -127,7 +127,7 @@ describe('TaskChangeWorkerClient', () => {
     await expect(promise).resolves.toEqual(makeResult());
   });
 
-  it('times out the active request, terminates the worker, and recreates it on the next call', async () => {
+  it('times out the active request and waits for cooldown before recreating the worker', async () => {
     vi.useFakeTimers();
     const workers: FakeWorker[] = [];
     const client = new TaskChangeWorkerClient({
@@ -138,6 +138,7 @@ describe('TaskChangeWorkerClient', () => {
         return worker as any;
       },
       timeoutMs: 25,
+      fatalRestartCooldownMs: 100,
       enabled: true,
     });
 
@@ -147,6 +148,13 @@ describe('TaskChangeWorkerClient', () => {
     await firstExpectation;
     expect(workers[0]!.terminate).toHaveBeenCalledTimes(1);
 
+    const duringCooldown = client.computeTaskChanges(makePayload('task-during-cooldown'));
+    await expect(duringCooldown).rejects.toThrow(
+      'Task change worker recovering after fatal failure'
+    );
+    expect(workers).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(100);
     const secondPromise = client.computeTaskChanges(makePayload('task-next'));
     const request = workers[1]!.posted[0]!;
     workers[1]!.emitMessage({
@@ -156,6 +164,49 @@ describe('TaskChangeWorkerClient', () => {
     });
 
     await expect(secondPromise).resolves.toEqual(makeResult('task-next', '/repo/src/next.ts'));
+    expect(workers).toHaveLength(2);
+  });
+
+  it('does not recreate the worker during fatal OOM cooldown', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const workers: FakeWorker[] = [];
+    const client = new TaskChangeWorkerClient({
+      workerPath: '/tmp/task-change-worker.cjs',
+      workerFactory: () => {
+        const worker = new FakeWorker();
+        workers.push(worker);
+        return worker as any;
+      },
+      fatalRestartCooldownMs: 100,
+      enabled: true,
+    });
+
+    const first = client.computeTaskChanges(makePayload('task-oom'));
+    workers[0]!.emitError(
+      Object.assign(
+        new Error('Worker terminated due to reaching memory limit: JS heap out of memory'),
+        { code: 'ERR_WORKER_OUT_OF_MEMORY' }
+      )
+    );
+
+    await expect(first).rejects.toThrow('Worker terminated due to reaching memory limit');
+    const second = client.computeTaskChanges(makePayload('task-after-oom'));
+    await expect(second).rejects.toThrow('Task change worker recovering after fatal failure');
+    expect(workers).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(100);
+    const third = client.computeTaskChanges(makePayload('task-after-cooldown'));
+    const request = workers[1]!.posted[0]!;
+    workers[1]!.emitMessage({
+      id: request.id,
+      ok: true,
+      result: makeResult('task-after-cooldown', '/repo/src/recovered.ts'),
+    });
+
+    await expect(third).resolves.toEqual(
+      makeResult('task-after-cooldown', '/repo/src/recovered.ts')
+    );
     expect(workers).toHaveLength(2);
   });
 

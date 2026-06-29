@@ -14,6 +14,16 @@ import type { TaskChangeSetV2 } from '@shared/types';
 
 const logger = createLogger('Service:TaskChangeWorkerClient');
 const DEFAULT_WORKER_CALL_TIMEOUT_MS = 30_000;
+const DEFAULT_FATAL_RESTART_COOLDOWN_MS = 30_000;
+const FATAL_WORKER_ERROR_PATTERNS = [
+  'ERR_WORKER_OUT_OF_MEMORY',
+  'Task change worker recovering after fatal failure',
+  'Worker terminated due to reaching memory limit',
+  'JS heap out of memory',
+  'JavaScript heap out of memory',
+  'Worker exited with code',
+  'Worker call timeout after',
+] as const;
 
 interface WorkerLike {
   on(event: 'message', listener: (msg: TaskChangeWorkerResponse) => void): this;
@@ -72,18 +82,24 @@ export class TaskChangeWorkerClient {
   private terminatingForTimeoutRequestId: string | null = null;
   private pending = new Map<string, QueueEntry>();
   private queue: QueueEntry[] = [];
+  private lastFatalWorkerError: Error | null = null;
+  private lastFatalWorkerFailureAt = 0;
+  private readonly fatalRestartCooldownMs: number;
 
   constructor(options?: {
     workerPath?: string | null;
     workerFactory?: (workerPath: string) => WorkerLike;
     timeoutMs?: number;
     enabled?: boolean;
+    fatalRestartCooldownMs?: number;
   }) {
     this.workerPath =
       options && 'workerPath' in options ? (options.workerPath ?? null) : resolveWorkerPath();
     this.workerFactory = options?.workerFactory ?? ((workerPath) => new Worker(workerPath));
     this.timeoutMs = options?.timeoutMs ?? DEFAULT_WORKER_CALL_TIMEOUT_MS;
     this.enabled = options?.enabled ?? process.env.CLAUDE_TEAM_ENABLE_TASK_CHANGE_WORKER !== '0';
+    this.fatalRestartCooldownMs =
+      options?.fatalRestartCooldownMs ?? DEFAULT_FATAL_RESTART_COOLDOWN_MS;
   }
 
   isAvailable(): boolean {
@@ -129,6 +145,14 @@ export class TaskChangeWorkerClient {
       return this.worker;
     }
 
+    const cooldownRemainingMs =
+      this.lastFatalWorkerFailureAt + this.fatalRestartCooldownMs - Date.now();
+    if (this.lastFatalWorkerError && cooldownRemainingMs > 0) {
+      throw new Error(
+        `Task change worker recovering after fatal failure: ${this.lastFatalWorkerError.message}`
+      );
+    }
+
     const worker = this.workerFactory(this.workerPath);
     worker.on('message', (msg) => this.handleMessage(msg));
     worker.on('error', (error) => this.handleWorkerFailure(worker, error));
@@ -147,7 +171,15 @@ export class TaskChangeWorkerClient {
       return;
     }
 
-    const worker = this.ensureWorker();
+    let worker: WorkerLike;
+    try {
+      worker = this.ensureWorker();
+    } catch (error) {
+      this.pending.delete(entry.id);
+      entry.reject(error instanceof Error ? error : new Error(String(error)));
+      this.processQueue();
+      return;
+    }
     this.activeRequestId = entry.id;
     this.activeTimeout = setTimeout(() => {
       const activeId = this.activeRequestId;
@@ -155,15 +187,13 @@ export class TaskChangeWorkerClient {
         return;
       }
 
-      this.clearActiveState();
       this.terminatingForTimeoutRequestId = activeId;
-      const pending = this.pending.get(activeId);
-      if (pending) {
-        this.pending.delete(activeId);
-        pending.reject(
-          new Error(`Worker call timeout after ${this.timeoutMs}ms (computeTaskChanges)`)
-        );
-      }
+      const timeoutError = new Error(
+        `Worker call timeout after ${this.timeoutMs}ms (computeTaskChanges)`
+      );
+      this.rememberFatalWorkerFailure(timeoutError);
+      this.rejectAllPending(timeoutError);
+      this.clearActiveState();
 
       try {
         const workerToTerminate = this.worker;
@@ -174,8 +204,6 @@ export class TaskChangeWorkerClient {
       } finally {
         this.worker = null;
       }
-
-      this.processQueue();
     }, this.timeoutMs);
 
     try {
@@ -216,6 +244,9 @@ export class TaskChangeWorkerClient {
       return;
     }
 
+    if (isTaskChangeWorkerFatalError(error)) {
+      this.rememberFatalWorkerFailure(error);
+    }
     this.rejectAllPending(error);
     this.clearActiveState();
     if (this.worker === worker) {
@@ -233,7 +264,11 @@ export class TaskChangeWorkerClient {
     if (code !== 0) {
       logger.warn(`Task change worker exited with code ${code}`);
     }
-    this.rejectAllPending(new Error(`Worker exited with code ${code}`));
+    const error = new Error(`Worker exited with code ${code}`);
+    if (code !== 0) {
+      this.rememberFatalWorkerFailure(error);
+    }
+    this.rejectAllPending(error);
     this.clearActiveState();
     if (this.worker === worker) {
       this.worker = null;
@@ -248,6 +283,11 @@ export class TaskChangeWorkerClient {
     this.queue = [];
   }
 
+  private rememberFatalWorkerFailure(error: Error): void {
+    this.lastFatalWorkerError = error;
+    this.lastFatalWorkerFailureAt = Date.now();
+  }
+
   private clearActiveState(): void {
     this.activeRequestId = null;
     if (this.activeTimeout) {
@@ -255,6 +295,14 @@ export class TaskChangeWorkerClient {
       this.activeTimeout = null;
     }
   }
+}
+
+export function isTaskChangeWorkerFatalError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? `${error.name} ${error.message} ${(error as Error & { code?: unknown }).code ?? ''}`
+      : String(error);
+  return FATAL_WORKER_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
 }
 
 let singleton: TaskChangeWorkerClient | null = null;

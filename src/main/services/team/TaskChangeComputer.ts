@@ -4,6 +4,7 @@ import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import * as readline from 'readline';
 
+import { estimateCachedValueBytes } from './cacheMemoryEstimate';
 import { normalizeTaskChangePresenceFilePath } from './taskChangePresenceUtils';
 import { countLineChanges } from './UnifiedLineCounter';
 
@@ -27,6 +28,7 @@ interface ParsedSnippetsCacheEntry {
   data: ParsedSnippetRecord[];
   mtime: number;
   expiresAt: number;
+  bytes: number;
 }
 
 interface ParsedSnippetsResult {
@@ -37,6 +39,8 @@ interface ParsedSnippetsResult {
 interface ParsedSnippetRecord {
   snippet: SnippetDiff;
   sourceLine: number;
+  linesAdded: number;
+  linesRemoved: number;
 }
 
 interface LogFileRef {
@@ -47,11 +51,6 @@ interface LogFileRef {
 interface MetadataChangePath {
   filePath: string;
   kind?: string;
-}
-
-interface ParsedJsonlEntry {
-  entry: Record<string, unknown>;
-  lineNumber: number;
 }
 
 function shouldWarnAboutUnavailableTaskChangeEvidence(
@@ -70,8 +69,10 @@ function shouldWarnAboutUnavailableTaskChangeEvidence(
 export class TaskChangeComputer {
   private parsedSnippetsCache = new Map<string, ParsedSnippetsCacheEntry>();
   private parsedSnippetsInFlight = new Map<string, Promise<ParsedSnippetsResult>>();
+  private parsedSnippetsCacheBytes = 0;
   private readonly parsedSnippetsCacheTtl = 20 * 1000;
   private readonly maxParsedSnippetsCacheEntries = 1_000;
+  private readonly maxParsedSnippetsCacheBytes = 8 * 1024 * 1024;
   private static readonly JSONL_PARSE_CONCURRENCY = 6;
 
   constructor(
@@ -85,18 +86,22 @@ export class TaskChangeComputer {
     projectPath?: string
   ): Promise<{ result: AgentChangeSet; latestMtime: number }> {
     const paths = await this.logsFinder.findMemberLogPaths(teamName, memberName);
-    const parseResults = await this.parseJSONLFilesWithConcurrency(paths);
+    const parseResults = await this.parseJSONLFilesWithConcurrency(paths, true);
     let latestMtime = 0;
-    const merged: SnippetDiff[] = [];
+    const merged: ParsedSnippetRecord[] = [];
 
     for (const result of parseResults) {
-      merged.push(...result.snippets.map((record) => record.snippet));
+      merged.push(...result.snippets);
       if (result.mtime > latestMtime) {
         latestMtime = result.mtime;
       }
     }
 
-    const files = this.aggregateByFile(this.sortSnippetsChronologically(merged), projectPath);
+    const files = this.aggregateByFile(
+      this.sortSnippetRecordsChronologically(merged),
+      projectPath,
+      true
+    );
     const taskChangeResult = {
       teamName,
       memberName,
@@ -314,15 +319,19 @@ export class TaskChangeComputer {
       return false;
     };
 
-    const allParsed = await this.parseJSONLFilesWithConcurrency(logRefs.map((ref) => ref.filePath));
-    const allowedSnippets: SnippetDiff[] = [];
+    const allParsed = await this.parseJSONLFilesWithConcurrency(
+      logRefs.map((ref) => ref.filePath),
+      includeDetails
+    );
+    const allowedSnippets: ParsedSnippetRecord[] = [];
     const toolUseIdsSet = new Set<string>();
 
     for (const { snippets } of allParsed) {
-      for (const { snippet } of snippets) {
+      for (const record of snippets) {
+        const { snippet } = record;
         if (snippet.isError) continue;
         if (!inAnyInterval(snippet.timestamp)) continue;
-        allowedSnippets.push(snippet);
+        allowedSnippets.push(record);
         if (snippet.toolUseId) {
           toolUseIdsSet.add(snippet.toolUseId);
         }
@@ -331,7 +340,7 @@ export class TaskChangeComputer {
 
     return {
       files: this.aggregateByFile(
-        this.sortSnippetsChronologically(allowedSnippets),
+        this.sortSnippetRecordsChronologically(allowedSnippets),
         projectPath,
         includeDetails
       ),
@@ -352,8 +361,11 @@ export class TaskChangeComputer {
       return [];
     }
 
-    const allParsed = await this.parseJSONLFilesWithConcurrency(logRefs.map((ref) => ref.filePath));
-    const allSnippets: SnippetDiff[] = [];
+    const allParsed = await this.parseJSONLFilesWithConcurrency(
+      logRefs.map((ref) => ref.filePath),
+      includeDetails
+    );
+    const allSnippets: ParsedSnippetRecord[] = [];
 
     for (let index = 0; index < allParsed.length; index++) {
       const ref = logRefs[index];
@@ -363,12 +375,12 @@ export class TaskChangeComputer {
       if (matchingScopes.length === 0) continue;
 
       for (const record of parsed.snippets) {
-        if (this.recordMatchesAnyScope(record, matchingScopes)) allSnippets.push(record.snippet);
+        if (this.recordMatchesAnyScope(record, matchingScopes)) allSnippets.push(record);
       }
     }
 
     return this.aggregateByFile(
-      this.sortSnippetsChronologically(allSnippets),
+      this.sortSnippetRecordsChronologically(allSnippets),
       projectPath,
       includeDetails
     );
@@ -425,9 +437,12 @@ export class TaskChangeComputer {
     logRefs: LogFileRef[]
   ): Promise<TaskChangeSetV2> {
     const { teamName, taskId, projectPath, includeDetails } = input;
-    const allParsed = await this.parseJSONLFilesWithConcurrency(logRefs.map((ref) => ref.filePath));
-    const allSnippets = this.sortSnippetsChronologically(
-      allParsed.flatMap((result) => result.snippets.map((record) => record.snippet))
+    const allParsed = await this.parseJSONLFilesWithConcurrency(
+      logRefs.map((ref) => ref.filePath),
+      includeDetails
+    );
+    const allSnippets = this.sortSnippetRecordsChronologically(
+      allParsed.flatMap((result) => result.snippets)
     );
     const aggregatedFiles = this.aggregateByFile(allSnippets, projectPath, includeDetails);
     const shouldWarn =
@@ -487,7 +502,10 @@ export class TaskChangeComputer {
     };
   }
 
-  private async parseJSONLFilesWithConcurrency(paths: string[]): Promise<ParsedSnippetsResult[]> {
+  private async parseJSONLFilesWithConcurrency(
+    paths: string[],
+    includeDetails: boolean
+  ): Promise<ParsedSnippetsResult[]> {
     if (paths.length === 0) return [];
 
     const results = new Array<ParsedSnippetsResult>(paths.length);
@@ -497,7 +515,7 @@ export class TaskChangeComputer {
       while (true) {
         const currentIndex = nextIndex++;
         if (currentIndex >= paths.length) return;
-        results[currentIndex] = await this.parseJSONLFile(paths[currentIndex]);
+        results[currentIndex] = await this.parseJSONLFile(paths[currentIndex], includeDetails);
       }
     };
 
@@ -511,12 +529,16 @@ export class TaskChangeComputer {
     return results;
   }
 
-  private async parseJSONLFile(filePath: string): Promise<ParsedSnippetsResult> {
+  private async parseJSONLFile(
+    filePath: string,
+    includeDetails: boolean
+  ): Promise<ParsedSnippetsResult> {
+    const cacheKey = this.buildParsedSnippetsCacheKey(filePath, includeDetails);
     let fileMtime = 0;
     try {
       const fileStat = await stat(filePath);
       fileMtime = fileStat.mtimeMs;
-      const cached = this.parsedSnippetsCache.get(filePath);
+      const cached = this.parsedSnippetsCache.get(cacheKey);
       if (cached?.mtime === fileMtime && cached.expiresAt > Date.now()) {
         return { snippets: cached.data, mtime: fileMtime };
       }
@@ -525,11 +547,11 @@ export class TaskChangeComputer {
       return { snippets: [], mtime: 0 };
     }
 
-    const inFlightKey = `${filePath}:${fileMtime}`;
+    const inFlightKey = `${cacheKey}:${fileMtime}`;
     const inFlight = this.parsedSnippetsInFlight.get(inFlightKey);
     if (inFlight) return inFlight;
 
-    const promise = this.parseJSONLFileUncached(filePath, fileMtime).finally(() => {
+    const promise = this.parseJSONLFileUncached(filePath, fileMtime, includeDetails).finally(() => {
       if (this.parsedSnippetsInFlight.get(inFlightKey) === promise) {
         this.parsedSnippetsInFlight.delete(inFlightKey);
       }
@@ -540,9 +562,41 @@ export class TaskChangeComputer {
 
   private async parseJSONLFileUncached(
     filePath: string,
-    fileMtime: number
+    fileMtime: number,
+    includeDetails: boolean
   ): Promise<ParsedSnippetsResult> {
-    const entries: ParsedJsonlEntry[] = [];
+    const snippets: ParsedSnippetRecord[] = [];
+    const snippetsByToolUseId = new Map<string, ParsedSnippetRecord[]>();
+    const erroredIds = new Set<string>();
+    const seenFiles = new Set<string>();
+
+    const markErroredIds = (entry: Record<string, unknown>): void => {
+      for (const toolUseId of this.collectErroredToolUseIdsFromEntry(entry)) {
+        erroredIds.add(toolUseId);
+        for (const record of snippetsByToolUseId.get(toolUseId) ?? []) {
+          record.snippet.isError = true;
+        }
+      }
+    };
+
+    const addSnippet = (lineNumber: number, snippet: SnippetDiff): void => {
+      const { added, removed } = countLineChanges(snippet.oldString, snippet.newString);
+      const record: ParsedSnippetRecord = {
+        snippet: includeDetails ? snippet : { ...snippet, oldString: '', newString: '' },
+        sourceLine: lineNumber,
+        linesAdded: added,
+        linesRemoved: removed,
+      };
+      snippets.push(record);
+      if (snippet.toolUseId) {
+        const records = snippetsByToolUseId.get(snippet.toolUseId);
+        if (records) {
+          records.push(record);
+        } else {
+          snippetsByToolUseId.set(snippet.toolUseId, [record]);
+        }
+      }
+    };
 
     try {
       const stream = createReadStream(filePath, { encoding: 'utf8' });
@@ -553,13 +607,121 @@ export class TaskChangeComputer {
         lineNumber += 1;
         const trimmed = line.trim();
         if (!trimmed) continue;
+        let entry: Record<string, unknown>;
         try {
-          entries.push({
-            entry: JSON.parse(trimmed) as Record<string, unknown>,
-            lineNumber,
-          });
+          entry = JSON.parse(trimmed) as Record<string, unknown>;
         } catch {
           // Ignore invalid JSON lines.
+          continue;
+        }
+
+        markErroredIds(entry);
+        const role = this.extractRole(entry);
+        if (role !== 'assistant') continue;
+
+        const content = this.extractContent(entry);
+        if (!content) continue;
+
+        const timestamp =
+          typeof entry.timestamp === 'string' ? entry.timestamp : new Date().toISOString();
+
+        for (const block of content) {
+          if (
+            !block ||
+            typeof block !== 'object' ||
+            (block as Record<string, unknown>).type !== 'tool_use'
+          ) {
+            continue;
+          }
+
+          const toolBlock = block as Record<string, unknown>;
+          const rawName = typeof toolBlock.name === 'string' ? toolBlock.name : '';
+          const toolName = rawName.startsWith('proxy_') ? rawName.slice(6) : rawName;
+          const toolUseId = typeof toolBlock.id === 'string' ? toolBlock.id : '';
+          const input = toolBlock.input as Record<string, unknown> | undefined;
+          if (!input) continue;
+
+          const isError = erroredIds.has(toolUseId);
+
+          if (toolName === 'Edit') {
+            const targetPath = typeof input.file_path === 'string' ? input.file_path : '';
+            const oldString = typeof input.old_string === 'string' ? input.old_string : '';
+            const newString = typeof input.new_string === 'string' ? input.new_string : '';
+            const replaceAll = input.replace_all === true;
+            const hasTextPayload =
+              typeof input.old_string === 'string' || typeof input.new_string === 'string';
+            const metadataPaths = hasTextPayload ? [] : this.extractMetadataChangePaths(input);
+            const targetPaths =
+              metadataPaths.length > 0
+                ? metadataPaths
+                : targetPath
+                  ? [{ filePath: targetPath }]
+                  : [];
+
+            for (const target of targetPaths) {
+              seenFiles.add(this.normalizeFilePathKey(target.filePath));
+              const snippetType: SnippetDiff['type'] =
+                !hasTextPayload && target.kind === 'add' ? 'write-new' : 'edit';
+              addSnippet(lineNumber, {
+                toolUseId,
+                filePath: target.filePath,
+                toolName: 'Edit',
+                type: snippetType,
+                oldString,
+                newString,
+                replaceAll,
+                timestamp,
+                isError,
+                contextHash: this.computeContextHash(oldString, newString),
+              });
+            }
+          } else if (toolName === 'Write') {
+            const targetPath = typeof input.file_path === 'string' ? input.file_path : '';
+            const writeContent = typeof input.content === 'string' ? input.content : '';
+
+            if (targetPath) {
+              const normalizedTargetPath = this.normalizeFilePathKey(targetPath);
+              const isNew = !seenFiles.has(normalizedTargetPath);
+              seenFiles.add(normalizedTargetPath);
+              addSnippet(lineNumber, {
+                toolUseId,
+                filePath: targetPath,
+                toolName: 'Write',
+                type: isNew ? 'write-new' : 'write-update',
+                oldString: '',
+                newString: writeContent,
+                replaceAll: false,
+                timestamp,
+                isError,
+                contextHash: this.computeContextHash('', writeContent),
+              });
+            }
+          } else if (toolName === 'MultiEdit') {
+            const targetPath = typeof input.file_path === 'string' ? input.file_path : '';
+            const edits = Array.isArray(input.edits) ? input.edits : [];
+
+            if (targetPath) {
+              seenFiles.add(this.normalizeFilePathKey(targetPath));
+              for (const edit of edits) {
+                if (!edit || typeof edit !== 'object') continue;
+                const editObj = edit as Record<string, unknown>;
+                const oldString = typeof editObj.old_string === 'string' ? editObj.old_string : '';
+                const newString = typeof editObj.new_string === 'string' ? editObj.new_string : '';
+                addSnippet(lineNumber, {
+                  toolUseId,
+                  filePath: targetPath,
+                  toolName: 'MultiEdit',
+                  type: 'multi-edit',
+                  oldString,
+                  newString,
+                  replaceAll: false,
+                  timestamp,
+                  isError,
+                  contextHash: this.computeContextHash(oldString, newString),
+                });
+              }
+            }
+          }
         }
       }
 
@@ -570,131 +732,53 @@ export class TaskChangeComputer {
       return { snippets: [], mtime: 0 };
     }
 
-    const erroredIds = this.collectErroredToolUseIds(entries.map((record) => record.entry));
-    const snippets: ParsedSnippetRecord[] = [];
-    const seenFiles = new Set<string>();
+    this.setParsedSnippetsCache(filePath, includeDetails, fileMtime, snippets);
 
-    for (const { entry, lineNumber } of entries) {
-      const role = this.extractRole(entry);
-      if (role !== 'assistant') continue;
+    return { snippets, mtime: fileMtime };
+  }
 
-      const content = this.extractContent(entry);
-      if (!content) continue;
+  private buildParsedSnippetsCacheKey(filePath: string, includeDetails: boolean): string {
+    return `${includeDetails ? 'details' : 'summary'}\0${filePath}`;
+  }
 
-      const timestamp =
-        typeof entry.timestamp === 'string' ? entry.timestamp : new Date().toISOString();
-
-      for (const block of content) {
-        if (
-          !block ||
-          typeof block !== 'object' ||
-          (block as Record<string, unknown>).type !== 'tool_use'
-        ) {
-          continue;
-        }
-
-        const toolBlock = block as Record<string, unknown>;
-        const rawName = typeof toolBlock.name === 'string' ? toolBlock.name : '';
-        const toolName = rawName.startsWith('proxy_') ? rawName.slice(6) : rawName;
-        const toolUseId = typeof toolBlock.id === 'string' ? toolBlock.id : '';
-        const input = toolBlock.input as Record<string, unknown> | undefined;
-        if (!input) continue;
-
-        const isError = erroredIds.has(toolUseId);
-        const addSnippet = (snippet: SnippetDiff): void => {
-          snippets.push({ snippet, sourceLine: lineNumber });
-        };
-
-        if (toolName === 'Edit') {
-          const targetPath = typeof input.file_path === 'string' ? input.file_path : '';
-          const oldString = typeof input.old_string === 'string' ? input.old_string : '';
-          const newString = typeof input.new_string === 'string' ? input.new_string : '';
-          const replaceAll = input.replace_all === true;
-          const hasTextPayload =
-            typeof input.old_string === 'string' || typeof input.new_string === 'string';
-          const metadataPaths = hasTextPayload ? [] : this.extractMetadataChangePaths(input);
-          const targetPaths =
-            metadataPaths.length > 0 ? metadataPaths : targetPath ? [{ filePath: targetPath }] : [];
-
-          for (const target of targetPaths) {
-            seenFiles.add(this.normalizeFilePathKey(target.filePath));
-            const snippetType: SnippetDiff['type'] =
-              !hasTextPayload && target.kind === 'add' ? 'write-new' : 'edit';
-            addSnippet({
-              toolUseId,
-              filePath: target.filePath,
-              toolName: 'Edit',
-              type: snippetType,
-              oldString,
-              newString,
-              replaceAll,
-              timestamp,
-              isError,
-              contextHash: this.computeContextHash(oldString, newString),
-            });
-          }
-        } else if (toolName === 'Write') {
-          const targetPath = typeof input.file_path === 'string' ? input.file_path : '';
-          const writeContent = typeof input.content === 'string' ? input.content : '';
-
-          if (targetPath) {
-            const normalizedTargetPath = this.normalizeFilePathKey(targetPath);
-            const isNew = !seenFiles.has(normalizedTargetPath);
-            seenFiles.add(normalizedTargetPath);
-            addSnippet({
-              toolUseId,
-              filePath: targetPath,
-              toolName: 'Write',
-              type: isNew ? 'write-new' : 'write-update',
-              oldString: '',
-              newString: writeContent,
-              replaceAll: false,
-              timestamp,
-              isError,
-              contextHash: this.computeContextHash('', writeContent),
-            });
-          }
-        } else if (toolName === 'MultiEdit') {
-          const targetPath = typeof input.file_path === 'string' ? input.file_path : '';
-          const edits = Array.isArray(input.edits) ? input.edits : [];
-
-          if (targetPath) {
-            seenFiles.add(this.normalizeFilePathKey(targetPath));
-            for (const edit of edits) {
-              if (!edit || typeof edit !== 'object') continue;
-              const editObj = edit as Record<string, unknown>;
-              const oldString = typeof editObj.old_string === 'string' ? editObj.old_string : '';
-              const newString = typeof editObj.new_string === 'string' ? editObj.new_string : '';
-              addSnippet({
-                toolUseId,
-                filePath: targetPath,
-                toolName: 'MultiEdit',
-                type: 'multi-edit',
-                oldString,
-                newString,
-                replaceAll: false,
-                timestamp,
-                isError,
-                contextHash: this.computeContextHash(oldString, newString),
-              });
-            }
-          }
-        }
-      }
+  private setParsedSnippetsCache(
+    filePath: string,
+    includeDetails: boolean,
+    fileMtime: number,
+    snippets: ParsedSnippetRecord[]
+  ): void {
+    const cacheKey = this.buildParsedSnippetsCacheKey(filePath, includeDetails);
+    const existing = this.parsedSnippetsCache.get(cacheKey);
+    if (existing) {
+      this.parsedSnippetsCacheBytes -= existing.bytes;
     }
-
-    this.parsedSnippetsCache.set(filePath, {
+    const bytes = estimateCachedValueBytes(snippets);
+    this.parsedSnippetsCache.set(cacheKey, {
       data: snippets,
       mtime: fileMtime,
       expiresAt: Date.now() + this.parsedSnippetsCacheTtl,
+      bytes,
     });
-    while (this.parsedSnippetsCache.size > this.maxParsedSnippetsCacheEntries) {
+    this.parsedSnippetsCacheBytes += bytes;
+    this.pruneParsedSnippetsCache();
+  }
+
+  private pruneParsedSnippetsCache(): void {
+    while (
+      this.parsedSnippetsCache.size > this.maxParsedSnippetsCacheEntries ||
+      this.parsedSnippetsCacheBytes > this.maxParsedSnippetsCacheBytes
+    ) {
       const oldestKey = this.parsedSnippetsCache.keys().next().value;
       if (!oldestKey) break;
+      const oldest = this.parsedSnippetsCache.get(oldestKey);
+      if (oldest) {
+        this.parsedSnippetsCacheBytes -= oldest.bytes;
+      }
       this.parsedSnippetsCache.delete(oldestKey);
     }
-
-    return { snippets, mtime: fileMtime };
+    if (this.parsedSnippetsCacheBytes < 0) {
+      this.parsedSnippetsCacheBytes = 0;
+    }
   }
 
   private extractContent(entry: Record<string, unknown>): unknown[] | null {
@@ -731,29 +815,27 @@ export class TaskChangeComputer {
     return paths;
   }
 
-  private collectErroredToolUseIds(entries: Record<string, unknown>[]): Set<string> {
+  private collectErroredToolUseIdsFromEntry(entry: Record<string, unknown>): Set<string> {
     const erroredIds = new Set<string>();
 
-    for (const entry of entries) {
-      if (Array.isArray(entry.content)) {
-        for (const block of entry.content) {
-          if (this.isErroredToolResult(block)) {
-            const toolUseId = (block as Record<string, unknown>).tool_use_id;
-            if (typeof toolUseId === 'string') {
-              erroredIds.add(toolUseId);
-            }
+    if (Array.isArray(entry.content)) {
+      for (const block of entry.content) {
+        if (this.isErroredToolResult(block)) {
+          const toolUseId = (block as Record<string, unknown>).tool_use_id;
+          if (typeof toolUseId === 'string') {
+            erroredIds.add(toolUseId);
           }
         }
       }
+    }
 
-      const message = entry.message as Record<string, unknown> | undefined;
-      if (message && Array.isArray(message.content)) {
-        for (const block of message.content) {
-          if (this.isErroredToolResult(block)) {
-            const toolUseId = (block as Record<string, unknown>).tool_use_id;
-            if (typeof toolUseId === 'string') {
-              erroredIds.add(toolUseId);
-            }
+    const message = entry.message as Record<string, unknown> | undefined;
+    if (message && Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (this.isErroredToolResult(block)) {
+          const toolUseId = (block as Record<string, unknown>).tool_use_id;
+          if (typeof toolUseId === 'string') {
+            erroredIds.add(toolUseId);
           }
         }
       }
@@ -769,27 +851,28 @@ export class TaskChangeComputer {
   }
 
   private aggregateByFile(
-    snippets: SnippetDiff[],
+    records: ParsedSnippetRecord[],
     projectPath?: string,
     includeDetails = true
   ): FileChangeSummary[] {
     const fileMap = new Map<
       string,
-      { filePath: string; snippets: SnippetDiff[]; isNewFile: boolean }
+      { filePath: string; records: ParsedSnippetRecord[]; isNewFile: boolean }
     >();
 
-    for (const snippet of snippets) {
+    for (const record of records) {
+      const { snippet } = record;
       if (snippet.isError) continue;
 
       const normalizedFilePath = this.normalizeFilePathKey(snippet.filePath);
       const existing = fileMap.get(normalizedFilePath);
       if (existing) {
-        existing.snippets.push(snippet);
+        existing.records.push(record);
         if (snippet.type === 'write-new') existing.isNewFile = true;
       } else {
         fileMap.set(normalizedFilePath, {
           filePath: snippet.filePath,
-          snippets: [snippet],
+          records: [record],
           isNewFile: snippet.type === 'write-new',
         });
       }
@@ -798,11 +881,11 @@ export class TaskChangeComputer {
     return [...fileMap.values()].map((data) => {
       let totalAdded = 0;
       let totalRemoved = 0;
-      for (const snippet of data.snippets) {
+      for (const record of data.records) {
+        const { snippet } = record;
         if (snippet.isError) continue;
-        const { added, removed } = countLineChanges(snippet.oldString, snippet.newString);
-        totalAdded += added;
-        totalRemoved += removed;
+        totalAdded += record.linesAdded;
+        totalRemoved += record.linesRemoved;
       }
 
       const normalizedFilePath = data.filePath.replace(/\\/g, '/');
@@ -818,11 +901,16 @@ export class TaskChangeComputer {
       return {
         filePath: data.filePath,
         relativePath,
-        snippets: includeDetails ? data.snippets : [],
+        snippets: includeDetails ? data.records.map((record) => record.snippet) : [],
         linesAdded: totalAdded,
         linesRemoved: totalRemoved,
         isNewFile: data.isNewFile,
-        timeline: includeDetails ? this.buildTimeline(data.filePath, data.snippets) : undefined,
+        timeline: includeDetails
+          ? this.buildTimeline(
+              data.filePath,
+              data.records.map((record) => record.snippet)
+            )
+          : undefined,
       };
     });
   }
@@ -891,24 +979,24 @@ export class TaskChangeComputer {
     return (hash >>> 0).toString(36);
   }
 
-  private sortSnippetsChronologically(snippets: SnippetDiff[]): SnippetDiff[] {
-    return snippets
-      .map((snippet, originalIndex) => ({ snippet, originalIndex }))
+  private sortSnippetRecordsChronologically(records: ParsedSnippetRecord[]): ParsedSnippetRecord[] {
+    return records
+      .map((record, originalIndex) => ({ record, originalIndex }))
       .sort((a, b) => {
-        const aMs = Date.parse(a.snippet.timestamp);
-        const bMs = Date.parse(b.snippet.timestamp);
+        const aMs = Date.parse(a.record.snippet.timestamp);
+        const bMs = Date.parse(b.record.snippet.timestamp);
         const safeA = Number.isFinite(aMs) ? aMs : Number.MAX_SAFE_INTEGER;
         const safeB = Number.isFinite(bMs) ? bMs : Number.MAX_SAFE_INTEGER;
         if (safeA !== safeB) return safeA - safeB;
-        if (a.snippet.filePath !== b.snippet.filePath) {
-          return a.snippet.filePath.localeCompare(b.snippet.filePath);
+        if (a.record.snippet.filePath !== b.record.snippet.filePath) {
+          return a.record.snippet.filePath.localeCompare(b.record.snippet.filePath);
         }
-        if (a.snippet.toolUseId !== b.snippet.toolUseId) {
-          return a.snippet.toolUseId.localeCompare(b.snippet.toolUseId);
+        if (a.record.snippet.toolUseId !== b.record.snippet.toolUseId) {
+          return a.record.snippet.toolUseId.localeCompare(b.record.snippet.toolUseId);
         }
         return a.originalIndex - b.originalIndex;
       })
-      .map(({ snippet }) => snippet);
+      .map(({ record }) => record);
   }
 
   private normalizeFilePathKey(filePath: string): string {
