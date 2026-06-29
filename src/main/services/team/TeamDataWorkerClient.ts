@@ -325,7 +325,14 @@ export class TeamDataWorkerClient {
         startedAt,
       });
 
-      worker.postMessage(request);
+      try {
+        worker.postMessage(request);
+      } catch (error) {
+        const postError = error instanceof Error ? error : new Error(String(error));
+        const entry = this.pending.get(id);
+        this.pending.delete(id);
+        entry?.reject(postError);
+      }
     });
   }
 
