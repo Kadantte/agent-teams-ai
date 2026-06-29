@@ -48,6 +48,9 @@ function getIgnoredReason(event: RuntimeTurnSettledEvent): string | null {
   if (!outcome || !NON_TERMINAL_OPENCODE_OUTCOMES.has(outcome)) {
     return null;
   }
+  if (event.turnId?.trim() || event.threadId?.trim()) {
+    return null;
+  }
   return `opencode_non_terminal_outcome:${outcome}`;
 }
 
