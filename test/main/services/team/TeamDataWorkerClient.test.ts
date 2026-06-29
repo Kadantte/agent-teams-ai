@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const hoisted = vi.hoisted(() => {
   const skipResponsesForOps = new Set<string>();
+  const throwPostMessageForOps = new Set<string>();
   const workers: Array<{
     messages: unknown[];
     handlers: Map<string, (value: unknown) => void>;
@@ -14,8 +15,11 @@ const hoisted = vi.hoisted(() => {
       messages: [] as unknown[],
       handlers: new Map<string, (value: unknown) => void>(),
       postMessage(message: unknown) {
-        worker.messages.push(message);
         const request = message as { id: string; op: string; payload?: { teamName?: string } };
+        if (throwPostMessageForOps.has(request.op)) {
+          throw new Error(`post failed for ${request.op}`);
+        }
+        worker.messages.push(message);
         if (skipResponsesForOps.has(request.op)) return;
         queueMicrotask(() => {
           const handler = worker.handlers.get('message');
@@ -44,6 +48,7 @@ const hoisted = vi.hoisted(() => {
     workers,
     createMockWorker,
     skipResponsesForOps,
+    throwPostMessageForOps,
   };
 });
 
@@ -69,6 +74,7 @@ describe('TeamDataWorkerClient', () => {
     vi.useRealTimers();
     hoisted.workers.length = 0;
     hoisted.skipResponsesForOps.clear();
+    hoisted.throwPostMessageForOps.clear();
   });
 
   it('deduplicates concurrent getTeamData calls for the same team', async () => {
@@ -543,6 +549,36 @@ describe('TeamDataWorkerClient', () => {
     await vi.advanceTimersByTimeAsync(30_001);
     await client.getTeamData('my-team');
     expect(hoisted.workers).toHaveLength(2);
+
+    client.dispose();
+  });
+
+  it('classifies worker exits as fatal only for non-zero exit codes', async () => {
+    const { isTeamDataWorkerFatalError } = await import(
+      '../../../../src/main/services/team/TeamDataWorkerClient'
+    );
+
+    expect(isTeamDataWorkerFatalError(new Error('Worker exited with code 0'))).toBe(false);
+    expect(isTeamDataWorkerFatalError(new Error('Worker exited with code 1'))).toBe(true);
+    expect(isTeamDataWorkerFatalError(new Error('Worker exited with code 9'))).toBe(true);
+  });
+
+  it('clears pending state when worker postMessage throws synchronously', async () => {
+    vi.useFakeTimers();
+    const { TeamDataWorkerClient } =
+      await import('../../../../src/main/services/team/TeamDataWorkerClient');
+    hoisted.throwPostMessageForOps.add('getTeamData');
+    const client = new TeamDataWorkerClient();
+
+    await expect(client.getTeamData('my-team')).rejects.toThrow('post failed for getTeamData');
+    expect(hoisted.workers).toHaveLength(1);
+
+    hoisted.throwPostMessageForOps.delete('getTeamData');
+    await vi.advanceTimersByTimeAsync(30_001);
+    await client.getTeamData('my-team');
+
+    expect(hoisted.workers).toHaveLength(1);
+    expect(hoisted.workers[0].messages).toHaveLength(1);
 
     client.dispose();
   });

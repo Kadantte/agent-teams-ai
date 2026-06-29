@@ -37,9 +37,9 @@ const FATAL_WORKER_ERROR_PATTERNS = [
   'Worker terminated due to reaching memory limit',
   'JS heap out of memory',
   'JavaScript heap out of memory',
-  'Worker exited with code',
   'Worker call timeout after',
 ] as const;
+const FATAL_WORKER_EXIT_CODE_PATTERN = /Worker exited with code (?!0\b)\d+/;
 
 function makeId(): string {
   return `${Date.now()}-${crypto.randomUUID().slice(0, 12)}`;
@@ -325,7 +325,14 @@ export class TeamDataWorkerClient {
         startedAt,
       });
 
-      worker.postMessage(request);
+      try {
+        worker.postMessage(request);
+      } catch (error) {
+        const postError = error instanceof Error ? error : new Error(String(error));
+        const entry = this.pending.get(id);
+        this.pending.delete(id);
+        entry?.reject(postError);
+      }
     });
   }
 
@@ -483,5 +490,8 @@ export function isTeamDataWorkerFatalError(error: unknown): boolean {
     error instanceof Error
       ? `${error.name}: ${error.message} ${(error as { code?: unknown }).code ?? ''}`
       : String(error);
-  return FATAL_WORKER_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
+  return (
+    FATAL_WORKER_ERROR_PATTERNS.some((pattern) => message.includes(pattern)) ||
+    FATAL_WORKER_EXIT_CODE_PATTERN.test(message)
+  );
 }

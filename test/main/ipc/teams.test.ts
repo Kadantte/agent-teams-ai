@@ -100,7 +100,7 @@ vi.mock('@main/services/team/TeamDataWorkerClient', () => ({
       message.includes('ERR_WORKER_OUT_OF_MEMORY') ||
       message.includes('Worker terminated due to reaching memory limit') ||
       message.includes('JS heap out of memory') ||
-      message.includes('Worker exited with code') ||
+      /Worker exited with code (?!0\b)\d+/.test(message) ||
       message.includes('Worker call timeout after')
     );
   },
