@@ -8,6 +8,7 @@ import { lazy, Suspense, useCallback, useState } from 'react';
 import { GraphView } from '@claude-teams/agent-graph';
 import { TerminalWorkspaceFloatingLauncher } from '@features/terminal-workspace/renderer';
 import { TeamSidebarHost } from '@renderer/components/team/sidebar/TeamSidebarHost';
+import { useTeamSidebarPortalSnapshot } from '@renderer/components/team/sidebar/TeamSidebarPortalManager';
 
 import { useGraphMessagesPanel } from '../hooks/useGraphMessagesPanel';
 import { useGraphSidebarVisibility } from '../hooks/useGraphSidebarVisibility';
@@ -51,6 +52,9 @@ export const TeamGraphTab = ({
     null
   );
   const { sidebarVisible, toggleSidebarVisible } = useGraphSidebarVisibility();
+  const sidebarSnapshot = useTeamSidebarPortalSnapshot();
+  const hasSidebarSource = Boolean(sidebarSnapshot.activeSourceIdByTeam[teamName]);
+  const effectiveSidebarVisible = sidebarVisible && hasSidebarSource;
   const interactions = useGraphSurfaceInteractions(teamName);
   const openCreateTask = useCallback(() => {
     interactions.openCreateTask('');
@@ -83,7 +87,7 @@ export const TeamGraphTab = ({
 
   return (
     <div className="relative flex size-full overflow-hidden" style={{ background: '#050510' }}>
-      {sidebarVisible ? (
+      {effectiveSidebarVisible ? (
         <TeamSidebarHost
           teamName={teamName}
           surface="graph-tab"
@@ -101,8 +105,8 @@ export const TeamGraphTab = ({
           onRequestFullscreen={() => setFullscreen(true)}
           onOpenTeamPage={openTeamPage}
           onCreateTask={openCreateTask}
-          onToggleSidebar={toggleSidebarVisible}
-          isSidebarVisible={sidebarVisible}
+          onToggleSidebar={hasSidebarSource ? toggleSidebarVisible : undefined}
+          isSidebarVisible={effectiveSidebarVisible}
           renderTopToolbarContent={() => (
             <GraphProvisioningHud teamName={teamName} enabled={isActive} />
           )}
@@ -233,8 +237,8 @@ export const TeamGraphTab = ({
           <TeamGraphOverlay
             teamName={teamName}
             onClose={() => setFullscreen(false)}
-            sidebarVisible={sidebarVisible}
-            onToggleSidebar={toggleSidebarVisible}
+            sidebarVisible={effectiveSidebarVisible}
+            onToggleSidebar={hasSidebarSource ? toggleSidebarVisible : undefined}
             messagesPanelEnabled={isActive && isPaneFocused}
           />
         </Suspense>

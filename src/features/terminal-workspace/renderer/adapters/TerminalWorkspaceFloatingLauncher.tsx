@@ -19,6 +19,7 @@ export interface TerminalWorkspaceFloatingLauncherProps {
   className?: string;
   buttonTestId?: string;
   enabled?: boolean;
+  rightOffset?: number;
 }
 
 export const TerminalWorkspaceFloatingLauncher = ({
@@ -27,6 +28,7 @@ export const TerminalWorkspaceFloatingLauncher = ({
   className,
   buttonTestId = 'open-terminal-floating-button',
   enabled = true,
+  rightOffset = 18,
 }: TerminalWorkspaceFloatingLauncherProps): React.JSX.Element | null => {
   const { t } = useAppTranslation('team');
   const [mountPoint, setMountPoint] = useState<HTMLElement | null>(null);
@@ -98,11 +100,11 @@ export const TerminalWorkspaceFloatingLauncher = ({
             size="icon"
             variant="ghost"
             className={cn(
-              'fixed left-4 z-[33] size-11 rounded-full border border-sky-300/30 bg-[#08111a]/70 text-sky-100 shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-colors hover:border-sky-300/50 hover:bg-[#0d1a26]/75 hover:text-white',
-              open && 'bg-sky-400/18 border-sky-300/60 text-white',
+              'absolute z-[33] size-11 rounded-full border border-sky-300/30 bg-[#08111a]/70 text-sky-100 opacity-75 shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-colors hover:border-sky-300/50 hover:bg-[#0d1a26]/75 hover:text-white hover:opacity-90',
+              open && 'bg-sky-400/18 border-sky-300/60 text-white opacity-85',
               className
             )}
-            style={{ bottom: Math.max(10, bottomOffset) }}
+            style={{ bottom: Math.max(10, bottomOffset), right: Math.max(10, rightOffset) }}
             aria-label={title}
             aria-pressed={open}
             data-testid={buttonTestId}
@@ -111,7 +113,7 @@ export const TerminalWorkspaceFloatingLauncher = ({
             {open ? <PanelBottomOpen size={19} /> : <Terminal size={19} />}
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="right">
+        <TooltipContent side="left">
           {open ? t('terminalWorkspace.terminalSheetOpen') : t('terminalWorkspace.openTerminal')}
         </TooltipContent>
       </Tooltip>

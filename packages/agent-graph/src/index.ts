@@ -21,6 +21,7 @@ export type {
   GraphDomainRef,
   GraphEdge,
   GraphEdgeType,
+  GraphGroupFrame,
   GraphLaunchVisualState,
   GraphLayoutMode,
   GraphLayoutPort,
@@ -32,7 +33,7 @@ export type {
   GraphParticle,
   GraphParticleKind,
 } from './ports/types';
-export type { GraphViewProps } from './ui/GraphView';
+export type { GraphGroupFrameScreenPlacement, GraphViewProps } from './ui/GraphView';
 export { GraphView } from './ui/GraphView';
 export type { TransientHandoffCard } from './ui/transientHandoffs';
 export { getTransientHandoffCardAlpha } from './ui/transientHandoffs';

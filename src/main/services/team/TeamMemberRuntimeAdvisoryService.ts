@@ -50,6 +50,7 @@ interface RuntimeAdvisoryLookupOptions {
 
 const LOOKBACK_MS = 10 * 60 * 1000;
 const CACHE_TTL_MS = 30_000;
+const RECENT_BATCH_REUSE_AFTER_INVALIDATION_MS = CACHE_TTL_MS;
 const TAIL_BYTES = 64 * 1024;
 const BATCH_WARN_MS = 1_000;
 const ADVISORY_FETCH_CONCURRENCY = 2;
@@ -64,6 +65,11 @@ interface CachedRuntimeAdvisory {
 interface CachedTeamBatchAdvisories {
   membersSignature: string;
   observedAfterScopeKey: string;
+  value: Map<string, MemberRuntimeAdvisory>;
+  expiresAt: number;
+}
+
+interface RecentBatchAdvisories {
   value: Map<string, MemberRuntimeAdvisory>;
   expiresAt: number;
 }
@@ -93,6 +99,7 @@ async function mapLimit<T, R>(
 export class TeamMemberRuntimeAdvisoryService {
   private readonly memberCache = new Map<string, CachedRuntimeAdvisory>();
   private readonly teamBatchCacheByTeam = new Map<string, CachedTeamBatchAdvisories>();
+  private readonly recentBatchByKey = new Map<string, RecentBatchAdvisories>();
   private readonly cacheGenerationByTeam = new Map<string, number>();
   private readonly inFlightBatchRequests = new Map<
     string,
@@ -114,11 +121,6 @@ export class TeamMemberRuntimeAdvisoryService {
     this.cacheGenerationByTeam.set(teamKey, (this.cacheGenerationByTeam.get(teamKey) ?? 0) + 1);
     this.memberCache.delete(`${teamKey}::${memberKey}`);
     this.teamBatchCacheByTeam.delete(teamKey);
-    for (const key of this.inFlightBatchRequests.keys()) {
-      if (key.startsWith(`${teamKey}::`)) {
-        this.inFlightBatchRequests.delete(key);
-      }
-    }
   }
 
   invalidateTeamAdvisories(teamName: string): void {
@@ -134,11 +136,10 @@ export class TeamMemberRuntimeAdvisoryService {
         this.memberCache.delete(key);
       }
     }
-    for (const key of this.inFlightBatchRequests.keys()) {
-      if (key.startsWith(`${teamKey}::`)) {
-        this.inFlightBatchRequests.delete(key);
-      }
-    }
+    // Keep in-flight scans alive. Runtime updates can invalidate the team while
+    // a slow log scan is already running; dropping it starts duplicate scans.
+    // The generation check in loadBatchAdvisories prevents stale results from
+    // being cached after this invalidation.
   }
 
   async getMemberAdvisories(
@@ -169,6 +170,11 @@ export class TeamMemberRuntimeAdvisoryService {
     const existingRequest = this.inFlightBatchRequests.get(inFlightKey);
     if (existingRequest) {
       return this.materializeBatchAdvisories(activeMembers, await existingRequest);
+    }
+
+    const recentBatch = this.recentBatchByKey.get(inFlightKey);
+    if (recentBatch && recentBatch.expiresAt > now) {
+      return this.materializeBatchAdvisories(activeMembers, recentBatch.value);
     }
 
     const request = this.loadBatchAdvisories(
@@ -277,6 +283,7 @@ export class TeamMemberRuntimeAdvisoryService {
         expiresAt: Date.now() + CACHE_TTL_MS,
       });
     }
+    this.rememberRecentBatch(`${teamKey}::${membersSignature}::${observedAfterScopeKey}`, result);
 
     const totalMs = performance.now() - startedAt;
     if (totalMs >= BATCH_WARN_MS) {
@@ -306,6 +313,29 @@ export class TeamMemberRuntimeAdvisoryService {
 
   private buildObservedAfterScopeKey(observedAfterMs: number | null | undefined): string {
     return observedAfterMs == null ? 'recent' : `after:${observedAfterMs}`;
+  }
+
+  private rememberRecentBatch(
+    inFlightKey: string,
+    advisories: ReadonlyMap<string, MemberRuntimeAdvisory>
+  ): void {
+    this.recentBatchByKey.set(inFlightKey, {
+      value: this.cloneNormalizedAdvisories(advisories),
+      expiresAt: Date.now() + RECENT_BATCH_REUSE_AFTER_INVALIDATION_MS,
+    });
+    if (this.recentBatchByKey.size > 50) {
+      const now = Date.now();
+      for (const [key, value] of this.recentBatchByKey) {
+        if (value.expiresAt <= now) {
+          this.recentBatchByKey.delete(key);
+        }
+      }
+      while (this.recentBatchByKey.size > 50) {
+        const oldestKey = this.recentBatchByKey.keys().next().value;
+        if (oldestKey === undefined) break;
+        this.recentBatchByKey.delete(oldestKey);
+      }
+    }
   }
 
   private buildMembersSignature(members: readonly Pick<ResolvedTeamMember, 'name'>[]): string {

@@ -1,13 +1,12 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { TooltipProvider } from '@renderer/components/ui/tooltip';
 import { HEADER_ROW1_HEIGHT } from '@renderer/constants/layout';
 import { useBranchSync } from '@renderer/hooks/useBranchSync';
 import { useStore } from '@renderer/store';
 import { normalizePath } from '@renderer/utils/pathNormalize';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TeamViewSnapshot } from '@shared/types';
 
@@ -242,11 +241,60 @@ describe('terminal workspace bottom sheet fixture-e2e', () => {
     expect(sheetFixture.snapTo).toHaveBeenCalledWith(2);
   });
 
+  it('recomputes snap points from the viewport and keeps full app width on resize', async () => {
+    await renderBottomSheet({ open: true, mountPoint });
+
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: 700,
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event('resize'));
+      await flushMicrotasks();
+    });
+
+    const rootElement = getRequiredElement('mock-terminal-sheet-root');
+    const container = getRequiredElement('terminal-workspace-bottom-sheet');
+    expect(rootElement.getAttribute('data-snap-points')).toBe(JSON.stringify([0, 44, 330, 540, 1]));
+    expect(rootElement.style.left).toBe('0px');
+    expect(rootElement.style.right).toBe('0px');
+    expect(rootElement.style.width).toBe('100%');
+    expect(container.style.height).toBe('660px');
+  });
+
+  it('snaps from pointer drag gestures on the sheet handle', async () => {
+    await renderBottomSheet({ open: true, mountPoint });
+    const handle = getRequiredElement('terminal-workspace-sheet-drag-handle');
+
+    sheetFixture.snapTo.mockClear();
+    sheetFixture.ySet.mockClear();
+    await act(async () => {
+      handle.dispatchEvent(createPointerEvent('pointerdown', { button: 0, clientY: 500 }));
+      window.dispatchEvent(createPointerEvent('pointermove', { clientY: 120 }));
+      window.dispatchEvent(createPointerEvent('pointerup', { clientY: 120 }));
+      await flushMicrotasks();
+    });
+
+    expect(sheetFixture.snapTo).toHaveBeenLastCalledWith(4);
+    expect(sheetFixture.ySet).toHaveBeenCalledWith(0);
+
+    sheetFixture.snapTo.mockClear();
+    await act(async () => {
+      handle.dispatchEvent(createPointerEvent('pointerdown', { button: 0, clientY: 120 }));
+      window.dispatchEvent(createPointerEvent('pointermove', { clientY: 820 }));
+      window.dispatchEvent(createPointerEvent('pointerup', { clientY: 820 }));
+      await flushMicrotasks();
+    });
+
+    expect(sheetFixture.snapTo).toHaveBeenLastCalledWith(1);
+  });
+
   it('toggles settings and forwards the state into the terminal panel', async () => {
     await renderBottomSheet({ open: true, mountPoint });
 
     expect(sheetFixture.panelProps.at(-1)?.settingsOpen).toBe(false);
-    await clickButton('Show terminal settings');
+    await clickButton('Open terminal settings');
 
     expect(sheetFixture.panelProps.at(-1)?.settingsOpen).toBe(true);
     expect(
@@ -304,6 +352,7 @@ describe('terminal workspace bottom sheet fixture-e2e', () => {
           React.createElement(TerminalWorkspaceFloatingLauncher, {
             bottomOffset: 24,
             buttonTestId: 'open-terminal-floating-button-fixture',
+            rightOffset: 350,
             teamName: TEAM_NAME,
           })
         )
@@ -315,6 +364,7 @@ describe('terminal workspace bottom sheet fixture-e2e', () => {
     expect(button.getAttribute('aria-label')).toBe('Open Terminal UI Smoke Sandbox terminal');
     expect(button.getAttribute('aria-pressed')).toBe('false');
     expect(button.style.bottom).toBe('24px');
+    expect(button.style.right).toBe('350px');
     expect(useBranchSync).toHaveBeenLastCalledWith([PROJECT_PATH], { live: true });
 
     await act(async () => {
@@ -335,6 +385,135 @@ describe('terminal workspace bottom sheet fixture-e2e', () => {
       teamDisplayName: 'Terminal UI Smoke Sandbox',
       teamName: TEAM_NAME,
     });
+  });
+
+  it('floating launcher keeps inline messages in place and clamps unsafe offsets', async () => {
+    const setMessagesPanelMode = vi.fn((mode: string) => {
+      useStore.setState({ messagesPanelMode: mode } as never);
+    });
+    useStore.setState({
+      branchByPath: {
+        [normalizePath(PROJECT_PATH)]: 'feature/terminal-ui',
+      },
+      messagesPanelMode: 'inline',
+      selectedTeamName: TEAM_NAME,
+      selectedTeamData: createTeamSnapshot(),
+      setMessagesPanelMode,
+      teamDataCacheByName: {
+        [TEAM_NAME]: createTeamSnapshot(),
+      },
+      teamByName: {
+        [TEAM_NAME]: {
+          teamName: TEAM_NAME,
+          displayName: 'Terminal UI Smoke Sandbox',
+          description: 'fixture',
+          memberCount: 1,
+          taskCount: 0,
+          lastActivity: null,
+          projectPath: PROJECT_PATH,
+        },
+      },
+    } as never);
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(TerminalWorkspaceFloatingLauncher, {
+            bottomOffset: -40,
+            buttonTestId: 'open-terminal-floating-button-fixture',
+            rightOffset: -40,
+            teamName: TEAM_NAME,
+          })
+        )
+      );
+      await flushMicrotasks();
+    });
+
+    const button = getRequiredElement('open-terminal-floating-button-fixture');
+    expect(button.style.bottom).toBe('10px');
+    expect(button.style.right).toBe('10px');
+
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await flushMicrotasks();
+    });
+
+    expect(setMessagesPanelMode).not.toHaveBeenCalled();
+    expect(getRequiredElement('mock-terminal-bottom-sheet-adapter').getAttribute('data-open')).toBe(
+      'true'
+    );
+  });
+
+  it('floating launcher tears down an open sheet when the terminal surface becomes disabled', async () => {
+    useStore.setState({
+      branchByPath: {
+        [normalizePath(PROJECT_PATH)]: 'feature/terminal-ui',
+      },
+      messagesPanelMode: 'inline',
+      selectedTeamName: TEAM_NAME,
+      selectedTeamData: createTeamSnapshot(),
+      teamDataCacheByName: {
+        [TEAM_NAME]: createTeamSnapshot(),
+      },
+      teamByName: {
+        [TEAM_NAME]: {
+          teamName: TEAM_NAME,
+          displayName: 'Terminal UI Smoke Sandbox',
+          description: 'fixture',
+          memberCount: 1,
+          taskCount: 0,
+          lastActivity: null,
+          projectPath: PROJECT_PATH,
+        },
+      },
+    } as never);
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(TerminalWorkspaceFloatingLauncher, {
+            buttonTestId: 'open-terminal-floating-button-fixture',
+            enabled: true,
+            teamName: TEAM_NAME,
+          })
+        )
+      );
+      await flushMicrotasks();
+    });
+
+    const button = getRequiredElement('open-terminal-floating-button-fixture');
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await flushMicrotasks();
+    });
+    expect(getRequiredElement('mock-terminal-bottom-sheet-adapter').getAttribute('data-open')).toBe(
+      'true'
+    );
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(TerminalWorkspaceFloatingLauncher, {
+            buttonTestId: 'open-terminal-floating-button-fixture',
+            enabled: false,
+            teamName: TEAM_NAME,
+          })
+        )
+      );
+      await flushMicrotasks();
+    });
+
+    expect(
+      document.querySelector('[data-testid="open-terminal-floating-button-fixture"]')
+    ).toBeNull();
+    expect(document.querySelector('[data-testid="mock-terminal-bottom-sheet-adapter"]')).toBeNull();
+    expect(useBranchSync).toHaveBeenLastCalledWith([], { live: true });
   });
 
   it('floating launcher stays fully disabled without mounting a stale sheet', async () => {
@@ -432,4 +611,16 @@ async function clickButton(label: string): Promise<void> {
 
 function flushMicrotasks(): Promise<void> {
   return Promise.resolve();
+}
+
+function createPointerEvent(
+  type: string,
+  options: MouseEventInit & { button?: number; clientY?: number }
+): Event {
+  const PointerEventConstructor = window.PointerEvent ?? MouseEvent;
+  return new PointerEventConstructor(type, {
+    bubbles: true,
+    cancelable: true,
+    ...options,
+  });
 }

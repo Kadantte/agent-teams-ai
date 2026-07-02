@@ -1,5 +1,158 @@
 # Release Guide
 
+## Published: v2.5.1 (2026-06-21)
+
+GitHub release: [v2.5.1](https://github.com/777genius/agent-teams-ai/releases/tag/v2.5.1).
+
+Target branch: `dev`.
+
+Draft build commit: `9cddb727de5470074ffe07dd3f528f31c4b8edf2`.
+
+User-facing code range: `v2.5.0..9e1edc66944ef69d148ec9b3f55b377deac2e68a`, plus release metadata in `9cddb727de5470074ffe07dd3f528f31c4b8edf2`.
+
+Runtime gate:
+
+- Agent Teams runtime: `v0.0.54`; `777genius/agent_teams_orchestrator@main` currently matches `v0.0.54`.
+- Terminal Platform runtime: `v0.2.0`; this is the latest published `777genius/terminal-platform` release. The newer `terminal-platform@main` commit is unreleased and is not bundled in this patch release.
+
+Release body source for GitHub release:
+
+<!-- RELEASE_BODY_START v2.5.1 -->
+Reduces memory growth in long-running teams and large projects. Fixes OOM risks in transcript/project matching, duplicate runtime probes, and unbounded runtime/provisioning diagnostic buffers.
+
+### What's New
+
+- Lower memory overhead for long-running teams and large project scans.
+
+### Improvements
+
+- Keep transcript/project matching metadata compact after large scans finish.
+- Keep runtime health checks single-flight during rapid refreshes and timeouts.
+- Cap retained runtime, provisioning, provider, MCP probe, and timeout output.
+- Improve launch reliability on low-memory machines.
+- Reduce repeated work-sync nudges that do not add new information.
+
+### Bug Fixes
+
+- Fix OOM risk from transcript affinity metadata retaining full normalized JSONL message text.
+- Fix duplicate runtime snapshot probes during cache invalidation and timeout storms.
+- Fix low-heap team launch crashes and unbounded stdout/stderr carry buffers.
+- Fix Enter submitting text during IME composition.
+- Fix draft launch roster updates before launch.
+- Update vulnerable dependencies from the post-v2.5.0 security audit.
+
+### Downloads
+
+<table>
+<tr>
+<td align="center">
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/Agent.Teams.AI-2.5.1-arm64.dmg">
+    <img src="https://img.shields.io/badge/macOS_Apple_Silicon-.dmg-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Apple Silicon" />
+  </a>
+  <br />
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/Agent.Teams.AI-2.5.1-x64.dmg">
+    <img src="https://img.shields.io/badge/macOS_Intel-.dmg-434343?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Intel" />
+  </a>
+</td>
+<td align="center">
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/Agent.Teams.AI.Setup.2.5.1.exe">
+    <img src="https://img.shields.io/badge/Windows-Download_.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
+  </a>
+  <br />
+  <sub>May trigger SmartScreen - click "More info" then "Run anyway"</sub>
+  <br />
+  <sub><strong>Windows required:</strong> launch Agent Teams AI as Administrator, especially when using OpenCode runtimes.</sub>
+</td>
+<td align="center">
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/Agent.Teams.AI-2.5.1.AppImage">
+    <img src="https://img.shields.io/badge/Linux-Download_.AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux AppImage" />
+  </a>
+  <br />
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/agent-teams-ai_2.5.1_amd64.deb">
+    <img src="https://img.shields.io/badge/.deb-E95420?style=flat-square&logo=ubuntu&logoColor=white" alt=".deb" />
+  </a>&nbsp;
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/agent-teams-ai-2.5.1.x86_64.rpm">
+    <img src="https://img.shields.io/badge/.rpm-294172?style=flat-square&logo=redhat&logoColor=white" alt=".rpm" />
+  </a>&nbsp;
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.1/agent-teams-ai-2.5.1.pacman">
+    <img src="https://img.shields.io/badge/.pacman-1793D1?style=flat-square&logo=archlinux&logoColor=white" alt=".pacman" />
+  </a>
+</td>
+</tr>
+</table>
+<!-- RELEASE_BODY_END v2.5.1 -->
+
+## Published: v2.5.0 (2026-06-15)
+
+GitHub release: [v2.5.0](https://github.com/777genius/agent-teams-ai/releases/tag/v2.5.0).
+
+Release body source for GitHub release:
+
+<!-- RELEASE_BODY_START v2.5.0 -->
+Built-in terminal for command and graph screens.
+
+<img width="762" height="338" alt="image" src="https://github.com/user-attachments/assets/c8aa4e93-1223-4caa-b3be-cf22852f1c10" />
+
+### What's New
+
+- Bottom-sheet terminal in command and graph views.
+- Multi-tab shells: rename, reorder, close, switch, restore history, and prewarmed new tabs.
+- Command history blocks show cwd, git branch, duration, stdout/stderr, and error state.
+- Settings tab controls theme, font size, opacity, background color/image, image fit, blur, and line wrapping.
+- Right-click command block actions copy the whole block, command, or output.
+
+### Improvements
+
+- Fresh clones auto-download the Terminal Platform runtime; `CLAUDE_TERMINAL_PLATFORM_ROOT` remains available for local runtime development.
+- Run is shown only with non-empty input; Ctrl+C is shown only after terminal history exists.
+
+### Bug Fixes
+
+- Prevented shell-startup input from becoming stray text or duplicate pending command entries.
+- Restored visible command input in blank/initial terminal states and fixed history context menus.
+- Fixed tab click, close, reorder, hover close, and left-tab fallback after close.
+
+### Downloads
+
+<table>
+<tr>
+<td align="center">
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.0/Agent.Teams.AI-2.5.0-arm64.dmg">
+    <img src="https://img.shields.io/badge/macOS_Apple_Silicon-.dmg-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Apple Silicon" />
+  </a>
+  <br />
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.0/Agent.Teams.AI-2.5.0-x64.dmg">
+    <img src="https://img.shields.io/badge/macOS_Intel-.dmg-434343?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Intel" />
+  </a>
+</td>
+<td align="center">
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.0/Agent.Teams.AI.Setup.2.5.0.exe">
+    <img src="https://img.shields.io/badge/Windows-Download_.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
+  </a>
+  <br />
+  <sub>May trigger SmartScreen - click "More info" then "Run anyway"</sub>
+  <br />
+  <sub><strong>Windows required:</strong> launch Agent Teams AI as Administrator, especially when using OpenCode runtimes.</sub>
+</td>
+<td align="center">
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.0/Agent.Teams.AI-2.5.0.AppImage">
+    <img src="https://img.shields.io/badge/Linux-Download_.AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux AppImage" />
+  </a>
+  <br />
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.0/agent-teams-ai_2.5.0_amd64.deb">
+    <img src="https://img.shields.io/badge/.deb-E95420?style=flat-square&logo=ubuntu&logoColor=white" alt=".deb" />
+  </a>&nbsp;
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.0/agent-teams-ai-2.5.0.x86_64.rpm">
+    <img src="https://img.shields.io/badge/.rpm-294172?style=flat-square&logo=redhat&logoColor=white" alt=".rpm" />
+  </a>&nbsp;
+  <a href="https://github.com/777genius/agent-teams-ai/releases/download/v2.5.0/agent-teams-ai-2.5.0.pacman">
+    <img src="https://img.shields.io/badge/.pacman-1793D1?style=flat-square&logo=archlinux&logoColor=white" alt=".pacman" />
+  </a>
+</td>
+</tr>
+</table>
+<!-- RELEASE_BODY_END v2.5.0 -->
+
 ## Draft: v2.4.0 (2026-06-09)
 
 Target commit: `ad5a2dc5808eeddde30ab17eecf3afbb32b24214` (`origin/dev`).
@@ -312,8 +465,12 @@ Public release notes must follow this standard every time:
 
 - Start with a short user-facing summary. Explain what changed and why users should care.
 - Do not add a duplicate `## Agent Teams v<VERSION>` heading inside the release body; the GitHub release title already shows the version.
+- Do not start with a template sentence like `Agent Teams AI <VERSION> is...`; start with the concrete user impact.
 - Use the sections `What's New`, `Improvements`, and `Bug Fixes`; omit a section only if it would be empty.
 - Keep internal-only CI, lint, dependency, and refactor work out of public notes unless it directly explains a user-visible fix.
+- Do not include raw build SHA, target commit, workflow IDs, or other internal release plumbing in public notes.
+- Do not mention the Agent Teams/orchestrator runtime version in public notes. Describe the user-visible runtime change instead, for example "Update bundled runtime" or "Improve native startup validation".
+- For Terminal Platform updates, prefer user-facing wording such as "Update terminal runtime" unless the exact version is specifically relevant.
 - Put `Downloads` as the final section, after all text notes.
 - Use badge/button links in `Downloads`, not bare asset links.
 - Verify actual asset names with `gh release view v<VERSION> --repo 777genius/agent-teams-ai --json assets` before writing links.
@@ -323,7 +480,7 @@ Draft releases must be treated as review artifacts:
 
 - Do not hand off a draft release for review while it still has generated notes, stale notes from an earlier run, or a `Full Changelog`-only body.
 - Before telling the user a draft is ready, always edit the draft body with the current release notes template and then re-check it with `gh release view v<VERSION> --repo 777genius/agent-teams-ai --json body,assets,isDraft,isPrerelease,targetCommitish`.
-- Confirm the notes describe the exact target commit that the draft was built from, including any commits added after a previous draft attempt.
+- Confirm the draft targets the intended commit with `targetCommitish`; do not put the raw commit SHA in the release body.
 - If a draft already exists when starting or retrying a release, do not delete it automatically. Ask for explicit permission to delete, replace, or reuse it.
 - Never delete a draft release just because the user said to "make a release" or "redo the release". Deleting a draft requires a separate explicit command such as "delete the draft release".
 

@@ -54,6 +54,11 @@ const TeamListView = lazy(() =>
     default: module.TeamListView,
   }))
 );
+const TeamUsageTab = lazy(() =>
+  import('../team/TeamUsageTab').then((module) => ({
+    default: module.TeamUsageTab,
+  }))
+);
 const SessionTabContent = lazy(() =>
   import('./SessionTabContent').then((module) => ({
     default: module.SessionTabContent,
@@ -62,6 +67,11 @@ const SessionTabContent = lazy(() =>
 const TeamGraphTab = lazy(() =>
   import('@features/agent-graph/renderer').then((module) => ({
     default: module.TeamGraphTab,
+  }))
+);
+const OrganizationMapTab = lazy(() =>
+  import('@features/organizations/renderer').then((module) => ({
+    default: module.OrganizationMapTab,
   }))
 );
 
@@ -152,6 +162,11 @@ const PaneTabSlot = ({ tab, isActive, isPaneFocused }: PaneTabSlotProps): React.
           {tab.type === 'notifications' && <NotificationsView />}
           {tab.type === 'settings' && <SettingsView />}
           {tab.type === 'teams' && <TeamListView />}
+          {tab.type === 'organizations' && (
+            <TabUIProvider tabId={tab.id}>
+              <OrganizationMapTab isActive={isActive} isPaneFocused={isPaneFocused} />
+            </TabUIProvider>
+          )}
           {tab.type === 'team' && (
             <TabUIProvider tabId={tab.id}>
               <TeamDetailView
@@ -161,6 +176,7 @@ const PaneTabSlot = ({ tab, isActive, isPaneFocused }: PaneTabSlotProps): React.
               />
             </TabUIProvider>
           )}
+          {tab.type === 'usage' && <TeamUsageTab teamName={tab.teamName ?? ''} />}
           {tab.type === 'session' && (
             <TabUIProvider tabId={tab.id}>
               <SessionTabContent tab={tab} isActive={isActive} />

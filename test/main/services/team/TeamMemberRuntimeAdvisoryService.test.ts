@@ -1539,6 +1539,47 @@ describe('TeamMemberRuntimeAdvisoryService', () => {
     expect(first).not.toBe(second);
   });
 
+  it('keeps slow in-flight batch scans through invalidation and briefly reuses the result', async () => {
+    const { service, logsFinder } = createStubbedServiceHarness();
+    const gate = createDeferred<void>();
+    logsFinder.findMemberLogs.mockImplementation(async (_teamName: string, memberName: string) => {
+      await gate.promise;
+      return [{ filePath: `/logs/${memberName}.jsonl` }];
+    });
+
+    const firstRequest = service.getMemberAdvisories('signal-ops', [buildMember('Alice')]);
+    await vi.waitFor(() => expect(logsFinder.findMemberLogs).toHaveBeenCalledTimes(1));
+
+    service.invalidateTeamAdvisories('signal-ops');
+    const secondRequest = service.getMemberAdvisories('signal-ops', [buildMember('Alice')]);
+    await Promise.resolve();
+
+    expect(logsFinder.findMemberLogs).toHaveBeenCalledTimes(1);
+
+    gate.resolve();
+    const [first, second] = await Promise.all([firstRequest, secondRequest]);
+
+    expect(first).toEqual(second);
+    expect(logsFinder.findMemberLogs).toHaveBeenCalledTimes(1);
+
+    await service.getMemberAdvisories('signal-ops', [buildMember('Alice')]);
+
+    expect(logsFinder.findMemberLogs).toHaveBeenCalledTimes(1);
+
+    const recentBatchByKey = (
+      service as unknown as {
+        recentBatchByKey: Map<string, { expiresAt: number }>;
+      }
+    ).recentBatchByKey;
+    for (const recentBatch of recentBatchByKey.values()) {
+      recentBatch.expiresAt = Date.now() - 1;
+    }
+
+    await service.getMemberAdvisories('signal-ops', [buildMember('Alice')]);
+
+    expect(logsFinder.findMemberLogs).toHaveBeenCalledTimes(2);
+  });
+
   it('fetches only expired or missing members when building a batch', async () => {
     const { service, logsFinder } = createStubbedServiceHarness();
 

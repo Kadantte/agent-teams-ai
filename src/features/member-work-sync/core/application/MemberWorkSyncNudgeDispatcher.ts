@@ -2,6 +2,10 @@ import { decideMemberWorkSyncStatus } from '../domain';
 
 import { appendMemberWorkSyncAudit, reasonToAuditEvent } from './MemberWorkSyncAudit';
 import { decideMemberWorkSyncNudgeActivation } from './MemberWorkSyncNudgeActivationPolicy';
+import {
+  applyMemberWorkSyncNudgeSuppression,
+  MEMBER_WORK_SYNC_SUPPRESSION_DIAGNOSTIC,
+} from './MemberWorkSyncNudgeSuppressionPolicy';
 import { finalizeMemberWorkSyncAgenda } from './MemberWorkSyncReconciler';
 import { resolveMemberWorkSyncRuntimeActivity } from './MemberWorkSyncRuntimeActivity';
 
@@ -64,6 +68,27 @@ function addMinutes(iso: string, minutes: number): string {
 
 function subtractMinutes(iso: string, minutes: number): string {
   return new Date(Date.parse(iso) - minutes * 60_000).toISOString();
+}
+
+function preserveCurrentRuntimeStallDiagnostics(input: {
+  previous: MemberWorkSyncStatus;
+  agenda: MemberWorkSyncAgenda;
+  state: MemberWorkSyncStatus['state'];
+  diagnostics: string[];
+}): string[] {
+  const diagnostics = new Set(input.diagnostics);
+  if (
+    input.state !== 'needs_sync' ||
+    input.previous.agenda.fingerprint !== input.agenda.fingerprint
+  ) {
+    return [...diagnostics];
+  }
+  for (const diagnostic of input.previous.diagnostics) {
+    if (diagnostic.startsWith('runtime_stall:')) {
+      diagnostics.add(diagnostic);
+    }
+  }
+  return [...diagnostics];
 }
 
 function stableJitterMinutes(id: string, attemptGeneration: number): number {
@@ -182,24 +207,21 @@ export class MemberWorkSyncNudgeDispatcher {
       options.claimTimeoutMs ?? MEMBER_WORK_SYNC_NUDGE_CLAIM_TIMEOUT_MS
     );
     const teamNames = [...new Set(options.teamNames.map((name) => name.trim()).filter(Boolean))];
-    const summaries = await Promise.allSettled(
-      teamNames.map((teamName) =>
-        this.dispatchTeamWithTimeout(teamName, options, nowIso, {
-          itemTimeoutMs,
-          teamTimeoutMs,
-          claimTimeoutMs,
-        })
-      )
-    );
-
     let summary = emptySummary();
-    for (const [index, result] of summaries.entries()) {
-      if (result.status === 'fulfilled') {
-        summary = addSummary(summary, result.value);
-      } else {
+    for (const teamName of teamNames) {
+      try {
+        summary = addSummary(
+          summary,
+          await this.dispatchTeamWithTimeout(teamName, options, nowIso, {
+            itemTimeoutMs,
+            teamTimeoutMs,
+            claimTimeoutMs,
+          })
+        );
+      } catch (error) {
         this.deps.logger?.warn('member work sync team nudge dispatch failed', {
-          teamName: teamNames[index],
-          error: String(result.reason),
+          teamName,
+          error: String(error),
         });
       }
     }
@@ -802,7 +824,12 @@ export class MemberWorkSyncNudgeDispatcher {
           previous.agenda.fingerprint !== agenda.fingerprint,
       },
       evaluatedAt: nowIso,
-      diagnostics: [...agenda.diagnostics, ...decision.diagnostics],
+      diagnostics: preserveCurrentRuntimeStallDiagnostics({
+        previous,
+        agenda,
+        state: decision.state,
+        diagnostics: [...agenda.diagnostics, ...decision.diagnostics],
+      }),
       ...(providerId ? { providerId } : {}),
     };
     const agendaStillMatches =
@@ -811,13 +838,29 @@ export class MemberWorkSyncNudgeDispatcher {
     if (decision.state !== 'needs_sync' || agenda.items.length === 0 || !agendaStillMatches) {
       return { ok: false, reason: 'status_no_longer_matches_outbox', retryable: false };
     }
+    const suppressionStatus = await applyMemberWorkSyncNudgeSuppression(this.deps, {
+      status: revalidatedStatus,
+      previousStatus: previous,
+      source: 'nudge_dispatcher',
+    });
+    if (
+      suppressionStatus.shadow?.wouldNudge !== true &&
+      suppressionStatus.diagnostics.includes(MEMBER_WORK_SYNC_SUPPRESSION_DIAGNOSTIC)
+    ) {
+      await this.deps.statusStore.write(suppressionStatus);
+      return {
+        ok: false,
+        reason: MEMBER_WORK_SYNC_SUPPRESSION_DIAGNOSTIC,
+        retryable: false,
+      };
+    }
 
     if (!this.deps.statusStore.readTeamMetrics) {
       return { ok: false, reason: 'metrics_unavailable', retryable: true };
     }
     const metrics = await this.deps.statusStore.readTeamMetrics(item.teamName);
     const activation = decideMemberWorkSyncNudgeActivation({
-      status: revalidatedStatus,
+      status: suppressionStatus,
       metrics,
     });
     if (!activation.active) {

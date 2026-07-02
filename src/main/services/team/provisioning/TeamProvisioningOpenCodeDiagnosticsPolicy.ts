@@ -1,5 +1,12 @@
+import {
+  isOpenCodeWindowsAccessDeniedDiagnostic,
+  normalizeOpenCodeWindowsAccessDeniedDiagnostic,
+} from '@shared/utils/openCodeWindowsAccessDenied';
+
+import { isOpenCodeBridgeNoOutputDiagnostic } from '../opencode/bridge/OpenCodeBridgeSupportDiagnostics';
 import { createPersistedLaunchSnapshot } from '../TeamLaunchStateEvaluator';
 
+import type { TeamRuntimePrepareResult } from '../runtime';
 import type { PersistedTeamLaunchMemberState, PersistedTeamLaunchSnapshot } from '@shared/types';
 
 export const OPENCODE_UNCOMMITTED_BOOTSTRAP_DIAGNOSTIC =
@@ -12,6 +19,10 @@ const OPEN_CODE_SECRET_FLAG_PATTERN =
 const OPEN_CODE_BEARER_TOKEN_PATTERN = /\bBearer\s+[A-Z0-9._~+/=-]+/gi;
 const OPEN_CODE_SECRET_KEY_PATTERN = /\bsk-[A-Za-z0-9_-]{16,}\b/g;
 const OPEN_CODE_APP_MANAGED_BRIEFING_MAX_CHARS = 12_000;
+export const OPENCODE_RUNTIME_BINARY_UNREACHABLE_DIAGNOSTIC =
+  'OpenCode runtime binary is not installed or not reachable by launch preflight.';
+export const OPENCODE_APP_MCP_UNREACHABLE_DIAGNOSTIC =
+  'OpenCode app MCP is unreachable. Retry launch to refresh the app MCP bridge.';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -98,6 +109,126 @@ export function hasRealOpenCodeFailureDiagnostic(text: string): boolean {
     text.includes('stop requested') ||
     text.includes('relaunch started')
   );
+}
+
+export function looksLikeOpenCodeProviderPrepareDiagnostic(value: string): boolean {
+  const lower = value.trim().toLowerCase();
+  return (
+    isOpenCodeBridgeNoOutputDiagnostic(value) ||
+    isOpenCodeWindowsAccessDeniedDiagnostic(value) ||
+    lower.includes('opencode /experimental/tool') ||
+    lower.includes('/experimental/tool') ||
+    lower.includes('mcp_unavailable') ||
+    lower.includes('runtime store') ||
+    lower.includes('opencode cli') ||
+    lower.includes('opencode runtime binary') ||
+    lower.includes('unable to connect')
+  );
+}
+
+export function normalizeOpenCodePrepareDiagnostic(value: string, reason?: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (isOpenCodeBridgeNoOutputDiagnostic(trimmed)) {
+    return 'OpenCode runtime check returned no output.';
+  }
+
+  const accessDeniedDiagnostic = normalizeOpenCodeWindowsAccessDeniedDiagnostic(trimmed);
+  if (accessDeniedDiagnostic) {
+    return accessDeniedDiagnostic;
+  }
+
+  if (/opencode cli (?:not detected on path|not found)/i.test(trimmed)) {
+    return OPENCODE_RUNTIME_BINARY_UNREACHABLE_DIAGNOSTIC;
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.includes('unable to connect') &&
+    (lower.includes('/experimental/tool') ||
+      lower.includes('mcp_unavailable') ||
+      reason === 'mcp_unavailable')
+  ) {
+    const detail = trimmed.includes(' - ') ? trimmed.split(' - ').pop()?.trim() : trimmed;
+    return detail && detail !== trimmed
+      ? `${OPENCODE_APP_MCP_UNREACHABLE_DIAGNOSTIC} Details: ${detail}`
+      : OPENCODE_APP_MCP_UNREACHABLE_DIAGNOSTIC;
+  }
+
+  if (reason === 'mcp_unavailable' && lower.includes('mcp_unavailable')) {
+    return 'OpenCode app MCP is unavailable. Retry launch to refresh the app MCP bridge.';
+  }
+
+  return trimmed;
+}
+
+export function isRetryableOpenCodePreflightBusyDiagnostic(
+  value: string | null | undefined
+): boolean {
+  const lower = value?.trim().toLowerCase() ?? '';
+  if (!lower) {
+    return false;
+  }
+  // Fact: these diagnostics report OpenCode host/session occupancy, not that
+  // the selected model is unavailable or rejected by the provider.
+  return (
+    lower.includes('opencode session status busy') ||
+    lower.includes('session status busy') ||
+    lower === 'provider busy' ||
+    lower.includes('provider busy')
+  );
+}
+
+export function isOpenCodeModelVerificationTimeoutDiagnostic(
+  value: string | null | undefined
+): boolean {
+  const lower = value?.trim().toLowerCase() ?? '';
+  return lower.includes('model verification timed out');
+}
+
+export function selectOpenCodePrepareProviderDiagnostic(
+  prepare: Pick<TeamRuntimePrepareResult, 'diagnostics' | 'warnings'>
+): string | undefined {
+  return [...prepare.diagnostics, ...prepare.warnings].find((entry) =>
+    looksLikeOpenCodeProviderPrepareDiagnostic(entry)
+  );
+}
+
+export function selectOpenCodeModelPreparePrimaryReason(
+  prepare: Extract<TeamRuntimePrepareResult, { ok: false }>
+): string {
+  const providerDiagnostic = selectOpenCodePrepareProviderDiagnostic(prepare);
+  if (providerDiagnostic) {
+    return providerDiagnostic;
+  }
+
+  const candidates = [...prepare.diagnostics, prepare.reason]
+    .map((entry) => entry?.trim() ?? '')
+    .filter(Boolean);
+  const timeoutReason = candidates.find(isOpenCodeModelVerificationTimeoutDiagnostic);
+  return timeoutReason ?? candidates[0] ?? prepare.reason;
+}
+
+export function isOpenCodeModelPrepareBusyDeferred(
+  prepare: Extract<TeamRuntimePrepareResult, { ok: false }>,
+  primaryReason: string
+): boolean {
+  const candidates = [primaryReason, prepare.reason, ...prepare.diagnostics];
+  return (
+    prepare.retryable &&
+    !candidates.some(isOpenCodeModelVerificationTimeoutDiagnostic) &&
+    candidates.some(isRetryableOpenCodePreflightBusyDiagnostic)
+  );
+}
+
+export function buildOpenCodeProviderVerificationDeferredLine(reason: string): string {
+  const normalizedReason = isRetryableOpenCodePreflightBusyDiagnostic(reason)
+    ? 'OpenCode is currently busy with another session. Deep model verification will retry when OpenCode is idle.'
+    : reason;
+  return normalizedReason;
 }
 
 export function normalizeOpenCodePersistedFailureReason(

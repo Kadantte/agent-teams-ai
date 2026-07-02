@@ -4,17 +4,19 @@
  * Uses our GraphNode port type instead of agent-flow's Agent type.
  */
 
-import type { GraphNode } from '../ports/types';
-import { COLORS, getStateColor, alphaHex } from '../constants/colors';
 import {
-  NODE,
   AGENT_DRAW,
-  CONTEXT_RING,
   ANIM,
+  CONTEXT_RING,
   MIN_VISIBLE_OPACITY,
+  NODE,
 } from '../constants/canvas-constants';
+import { alphaHex, COLORS, getStateColor } from '../constants/colors';
+
 import { drawHexagon } from './draw-misc';
 import { getAgentGlowSprite, hexWithAlpha } from './render-cache';
+
+import type { GraphNode } from '../ports/types';
 
 /**
  * Draw all member/lead nodes on the canvas.

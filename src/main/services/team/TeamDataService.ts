@@ -54,6 +54,7 @@ import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { getTeamTaskWorkflowColumn, selectCurrentActiveTeamTask } from './teamTaskActiveState';
 import { TeamTaskCommentNotificationJournal } from './TeamTaskCommentNotificationJournal';
 import { TeamTaskReader } from './TeamTaskReader';
+import { compactTeamTaskForSnapshot } from './teamTaskSnapshotCompaction';
 import { TeamTaskWriter } from './TeamTaskWriter';
 import { TeamTranscriptProjectResolver } from './TeamTranscriptProjectResolver';
 
@@ -110,8 +111,51 @@ const TASK_COMMENT_NOTIFICATION_SOURCE = 'system_notification';
 const PASSIVE_USER_REPLY_LINK_WINDOW_MS = 15_000;
 const MEMBER_RUNTIME_ADVISORY_SNAPSHOT_BUDGET_MS = 250;
 const GLOBAL_TASK_TEAM_CONFIG_CONCURRENCY = 12;
+const TEAM_NOTIFICATION_CONTEXT_CACHE_MAX_AGE_MS = 5_000;
+const MAX_MESSAGES_PAGE_LIVE_OVERLAY_PAYLOAD = 200;
 const MIXED_TEAM_LIVE_MUTATION_BLOCK_MESSAGE =
   'Live roster mutation on a running mixed team is not supported in V1. Stop the team, edit the roster, then relaunch.';
+
+interface TeamNotificationContext {
+  displayName: string;
+  projectPath?: string;
+}
+
+interface TeamNotificationContextCacheEntry {
+  value: TeamNotificationContext;
+  cachedAt: number;
+  generation: number;
+}
+
+interface InFlightTeamNotificationContext {
+  promise: Promise<TeamNotificationContext>;
+  generation: number;
+}
+
+function compareInboxMessagesNewestFirst(left: InboxMessage, right: InboxMessage): number {
+  const leftTime = Date.parse(left.timestamp);
+  const rightTime = Date.parse(right.timestamp);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+  const leftId = typeof left.messageId === 'string' ? left.messageId : '';
+  const rightId = typeof right.messageId === 'string' ? right.messageId : '';
+  return leftId.localeCompare(rightId);
+}
+
+function capMessagesPageLiveOverlay(
+  liveMessages: readonly InboxMessage[] | undefined
+): InboxMessage[] {
+  if (!liveMessages?.length) {
+    return [];
+  }
+  if (liveMessages.length <= MAX_MESSAGES_PAGE_LIVE_OVERLAY_PAYLOAD) {
+    return [...liveMessages];
+  }
+  return [...liveMessages]
+    .sort(compareInboxMessagesNewestFirst)
+    .slice(0, MAX_MESSAGES_PAGE_LIVE_OVERLAY_PAYLOAD);
+}
 
 function resolveEffectiveMemberProviderId(
   leadProviderId: TeamProviderId | undefined,
@@ -195,14 +239,6 @@ function isSupportedRunningMixedRosterMutation(params: {
   }
 
   return true;
-}
-
-function requireCanonicalMessageId(message: InboxMessage): string {
-  const messageId = typeof message.messageId === 'string' ? message.messageId.trim() : '';
-  if (messageId.length > 0) {
-    return messageId;
-  }
-  throw new Error('Canonical team message is missing effective messageId');
 }
 
 interface EligibleTaskCommentNotification {
@@ -410,12 +446,21 @@ export class TeamDataService {
   /** Tracks notified task-start transitions to avoid duplicate lead notifications. */
   private notifiedTaskStarts = new Set<string>();
   private taskCommentNotificationInitialization: Promise<void> | null = null;
+  private taskCommentNotificationProcessInFlight = new Map<string, Promise<void>>();
+  private taskCommentNotificationActiveProcess = new Map<string, string | undefined>();
+  private taskCommentNotificationQueuedProcess = new Map<
+    string,
+    { teamWide: boolean; taskIds: Set<string> }
+  >();
   private taskCommentNotificationInFlight = new Set<string>();
   private taskChangePresenceRepository: TaskChangePresenceRepository | null = null;
   private teamLogSourceTracker: TeamLogSourceTracker | null = null;
   private fileWatchReconcileDiagnostics = new Map<string, FileWatchReconcileDiagnostics>();
   private readonly messageFeedService: TeamMessageFeedService;
   private readonly memberActivityMetaService: MemberActivityMetaService;
+  private readonly notificationContextCache = new Map<string, TeamNotificationContextCacheEntry>();
+  private readonly notificationContextInFlight = new Map<string, InFlightTeamNotificationContext>();
+  private readonly notificationContextGenerationByTeam = new Map<string, number>();
 
   constructor(
     private readonly configReader: TeamConfigReader = new TeamConfigReader(),
@@ -442,9 +487,16 @@ export class TeamDataService {
     ),
     private readonly launchStateStore: TeamLaunchStateStore = new TeamLaunchStateStore()
   ) {
+    const getInboxMessagesWindow =
+      typeof this.inboxReader.getMessagesWindow === 'function'
+        ? (teamName: string, options: Parameters<TeamInboxReader['getMessagesWindow']>[1]) =>
+            this.inboxReader.getMessagesWindow(teamName, options)
+        : undefined;
+
     this.messageFeedService = new TeamMessageFeedService({
       getConfig: (teamName) => this.readSnapshotConfig(teamName),
       getInboxMessages: (teamName) => this.inboxReader.getMessages(teamName),
+      getInboxMessagesWindow,
       getLeadSessionMessages: (teamName, config) => this.extractLeadSessionTexts(teamName, config),
       getSentMessages: (teamName) => this.sentMessagesStore.readMessages(teamName),
     });
@@ -453,6 +505,18 @@ export class TeamDataService {
 
   private readSnapshotConfig(teamName: string): Promise<TeamConfig | null> {
     return readConfigForUiSnapshot(this.configReader, teamName);
+  }
+
+  private getNotificationContextGeneration(teamName: string): number {
+    return this.notificationContextGenerationByTeam.get(teamName) ?? 0;
+  }
+
+  private invalidateNotificationContext(teamName: string): void {
+    this.notificationContextCache.delete(teamName);
+    this.notificationContextGenerationByTeam.set(
+      teamName,
+      this.getNotificationContextGeneration(teamName) + 1
+    );
   }
 
   private async readGlobalTaskTeamInfoFromListTeams(): Promise<Map<string, GlobalTaskTeamInfo>> {
@@ -766,6 +830,27 @@ export class TeamDataService {
       ...(kanbanColumn ? { kanbanColumn } : {}),
       reviewer,
     };
+  }
+
+  async getTask(teamName: string, taskId: string): Promise<TeamTaskWithKanban | null> {
+    const controller = this.getController(teamName);
+    const task = controller.tasks?.getTask?.(taskId) as TeamTask | null | undefined;
+    if (!task) {
+      return null;
+    }
+
+    let kanbanState: KanbanState = {
+      teamName,
+      reviewers: [],
+      tasks: {},
+    };
+    try {
+      kanbanState = await this.kanbanManager.getState(teamName);
+    } catch {
+      // Task detail must still open if kanban state is temporarily unreadable.
+    }
+
+    return this.attachKanbanCompatibility(task, kanbanState.tasks[task.id]);
   }
 
   private resolveTaskKanbanColumn(
@@ -1216,7 +1301,7 @@ export class TeamDataService {
         //
         // Fix: include lightweight comment metadata (id, author, truncated text for toast
         // preview, createdAt, type). Full text and attachments are still omitted — those
-        // are loaded on-demand by the task detail view via team:getData.
+        // are loaded on-demand by the task detail view via team:getTask.
         comments: Array.isArray(task.comments)
           ? task.comments.map((c) => ({
               id: c.id,
@@ -1244,7 +1329,9 @@ export class TeamDataService {
     teamName: string,
     updates: { name?: string; description?: string; color?: string }
   ): Promise<TeamConfig | null> {
-    return this.configReader.updateConfig(teamName, updates);
+    const updated = await this.configReader.updateConfig(teamName, updates);
+    this.invalidateNotificationContext(teamName);
+    return updated;
   }
 
   async deleteTeam(teamName: string): Promise<void> {
@@ -1256,6 +1343,7 @@ export class TeamDataService {
     const configPath = path.join(getTeamsBasePath(), teamName, 'config.json');
     await atomicWriteAsync(configPath, JSON.stringify(config, null, 2));
     await TeamConfigReader.primeConfig(teamName, config);
+    this.invalidateNotificationContext(teamName);
   }
 
   async restoreTeam(teamName: string): Promise<void> {
@@ -1267,12 +1355,14 @@ export class TeamDataService {
     const configPath = path.join(getTeamsBasePath(), teamName, 'config.json');
     await atomicWriteAsync(configPath, JSON.stringify(config, null, 2));
     await TeamConfigReader.primeConfig(teamName, config);
+    this.invalidateNotificationContext(teamName);
   }
 
   async permanentlyDeleteTeam(teamName: string): Promise<void> {
     const teamsDir = path.join(getTeamsBasePath(), teamName);
     await fs.promises.rm(teamsDir, { recursive: true, force: true });
     TeamConfigReader.invalidateTeam(teamName);
+    this.invalidateNotificationContext(teamName);
 
     const tasksDir = path.join(getTasksBasePath(), teamName);
     await fs.promises.rm(tasksDir, { recursive: true, force: true });
@@ -1594,7 +1684,7 @@ export class TeamDataService {
     return {
       teamName,
       config,
-      tasks: tasksWithKanban,
+      tasks: tasksWithKanban.map(compactTeamTaskForSnapshot),
       members,
       kanbanState,
       processes,
@@ -1611,39 +1701,33 @@ export class TeamDataService {
     teamName: string,
     options: { cursor?: string | null; limit: number; liveMessages?: InboxMessage[] }
   ): Promise<MessagesPage> {
-    const feed = await this.messageFeedService.getFeed(teamName);
-    const newestDurableMessages = feed.messages;
-    let messages = newestDurableMessages;
-
-    if (options.cursor) {
-      const [cursorTs, cursorId] = options.cursor.split('|');
-      const cursorMs = Date.parse(cursorTs);
-      messages = messages.filter((m) => {
-        const ms = Date.parse(m.timestamp);
-        if (ms < cursorMs) return true;
-        if (ms > cursorMs) return false;
-        if (!cursorId) return false;
-        return requireCanonicalMessageId(m).localeCompare(cursorId) > 0;
-      });
+    const liveMessages = capMessagesPageLiveOverlay(options.liveMessages);
+    const pageOptions =
+      liveMessages.length > 0
+        ? {
+            ...options,
+            liveMessages,
+          }
+        : {
+            cursor: options.cursor,
+            limit: options.limit,
+          };
+    const page = await this.messageFeedService.getPage(teamName, pageOptions);
+    if (options.cursor || liveMessages.length === 0) {
+      return {
+        messages: page.messages,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+        feedRevision: page.feedRevision,
+      };
     }
 
-    const hasMore = messages.length > options.limit;
-    const page = messages.slice(0, options.limit);
-    const lastMsg = page[page.length - 1];
-    const nextCursor =
-      hasMore && lastMsg ? `${lastMsg.timestamp}|${requireCanonicalMessageId(lastMsg)}` : null;
-
-    if (options.cursor || !options.liveMessages?.length) {
-      return { messages: page, nextCursor, hasMore, feedRevision: feed.feedRevision };
-    }
-
-    // Merge live lead thoughts against the full durable newest-page history so we do not
-    // re-introduce persisted thoughts that have simply paged off the first durable page.
     return mergeLiveLeadProcessMessagesPage({
-      durableMessages: newestDurableMessages,
-      liveMessages: options.liveMessages,
+      durableMessages: page.durableWindowMessages,
+      liveMessages,
       limit: options.limit,
-      feedRevision: feed.feedRevision,
+      feedRevision: page.feedRevision,
+      durableHasMoreAfterWindow: page.durableHasMoreAfterWindow,
     });
   }
 
@@ -2275,7 +2359,7 @@ export class TeamDataService {
   async notifyLeadOnTeammateTaskComment(teamName: string, taskId: string): Promise<void> {
     try {
       await this.waitForTaskCommentNotificationInitialization();
-      await this.processTaskCommentNotifications(teamName, taskId, {
+      await this.runTaskCommentNotificationsCoalesced(teamName, taskId, {
         seedHistoricalIfJournalMissing: true,
         recoverPending: true,
       });
@@ -2519,7 +2603,7 @@ export class TeamDataService {
       for (const team of teams) {
         if (team.deletedAt) continue;
         try {
-          await this.processTaskCommentNotifications(team.teamName, undefined, {
+          await this.runTaskCommentNotificationsCoalesced(team.teamName, undefined, {
             seedHistoricalIfJournalMissing: true,
             recoverPending: true,
             teamContext: {
@@ -2566,6 +2650,87 @@ export class TeamDataService {
 
   private buildTaskCommentNotificationClaimKey(teamName: string, notificationKey: string): string {
     return `${teamName}:${notificationKey}`;
+  }
+
+  private buildTaskCommentNotificationProcessKey(teamName: string): string {
+    return teamName;
+  }
+
+  private queueTaskCommentNotificationProcess(teamName: string, taskId?: string): void {
+    const key = this.buildTaskCommentNotificationProcessKey(teamName);
+    const queued = this.taskCommentNotificationQueuedProcess.get(key) ?? {
+      teamWide: false,
+      taskIds: new Set<string>(),
+    };
+    const normalizedTaskId = taskId?.trim() ?? '';
+    if (!normalizedTaskId) {
+      queued.teamWide = true;
+      queued.taskIds.clear();
+    } else if (!queued.teamWide) {
+      queued.taskIds.add(normalizedTaskId);
+    }
+    this.taskCommentNotificationQueuedProcess.set(key, queued);
+  }
+
+  private consumeTaskCommentNotificationProcessQueue(teamName: string): { taskId?: string } | null {
+    const key = this.buildTaskCommentNotificationProcessKey(teamName);
+    const queued = this.taskCommentNotificationQueuedProcess.get(key);
+    if (!queued) return null;
+    this.taskCommentNotificationQueuedProcess.delete(key);
+    if (queued.teamWide || queued.taskIds.size !== 1) {
+      return {};
+    }
+    const taskId = queued.taskIds.values().next().value;
+    return typeof taskId === 'string' && taskId.length > 0 ? { taskId } : {};
+  }
+
+  private runTaskCommentNotificationsCoalesced(
+    teamName: string,
+    taskId: string | undefined,
+    options: {
+      seedHistoricalIfJournalMissing?: boolean;
+      recoverPending?: boolean;
+      teamContext?: TaskCommentNotificationTeamContext;
+    }
+  ): Promise<void> {
+    const key = this.buildTaskCommentNotificationProcessKey(teamName);
+    const existing = this.taskCommentNotificationProcessInFlight.get(key);
+    if (existing) {
+      const normalizedTaskId = taskId?.trim() || undefined;
+      this.queueTaskCommentNotificationProcess(teamName, normalizedTaskId);
+      return existing;
+    }
+
+    const promise = this.drainTaskCommentNotifications(teamName, taskId, options).finally(() => {
+      if (this.taskCommentNotificationProcessInFlight.get(key) === promise) {
+        this.taskCommentNotificationProcessInFlight.delete(key);
+      }
+      this.taskCommentNotificationActiveProcess.delete(key);
+    });
+    this.taskCommentNotificationProcessInFlight.set(key, promise);
+    return promise;
+  }
+
+  private async drainTaskCommentNotifications(
+    teamName: string,
+    taskId: string | undefined,
+    options: {
+      seedHistoricalIfJournalMissing?: boolean;
+      recoverPending?: boolean;
+      teamContext?: TaskCommentNotificationTeamContext;
+    }
+  ): Promise<void> {
+    const key = this.buildTaskCommentNotificationProcessKey(teamName);
+    let nextTaskId = taskId?.trim() || undefined;
+    while (true) {
+      this.taskCommentNotificationActiveProcess.set(key, nextTaskId);
+      await this.processTaskCommentNotifications(teamName, nextTaskId, options);
+      const queued = this.consumeTaskCommentNotificationProcessQueue(teamName);
+      if (!queued) {
+        return;
+      }
+      nextTaskId = queued.taskId;
+    }
   }
 
   private buildTaskRef(teamName: string, task: Pick<TeamTask, 'id' | 'displayId'>): TaskRef {
@@ -3043,10 +3208,37 @@ export class TeamDataService {
     }
   }
 
-  async getTeamNotificationContext(teamName: string): Promise<{
-    displayName: string;
-    projectPath?: string;
-  }> {
+  async getTeamNotificationContext(teamName: string): Promise<TeamNotificationContext> {
+    const now = Date.now();
+    const generation = this.getNotificationContextGeneration(teamName);
+    const cached = this.notificationContextCache.get(teamName);
+    if (
+      cached &&
+      cached.generation === generation &&
+      now - cached.cachedAt < TEAM_NOTIFICATION_CONTEXT_CACHE_MAX_AGE_MS
+    ) {
+      return cached.value;
+    }
+
+    const existing = this.notificationContextInFlight.get(teamName);
+    if (existing?.generation === generation) {
+      return existing.promise;
+    }
+
+    const promise = this.readTeamNotificationContext(teamName, generation, now).finally(() => {
+      if (this.notificationContextInFlight.get(teamName)?.promise === promise) {
+        this.notificationContextInFlight.delete(teamName);
+      }
+    });
+    this.notificationContextInFlight.set(teamName, { promise, generation });
+    return promise;
+  }
+
+  private async readTeamNotificationContext(
+    teamName: string,
+    generationAtStart: number,
+    now: number
+  ): Promise<TeamNotificationContext> {
     try {
       const config = await this.readSnapshotConfig(teamName);
       const displayName = config?.name?.trim() || teamName;
@@ -3054,9 +3246,27 @@ export class TeamDataService {
         typeof config?.projectPath === 'string' && config.projectPath.trim().length > 0
           ? config.projectPath
           : undefined;
-      return { displayName, projectPath };
+      const value: TeamNotificationContext = projectPath
+        ? { displayName, projectPath }
+        : { displayName };
+      if (this.getNotificationContextGeneration(teamName) === generationAtStart) {
+        this.notificationContextCache.set(teamName, {
+          value,
+          cachedAt: now,
+          generation: generationAtStart,
+        });
+      }
+      return value;
     } catch {
-      return { displayName: teamName };
+      const value = { displayName: teamName };
+      if (this.getNotificationContextGeneration(teamName) === generationAtStart) {
+        this.notificationContextCache.set(teamName, {
+          value,
+          cachedAt: now,
+          generation: generationAtStart,
+        });
+      }
+      return value;
     }
   }
 

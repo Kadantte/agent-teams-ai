@@ -8,7 +8,9 @@ import type { InboxMessage } from '@shared/types';
 
 const MAX_VISIBLE_ACTIVITY_MESSAGES_TO_CONSIDER = 160;
 const MAX_VISIBLE_ACTIVITY_ENTRIES = 24;
+const MAX_VISIBLE_ACTIVITY_TEAM_WINDOW_MESSAGES = MAX_VISIBLE_ACTIVITY_MESSAGES_TO_CONSIDER * 8;
 const TEAM_MESSAGES_CACHE_TTL_MS = 1_500;
+const TEAM_MESSAGES_CACHE_MAX_TEAMS = 20;
 const HIDDEN_ACTIVITY_BLOCK_TAGS = [
   'info_for_agent',
   'opencode_runtime_identity',
@@ -18,6 +20,10 @@ const HIDDEN_ACTIVITY_BLOCK_TAGS = [
 
 export interface OpenCodeVisibleActivityInboxReader {
   getMessages(teamName: string): Promise<InboxMessage[]>;
+  getMessagesWindow?(
+    teamName: string,
+    options: { cursor?: null; limit: number }
+  ): Promise<{ messages: InboxMessage[] }>;
 }
 
 export interface OpenCodeMemberVisibleActivityEntry {
@@ -82,13 +88,23 @@ export class OpenCodeMemberVisibleActivityReader {
       }
     }
 
-    const promise = this.inboxReader
-      .getMessages(teamName)
+    const loadMessages = this.inboxReader.getMessagesWindow
+      ? this.inboxReader
+          .getMessagesWindow(teamName, {
+            cursor: null,
+            limit: MAX_VISIBLE_ACTIVITY_TEAM_WINDOW_MESSAGES,
+          })
+          .then((window) => window.messages)
+      : this.inboxReader.getMessages(teamName);
+
+    const promise = loadMessages
       .then((messages) => {
+        this.deleteExpiredCacheEntries();
         this.teamMessagesCache.set(cacheKey, {
           expiresAt: Date.now() + TEAM_MESSAGES_CACHE_TTL_MS,
           messages,
         });
+        this.trimCache();
         return messages;
       })
       .finally(() => {
@@ -96,6 +112,25 @@ export class OpenCodeMemberVisibleActivityReader {
       });
     this.teamMessagesInFlight.set(cacheKey, promise);
     return promise;
+  }
+
+  private deleteExpiredCacheEntries(): void {
+    const now = Date.now();
+    for (const [key, cached] of this.teamMessagesCache) {
+      if (cached.expiresAt <= now) {
+        this.teamMessagesCache.delete(key);
+      }
+    }
+  }
+
+  private trimCache(): void {
+    while (this.teamMessagesCache.size > TEAM_MESSAGES_CACHE_MAX_TEAMS) {
+      const oldestKey = this.teamMessagesCache.keys().next().value;
+      if (oldestKey === undefined) {
+        return;
+      }
+      this.teamMessagesCache.delete(oldestKey);
+    }
   }
 }
 

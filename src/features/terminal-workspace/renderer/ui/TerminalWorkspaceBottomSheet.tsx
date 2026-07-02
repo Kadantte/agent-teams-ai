@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Sheet, type SheetContext } from 'react-modal-sheet';
 
+import { useAppTranslation } from '@features/localization/renderer';
 import { Button } from '@renderer/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip';
 import { HEADER_ROW1_HEIGHT } from '@renderer/constants/layout';
@@ -166,6 +167,7 @@ export const TerminalWorkspaceBottomSheet = ({
   getBootstrap,
   stopTeamRuntime,
 }: TerminalWorkspaceBottomSheetProps): React.JSX.Element | null => {
+  const { t } = useAppTranslation('team');
   const sheetApiRef = useRef<SheetContext | null>(null);
   const [mountHeight, setMountHeight] = useState(0);
   const [snapIndex, setSnapIndex] = useState(TERMINAL_SHEET_OPEN_SNAP_INDEX);
@@ -287,7 +289,13 @@ export const TerminalWorkspaceBottomSheet = ({
   const toggleExpanded = useCallback((): void => {
     snapTo(expanded ? TERMINAL_SHEET_PREVIEW_SNAP_INDEX : TERMINAL_SHEET_FULL_SNAP_INDEX);
   }, [expanded, snapTo]);
-  const expansionActionLabel = expanded ? 'Restore half-height sheet' : 'Expand terminal sheet';
+  const expansionActionLabel = expanded
+    ? t('terminalWorkspace.restoreHalfHeightSheet')
+    : t('terminalWorkspace.expandTerminalSheet');
+  const settingsActionLabel = settingsOpen
+    ? t('terminalWorkspace.closeTerminalSettings')
+    : t('terminalWorkspace.openTerminalSettings');
+  const closeSheetLabel = t('terminalWorkspace.closeTerminalSheet');
   const controlledSheetY =
     dragY ?? resolveSheetYForSnap(normalizedSnapIndex, snapPoints, mountHeight);
   const handleDragPointerDown = useCallback(
@@ -413,7 +421,11 @@ export const TerminalWorkspaceBottomSheet = ({
                   'mb-5 size-1.5 shrink-0 rounded-full',
                   isTeamAlive ? 'bg-emerald-400' : 'bg-sky-400',
                 ].join(' ')}
-                title={isTeamAlive ? 'Team runtime' : 'Local shell'}
+                title={
+                  isTeamAlive
+                    ? t('terminalWorkspace.teamRuntime')
+                    : t('terminalWorkspace.localShell')
+                }
               />
 
               <div
@@ -436,16 +448,14 @@ export const TerminalWorkspaceBottomSheet = ({
                           ? 'bg-[var(--color-surface-raised)] text-[var(--color-text)]'
                           : '',
                       ].join(' ')}
-                      aria-label={settingsOpen ? 'Show terminal console' : 'Show terminal settings'}
+                      aria-label={settingsActionLabel}
                       aria-pressed={settingsOpen}
                       onClick={() => setSettingsOpen((value) => !value)}
                     >
                       <Settings2 size={15} />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="top">
-                    {settingsOpen ? 'Show terminal console' : 'Show terminal settings'}
-                  </TooltipContent>
+                  <TooltipContent side="top">{settingsActionLabel}</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -469,13 +479,13 @@ export const TerminalWorkspaceBottomSheet = ({
                       variant="ghost"
                       size="sm"
                       className="size-7 p-0 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-text)]"
-                      aria-label="Close terminal sheet"
+                      aria-label={closeSheetLabel}
                       onClick={() => onOpenChange(false)}
                     >
                       <X size={15} />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="top">Close terminal sheet</TooltipContent>
+                  <TooltipContent side="top">{closeSheetLabel}</TooltipContent>
                 </Tooltip>
               </div>
             </div>
@@ -501,6 +511,7 @@ export const TerminalWorkspaceBottomSheet = ({
                 isTeamAlive={isTeamAlive}
                 surface="sheet"
                 settingsOpen={settingsOpen}
+                onSettingsOpenChange={setSettingsOpen}
                 terminalHeightClassName="h-full min-h-0 flex-1"
                 tabsPortalElement={headerTabsElement}
                 getBootstrap={getBootstrap}

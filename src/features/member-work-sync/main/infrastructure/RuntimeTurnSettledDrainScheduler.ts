@@ -20,7 +20,7 @@ export class RuntimeTurnSettledDrainScheduler {
   private readonly intervalMs: number;
   private readonly drainTimeoutMs: number;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private running = false;
+  private activeDrain: Promise<RuntimeTurnSettledDrainSummary> | null = null;
   private disposed = false;
 
   constructor(private readonly deps: RuntimeTurnSettledDrainSchedulerDeps) {
@@ -39,20 +39,35 @@ export class RuntimeTurnSettledDrainScheduler {
   }
 
   async drainNow(): Promise<RuntimeTurnSettledDrainSummary | null> {
-    if (this.running || this.disposed) {
+    if (this.activeDrain || this.disposed) {
       return null;
     }
 
-    this.running = true;
+    const drain = Promise.resolve().then(() => this.deps.drain());
+
+    let timedOut = false;
+    this.activeDrain = drain;
+    void drain
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.activeDrain === drain) {
+          this.activeDrain = null;
+        }
+      });
+
     try {
-      return await this.runDrainWithTimeout();
+      return await this.runDrainWithTimeout(drain, () => {
+        timedOut = true;
+      });
     } catch (error) {
       this.deps.logger?.warn('runtime turn settled scheduled drain failed', {
         error: String(error),
       });
       return null;
     } finally {
-      this.running = false;
+      if (!timedOut && this.activeDrain === drain) {
+        this.activeDrain = null;
+      }
     }
   }
 
@@ -75,13 +90,17 @@ export class RuntimeTurnSettledDrainScheduler {
     unrefTimer(this.timer);
   }
 
-  private async runDrainWithTimeout(): Promise<RuntimeTurnSettledDrainSummary> {
+  private async runDrainWithTimeout(
+    drain: Promise<RuntimeTurnSettledDrainSummary>,
+    onTimeout: () => void
+  ): Promise<RuntimeTurnSettledDrainSummary> {
     let timeout: ReturnType<typeof setTimeout> | null = null;
     try {
       return await Promise.race([
-        this.deps.drain(),
+        drain,
         new Promise<never>((_, reject) => {
           timeout = setTimeout(() => {
+            onTimeout();
             reject(
               new Error(`runtime turn settled drain timed out after ${this.drainTimeoutMs}ms`)
             );

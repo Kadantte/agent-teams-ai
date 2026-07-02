@@ -9,6 +9,7 @@ import { type RuntimeProcessTableRow } from '@features/tmux-installer/main';
 import { applyAgentTeamsIdentityEnv } from '@main/services/identity/AgentTeamsIdentityStore';
 import { atomicWriteAsync } from '@main/utils/atomicWrite';
 import { killProcessTree, spawnCli, untrackCliProcess } from '@main/utils/childProcess';
+import { ensureMinimumNodeOldSpaceEnv } from '@main/utils/nodeOptions';
 import { getAppDataPath, getClaudeBasePath } from '@main/utils/pathDecoder';
 import { killProcessByPid } from '@main/utils/processKill';
 import { createLogger } from '@shared/utils/logger';
@@ -19,7 +20,7 @@ import { type McpLaunchSpec, resolveAgentTeamsMcpLaunchSpec } from './TeamMcpCon
 const logger = createLogger('Service:AgentTeamsMcpHttpServer');
 const MCP_HTTP_HOST = '127.0.0.1';
 const MCP_HTTP_ENDPOINT = '/mcp';
-const MCP_HTTP_READY_TIMEOUT_MS = 10_000;
+const MCP_HTTP_READY_TIMEOUT_MS = 20_000;
 const MCP_HTTP_EXISTING_HANDLE_READY_TIMEOUT_MS = 3_000;
 const MCP_HTTP_READY_POLL_MS = 100;
 const MCP_HTTP_PORT_RELEASE_TIMEOUT_MS = 3_000;
@@ -1111,6 +1112,7 @@ export class AgentTeamsMcpHttpServer {
       [MCP_HTTP_LAUNCH_SPEC_HASH_ENV]: expectedIdentity.launchSpecHash,
       [MCP_HTTP_OWNER_INSTANCE_ID_ENV]: expectedIdentity.ownerInstanceId,
     });
+    ensureMinimumNodeOldSpaceEnv(childEnv);
     const child = spawnProcess(launchSpec.command, args, childEnv);
 
     const clearIfCurrent = (): void => {

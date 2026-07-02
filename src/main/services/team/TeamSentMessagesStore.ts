@@ -135,7 +135,7 @@ export class TeamSentMessagesStore {
       });
     }
 
-    return messages;
+    return messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages;
   }
 
   async appendMessage(teamName: string, message: InboxMessage): Promise<void> {

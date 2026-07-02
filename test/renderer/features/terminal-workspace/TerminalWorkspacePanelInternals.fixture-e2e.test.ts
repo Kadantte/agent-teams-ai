@@ -1,20 +1,21 @@
-import { describe, expect, it } from 'vitest';
-
 import {
+  closeSupersededTerminalCommandRuns,
   formatTerminalPromptLabel,
   formatWorkingDirectory,
   inferTerminalCommandCompletion,
   inferTerminalCommandOutputStatus,
   normalizeTerminalCommandRunEventDetail,
+  resolveTerminalLocalAutocompleteSuggestion,
   settleTerminalCommandRuns,
   type TerminalCommandRunPresentation,
   upsertTerminalCommandRun,
 } from '@features/terminal-workspace/renderer/ui/TerminalWorkspacePanel';
+import { describe, expect, it } from 'vitest';
 
 describe('terminal workspace panel internals fixture-e2e', () => {
   it('formats working directories for compact terminal chrome', () => {
-    expect(formatWorkingDirectory(null)).toBe('Shell default directory');
-    expect(formatWorkingDirectory('   ')).toBe('Shell default directory');
+    expect(formatWorkingDirectory(null, 'Shell default directory')).toBe('Shell default directory');
+    expect(formatWorkingDirectory('   ', 'Shell default directory')).toBe('Shell default directory');
     expect(formatWorkingDirectory('/Users/belief/dev/projects/claude_team///')).toBe(
       '~/dev/projects/claude_team'
     );
@@ -23,8 +24,75 @@ describe('terminal workspace panel internals fixture-e2e', () => {
   });
 
   it('uses a readable local-shell prompt when no cwd is available', () => {
-    expect(formatTerminalPromptLabel(null)).toBe('local shell');
+    expect(formatTerminalPromptLabel(null, 'local shell')).toBe('local shell');
     expect(formatTerminalPromptLabel('/Users/belief/dev/quanta')).toBe('~/dev/quanta');
+  });
+
+  it('suggests a local-history autocomplete suffix from recent command prefixes', () => {
+    expect(
+      resolveTerminalLocalAutocompleteSuggestion({
+        candidates: [
+          { command: 'pnpm test', status: 'succeeded' },
+          { command: 'pnpm typecheck', status: 'succeeded', startedAtMs: 1000 },
+        ],
+        draft: 'pnpm t',
+      })
+    ).toBe('pnpm typecheck');
+  });
+
+  it('prefers successful same-pane autocomplete candidates over failed commands', () => {
+    expect(
+      resolveTerminalLocalAutocompleteSuggestion({
+        candidates: [
+          {
+            command: 'pnpm test --broken',
+            paneId: 'pane-1',
+            sessionId: 'session-1',
+            startedAtMs: 5000,
+            status: 'failed',
+          },
+          {
+            command: 'pnpm test --filter renderer',
+            paneId: 'pane-1',
+            sessionId: 'session-1',
+            startedAtMs: 1000,
+            status: 'succeeded',
+          },
+        ],
+        draft: 'pnpm test --',
+        paneId: 'pane-1',
+        sessionId: 'session-1',
+      })
+    ).toBe('pnpm test --filter renderer');
+  });
+
+  it('keeps autocomplete quiet for dismissed, exact, multiline, and unrelated drafts', () => {
+    const candidates = [{ command: 'pnpm typecheck', status: 'succeeded' as const }];
+
+    expect(
+      resolveTerminalLocalAutocompleteSuggestion({
+        candidates,
+        dismissedDraft: 'pnpm t',
+        draft: 'pnpm t',
+      })
+    ).toBeNull();
+    expect(
+      resolveTerminalLocalAutocompleteSuggestion({ candidates, draft: 'pnpm typecheck' })
+    ).toBeNull();
+    expect(resolveTerminalLocalAutocompleteSuggestion({ candidates, draft: 'pnpm\n' })).toBeNull();
+    expect(resolveTerminalLocalAutocompleteSuggestion({ candidates, draft: 'git' })).toBeNull();
+  });
+
+  it('does not aggressively suggest dangerous shell commands from short prefixes', () => {
+    const candidates = [
+      { command: 'rm -rf ./dist', status: 'succeeded' as const },
+      { command: 'git reset --hard HEAD~1', status: 'succeeded' as const },
+    ];
+
+    expect(resolveTerminalLocalAutocompleteSuggestion({ candidates, draft: 'rm' })).toBeNull();
+    expect(resolveTerminalLocalAutocompleteSuggestion({ candidates, draft: 'git reset' })).toBe(
+      'git reset --hard HEAD~1'
+    );
   });
 
   it('normalizes command lifecycle events from the command dock', () => {
@@ -108,6 +176,39 @@ describe('terminal workspace panel internals fixture-e2e', () => {
       status: 'running',
     });
     expect(appended[0]?.clientEventId).toBe('event-3');
+  });
+
+  it('caps command presentation metadata per pane during busy multi-tab sessions', () => {
+    let runs = [
+      createRun({
+        clientEventId: 'build-command',
+        command: 'pnpm build',
+        paneId: 'pane-build',
+      }),
+    ];
+
+    for (let index = 0; index < 96; index += 1) {
+      runs = upsertTerminalCommandRun(
+        runs,
+        createRun({
+          clientEventId: `test-command-${index}`,
+          command: `printf TEST_${index}\\n`,
+          paneId: 'pane-tests',
+          startedAtMs: 20_000 + index,
+        }),
+        'running'
+      );
+    }
+
+    expect(runs.find((run) => run.clientEventId === 'build-command')).toMatchObject({
+      command: 'pnpm build',
+      paneId: 'pane-build',
+    });
+    expect(runs.filter((run) => run.paneId === 'pane-tests')).toHaveLength(80);
+    expect(runs.find((run) => run.clientEventId === 'test-command-15')).toBeUndefined();
+    expect(runs.find((run) => run.clientEventId === 'test-command-16')).toMatchObject({
+      command: 'printf TEST_16\\n',
+    });
   });
 
   it('settles a running command as succeeded when output appears before the next prompt', () => {
@@ -198,6 +299,101 @@ describe('terminal workspace panel internals fixture-e2e', () => {
     });
   });
 
+  it('settles long wrapped commands using terminal emulator fragments', () => {
+    const command =
+      "printf 'TP_LONG_1781452725001_%s\\n' 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'";
+    const next = settleTerminalCommandRuns(
+      [createRun({ command, startedAtMs: 1000 })],
+      [
+        "(venv312) shell % printf 'TP_LONG_",
+        "<                      1781452725001_%s\\n' 'abcdefghijklmnop",
+        "<                      abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'",
+        'TP_LONG_1781452725001_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+        'shell %',
+      ],
+      1844,
+      false
+    );
+
+    expect(next[0]).toMatchObject({
+      durationMs: 844,
+      status: 'succeeded',
+    });
+  });
+
+  it('marks visible shell failures as failed before the next prompt is visible', () => {
+    const next = settleTerminalCommandRuns(
+      [createRun({ command: 'ls __tp_missing_1781452725003', startedAtMs: 1000 })],
+      [
+        '(venv312) shell % ls __tp_missing_',
+        '<                      1781452725003',
+        'ls: __tp_missing_1781452725003: No such file or directory',
+      ],
+      2285,
+      false
+    );
+
+    expect(next[0]).toMatchObject({
+      durationMs: 1285,
+      status: 'failed',
+    });
+  });
+
+  it('promotes unknown wrapped shell failures after stderr appears', () => {
+    const next = settleTerminalCommandRuns(
+      [
+        createRun({
+          command: 'ls __tp_missing_verify_1781453698049',
+          durationMs: 1210,
+          status: 'unknown',
+        }),
+      ],
+      [
+        '(venv312) shell % ls __tp_missing_verify_',
+        '<                      1781453698049',
+        'ls: __tp_missing_verify_1781453698049: No such file or directory',
+        'shell %',
+      ],
+      2400,
+      true
+    );
+
+    expect(next[0]).toMatchObject({
+      durationMs: 1210,
+      status: 'failed',
+    });
+  });
+
+  it('closes superseded running commands with a duration when a new command starts', () => {
+    const running = createRun({
+      command:
+        'echo TP_LONG_VERIFY_1781454013183_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      startedAtMs: 1000,
+      status: 'running',
+    });
+    const nextRun = createRun({
+      clientEventId: 'event-next',
+      command: 'sleep 0.4; echo TP_TIMING_VERIFY_1781454013184',
+      startedAtMs: 2600,
+      status: 'running',
+    });
+
+    const next = closeSupersededTerminalCommandRuns(
+      [running],
+      nextRun,
+      [
+        '<                      23456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+        'TP_LONG_VERIFY_1781454013183_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      ],
+      2600
+    );
+
+    expect(next[0]).toMatchObject({
+      durationMs: 1600,
+      status: 'unknown',
+    });
+  });
+
   it('does not complete a command until the next prompt boundary is visible', () => {
     expect(
       inferTerminalCommandCompletion(['shell % pnpm test', 'still running'], 'pnpm test')
@@ -211,7 +407,92 @@ describe('terminal workspace panel internals fixture-e2e', () => {
     expect(inferTerminalCommandOutputStatus(['zsh: command not found: nope'])).toBe('failed');
     expect(inferTerminalCommandOutputStatus(['fatal: not a git repository'])).toBe('failed');
     expect(inferTerminalCommandOutputStatus(['permission denied'])).toBe('failed');
+    expect(inferTerminalCommandOutputStatus(['ls: nope: No such file or directory'])).toBe(
+      'failed'
+    );
     expect(inferTerminalCommandOutputStatus(['all good'])).toBe('succeeded');
+  });
+
+  it('infers failed status from common process and package-manager failures', () => {
+    expect(inferTerminalCommandOutputStatus(['Command exited with code 1'])).toBe('failed');
+    expect(inferTerminalCommandOutputStatus(['process exit status 2'])).toBe('failed');
+    expect(inferTerminalCommandOutputStatus(['npm ERR! missing script: build'])).toBe('failed');
+    expect(inferTerminalCommandOutputStatus(['pnpm ERR! test failed'])).toBe('failed');
+    expect(
+      inferTerminalCommandOutputStatus([
+        'Traceback (most recent call last):',
+        'ValueError: fixture failed',
+      ])
+    ).toBe('failed');
+  });
+
+  it('does not treat successful output mentioning zero failures as an error', () => {
+    expect(inferTerminalCommandOutputStatus(['Tests: 0 failed, 42 passed'])).toBe('succeeded');
+    expect(inferTerminalCommandOutputStatus(['exit code 0'])).toBe('succeeded');
+  });
+
+  it('keeps quoted shell continuation prompts inside output rather than mixing commands', () => {
+    expect(
+      inferTerminalCommandCompletion(
+        [
+          'shell % printf "TP_QUOTE',
+          'dquote> _OK\\n"',
+          'TP_QUOTE_OK',
+          'shell %',
+          'shell % echo next',
+        ],
+        'printf "TP_QUOTE'
+      )
+    ).toEqual({
+      completed: true,
+      outputLines: ['dquote> _OK\\n"', 'TP_QUOTE_OK'],
+    });
+  });
+
+  it('keeps the latest repeated command running when an older identical command completed', () => {
+    expect(
+      inferTerminalCommandCompletion(
+        [
+          'shell % pnpm test',
+          'old run passed',
+          'shell %',
+          'shell % pnpm test',
+          'new run still streaming',
+        ],
+        'pnpm test'
+      )
+    ).toEqual({
+      completed: false,
+      outputLines: [],
+    });
+  });
+
+  it('settles the latest repeated command using only its latest output block', () => {
+    expect(
+      inferTerminalCommandCompletion(
+        [
+          'shell % pnpm test',
+          'old run passed',
+          'shell %',
+          'shell % pnpm test',
+          'pnpm ERR! latest run failed',
+          'shell %',
+        ],
+        'pnpm test'
+      )
+    ).toEqual({
+      completed: true,
+      outputLines: ['pnpm ERR! latest run failed'],
+    });
+  });
+
+  it('infers ANSI-colored terminal errors as failures', () => {
+    expect(
+      inferTerminalCommandOutputStatus(['\u001b[31mfatal:\u001b[0m not a git repository'])
+    ).toBe('failed');
+    expect(inferTerminalCommandOutputStatus(['\u001b[1;31mError:\u001b[0m build failed'])).toBe(
+      'failed'
+    );
   });
 });
 

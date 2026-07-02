@@ -28,7 +28,7 @@ import {
   computeTaskChangePresenceProjectFingerprint,
   normalizeTaskChangePresenceFilePath,
 } from './taskChangePresenceUtils';
-import { getTaskChangeWorkerClient } from './TaskChangeWorkerClient';
+import { getTaskChangeWorkerClient, isTaskChangeWorkerFatalError } from './TaskChangeWorkerClient';
 import {
   type ResolvedTaskChangeComputeInput,
   type TaskChangeEffectiveOptions,
@@ -110,6 +110,16 @@ interface TaskChangeSummaryCacheEntry {
   expiresAt: number;
 }
 
+interface TaskChangeRequestOptions {
+  owner?: string;
+  status?: string;
+  intervals?: { startedAt: string; completedAt?: string }[];
+  since?: string;
+  stateBucket?: TaskChangeStateBucket;
+  summaryOnly?: boolean;
+  forceFresh?: boolean;
+}
+
 interface LogFileRef {
   filePath: string;
   memberName: string;
@@ -153,6 +163,7 @@ interface OpenCodeDeliveryContextPayload {
 export class ChangeExtractorService {
   private cache = new Map<string, CacheEntry>();
   private taskChangeSummaryCache = new Map<string, TaskChangeSummaryCacheEntry>();
+  private taskChangeSummaryEarlyInFlight = new Map<string, Promise<TaskChangeSetV2>>();
   private taskChangeSummaryInFlight = new Map<string, Promise<TaskChangeSetV2>>();
   private taskChangeSummaryVersionByTask = new Map<string, number>();
   private taskChangeSummaryValidationInFlight = new Set<string>();
@@ -227,15 +238,35 @@ export class ChangeExtractorService {
   async getTaskChanges(
     teamName: string,
     taskId: string,
-    options?: {
-      owner?: string;
-      status?: string;
-      intervals?: { startedAt: string; completedAt?: string }[];
-      since?: string;
-      stateBucket?: TaskChangeStateBucket;
-      summaryOnly?: boolean;
-      forceFresh?: boolean;
+    options?: TaskChangeRequestOptions
+  ): Promise<TaskChangeSetV2> {
+    const includeDetails = options?.summaryOnly !== true;
+    if (!includeDetails && options?.forceFresh !== true) {
+      const earlyInFlightKey = this.buildEarlyTaskChangeSummaryInFlightKey(
+        teamName,
+        taskId,
+        options
+      );
+      const existing = this.taskChangeSummaryEarlyInFlight.get(earlyInFlightKey);
+      if (existing) {
+        return existing;
+      }
+      const promise = this.getTaskChangesResolved(teamName, taskId, options).finally(() => {
+        if (this.taskChangeSummaryEarlyInFlight.get(earlyInFlightKey) === promise) {
+          this.taskChangeSummaryEarlyInFlight.delete(earlyInFlightKey);
+        }
+      });
+      this.taskChangeSummaryEarlyInFlight.set(earlyInFlightKey, promise);
+      return promise;
     }
+
+    return this.getTaskChangesResolved(teamName, taskId, options);
+  }
+
+  private async getTaskChangesResolved(
+    teamName: string,
+    taskId: string,
+    options?: TaskChangeRequestOptions
   ): Promise<TaskChangeSetV2> {
     const initialVersion = this.getTaskChangeSummaryVersion(teamName, taskId);
     const includeDetails = options?.summaryOnly !== true;
@@ -321,6 +352,12 @@ export class ChangeExtractorService {
       effectiveStateBucket,
       version
     );
+    const inFlightKey = this.buildTaskChangeSummaryInFlightKey(
+      teamName,
+      taskId,
+      cacheOptions,
+      effectiveStateBucket
+    );
 
     if (options?.forceFresh !== true) {
       const cached = this.taskChangeSummaryCache.get(cacheKey);
@@ -336,7 +373,7 @@ export class ChangeExtractorService {
       }
       this.taskChangeSummaryCache.delete(cacheKey);
 
-      const inFlight = this.taskChangeSummaryInFlight.get(cacheKey);
+      const inFlight = this.taskChangeSummaryInFlight.get(inFlightKey);
       if (inFlight) {
         return inFlight;
       }
@@ -361,7 +398,8 @@ export class ChangeExtractorService {
       }
     }
 
-    const promise = this.computeTaskChangesPreferred({ ...resolvedInput, includeDetails: false })
+    const promise = Promise.resolve()
+      .then(() => this.computeTaskChangesPreferred({ ...resolvedInput, includeDetails: false }))
       .then(async (result) => {
         if (this.getTaskChangeSummaryVersion(teamName, taskId) !== version) {
           return result;
@@ -380,10 +418,12 @@ export class ChangeExtractorService {
         return result;
       })
       .finally(() => {
-        this.taskChangeSummaryInFlight.delete(cacheKey);
+        if (this.taskChangeSummaryInFlight.get(inFlightKey) === promise) {
+          this.taskChangeSummaryInFlight.delete(inFlightKey);
+        }
       });
 
-    this.taskChangeSummaryInFlight.set(cacheKey, promise);
+    this.taskChangeSummaryInFlight.set(inFlightKey, promise);
     return promise;
   }
 
@@ -493,11 +533,6 @@ export class ChangeExtractorService {
             this.taskChangeSummaryCache.delete(key);
           }
         }
-        for (const key of [...this.taskChangeSummaryInFlight.keys()]) {
-          if (this.isTaskChangeSummaryCacheKeyForTask(key, teamName, taskId)) {
-            this.taskChangeSummaryInFlight.delete(key);
-          }
-        }
         if (options?.deletePersisted !== false && this.isPersistedTaskChangeCacheEnabled) {
           await this.taskChangeSummaryRepository.delete(teamName, taskId);
         }
@@ -521,6 +556,12 @@ export class ChangeExtractorService {
         `Task change worker returned malformed result for ${input.teamName}/${input.taskId}; falling back inline.`
       );
     } catch (error) {
+      if (isTaskChangeWorkerFatalError(error)) {
+        logger.warn(
+          `Task change worker fatal failure for ${input.teamName}/${input.taskId}; skipping inline fallback: ${error instanceof Error ? error.message : String(error)}`
+        );
+        throw error;
+      }
       logger.warn(
         `Task change worker failed for ${input.teamName}/${input.taskId}: ${error instanceof Error ? error.message : String(error)}`
       );
@@ -1274,6 +1315,33 @@ export class ChangeExtractorService {
     version: number
   ): string {
     return `${teamName}:${taskId}:v${version}:${this.buildTaskSignature(options, stateBucket)}`;
+  }
+
+  private buildEarlyTaskChangeSummaryInFlightKey(
+    teamName: string,
+    taskId: string,
+    options?: TaskChangeRequestOptions
+  ): string {
+    const owner = typeof options?.owner === 'string' ? options.owner.trim() : '';
+    const status = typeof options?.status === 'string' ? options.status.trim() : '';
+    const since = typeof options?.since === 'string' ? options.since : '';
+    const stateBucket = options?.stateBucket ?? '';
+    const intervals = Array.isArray(options?.intervals)
+      ? options.intervals.map((interval) => ({
+          startedAt: interval.startedAt,
+          completedAt: interval.completedAt ?? '',
+        }))
+      : [];
+    return `${teamName}:${taskId}:${JSON.stringify({ owner, status, since, stateBucket, intervals })}`;
+  }
+
+  private buildTaskChangeSummaryInFlightKey(
+    teamName: string,
+    taskId: string,
+    options: TaskChangeEffectiveOptions,
+    stateBucket: TaskChangeStateBucket
+  ): string {
+    return `${teamName}:${taskId}:${this.buildTaskSignature(options, stateBucket)}`;
   }
 
   private normalizeFilePathKey(filePath: string): string {

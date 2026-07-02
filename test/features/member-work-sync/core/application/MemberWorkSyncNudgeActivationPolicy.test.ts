@@ -414,6 +414,157 @@ describe('MemberWorkSyncNudgeActivationPolicy', () => {
     ).toEqual({ active: false, reason: 'blocking_metrics' });
   });
 
+  it('activates Codex task protocol repair after a settled native turn despite blocking metrics', () => {
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: nativeStaleInProgressStatus({
+          diagnostics: [
+            'no_current_report',
+            'runtime_stall:same_agenda_still_needs_sync',
+            'runtime_stall:trigger=turn_settled',
+          ],
+          shadow: {
+            reconciledBy: 'queue',
+            wouldNudge: true,
+            fingerprintChanged: false,
+            triggerReasons: ['turn_settled'],
+          },
+        }),
+        metrics: staleMetrics({
+          generatedAt: '2026-05-06T00:01:00.000Z',
+        }),
+      })
+    ).toEqual({ active: true, reason: 'native_task_protocol_repair' });
+  });
+
+  it('does not activate Codex task protocol repair before the worker turn settles', () => {
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: nativeStaleInProgressStatus({
+          shadow: {
+            reconciledBy: 'queue',
+            wouldNudge: true,
+            fingerprintChanged: false,
+            triggerReasons: ['runtime_activity', 'task_changed'],
+          },
+        }),
+        metrics: staleMetrics({
+          generatedAt: '2026-05-06T00:01:00.000Z',
+        }),
+      })
+    ).toEqual({ active: false, reason: 'blocking_metrics' });
+  });
+
+  it('does not use Codex task protocol repair for lead, OpenCode, or non-Codex native providers', () => {
+    const repairReady = nativeStaleInProgressStatus({
+      diagnostics: [
+        'no_current_report',
+        'runtime_stall:same_agenda_still_needs_sync',
+        'runtime_stall:trigger=turn_settled',
+      ],
+      shadow: {
+        reconciledBy: 'queue',
+        wouldNudge: true,
+        fingerprintChanged: false,
+        triggerReasons: ['turn_settled'],
+      },
+    });
+    const earlyBlockingMetrics = staleMetrics({
+      generatedAt: '2026-05-06T00:01:00.000Z',
+    });
+
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: { ...repairReady, memberName: 'team-lead' },
+        metrics: earlyBlockingMetrics,
+      })
+    ).toEqual({ active: true, reason: 'lead_targeted_shadow_collecting' });
+
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: { ...repairReady, providerId: 'opencode' },
+        metrics: earlyBlockingMetrics,
+      })
+    ).toEqual({ active: true, reason: 'opencode_targeted_shadow_collecting' });
+
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: { ...repairReady, providerId: 'anthropic' },
+        metrics: earlyBlockingMetrics,
+      })
+    ).toEqual({ active: false, reason: 'blocking_metrics' });
+  });
+
+  it('keeps Codex task protocol repair scoped to one owned in-progress work item without an active lease', () => {
+    const base = nativeStaleInProgressStatus({
+      diagnostics: [
+        'no_current_report',
+        'runtime_stall:same_agenda_still_needs_sync',
+        'runtime_stall:trigger=turn_settled',
+      ],
+      shadow: {
+        reconciledBy: 'queue',
+        wouldNudge: true,
+        fingerprintChanged: false,
+        triggerReasons: ['turn_settled'],
+      },
+    });
+    const earlyBlockingMetrics = staleMetrics({
+      generatedAt: '2026-05-06T00:01:00.000Z',
+    });
+    const baseItem = base.agenda.items[0]!;
+
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: {
+          ...base,
+          agenda: {
+            ...base.agenda,
+            items: [baseItem, { ...baseItem, taskId: 'task-2' }],
+          },
+        },
+        metrics: earlyBlockingMetrics,
+      })
+    ).toEqual({ active: false, reason: 'blocking_metrics' });
+
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: {
+          ...base,
+          agenda: {
+            ...base.agenda,
+            items: [
+              {
+                ...baseItem,
+                reason: 'owned_pending_task',
+                evidence: { status: 'pending', owner: 'alice' },
+              },
+            ],
+          },
+        },
+        metrics: earlyBlockingMetrics,
+      })
+    ).toEqual({ active: false, reason: 'blocking_metrics' });
+
+    expect(
+      decideMemberWorkSyncNudgeActivation({
+        status: {
+          ...base,
+          report: {
+            accepted: true,
+            state: 'still_working',
+            agendaFingerprint: base.agenda.fingerprint,
+            memberName: 'alice',
+            teamName: 'team-a',
+            reportedAt: '2026-05-06T00:00:30.000Z',
+            expiresAt: '2026-05-06T00:02:00.000Z',
+          },
+        },
+        metrics: earlyBlockingMetrics,
+      })
+    ).toEqual({ active: false, reason: 'blocking_metrics' });
+  });
+
   it('activates stale native single in-progress recovery despite blocking metrics', () => {
     expect(
       decideMemberWorkSyncNudgeActivation({

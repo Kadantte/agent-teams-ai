@@ -78,7 +78,7 @@ const EDGE_HIT_PRIORITY: Record<GraphEdge['type'], number> = {
   'parent-child': 1,
 };
 
-function getEdgeHitRadius(edgeType: GraphEdge['type']): number {
+function getBaseEdgeHitRadius(edgeType: GraphEdge['type']): number {
   switch (edgeType) {
     case 'parent-child':
       return Math.max(BEAM.parentChild.startW, BEAM.parentChild.endW) * 0.5 + HIT_DETECTION.edgePadding;
@@ -91,6 +91,19 @@ function getEdgeHitRadius(edgeType: GraphEdge['type']): number {
     case 'message':
       return Math.max(BEAM.message.startW, BEAM.message.endW) * 0.5 + HIT_DETECTION.edgePadding;
   }
+
+  const exhaustive: never = edgeType;
+  return exhaustive;
+}
+
+function getEdgeHitRadius(edgeType: GraphEdge['type'], zoom = 1): number {
+  const baseRadius = getBaseEdgeHitRadius(edgeType);
+  if (edgeType !== 'message') {
+    return baseRadius;
+  }
+
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  return Math.max(baseRadius, HIT_DETECTION.messageEdgeMinScreenRadius / safeZoom);
 }
 
 function distanceToSegmentSquared(
@@ -167,14 +180,11 @@ export function collectInteractiveEdgesInViewport(
   edges: GraphEdge[],
   nodeMap: Map<string, GraphNode>,
   bounds: { left: number; top: number; right: number; bottom: number },
+  zoom = 1,
 ): GraphEdge[] {
   const candidates: GraphEdge[] = [];
 
   for (const edge of edges) {
-    if (edge.type !== 'blocking') {
-      continue;
-    }
-
     const source = nodeMap.get(edge.source);
     const target = nodeMap.get(edge.target);
     if (!source || !target) continue;
@@ -185,7 +195,7 @@ export function collectInteractiveEdgesInViewport(
       source.y,
       target.x,
       target.y,
-      getEdgeHitRadius(edge.type) + 24
+      getEdgeHitRadius(edge.type, zoom) + 24
     );
     if (!boundsIntersect(edgeBounds.left, edgeBounds.top, edgeBounds.right, edgeBounds.bottom, bounds)) {
       continue;
@@ -202,6 +212,7 @@ export function findEdgeAt(
   worldY: number,
   edges: GraphEdge[],
   nodeMap: Map<string, GraphNode>,
+  zoom = 1,
 ): string | null {
   let bestHit: { id: string; distanceSquared: number; priority: number } | null = null;
 
@@ -211,7 +222,7 @@ export function findEdgeAt(
     if (!source || !target) continue;
     if (source.x == null || source.y == null || target.x == null || target.y == null) continue;
 
-    const radius = getEdgeHitRadius(edge.type);
+    const radius = getEdgeHitRadius(edge.type, zoom);
     const bounds = getBezierBounds(source.x, source.y, target.x, target.y, radius);
     if (
       worldX < bounds.left ||

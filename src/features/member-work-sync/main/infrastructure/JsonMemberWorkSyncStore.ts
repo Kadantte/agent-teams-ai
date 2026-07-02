@@ -1,7 +1,7 @@
 import { withFileLock } from '@main/services/team/fileLock';
-import { atomicWriteAsync } from '@main/utils/atomicWrite';
+import { atomicWriteAsync, renamePathWithRetry } from '@main/utils/atomicWrite';
 import { createHash } from 'crypto';
-import { mkdir, readdir, readFile, rename } from 'fs/promises';
+import { mkdir, readdir, readFile } from 'fs/promises';
 import { dirname, join } from 'path';
 
 import { assessMemberWorkSyncPhase2Readiness } from '../../core/domain';
@@ -9,6 +9,7 @@ import { assessMemberWorkSyncPhase2Readiness } from '../../core/domain';
 import type {
   MemberWorkSyncMetricEvent,
   MemberWorkSyncOutboxClaimInput,
+  MemberWorkSyncOutboxCountDeliveredForAgendaInput,
   MemberWorkSyncOutboxCountRecentDeliveredInput,
   MemberWorkSyncOutboxEnsureInput,
   MemberWorkSyncOutboxEnsureResult,
@@ -510,7 +511,7 @@ function toMetrics(teamName: string, file: MetricsIndexFile): MemberWorkSyncTeam
 
 async function quarantineFile(filePath: string): Promise<void> {
   try {
-    await rename(filePath, `${filePath}.invalid.${Date.now()}`);
+    await renamePathWithRetry(filePath, `${filePath}.invalid.${Date.now()}`);
   } catch {
     // If quarantine fails, keep the feature degraded but do not block team operation.
   }
@@ -1065,6 +1066,26 @@ export class JsonMemberWorkSyncStore
       });
     }
     return Math.max(indexedCount, memberFileCount);
+  }
+
+  async countDeliveredForAgenda(
+    input: MemberWorkSyncOutboxCountDeliveredForAgendaInput
+  ): Promise<number> {
+    const agendaFingerprint = input.agendaFingerprint.trim();
+    if (!agendaFingerprint) {
+      return 0;
+    }
+
+    const sinceIso = input.sinceIso?.trim();
+    const memberKey = normalizeMemberKey(input.memberName);
+    const memberOutbox = await this.readMemberOutboxFile(input.teamName, input.memberName);
+    return Object.values(memberOutbox.items).filter(
+      (item) =>
+        normalizeMemberKey(item.memberName) === memberKey &&
+        item.status === 'delivered' &&
+        item.agendaFingerprint === agendaFingerprint &&
+        (!sinceIso || item.updatedAt > sinceIso)
+    ).length;
   }
 
   async findDeliveredReviewPickupRequestEventIds(input: {

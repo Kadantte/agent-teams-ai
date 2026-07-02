@@ -26,6 +26,21 @@ import { drawHexagon } from '../canvas/draw-misc';
 import { drawParticles } from '../canvas/draw-particles';
 import { drawProcesses } from '../canvas/draw-processes';
 import { drawColumnHeaders, drawTasks } from '../canvas/draw-tasks';
+import {
+  getGroupFrameLabelBounds,
+  getGroupFrameLabelHorizontalOffsetPx,
+  getGroupFrameLabelPlacement,
+  getGroupFrameLabelScaleZoom,
+  getGroupFrameLabelVerticalOffsetPx,
+  getPaddedGroupFrameBounds,
+  GROUP_FRAME_RENDER_MIN_ZOOM,
+  type GroupFrameBounds,
+  type GroupFrameExtraBoundsByNodeId,
+  type PreparedGroupFrame,
+  prepareGroupFrame,
+  shouldRenderGroupFrameLabel,
+} from '../canvas/group-frames';
+import { hexWithAlpha } from '../canvas/render-cache';
 import { NODE } from '../constants/canvas-constants';
 import { KanbanLayoutEngine } from '../layout/kanbanLayout';
 
@@ -42,12 +57,13 @@ import {
 
 import type { CameraTransform } from '../hooks/useGraphCamera';
 import type { OwnerColumnGroupRect } from '../hooks/useGraphSimulation';
-import type { GraphEdge, GraphNode, GraphParticle } from '../ports/types';
+import type { GraphEdge, GraphGroupFrame, GraphNode, GraphParticle } from '../ports/types';
 
 // ─── Draw State (passed by ref, not by props — no React re-renders) ─────────
 
 export interface GraphDrawState {
   teamName: string;
+  groupFrames: readonly GraphGroupFrame[];
   nodes: GraphNode[];
   edges: GraphEdge[];
   particles: GraphParticle[];
@@ -56,6 +72,7 @@ export interface GraphDrawState {
   camera: CameraTransform;
   selectedNodeId: string | null;
   hoveredNodeId: string | null;
+  hoveredGroupFrameId: string | null;
   selectedEdgeId: string | null;
   hoveredEdgeId: string | null;
   focusNodeIds: ReadonlySet<string> | null;
@@ -276,6 +293,16 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
             zoom,
             focusNodeIds: state.focusNodeIds,
           });
+          drawGroupFrames(ctx, {
+            frames: state.groupFrames,
+            nodeMap,
+            extraBoundsByNodeId: getOwnerColumnFrameBoundsByNodeId(state.ownerColumnGroupRects),
+            zoom,
+            selectedNodeId: state.selectedNodeId,
+            hoveredGroupFrameId: state.hoveredGroupFrameId,
+            focusNodeIds: state.focusNodeIds,
+            time: state.time,
+          });
 
           // 2a. Edges (only those connecting visible nodes) — reuse collections
           const visibleNodeIds = visibleNodeIdsCache.current;
@@ -465,7 +492,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
       <canvas
         ref={canvasRef}
         className="absolute inset-0"
-        style={{ cursor: 'crosshair' }}
+        style={{ cursor: 'grab' }}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
@@ -475,6 +502,208 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
     </div>
   );
 });
+
+function drawGroupFrames(
+  ctx: CanvasRenderingContext2D,
+  args: {
+    frames: readonly GraphGroupFrame[];
+    nodeMap: ReadonlyMap<string, GraphNode>;
+    extraBoundsByNodeId?: GroupFrameExtraBoundsByNodeId;
+    zoom: number;
+    selectedNodeId: string | null;
+    hoveredGroupFrameId: string | null;
+    focusNodeIds: ReadonlySet<string> | null;
+    time: number;
+  }
+): void {
+  if (args.frames.length === 0 || args.zoom < GROUP_FRAME_RENDER_MIN_ZOOM) {
+    return;
+  }
+
+  const preparedFrames = args.frames
+    .map((frame) => prepareGroupFrame(frame, args.nodeMap, args.extraBoundsByNodeId))
+    .filter((frame): frame is PreparedGroupFrame => frame !== null)
+    .sort((left, right) => right.area - left.area);
+
+  for (const prepared of preparedFrames) {
+    drawPreparedGroupFrame(ctx, prepared, args);
+  }
+}
+
+function getOwnerColumnFrameBoundsByNodeId(
+  groups: readonly OwnerColumnGroupRect[]
+): GroupFrameExtraBoundsByNodeId | undefined {
+  if (groups.length === 0) {
+    return undefined;
+  }
+
+  const boundsByNodeId = new Map<string, GroupFrameBounds>();
+  for (const group of groups) {
+    boundsByNodeId.set(group.ownerId, group.rect);
+  }
+  return boundsByNodeId;
+}
+
+interface GroupFrameDrawStyle {
+  alpha: number;
+  strokeWidth: number;
+  dash: number[];
+  fillAlpha: number;
+  strokeAlpha: number;
+}
+
+const GROUP_FRAME_OVERVIEW_ZOOM = 0.08;
+
+function getPreparedGroupFrameDrawStyle(params: {
+  prepared: PreparedGroupFrame;
+  zoom: number;
+  selected: boolean;
+  hovered: boolean;
+  focused: boolean;
+}): GroupFrameDrawStyle {
+  const { prepared, zoom, selected, hovered, focused } = params;
+  const isPrimary = prepared.frame.priority === 'primary';
+  let strokeWidth = 1.15 / zoom;
+  let fillAlpha = 0.035;
+  let strokeAlpha = 0.34;
+  let alpha = 0.5;
+
+  if (isPrimary) {
+    strokeWidth = 1.45 / zoom;
+    fillAlpha = 0.055;
+    strokeAlpha = 0.55;
+    alpha = 0.68;
+  }
+  if (hovered) {
+    strokeWidth = 1.8 / zoom;
+    fillAlpha = 0.065;
+    strokeAlpha = 0.58;
+  }
+  if (selected) {
+    strokeWidth = 2.1 / zoom;
+    fillAlpha = 0.08;
+    strokeAlpha = 0.74;
+  }
+  if (focused) {
+    alpha = 1;
+  }
+
+  if (zoom < GROUP_FRAME_OVERVIEW_ZOOM) {
+    const overviewBoost = Math.min(1, (GROUP_FRAME_OVERVIEW_ZOOM - zoom) / 0.06);
+    alpha = Math.max(alpha, isPrimary ? 0.82 : 0.72);
+    fillAlpha += overviewBoost * (isPrimary ? 0.08 : 0.06);
+    strokeAlpha += overviewBoost * (isPrimary ? 0.24 : 0.18);
+  }
+
+  return {
+    alpha,
+    strokeWidth,
+    dash: isPrimary ? [14 / zoom, 10 / zoom] : [10 / zoom, 10 / zoom],
+    fillAlpha,
+    strokeAlpha,
+  };
+}
+
+function drawPreparedGroupFrame(
+  ctx: CanvasRenderingContext2D,
+  prepared: PreparedGroupFrame,
+  args: {
+    zoom: number;
+    selectedNodeId: string | null;
+    hoveredGroupFrameId: string | null;
+    focusNodeIds: ReadonlySet<string> | null;
+    time: number;
+  }
+): void {
+  const color = prepared.frame.color ?? '#8bd3ff';
+  const zoom = Math.max(args.zoom, GROUP_FRAME_RENDER_MIN_ZOOM);
+  const selected = args.selectedNodeId === prepared.frame.id;
+  const hovered = args.hoveredGroupFrameId === prepared.frame.id;
+  const focused =
+    args.focusNodeIds == null ||
+    args.focusNodeIds.has(prepared.frame.id) ||
+    prepared.frame.nodeIds.some((nodeId) => args.focusNodeIds?.has(nodeId));
+  const style = getPreparedGroupFrameDrawStyle({
+    prepared,
+    zoom,
+    selected,
+    hovered,
+    focused,
+  });
+  const radius = 9 / zoom;
+  const bounds = getPaddedGroupFrameBounds(prepared.bounds, zoom, prepared.frame);
+
+  ctx.save();
+  ctx.globalAlpha = style.alpha;
+  ctx.beginPath();
+  ctx.roundRect(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    radius
+  );
+  ctx.fillStyle = hexWithAlpha(color, style.fillAlpha);
+  ctx.fill();
+  ctx.setLineDash(style.dash);
+  ctx.lineDashOffset = selected ? -args.time * 16 : 0;
+  ctx.lineWidth = style.strokeWidth;
+  ctx.strokeStyle = hexWithAlpha(color, style.strokeAlpha);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  drawGroupFrameLabel(ctx, prepared, bounds, color, zoom, selected);
+  ctx.restore();
+}
+
+function drawGroupFrameLabel(
+  ctx: CanvasRenderingContext2D,
+  prepared: PreparedGroupFrame,
+  bounds: PreparedGroupFrame['bounds'],
+  color: string,
+  zoom: number,
+  selected: boolean
+): void {
+  if (!shouldRenderGroupFrameLabel(prepared.frame, zoom)) {
+    return;
+  }
+
+  const labelScaleZoom = getGroupFrameLabelScaleZoom(zoom);
+  const fontSize = (prepared.frame.priority === 'primary' ? 12 : 11) / labelScaleZoom;
+  const label = prepared.frame.label;
+
+  ctx.save();
+  ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const labelBounds = getGroupFrameLabelBounds(
+    label,
+    bounds,
+    zoom,
+    (value) => ctx.measureText(value).width,
+    {
+      horizontalOffsetPx: getGroupFrameLabelHorizontalOffsetPx(prepared.frame),
+      placement: getGroupFrameLabelPlacement(prepared.frame),
+      verticalOffsetPx: getGroupFrameLabelVerticalOffsetPx(prepared.frame),
+    }
+  );
+
+  ctx.beginPath();
+  ctx.roundRect(
+    labelBounds.left,
+    labelBounds.top,
+    labelBounds.width,
+    labelBounds.height,
+    5 / labelScaleZoom
+  );
+  ctx.fillStyle = 'rgba(8, 12, 28, 0.78)';
+  ctx.fill();
+  ctx.strokeStyle = hexWithAlpha(color, selected ? 0.7 : 0.42);
+  ctx.lineWidth = 1 / labelScaleZoom;
+  ctx.stroke();
+  ctx.fillStyle = hexWithAlpha(color, selected ? 0.98 : 0.86);
+  ctx.fillText(label, labelBounds.textX, labelBounds.textY);
+  ctx.restore();
+}
 
 function drawOwnerColumnGroups(
   ctx: CanvasRenderingContext2D,

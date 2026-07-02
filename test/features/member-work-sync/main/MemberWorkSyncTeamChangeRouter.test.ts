@@ -16,6 +16,85 @@ function createRouter(activeMembers: string[] = ['alice', 'bob']) {
 }
 
 describe('MemberWorkSyncTeamChangeRouter', () => {
+  it('scans startup teams sequentially', async () => {
+    let releaseFirst!: () => void;
+    const startedTeams: string[] = [];
+    const queue = {
+      enqueue: vi.fn(),
+      dropTeam: vi.fn(),
+    };
+    const router = new MemberWorkSyncTeamChangeRouter(
+      {
+        loadActiveMemberNames: async (teamName) => {
+          startedTeams.push(teamName);
+          if (teamName === 'team-a') {
+            await new Promise<void>((resolve) => {
+              releaseFirst = resolve;
+            });
+          }
+          return ['alice'];
+        },
+      },
+      queue as never
+    );
+
+    const scan = router.enqueueStartupScan(['team-a', 'team-b']);
+    await Promise.resolve();
+
+    expect(startedTeams).toEqual(['team-a']);
+
+    releaseFirst();
+    await scan;
+
+    expect(startedTeams).toEqual(['team-a', 'team-b']);
+    expect(queue.enqueue).toHaveBeenCalledWith({
+      teamName: 'team-b',
+      memberName: 'alice',
+      triggerReason: 'startup_scan',
+      runAfterMs: 30_000,
+    });
+  });
+
+  it('materializes team members sequentially before enqueuing team-wide work', async () => {
+    let releaseAlice!: () => void;
+    const calls: string[] = [];
+    const queue = {
+      enqueue: vi.fn(),
+      dropTeam: vi.fn(),
+    };
+    const router = new MemberWorkSyncTeamChangeRouter(
+      { loadActiveMemberNames: async () => ['alice', 'bob'] },
+      queue as never,
+      {
+        materializeMember: vi.fn(async (_teamName, memberName) => {
+          calls.push(memberName);
+          if (memberName === 'alice') {
+            await new Promise<void>((resolve) => {
+              releaseAlice = resolve;
+            });
+          }
+        }),
+      }
+    );
+
+    const scan = router.enqueueStartupScan(['team-a']);
+    await Promise.resolve();
+
+    expect(calls).toEqual(['alice']);
+    expect(queue.enqueue).not.toHaveBeenCalled();
+
+    releaseAlice();
+    await scan;
+
+    expect(calls).toEqual(['alice', 'bob']);
+    expect(queue.enqueue).toHaveBeenCalledWith({
+      teamName: 'team-a',
+      memberName: 'bob',
+      triggerReason: 'startup_scan',
+      runAfterMs: 30_000,
+    });
+  });
+
   it('routes task and config events to all active members', async () => {
     const { queue, router } = createRouter();
 
@@ -70,6 +149,49 @@ describe('MemberWorkSyncTeamChangeRouter', () => {
       teamName: 'team-a',
       memberName: 'bob',
       triggerReason: 'task_changed',
+    });
+  });
+
+  it('routes task events team-wide when the resolver cannot produce impacted members', async () => {
+    const queue = {
+      enqueue: vi.fn(),
+      dropTeam: vi.fn(),
+    };
+    const resolver = {
+      resolve: vi.fn(async () => ({
+        memberNames: [],
+        fallbackTeamWide: false,
+        diagnostics: ['task_impact_empty'],
+      })),
+    };
+    const router = new MemberWorkSyncTeamChangeRouter(
+      { loadActiveMemberNames: async () => ['alice', 'bob'] },
+      queue as never,
+      undefined,
+      resolver as never
+    );
+
+    router.noteTeamChange({
+      type: 'task',
+      teamName: 'team-a',
+      detail: 'task-1.json',
+      taskId: 'task-1',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(resolver.resolve).toHaveBeenCalledWith({ teamName: 'team-a', taskId: 'task-1' });
+    expect(queue.enqueue).toHaveBeenCalledWith({
+      teamName: 'team-a',
+      memberName: 'alice',
+      triggerReason: 'task_changed',
+      runAfterMs: undefined,
+    });
+    expect(queue.enqueue).toHaveBeenCalledWith({
+      teamName: 'team-a',
+      memberName: 'bob',
+      triggerReason: 'task_changed',
+      runAfterMs: undefined,
     });
   });
 
@@ -129,6 +251,58 @@ describe('MemberWorkSyncTeamChangeRouter', () => {
       teamName: 'team-a',
       memberName: 'alice',
       triggerReason: 'turn_settled',
+    });
+  });
+
+  it.each([
+    {
+      name: 'inbox',
+      event: { type: 'inbox' as const, teamName: 'team-a', detail: 'inboxes/bob.json' },
+      memberName: 'bob',
+      triggerReason: 'inbox_changed',
+    },
+    {
+      name: 'tool finish',
+      event: {
+        type: 'tool-activity' as const,
+        teamName: 'team-a',
+        detail: JSON.stringify({
+          action: 'finish',
+          memberName: 'alice',
+          toolUseId: 'tool-1',
+        }),
+      },
+      memberName: 'alice',
+      triggerReason: 'tool_finished',
+    },
+    {
+      name: 'member spawn',
+      event: { type: 'member-spawn' as const, teamName: 'team-a', detail: 'bob' },
+      memberName: 'bob',
+      triggerReason: 'member_spawned',
+      runAfterMs: 30_000,
+    },
+    {
+      name: 'member turn settled',
+      event: {
+        type: 'member-turn-settled' as const,
+        teamName: 'team-a',
+        detail: JSON.stringify({ memberName: 'alice', sourceId: 'source-1', provider: 'opencode' }),
+      },
+      memberName: 'alice',
+      triggerReason: 'turn_settled',
+    },
+  ])('keeps targeted router event $name scoped to one member', (scenario) => {
+    const { queue, router } = createRouter(['alice', 'bob', 'carol']);
+
+    router.noteTeamChange(scenario.event);
+
+    expect(queue.enqueue).toHaveBeenCalledTimes(1);
+    expect(queue.enqueue).toHaveBeenCalledWith({
+      teamName: 'team-a',
+      memberName: scenario.memberName,
+      triggerReason: scenario.triggerReason,
+      ...(scenario.runAfterMs === undefined ? {} : { runAfterMs: scenario.runAfterMs }),
     });
   });
 

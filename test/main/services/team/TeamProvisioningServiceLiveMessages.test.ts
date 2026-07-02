@@ -42,22 +42,20 @@ const hoisted = vi.hoisted(() => {
       files.set(p, JSON.stringify(rows));
       return message;
     }),
-    sendInboxMessage: vi.fn(
-      (teamName: string, message: Record<string, unknown>) => {
-        const member =
-          typeof message.member === 'string'
-            ? message.member
-            : typeof message.to === 'string'
-              ? message.to
-              : 'unknown';
-        const p = `/mock/teams/${teamName}/inboxes/${member}.json`;
-        const current = files.get(p);
-        const rows = current ? (JSON.parse(current) as unknown[]) : [];
-        rows.push(message);
-        files.set(p, JSON.stringify(rows));
-        return { deliveredToInbox: true, messageId: 'mock-id', message };
-      }
-    ),
+    sendInboxMessage: vi.fn((teamName: string, message: Record<string, unknown>) => {
+      const member =
+        typeof message.member === 'string'
+          ? message.member
+          : typeof message.to === 'string'
+            ? message.to
+            : 'unknown';
+      const p = `/mock/teams/${teamName}/inboxes/${member}.json`;
+      const current = files.get(p);
+      const rows = current ? (JSON.parse(current) as unknown[]) : [];
+      rows.push(message);
+      files.set(p, JSON.stringify(rows));
+      return { deliveredToInbox: true, messageId: 'mock-id', message };
+    }),
   };
 });
 
@@ -159,9 +157,11 @@ interface RunLike {
   pendingDirectCrossTeamSendRefresh: boolean;
   lastLeadTextEmitMs: number;
   leadRelayCapture: null;
-  silentUserDmForward:
-    | null
-    | { target: string; startedAt: string; mode: 'user_dm' | 'member_inbox_relay' };
+  silentUserDmForward: null | {
+    target: string;
+    startedAt: string;
+    mode: 'user_dm' | 'member_inbox_relay';
+  };
   suppressPostCompactReminderOutput?: boolean;
   child: Record<string, unknown> | null;
   processKilled: boolean;
@@ -235,8 +235,9 @@ function callHandleStreamJsonMessage(
   run: RunLike,
   msg: Record<string, unknown>
 ): void {
-  (service as unknown as { handleStreamJsonMessage: (r: unknown, m: unknown) => void })
-    .handleStreamJsonMessage(run, msg);
+  (
+    service as unknown as { handleStreamJsonMessage: (r: unknown, m: unknown) => void }
+  ).handleStreamJsonMessage(run, msg);
 }
 
 describe('TeamProvisioningService pre-ready live messages', () => {
@@ -774,6 +775,47 @@ describe('TeamProvisioningService pre-ready live messages', () => {
     expect(hoisted.appendSentMessage).not.toHaveBeenCalled();
   });
 
+  it('bounds live lead process message text before it enters the overlay cache', () => {
+    const service = new TeamProvisioningService();
+    seedConfig('my-team');
+
+    service.pushLiveLeadProcessMessage('my-team', {
+      from: 'team-lead',
+      text: 'x'.repeat(40 * 1024),
+      timestamp: '2026-04-17T12:00:00.000Z',
+      read: true,
+      source: 'lead_process',
+      messageId: 'large-live-message',
+    });
+
+    const live = service.getLiveLeadProcessMessages('my-team');
+    expect(live).toHaveLength(1);
+    expect(live[0].text.length).toBeLessThanOrEqual(32 * 1024);
+    expect(live[0].text).toContain('[truncated live message]');
+    expect(live[0].summary).toHaveLength(60);
+  });
+
+  it('keeps only the newest live lead process messages in the overlay cache', () => {
+    const service = new TeamProvisioningService();
+    seedConfig('my-team');
+
+    for (let index = 0; index < 105; index += 1) {
+      service.pushLiveLeadProcessMessage('my-team', {
+        from: 'team-lead',
+        text: `message ${index}`,
+        timestamp: new Date(Date.UTC(2026, 3, 17, 12, 0, index)).toISOString(),
+        read: true,
+        source: 'lead_process',
+        messageId: `live-${index}`,
+      });
+    }
+
+    const live = service.getLiveLeadProcessMessages('my-team');
+    expect(live).toHaveLength(100);
+    expect(live[0].messageId).toBe('live-5');
+    expect(live.at(-1)?.messageId).toBe('live-104');
+  });
+
   it('ignores stale cross-team send completions from an older run after a new run starts', async () => {
     const service = new TeamProvisioningService();
     seedConfig('my-team');
@@ -831,9 +873,10 @@ describe('TeamProvisioningService pre-ready live messages', () => {
     });
 
     expect(resolveSend).not.toBeNull();
-    const finishSend = resolveSend as unknown as ((
-      value: { deliveredToInbox: boolean; messageId: string }
-    ) => void);
+    const finishSend = resolveSend as unknown as (value: {
+      deliveredToInbox: boolean;
+      messageId: string;
+    }) => void;
     finishSend({ deliveredToInbox: true, messageId: 'cross-stale-old-run' });
     await Promise.resolve();
     await Promise.resolve();
@@ -897,7 +940,10 @@ describe('TeamProvisioningService pre-ready live messages', () => {
   it('upgrades MCP message_send pseudo recipients into cross-team sends', async () => {
     const service = new TeamProvisioningService();
     seedConfig('my-team');
-    const crossTeamSender = vi.fn(async () => ({ deliveredToInbox: true, messageId: 'cross-mcp-1' }));
+    const crossTeamSender = vi.fn(async () => ({
+      deliveredToInbox: true,
+      messageId: 'cross-mcp-1',
+    }));
     service.setCrossTeamSender(crossTeamSender);
     const run = attachRun(service, 'my-team', { provisioningComplete: true });
     run.activeCrossTeamReplyHints = [{ toTeam: 'team-best', conversationId: 'conv-mcp-1' }];
@@ -1075,7 +1121,10 @@ describe('TeamProvisioningService pre-ready live messages', () => {
   it('rescues mistaken cross_team_send recipients into actual cross-team replies', async () => {
     const service = new TeamProvisioningService();
     seedConfig('my-team');
-    const crossTeamSender = vi.fn(async () => ({ deliveredToInbox: true, messageId: 'cross-mcp-tool-1' }));
+    const crossTeamSender = vi.fn(async () => ({
+      deliveredToInbox: true,
+      messageId: 'cross-mcp-tool-1',
+    }));
     service.setCrossTeamSender(crossTeamSender);
     const run = attachRun(service, 'my-team', { provisioningComplete: true });
     run.activeCrossTeamReplyHints = [{ toTeam: 'team-best', conversationId: 'conv-tool-1' }];
@@ -1123,7 +1172,10 @@ describe('TeamProvisioningService pre-ready live messages', () => {
   it('rescues cross_team::team pseudo recipients into actual cross-team replies', async () => {
     const service = new TeamProvisioningService();
     seedConfig('my-team');
-    const crossTeamSender = vi.fn(async () => ({ deliveredToInbox: true, messageId: 'cross-colon-1' }));
+    const crossTeamSender = vi.fn(async () => ({
+      deliveredToInbox: true,
+      messageId: 'cross-colon-1',
+    }));
     service.setCrossTeamSender(crossTeamSender);
     const run = attachRun(service, 'my-team', { provisioningComplete: true });
 
@@ -1166,7 +1218,10 @@ describe('TeamProvisioningService pre-ready live messages', () => {
   it('strips canonical cross-team tag from outbound cross-team content', async () => {
     const service = new TeamProvisioningService();
     seedConfig('my-team');
-    const crossTeamSender = vi.fn(async () => ({ deliveredToInbox: true, messageId: 'cross-legacy' }));
+    const crossTeamSender = vi.fn(async () => ({
+      deliveredToInbox: true,
+      messageId: 'cross-legacy',
+    }));
     service.setCrossTeamSender(crossTeamSender);
     const run = attachRun(service, 'my-team', { provisioningComplete: true });
     run.activeCrossTeamReplyHints = [{ toTeam: 'team-best', conversationId: 'conv-legacy' }];

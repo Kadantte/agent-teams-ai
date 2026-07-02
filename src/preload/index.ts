@@ -2,6 +2,7 @@ import { createCodexAccountBridge } from '@features/codex-account/preload';
 import { createCodexRuntimeInstallerBridge } from '@features/codex-runtime-installer/preload';
 import { createMemberLogStreamBridge } from '@features/member-log-stream/preload';
 import { createMemberWorkSyncBridge } from '@features/member-work-sync/preload';
+import { createOrganizationsBridge } from '@features/organizations/preload';
 import { createRecentProjectsBridge } from '@features/recent-projects/preload';
 import { createRuntimeProviderManagementBridge } from '@features/runtime-provider-management/preload';
 import { createTerminalWorkspaceBridge } from '@features/terminal-workspace/preload';
@@ -150,6 +151,7 @@ import {
   TEAM_GET_OPENCODE_RUNTIME_DELIVERY_STATUS,
   TEAM_GET_PROJECT_BRANCH,
   TEAM_GET_SAVED_REQUEST,
+  TEAM_GET_TASK,
   TEAM_GET_TASK_ACTIVITY,
   TEAM_GET_TASK_ACTIVITY_DETAIL,
   TEAM_GET_TASK_ATTACHMENT,
@@ -344,6 +346,7 @@ import type {
   TeamTaskChangeSummariesResponse,
   TeamTaskChangeSummaryRequest,
   TeamTaskStatus,
+  TeamTaskWithKanban,
   TeamUpdateConfigRequest,
   TeamViewSnapshot,
   TeamWorktreeGitStatus,
@@ -502,6 +505,7 @@ const electronAPI: ElectronAPI = {
   runtimeProviderManagement: createRuntimeProviderManagementBridge(ipcRenderer),
   memberWorkSync: createMemberWorkSyncBridge(ipcRenderer),
   memberLogStream: createMemberLogStreamBridge(),
+  organizations: createOrganizationsBridge(ipcRenderer),
   terminalWorkspace: createTerminalWorkspaceBridge(ipcRenderer),
   telemetry: {
     getSentryContext: () => ipcRenderer.invoke(TELEMETRY_GET_SENTRY_CONTEXT),
@@ -1006,6 +1010,9 @@ const electronAPI: ElectronAPI = {
     },
     createTask: async (teamName: string, request: CreateTaskRequest) => {
       return invokeIpcWithResult<TeamTask>(TEAM_CREATE_TASK, teamName, request);
+    },
+    getTask: async (teamName: string, taskId: string) => {
+      return invokeIpcWithResult<TeamTaskWithKanban | null>(TEAM_GET_TASK, teamName, taskId);
     },
     requestReview: async (teamName: string, taskId: string) => {
       return invokeIpcWithResult<void>(TEAM_REQUEST_REVIEW, teamName, taskId);

@@ -272,6 +272,42 @@ describe('AgentTeamsMcpHttpServer', () => {
     expect(spawnProcess).not.toHaveBeenCalled();
   });
 
+  it('raises inherited low NODE_OPTIONS heap for the managed MCP HTTP child', async () => {
+    const previousNodeOptions = process.env.NODE_OPTIONS;
+    process.env.NODE_OPTIONS = '--max-old-space-size=64';
+    const child = new FakeChildProcess(41064);
+    const spawnProcess = vi.fn(() => child as unknown as ChildProcess);
+    const server = new AgentTeamsMcpHttpServer({
+      statePath: null,
+      resolveLaunchSpec: async () => ({
+        command: 'node',
+        args: ['mcp-server/dist/index.js'],
+      }),
+      allocatePort: async () => 41064,
+      spawnProcess: spawnProcess as AgentTeamsMcpHttpServerDeps['spawnProcess'],
+      waitForPort: vi.fn(async () => undefined),
+    });
+
+    try {
+      await server.ensureStarted();
+
+      expect(spawnProcess).toHaveBeenCalledWith(
+        'node',
+        expect.any(Array),
+        expect.objectContaining({
+          NODE_OPTIONS: '--max-old-space-size=2048',
+        })
+      );
+    } finally {
+      await server.stop();
+      if (previousNodeOptions === undefined) {
+        delete process.env.NODE_OPTIONS;
+      } else {
+        process.env.NODE_OPTIONS = previousNodeOptions;
+      }
+    }
+  });
+
   it('cancels an in-flight start before spawn when shutdown disables future starts', async () => {
     let resolveLaunchSpec!: (launchSpec: { command: string; args: string[] }) => void;
     const launchSpecPromise = new Promise<{ command: string; args: string[] }>((resolve) => {
@@ -548,7 +584,7 @@ describe('AgentTeamsMcpHttpServer', () => {
 
     expect(second).toBe(first);
     expect(spawnProcess).toHaveBeenCalledTimes(1);
-    expect(waitForPort).toHaveBeenCalledWith('127.0.0.1', 41006, 10_000);
+    expect(waitForPort).toHaveBeenCalledWith('127.0.0.1', 41006, 20_000);
     expect(waitForPort).toHaveBeenCalledWith('127.0.0.1', 41006, 3_000);
     expect(hoisted.killProcessTreeMock).not.toHaveBeenCalled();
   });
@@ -599,9 +635,9 @@ describe('AgentTeamsMcpHttpServer', () => {
     expect(spawnProcess).toHaveBeenCalledTimes(2);
     expect(allocatePort).toHaveBeenCalledTimes(1);
     expect(hoisted.killProcessTreeMock).toHaveBeenCalledWith(firstChild, 'SIGKILL');
-    expect(waitForPort).toHaveBeenCalledWith('127.0.0.1', 41007, 10_000);
+    expect(waitForPort).toHaveBeenCalledWith('127.0.0.1', 41007, 20_000);
     expect(waitForPort).toHaveBeenCalledWith('127.0.0.1', 41007, 3_000);
-    expect(waitForPort).toHaveBeenCalledWith('127.0.0.1', 41007, 10_000);
+    expect(waitForPort).toHaveBeenCalledWith('127.0.0.1', 41007, 20_000);
     expect(vi.mocked(console.warn).mock.calls[0]?.join(' ')).toContain('failed health reuse check');
     expect(vi.mocked(console.warn).mock.calls[1]?.join(' ')).toContain(
       'opencode_app_mcp_restart_reason:health_reuse_failed'

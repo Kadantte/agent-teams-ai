@@ -6,6 +6,8 @@ import { Worker } from 'node:worker_threads';
 import { getAppDataPath, getTasksBasePath, getTeamsBasePath } from '@main/utils/pathDecoder';
 import { createLogger } from '@shared/utils/logger';
 
+import { formatCurrentProcessMemorySnapshot } from '../../utils/startupTelemetry';
+
 import type { TeamSummary, TeamTask } from '@shared/types';
 
 const logger = createLogger('Service:TeamFsWorkerClient');
@@ -44,6 +46,20 @@ type WorkerRequest =
 type WorkerResponse =
   | { id: string; ok: true; result: unknown; diag?: WorkerDiag }
   | { id: string; ok: false; error: string };
+
+interface PendingEntry {
+  resolve: (v: { result: unknown; diag?: WorkerDiag }) => void;
+  reject: (e: Error) => void;
+  op: WorkerRequest['op'];
+  payload: WorkerRequest['payload'];
+  createdAt: number;
+  postedAt: number;
+  pendingAtStart: number;
+}
+
+interface QueuedEntry extends Omit<PendingEntry, 'postedAt' | 'pendingAtStart'> {
+  id: string;
+}
 
 function summarizeWorkerPayload(payload: WorkerRequest['payload']): Record<string, unknown> {
   if (!payload) {
@@ -112,19 +128,25 @@ export class TeamFsWorkerClient {
   private worker: Worker | null = null;
   private readonly workerPath: string | null = resolveWorkerPath();
   private warnedUnavailable = false;
-  private pending = new Map<
-    string,
-    { resolve: (v: { result: unknown; diag?: WorkerDiag }) => void; reject: (e: Error) => void }
-  >();
+  private pending = new Map<string, PendingEntry>();
+  private queue: QueuedEntry[] = [];
+  private activeCallId: string | null = null;
+  private activeTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private failWorker(worker: Worker, error: Error): void {
     if (this.worker !== worker) return;
 
     this.worker = null;
+    this.clearActiveCall();
     const pendingEntries = Array.from(this.pending.values());
+    const queuedEntries = [...this.queue];
     this.pending.clear();
+    this.queue = [];
 
     for (const entry of pendingEntries) {
+      entry.reject(error);
+    }
+    for (const entry of queuedEntries) {
       entry.reject(error);
     }
   }
@@ -161,11 +183,13 @@ export class TeamFsWorkerClient {
       const entry = this.pending.get(msg.id);
       if (!entry) return;
       this.pending.delete(msg.id);
+      this.clearActiveCall(msg.id);
       if (msg.ok) {
         entry.resolve({ result: msg.result, diag: msg.diag });
       } else {
         entry.reject(new Error(msg.error));
       }
+      this.processQueue();
     });
     worker.on('error', (err) => {
       logger.error('Worker error', err);
@@ -181,57 +205,113 @@ export class TeamFsWorkerClient {
     return worker;
   }
 
+  private clearActiveCall(id?: string): void {
+    if (id && this.activeCallId !== id) {
+      return;
+    }
+    if (this.activeTimeout) {
+      clearTimeout(this.activeTimeout);
+      this.activeTimeout = null;
+    }
+    this.activeCallId = null;
+  }
+
+  private processQueue(): void {
+    if (this.activeCallId || this.queue.length === 0) {
+      return;
+    }
+
+    const entry = this.queue.shift();
+    if (!entry) {
+      return;
+    }
+
+    let worker: Worker;
+    try {
+      worker = this.ensureWorker();
+    } catch (error) {
+      entry.reject(error instanceof Error ? error : new Error(String(error)));
+      this.processQueue();
+      return;
+    }
+
+    const postedAt = Date.now();
+    const pendingAtStart = this.pending.size;
+    const pendingEntry: PendingEntry = {
+      ...entry,
+      postedAt,
+      pendingAtStart,
+    };
+    this.pending.set(entry.id, pendingEntry);
+    this.activeCallId = entry.id;
+    this.activeTimeout = setTimeout(() => {
+      if (this.activeCallId !== entry.id) {
+        return;
+      }
+      const timeoutError = new Error(
+        `Worker call timeout after ${WORKER_CALL_TIMEOUT_MS}ms (${entry.op})`
+      );
+      logger.warn(
+        `worker call timeout op=${entry.op} ms=${Date.now() - entry.createdAt} workerMs=${Date.now() - postedAt} queuedMs=${postedAt - entry.createdAt} pendingAtStart=${pendingAtStart} pendingNow=${this.pending.size} queued=${this.queue.length} payload=${JSON.stringify(
+          summarizeWorkerPayload(entry.payload)
+        )} memory=${formatCurrentProcessMemorySnapshot()}`
+      );
+      this.failWorker(worker, timeoutError);
+      // Terminate and recreate on next call - worker may be stuck in native IO.
+      void worker.terminate().catch(() => undefined);
+    }, WORKER_CALL_TIMEOUT_MS);
+
+    try {
+      worker.postMessage({ id: entry.id, op: entry.op, payload: entry.payload } as WorkerRequest);
+    } catch (error) {
+      const postError = error instanceof Error ? error : new Error(String(error));
+      this.pending.delete(entry.id);
+      this.clearActiveCall(entry.id);
+      pendingEntry.reject(postError);
+      this.processQueue();
+    }
+  }
+
   private call(
     op: WorkerRequest['op'],
     payload: WorkerRequest['payload']
   ): Promise<{ result: unknown; diag?: WorkerDiag }> {
-    const worker = this.ensureWorker();
     const id = makeId();
-    const startedAt = Date.now();
-    const pendingAtStart = this.pending.size;
+    const createdAt = Date.now();
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        const timeoutError = new Error(
-          `Worker call timeout after ${WORKER_CALL_TIMEOUT_MS}ms (${op})`
-        );
-        logger.warn(
-          `worker call timeout op=${op} ms=${Date.now() - startedAt} pendingAtStart=${pendingAtStart} pendingNow=${this.pending.size} payload=${JSON.stringify(
-            summarizeWorkerPayload(payload)
-          )}`
-        );
-        this.failWorker(worker, timeoutError);
-        // Terminate and recreate on next call - worker may be stuck in native IO.
-        void worker.terminate().catch(() => undefined);
-        reject(timeoutError);
-      }, WORKER_CALL_TIMEOUT_MS);
-
-      this.pending.set(id, {
+      this.queue.push({
+        id,
         resolve: (value) => {
-          clearTimeout(timeout);
-          const ms = Date.now() - startedAt;
+          const ms = Date.now() - createdAt;
           if (ms >= 1500) {
+            const memorySuffix =
+              ms >= 5_000 ? ` memory=${formatCurrentProcessMemorySnapshot()}` : '';
             logger.warn(
-              `worker call slow op=${op} ms=${ms} workerTotalMs=${String(getDiagTotalMs(value.diag))} pendingAtStart=${pendingAtStart} pendingNow=${this.pending.size} payload=${JSON.stringify(
+              `worker call slow op=${op} ms=${ms} workerTotalMs=${String(getDiagTotalMs(value.diag))} pendingNow=${this.pending.size} queued=${this.queue.length} payload=${JSON.stringify(
                 summarizeWorkerPayload(payload)
-              )}`
+              )}${memorySuffix}`
             );
           }
           resolve(value);
         },
         reject: (error) => {
-          clearTimeout(timeout);
-          const ms = Date.now() - startedAt;
+          const ms = Date.now() - createdAt;
           if (ms >= 1500) {
+            const memorySuffix =
+              ms >= 5_000 ? ` memory=${formatCurrentProcessMemorySnapshot()}` : '';
             logger.warn(
-              `worker call failed slow op=${op} ms=${ms} pendingAtStart=${pendingAtStart} pendingNow=${this.pending.size} payload=${JSON.stringify(
+              `worker call failed slow op=${op} ms=${ms} pendingNow=${this.pending.size} queued=${this.queue.length} payload=${JSON.stringify(
                 summarizeWorkerPayload(payload)
-              )} error=${error.message}`
+              )}${memorySuffix} error=${error.message}`
             );
           }
           reject(error);
         },
+        op,
+        payload,
+        createdAt,
       });
-      worker.postMessage({ id, op, payload } as WorkerRequest);
+      this.processQueue();
     });
   }
 

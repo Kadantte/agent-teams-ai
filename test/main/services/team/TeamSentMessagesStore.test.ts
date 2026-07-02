@@ -1,7 +1,6 @@
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TeamSentMessagesStore } from '../../../../src/main/services/team/TeamSentMessagesStore';
@@ -87,5 +86,35 @@ describe('TeamSentMessagesStore', () => {
         commandLabel: '/model',
       },
     });
+  });
+
+  it('caps legacy sent message files to the newest messages on read', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'team-sent-store-'));
+    tempDirs.push(root);
+
+    const teamDir = path.join(root, 'my-team');
+    await fs.mkdir(teamDir, { recursive: true });
+    await fs.writeFile(
+      path.join(teamDir, 'sentMessages.json'),
+      JSON.stringify(
+        Array.from({ length: 205 }, (_, index) => ({
+          from: 'user',
+          to: 'team-lead',
+          text: `message ${index}`,
+          timestamp: new Date(Date.UTC(2026, 2, 27, 12, 0, index)).toISOString(),
+          read: true,
+          messageId: `sent-${index}`,
+          source: 'user_sent',
+        }))
+      ),
+      'utf8'
+    );
+
+    const store = new TeamSentMessagesStore();
+    const messages = await store.readMessages('my-team');
+
+    expect(messages).toHaveLength(200);
+    expect(messages[0].messageId).toBe('sent-5');
+    expect(messages.at(-1)?.messageId).toBe('sent-204');
   });
 });

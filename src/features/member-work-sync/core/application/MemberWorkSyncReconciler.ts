@@ -7,7 +7,9 @@ import {
 
 import { appendMemberWorkSyncAudit } from './MemberWorkSyncAudit';
 import { MemberWorkSyncNudgeOutboxPlanner } from './MemberWorkSyncNudgeOutboxPlanner';
+import { applyMemberWorkSyncNudgeSuppression } from './MemberWorkSyncNudgeSuppressionPolicy';
 import { resolveMemberWorkSyncRuntimeActivity } from './MemberWorkSyncRuntimeActivity';
+import { observeMemberWorkSyncRuntimeStall } from './MemberWorkSyncRuntimeStallDiagnostics';
 
 import type { MemberWorkSyncStatus, MemberWorkSyncStatusRequest } from '../../contracts';
 import type { MemberWorkSyncAgendaSourceResult, MemberWorkSyncUseCaseDeps } from './ports';
@@ -102,6 +104,14 @@ export class MemberWorkSyncReconciler {
       nowIso,
       inactive: source.inactive || runtimeActivity.inactive,
     });
+    const runtimeStall = observeMemberWorkSyncRuntimeStall({
+      currentState: decision.state,
+      agendaFingerprint: agenda.fingerprint,
+      actionableCount: agenda.items.length,
+      previousStatus: previous,
+      triggerReasons: context.triggerReasons,
+    });
+    const decisionDiagnostics = [...decision.diagnostics, ...runtimeStall.diagnostics];
     await appendMemberWorkSyncAudit(this.deps, {
       teamName: agenda.teamName,
       memberName: agenda.memberName,
@@ -111,11 +121,29 @@ export class MemberWorkSyncReconciler {
       state: decision.state,
       actionableCount: agenda.items.length,
       ...(source.providerId ? { providerId: source.providerId } : {}),
-      diagnostics: decision.diagnostics,
+      diagnostics: decisionDiagnostics,
     });
+    if (runtimeStall.stalled) {
+      await appendMemberWorkSyncAudit(this.deps, {
+        teamName: agenda.teamName,
+        memberName: agenda.memberName,
+        event: 'runtime_stall_observed',
+        source: 'reconciler',
+        agendaFingerprint: agenda.fingerprint,
+        state: decision.state,
+        actionableCount: agenda.items.length,
+        reason: runtimeStall.reason,
+        ...(source.providerId ? { providerId: source.providerId } : {}),
+        ...(context.triggerReasons?.length ? { triggerReasons: context.triggerReasons } : {}),
+        diagnostics: runtimeStall.diagnostics,
+        metadata: {
+          previousEvaluatedAt: previous?.evaluatedAt ?? null,
+        },
+      });
+    }
 
     assertReconcileNotCancelled(context);
-    const status = await attachMemberWorkSyncReportToken(this.deps, {
+    const statusWithToken = await attachMemberWorkSyncReportToken(this.deps, {
       teamName: agenda.teamName,
       memberName: agenda.memberName,
       state: decision.state,
@@ -145,8 +173,14 @@ export class MemberWorkSyncReconciler {
           : {}),
       },
       evaluatedAt: nowIso,
-      diagnostics: [...agenda.diagnostics, ...runtimeActivity.diagnostics, ...decision.diagnostics],
+      diagnostics: [...agenda.diagnostics, ...runtimeActivity.diagnostics, ...decisionDiagnostics],
       ...(source.providerId ? { providerId: source.providerId } : {}),
+    });
+    const status = await applyMemberWorkSyncNudgeSuppression(this.deps, {
+      status: statusWithToken,
+      previousStatus: previous,
+      forceNudge: request.forceNudge === true,
+      source: 'reconciler',
     });
 
     assertReconcileNotCancelled(context);

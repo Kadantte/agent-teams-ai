@@ -63,15 +63,18 @@ describe('MemberWorkSyncNudgeDispatchScheduler', () => {
     );
   });
 
-  it('times out a hung dispatch so later scheduled runs can continue', async () => {
+  it('does not overlap later scheduled runs while a timed-out dispatch is still settling', async () => {
     vi.useFakeTimers();
     try {
+      let releaseFirst!: () => void;
       let dispatchCalls = 0;
       const warn = vi.fn();
       const dispatchDue = vi.fn(async () => {
         dispatchCalls += 1;
         if (dispatchCalls === 1) {
-          await new Promise<void>(() => undefined);
+          await new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          });
         }
         return { claimed: 0, delivered: 0, superseded: 0, retryable: 0, terminal: 0 };
       });
@@ -102,6 +105,12 @@ describe('MemberWorkSyncNudgeDispatchScheduler', () => {
       );
 
       await scheduler.runOnce();
+      expect(dispatchDue).toHaveBeenCalledTimes(1);
+
+      releaseFirst();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await scheduler.runOnce();
 
       expect(dispatchDue).toHaveBeenCalledTimes(2);
     } finally {
@@ -109,9 +118,10 @@ describe('MemberWorkSyncNudgeDispatchScheduler', () => {
     }
   });
 
-  it('times out hung active team listing so later scheduled runs can continue', async () => {
+  it('does not overlap later scheduled runs while timed-out active team listing is still settling', async () => {
     vi.useFakeTimers();
     try {
+      let releaseFirst!: (teams: string[]) => void;
       let listCalls = 0;
       const warn = vi.fn();
       const dispatchDue = vi.fn(async () => ({
@@ -125,7 +135,9 @@ describe('MemberWorkSyncNudgeDispatchScheduler', () => {
         listLifecycleActiveTeamNames: async () => {
           listCalls += 1;
           if (listCalls === 1) {
-            await new Promise<string[]>(() => undefined);
+            return new Promise<string[]>((resolve) => {
+              releaseFirst = resolve;
+            });
           }
           return ['team-a'];
         },
@@ -149,6 +161,12 @@ describe('MemberWorkSyncNudgeDispatchScheduler', () => {
         })
       );
       expect(dispatchDue).not.toHaveBeenCalled();
+
+      await scheduler.runOnce();
+      expect(dispatchDue).not.toHaveBeenCalled();
+
+      releaseFirst(['team-a']);
+      await vi.advanceTimersByTimeAsync(0);
 
       await scheduler.runOnce();
 

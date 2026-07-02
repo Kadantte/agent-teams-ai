@@ -1,9 +1,9 @@
+import { createHash } from 'crypto';
+import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import { createHash } from 'crypto';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import * as fs from 'fs/promises';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ChangeExtractorService } from '../../../../src/main/services/team/ChangeExtractorService';
 import { OPEN_CODE_TASK_LEDGER_EVIDENCE_CONTRACT_VERSION } from '../../../../src/main/services/team/opencode/bridge/OpenCodeBridgeCommandContract';
@@ -1083,6 +1083,47 @@ describe('ChangeExtractorService', () => {
     expect(findLogFileRefsForTask).toHaveBeenCalled();
   });
 
+  it('does not fall back inline when task-change worker has a fatal OOM', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'change-extractor-service-'));
+    setClaudeBasePathOverride(tmpDir);
+    await writeTaskFile(tmpDir);
+
+    const logPath = path.join(tmpDir, 'alice-inline-worker-oom.jsonl');
+    await writeJsonl(logPath, [
+      buildAssistantWriteEntry(
+        'tool-1',
+        '/repo/src/file.ts',
+        'export const value = 1;\n',
+        '2026-03-01T10:00:00.000Z'
+      ),
+    ]);
+
+    const computeTaskChanges = vi.fn(async () => {
+      throw Object.assign(
+        new Error('Worker terminated due to reaching memory limit: JS heap out of memory'),
+        { code: 'ERR_WORKER_OUT_OF_MEMORY' }
+      );
+    });
+    const { service, findLogFileRefsForTask } = createService({
+      logPaths: [logPath],
+      taskChangeWorkerClient: {
+        isAvailable: vi.fn(() => true),
+        computeTaskChanges,
+      },
+    });
+
+    await expect(
+      service.getTaskChanges(TEAM_NAME, TASK_ID, {
+        owner: 'alice',
+        status: 'completed',
+      })
+    ).rejects.toThrow('Worker terminated due to reaching memory limit');
+
+    expect(computeTaskChanges).toHaveBeenCalledTimes(1);
+    expect(findLogFileRefsForTask).not.toHaveBeenCalled();
+  });
+
   it('keeps summary cache in main and skips worker on repeat terminal summary requests', async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'change-extractor-service-'));
     setClaudeBasePathOverride(tmpDir);
@@ -1150,7 +1191,7 @@ describe('ChangeExtractorService', () => {
     expect(secondWorker.computeTaskChanges).not.toHaveBeenCalled();
   });
 
-  it('does not let stale worker results populate summary cache after invalidation', async () => {
+  it('keeps in-flight summary compute across invalidation without caching stale results', async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'change-extractor-service-'));
     setClaudeBasePathOverride(tmpDir);
     await writeTaskFile(tmpDir);
@@ -1178,20 +1219,20 @@ describe('ChangeExtractorService', () => {
     await firstStarted.promise;
     await service.invalidateTaskChangeSummaries(TEAM_NAME, [TASK_ID], { deletePersisted: true });
     const freshPromise = service.getTaskChanges(TEAM_NAME, TASK_ID, SUMMARY_OPTIONS);
-    // Flush microtasks so freshPromise advances past its internal awaits
-    // and reaches the worker mock before we resolve the stale deferred.
-    // Without this, CI timing can cause the stale resolution to race with
-    // the fresh worker call, making the test flaky.
-    await vi.advanceTimersByTimeAsync?.(0).catch(() => undefined);
     await Promise.resolve();
     await Promise.resolve();
-    await Promise.resolve();
+    expect(worker.computeTaskChanges).toHaveBeenCalledTimes(1);
+
     first.resolve(makeTaskChangeResult());
     const stale = await stalePromise;
     const fresh = await freshPromise;
 
     expect(stale.files[0]?.filePath).toBe('/repo/src/file.ts');
-    expect(fresh.files[0]?.filePath).toBe('/repo/src/newer.ts');
+    expect(fresh.files[0]?.filePath).toBe('/repo/src/file.ts');
+    expect(worker.computeTaskChanges).toHaveBeenCalledTimes(1);
+
+    const recomputed = await service.getTaskChanges(TEAM_NAME, TASK_ID, SUMMARY_OPTIONS);
+    expect(recomputed.files[0]?.filePath).toBe('/repo/src/newer.ts');
     expect(worker.computeTaskChanges).toHaveBeenCalledTimes(2);
   });
 

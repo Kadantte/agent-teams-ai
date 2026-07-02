@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,6 +25,10 @@ const SHUTDOWN_TIMEOUT_MS = 5_000;
 const TERMINAL_PLATFORM_ROOT_ENV = 'CLAUDE_TERMINAL_PLATFORM_ROOT';
 const LEGACY_TERMINAL_PLATFORM_ROOT_ENV = 'TERMINAL_PLATFORM_ROOT';
 const TERMINAL_DAEMON_BINARY_ENV = 'CLAUDE_TERMINAL_DAEMON_BINARY';
+const BUNDLED_TERMINAL_PLATFORM_DIR_NAME = 'terminal-platform';
+const TERMINAL_PLATFORM_NODE_PACKAGE_DIR_NAME = 'terminal-platform-node';
+const TERMINAL_NODE_STUB_UNAVAILABLE_MESSAGE =
+  'terminal-platform-node native runtime is not installed';
 
 type TerminalDaemonChildProcess = ReturnType<typeof spawn>;
 
@@ -63,6 +68,7 @@ export function createTerminalWorkspaceFeature(
 ): TerminalWorkspaceFeatureFacade {
   const records = new Map<string, TerminalRuntimeRecord>();
   const pending = new Map<string, Promise<TerminalRuntimeRecord>>();
+  const cancelledStarts = new WeakSet<Promise<TerminalRuntimeRecord>>();
 
   async function getBootstrap(
     request: TerminalWorkspaceBootstrapRequest
@@ -81,19 +87,28 @@ export function createTerminalWorkspaceFeature(
 
     try {
       const record = await startPromise;
+      if (cancelledStarts.has(startPromise)) {
+        throw new Error('Terminal runtime start was cancelled');
+      }
       records.set(key, record);
       return toBootstrap(record);
     } finally {
-      pending.delete(key);
+      if (pending.get(key) === startPromise) {
+        pending.delete(key);
+      }
     }
   }
 
   async function stopTeamRuntime(teamName: string): Promise<void> {
     const pendingStart = pending.get(teamName);
     if (pendingStart) {
+      cancelledStarts.add(pendingStart);
       const record = await pendingStart;
+      records.delete(teamName);
       await disposeRecord(record, deps.logger);
-      pending.delete(teamName);
+      if (pending.get(teamName) === pendingStart) {
+        pending.delete(teamName);
+      }
       return;
     }
 
@@ -107,9 +122,14 @@ export function createTerminalWorkspaceFeature(
   }
 
   async function dispose(): Promise<void> {
+    const pendingStarts = [...pending.values()];
+    for (const pendingStart of pendingStarts) {
+      cancelledStarts.add(pendingStart);
+    }
+
     const allRecords = [
       ...records.values(),
-      ...(await Promise.allSettled(pending.values())).flatMap((result) =>
+      ...(await Promise.allSettled(pendingStarts)).flatMap((result) =>
         result.status === 'fulfilled' ? [result.value] : []
       ),
     ];
@@ -139,31 +159,43 @@ async function startRuntime(
     sessionStorePath,
     logger: deps.logger,
   });
-  await daemon.ensureRunning();
+  try {
+    await daemon.ensureRunning();
 
-  const TerminalNodeClient = await loadTerminalNodeClientConstructor();
-  const client = TerminalNodeClient.fromRuntimeSlug(runtimeSlug);
-  const projectPath = await resolveExistingDirectory(request.projectPath);
-  await ensureInitialNativeSession(client, {
-    title: request.teamDisplayName ?? request.teamName,
-    cwd: projectPath,
-  });
+    const TerminalNodeClient = await loadTerminalNodeClientConstructor();
+    const client = TerminalNodeClient.fromRuntimeSlug(runtimeSlug);
+    const projectPath = await resolveExistingDirectory(request.projectPath);
+    await ensureInitialNativeSession(client, {
+      title: request.teamDisplayName ?? request.teamName,
+      cwd: projectPath,
+    });
 
-  const gateway = await startWorkspaceGatewayNodeServer({
-    runtime: createRuntimeClientPort(client),
-    logger: {
-      warn: (message, context) => deps.logger.warn(message, context),
-      error: (message, context) => deps.logger.error(message, context),
-    },
-  });
+    const gateway = await startWorkspaceGatewayNodeServer({
+      runtime: createRuntimeClientPort(client),
+      logger: {
+        warn: (message, context) => deps.logger.warn(message, context),
+        error: (message, context) => deps.logger.error(message, context),
+      },
+    });
 
-  return {
-    runtimeSlug,
-    teamName: request.teamName,
-    projectPath,
-    daemon,
-    gateway,
-  };
+    return {
+      runtimeSlug,
+      teamName: request.teamName,
+      projectPath,
+      daemon,
+      gateway,
+    };
+  } catch (error) {
+    await daemon.dispose().catch((disposeError: unknown) => {
+      deps.logger.warn('terminal workspace daemon cleanup failed after bootstrap error', {
+        disposeError,
+        error,
+        runtimeSlug,
+        teamName: request.teamName,
+      });
+    });
+    throw error;
+  }
 }
 
 function toBootstrap(record: TerminalRuntimeRecord): TerminalWorkspaceBootstrap {
@@ -209,7 +241,7 @@ class TeamTerminalDaemonSupervisor {
       daemonBinaryPath,
       ['--runtime-slug', this.#runtimeSlug, '--session-store', this.#sessionStorePath],
       {
-        cwd: resolveTerminalPlatformRoot(),
+        cwd: resolveDaemonWorkingDirectory(daemonBinaryPath),
         env: process.env,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
@@ -252,31 +284,91 @@ class TeamTerminalDaemonSupervisor {
 
   private async waitUntilReady(): Promise<void> {
     const startedAt = Date.now();
+    let lastError: unknown = null;
+
     while (Date.now() - startedAt < READY_TIMEOUT_MS) {
       if (this.#child && this.#child.exitCode !== null) {
         throw new Error(`terminal-daemon exited before ready with code ${this.#child.exitCode}`);
       }
 
-      if (await this.isReady()) {
+      const readiness = await this.checkReadiness();
+      if (readiness.ready) {
         return;
+      }
+      lastError = readiness.error;
+      if (readiness.fatal) {
+        throw readiness.error;
       }
 
       await sleep(READY_POLL_MS);
     }
 
-    throw new Error('Timed out waiting for terminal-daemon');
+    throw new Error(
+      lastError instanceof Error
+        ? `Timed out waiting for terminal-daemon: ${lastError.message}`
+        : 'Timed out waiting for terminal-daemon'
+    );
   }
 
   private async isReady(): Promise<boolean> {
-    try {
-      const TerminalNodeClient = await loadTerminalNodeClientConstructor();
-      const client = TerminalNodeClient.fromRuntimeSlug(this.#runtimeSlug);
-      await client.handshakeInfo();
-      await client.close().catch(() => undefined);
-      return true;
-    } catch {
-      return false;
+    const readiness = await this.checkReadiness();
+    if (readiness.fatal) {
+      throw readiness.error;
     }
+    return readiness.ready;
+  }
+
+  private async checkReadiness(): Promise<{
+    error?: unknown;
+    fatal: boolean;
+    ready: boolean;
+  }> {
+    return probeTerminalNodeClientReadiness(loadTerminalNodeClientConstructor, this.#runtimeSlug);
+  }
+}
+
+function isTerminalNodeStubUnavailableError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    typeof error.message === 'string' &&
+    error.message.includes(TERMINAL_NODE_STUB_UNAVAILABLE_MESSAGE)
+  );
+}
+
+function createTerminalNodeClientReadinessError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(
+    `${message}. Set ${TERMINAL_PLATFORM_ROOT_ENV} to a built terminal-platform checkout, stage bundled resources/terminal-platform for production builds, or keep a built ../terminal-platform sibling checkout for local development.`
+  );
+}
+
+function isFatalTerminalNodeReadinessError(error: unknown): boolean {
+  return isTerminalNodeStubUnavailableError(error);
+}
+
+async function probeTerminalNodeClientReadiness(
+  loadClient: () => Promise<TerminalNodeClientConstructor>,
+  runtimeSlug: string
+): Promise<{
+  error?: unknown;
+  fatal: boolean;
+  ready: boolean;
+}> {
+  try {
+    const TerminalNodeClient = await loadClient();
+    const client = TerminalNodeClient.fromRuntimeSlug(runtimeSlug);
+    await client.handshakeInfo();
+    await client.close().catch(() => undefined);
+    return { fatal: false, ready: true };
+  } catch (error) {
+    if (isFatalTerminalNodeReadinessError(error)) {
+      return {
+        error: createTerminalNodeClientReadinessError(error),
+        fatal: true,
+        ready: false,
+      };
+    }
+    return { error, fatal: false, ready: false };
   }
 }
 
@@ -404,13 +496,18 @@ async function importTerminalNodeClientConstructor(): Promise<TerminalNodeClient
 }
 
 function resolveTerminalNodePackageSpecifier(): string {
-  const explicitRoot = resolveExplicitTerminalPlatformRoot();
-  if (!explicitRoot) {
-    return 'terminal-platform-node';
+  const localPackagePath = resolveTerminalNodeLocalPackagePath();
+  if (localPackagePath) {
+    return pathToFileURL(localPackagePath).href;
   }
 
-  return pathToFileURL(
-    path.join(
+  return 'terminal-platform-node';
+}
+
+function resolveTerminalNodeLocalPackagePath(): string | null {
+  const explicitRoot = resolveExplicitTerminalPlatformRoot();
+  if (explicitRoot) {
+    const explicitCandidate = path.join(
       explicitRoot,
       'crates',
       'terminal-node-napi',
@@ -418,8 +515,32 @@ function resolveTerminalNodePackageSpecifier(): string {
       'artifacts',
       'local',
       'index.mjs'
-    )
-  ).href;
+    );
+    return fsSync.existsSync(explicitCandidate) ? explicitCandidate : null;
+  }
+
+  const bundledRoot = resolveBundledTerminalPlatformRoot();
+  if (bundledRoot) {
+    const bundledCandidate = path.join(
+      bundledRoot,
+      TERMINAL_PLATFORM_NODE_PACKAGE_DIR_NAME,
+      'index.mjs'
+    );
+    if (fsSync.existsSync(bundledCandidate)) {
+      return bundledCandidate;
+    }
+  }
+
+  const checkoutCandidate = path.join(
+    resolveDefaultTerminalPlatformCheckoutRoot(),
+    'crates',
+    'terminal-node-napi',
+    'package',
+    'artifacts',
+    'local',
+    'index.mjs'
+  );
+  return fsSync.existsSync(checkoutCandidate) ? checkoutCandidate : null;
 }
 
 async function resolveExistingDirectory(value: string | null | undefined): Promise<string | null> {
@@ -438,32 +559,97 @@ async function resolveExistingDirectory(value: string | null | undefined): Promi
 
 async function resolveDaemonBinaryPath(): Promise<string> {
   const explicit = process.env[TERMINAL_DAEMON_BINARY_ENV]?.trim();
-  const binaryPath =
-    explicit ||
-    path.join(
-      resolveTerminalPlatformRoot(),
-      'target',
-      'debug',
-      process.platform === 'win32' ? 'terminal-daemon.exe' : 'terminal-daemon'
-    );
+  if (explicit) {
+    await assertExecutableExists(explicit, TERMINAL_DAEMON_BINARY_ENV);
+    return explicit;
+  }
 
+  const explicitRoot = resolveExplicitTerminalPlatformRoot();
+  if (explicitRoot) {
+    const explicitRootBinaryPath = path.join(explicitRoot, 'target', 'debug', daemonBinaryName());
+    await assertExecutableExists(explicitRootBinaryPath, TERMINAL_PLATFORM_ROOT_ENV);
+    return explicitRootBinaryPath;
+  }
+
+  const bundledRoot = resolveBundledTerminalPlatformRoot();
+  if (bundledRoot) {
+    const bundledBinaryPath = path.join(bundledRoot, daemonBinaryName());
+    if (await fileExists(bundledBinaryPath)) {
+      return bundledBinaryPath;
+    }
+  }
+
+  const checkoutBinaryPath = path.join(
+    resolveDefaultTerminalPlatformCheckoutRoot(),
+    'target',
+    'debug',
+    daemonBinaryName()
+  );
+  if (await fileExists(checkoutBinaryPath)) {
+    return checkoutBinaryPath;
+  }
+
+  throw new Error(
+    `terminal-daemon binary not found. Set ${TERMINAL_DAEMON_BINARY_ENV}, set ${TERMINAL_PLATFORM_ROOT_ENV} to a built terminal-platform checkout, or stage bundled resources/terminal-platform.`
+  );
+}
+
+async function assertExecutableExists(binaryPath: string, source: string): Promise<void> {
   try {
     await fs.access(binaryPath);
   } catch {
     throw new Error(
-      `terminal-daemon binary not found at ${binaryPath}. Build terminal-platform or set ${TERMINAL_DAEMON_BINARY_ENV}.`
+      `terminal-daemon binary not found at ${binaryPath}. Build terminal-platform or update ${source}.`
     );
   }
-
-  return binaryPath;
 }
 
-function resolveTerminalPlatformRoot(): string {
-  const explicit = resolveExplicitTerminalPlatformRoot();
-  if (explicit) {
-    return explicit;
+async function fileExists(value: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(value);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+function resolveDaemonWorkingDirectory(binaryPath: string): string {
+  const bundledRoot = resolveBundledTerminalPlatformRoot();
+  if (bundledRoot && isPathInside(binaryPath, bundledRoot)) {
+    return bundledRoot;
   }
 
+  const explicitRoot = resolveExplicitTerminalPlatformRoot();
+  if (explicitRoot) {
+    return explicitRoot;
+  }
+
+  const checkoutRoot = resolveDefaultTerminalPlatformCheckoutRoot();
+  if (isPathInside(binaryPath, checkoutRoot)) {
+    return checkoutRoot;
+  }
+
+  return path.dirname(binaryPath);
+}
+
+function resolveBundledTerminalPlatformRoot(): string | null {
+  const candidates = [
+    process.resourcesPath
+      ? path.join(process.resourcesPath, BUNDLED_TERMINAL_PLATFORM_DIR_NAME)
+      : null,
+    path.join(process.cwd(), 'resources', BUNDLED_TERMINAL_PLATFORM_DIR_NAME),
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && fsSync.existsSync(candidate) && fsSync.statSync(candidate).isDirectory()) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function resolveDefaultTerminalPlatformCheckoutRoot(): string {
   return path.resolve(process.cwd(), '../terminal-platform');
 }
 
@@ -472,6 +658,15 @@ function resolveExplicitTerminalPlatformRoot(): string | null {
     process.env[TERMINAL_PLATFORM_ROOT_ENV]?.trim() ||
     process.env[LEGACY_TERMINAL_PLATFORM_ROOT_ENV]?.trim();
   return explicit ? path.resolve(explicit) : null;
+}
+
+function daemonBinaryName(): string {
+  return process.platform === 'win32' ? 'terminal-daemon.exe' : 'terminal-daemon';
+}
+
+function isPathInside(value: string, parent: string): boolean {
+  const relative = path.relative(parent, value);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function resolveDefaultShell(): string {
@@ -488,3 +683,12 @@ function isChildRunning(child: TerminalDaemonChildProcess): boolean {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+export const terminalWorkspaceFeatureTestInternals = {
+  createTerminalNodeClientReadinessError,
+  isTerminalNodeStubUnavailableError,
+  probeTerminalNodeClientReadiness,
+  resolveBundledTerminalPlatformRoot,
+  resolveDaemonBinaryPath,
+  resolveTerminalNodePackageSpecifier,
+};

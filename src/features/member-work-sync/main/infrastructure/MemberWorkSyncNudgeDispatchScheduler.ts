@@ -27,6 +27,7 @@ export class MemberWorkSyncNudgeDispatchScheduler {
   private readonly dispatchTimeoutMs: number;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running: Promise<void> | null = null;
+  private timedOutWork: Promise<unknown> | null = null;
   private stopped = false;
 
   constructor(private readonly deps: MemberWorkSyncNudgeDispatchSchedulerDeps) {
@@ -46,6 +47,9 @@ export class MemberWorkSyncNudgeDispatchScheduler {
 
   async runOnce(): Promise<void> {
     if (this.stopped) {
+      return;
+    }
+    if (this.timedOutWork) {
       return;
     }
     if (this.running) {
@@ -120,6 +124,7 @@ export class MemberWorkSyncNudgeDispatchScheduler {
         work,
         new Promise<never>((_, reject) => {
           timeout = setTimeout(() => {
+            this.trackTimedOutWork(work);
             reject(
               new Error(
                 `member work sync scheduled nudge dispatch timed out after ${this.dispatchTimeoutMs}ms`
@@ -145,6 +150,7 @@ export class MemberWorkSyncNudgeDispatchScheduler {
         work,
         new Promise<never>((_, reject) => {
           timeout = setTimeout(() => {
+            this.trackTimedOutWork(work);
             reject(
               new Error(
                 `member work sync scheduled nudge team listing timed out after ${this.dispatchTimeoutMs}ms`
@@ -159,5 +165,16 @@ export class MemberWorkSyncNudgeDispatchScheduler {
         clearTimeout(timeout);
       }
     }
+  }
+
+  private trackTimedOutWork(work: Promise<unknown>): void {
+    const settling = work
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.timedOutWork === settling) {
+          this.timedOutWork = null;
+        }
+      });
+    this.timedOutWork = settling;
   }
 }

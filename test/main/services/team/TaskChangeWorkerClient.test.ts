@@ -1,11 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { TaskChangeWorkerClient } from '../../../../src/main/services/team/TaskChangeWorkerClient';
+import {
+  isTaskChangeWorkerFatalError,
+  TaskChangeWorkerClient,
+} from '../../../../src/main/services/team/TaskChangeWorkerClient';
 
+import type {
+  TaskChangeWorkerRequest,
+  TaskChangeWorkerResponse,
+} from '../../../../src/main/services/team/taskChangeWorkerTypes';
 import type { TaskChangeSetV2 } from '../../../../src/shared/types';
-import type { TaskChangeWorkerRequest, TaskChangeWorkerResponse } from '../../../../src/main/services/team/taskChangeWorkerTypes';
 
-class FakeWorker {
+interface FakeWorkerLike {
+  on(event: 'message', listener: (message: TaskChangeWorkerResponse) => void): this;
+  on(event: 'error', listener: (error: Error) => void): this;
+  on(event: 'exit', listener: (code: number) => void): this;
+  postMessage(message: TaskChangeWorkerRequest): void;
+  terminate(): Promise<number>;
+}
+
+class FakeWorker implements FakeWorkerLike {
   readonly posted: TaskChangeWorkerRequest[] = [];
   readonly terminate = vi.fn(async () => 0);
   private readonly listeners: {
@@ -18,8 +32,18 @@ class FakeWorker {
     exit: [],
   };
 
-  on(event: 'message' | 'error' | 'exit', listener: ((value: any) => void) & ((value: any) => void)) {
-    if (event === 'message') this.listeners.message.push(listener as (message: TaskChangeWorkerResponse) => void);
+  on(event: 'message', listener: (message: TaskChangeWorkerResponse) => void): this;
+  on(event: 'error', listener: (error: Error) => void): this;
+  on(event: 'exit', listener: (code: number) => void): this;
+  on(
+    event: 'message' | 'error' | 'exit',
+    listener:
+      | ((message: TaskChangeWorkerResponse) => void)
+      | ((error: Error) => void)
+      | ((code: number) => void)
+  ): this {
+    if (event === 'message')
+      this.listeners.message.push(listener as (message: TaskChangeWorkerResponse) => void);
     if (event === 'error') this.listeners.error.push(listener as (error: Error) => void);
     if (event === 'exit') this.listeners.exit.push(listener as (code: number) => void);
     return this;
@@ -55,14 +79,18 @@ function makePayload(taskId = 'task-1') {
     taskMeta: {
       owner: 'alice',
       status: 'completed',
-      intervals: [{ startedAt: '2026-03-01T10:00:00.000Z', completedAt: '2026-03-01T10:10:00.000Z' }],
+      intervals: [
+        { startedAt: '2026-03-01T10:00:00.000Z', completedAt: '2026-03-01T10:10:00.000Z' },
+      ],
       reviewState: 'none' as const,
       historyEvents: [],
     },
     effectiveOptions: {
       owner: 'alice',
       status: 'completed',
-      intervals: [{ startedAt: '2026-03-01T10:00:00.000Z', completedAt: '2026-03-01T10:10:00.000Z' }],
+      intervals: [
+        { startedAt: '2026-03-01T10:00:00.000Z', completedAt: '2026-03-01T10:10:00.000Z' },
+      ],
     },
     projectPath: '/repo',
     includeDetails: false,
@@ -115,7 +143,7 @@ describe('TaskChangeWorkerClient', () => {
       workerFactory: () => {
         const worker = new FakeWorker();
         workers.push(worker);
-        return worker as any;
+        return worker;
       },
       enabled: true,
     });
@@ -127,7 +155,7 @@ describe('TaskChangeWorkerClient', () => {
     await expect(promise).resolves.toEqual(makeResult());
   });
 
-  it('times out the active request, terminates the worker, and recreates it on the next call', async () => {
+  it('times out the active request and waits for cooldown before recreating the worker', async () => {
     vi.useFakeTimers();
     const workers: FakeWorker[] = [];
     const client = new TaskChangeWorkerClient({
@@ -135,9 +163,10 @@ describe('TaskChangeWorkerClient', () => {
       workerFactory: () => {
         const worker = new FakeWorker();
         workers.push(worker);
-        return worker as any;
+        return worker;
       },
       timeoutMs: 25,
+      fatalRestartCooldownMs: 100,
       enabled: true,
     });
 
@@ -145,8 +174,16 @@ describe('TaskChangeWorkerClient', () => {
     const firstExpectation = expect(firstPromise).rejects.toThrow('Worker call timeout');
     await vi.advanceTimersByTimeAsync(25);
     await firstExpectation;
+    vi.mocked(console.warn).mockClear();
     expect(workers[0]!.terminate).toHaveBeenCalledTimes(1);
 
+    const duringCooldown = client.computeTaskChanges(makePayload('task-during-cooldown'));
+    await expect(duringCooldown).rejects.toThrow(
+      'Task change worker recovering after fatal failure'
+    );
+    expect(workers).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(100);
     const secondPromise = client.computeTaskChanges(makePayload('task-next'));
     const request = workers[1]!.posted[0]!;
     workers[1]!.emitMessage({
@@ -159,6 +196,49 @@ describe('TaskChangeWorkerClient', () => {
     expect(workers).toHaveLength(2);
   });
 
+  it('does not recreate the worker during fatal OOM cooldown', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const workers: FakeWorker[] = [];
+    const client = new TaskChangeWorkerClient({
+      workerPath: '/tmp/task-change-worker.cjs',
+      workerFactory: () => {
+        const worker = new FakeWorker();
+        workers.push(worker);
+        return worker;
+      },
+      fatalRestartCooldownMs: 100,
+      enabled: true,
+    });
+
+    const first = client.computeTaskChanges(makePayload('task-oom'));
+    workers[0]!.emitError(
+      Object.assign(
+        new Error('Worker terminated due to reaching memory limit: JS heap out of memory'),
+        { code: 'ERR_WORKER_OUT_OF_MEMORY' }
+      )
+    );
+
+    await expect(first).rejects.toThrow('Worker terminated due to reaching memory limit');
+    const second = client.computeTaskChanges(makePayload('task-after-oom'));
+    await expect(second).rejects.toThrow('Task change worker recovering after fatal failure');
+    expect(workers).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(100);
+    const third = client.computeTaskChanges(makePayload('task-after-cooldown'));
+    const request = workers[1]!.posted[0]!;
+    workers[1]!.emitMessage({
+      id: request.id,
+      ok: true,
+      result: makeResult('task-after-cooldown', '/repo/src/recovered.ts'),
+    });
+
+    await expect(third).resolves.toEqual(
+      makeResult('task-after-cooldown', '/repo/src/recovered.ts')
+    );
+    expect(workers).toHaveLength(2);
+  });
+
   it('rejects all pending requests on worker error and clears queued work', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const workers: FakeWorker[] = [];
@@ -167,7 +247,7 @@ describe('TaskChangeWorkerClient', () => {
       workerFactory: () => {
         const worker = new FakeWorker();
         workers.push(worker);
-        return worker as any;
+        return worker;
       },
       enabled: true,
     });
@@ -185,6 +265,38 @@ describe('TaskChangeWorkerClient', () => {
     await expect(third).resolves.toEqual(makeResult('task-3'));
   });
 
+  it('ignores stale worker exit events after a replacement worker starts', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const workers: FakeWorker[] = [];
+    const client = new TaskChangeWorkerClient({
+      workerPath: '/tmp/task-change-worker.cjs',
+      workerFactory: () => {
+        const worker = new FakeWorker();
+        workers.push(worker);
+        return worker;
+      },
+      enabled: true,
+    });
+
+    const first = client.computeTaskChanges(makePayload('task-1'));
+    workers[0]!.emitError(new Error('transient worker failure'));
+    await expect(first).rejects.toThrow('transient worker failure');
+
+    const second = client.computeTaskChanges(makePayload('task-2'));
+    expect(workers).toHaveLength(2);
+    workers[0]!.emitExit(1);
+
+    const request = workers[1]!.posted[0]!;
+    workers[1]!.emitMessage({
+      id: request.id,
+      ok: true,
+      result: makeResult('task-2', '/repo/src/current.ts'),
+    });
+
+    await expect(second).resolves.toEqual(makeResult('task-2', '/repo/src/current.ts'));
+  });
+
   it('rejects all pending requests on worker exit', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const workers: FakeWorker[] = [];
@@ -193,7 +305,7 @@ describe('TaskChangeWorkerClient', () => {
       workerFactory: () => {
         const worker = new FakeWorker();
         workers.push(worker);
-        return worker as any;
+        return worker;
       },
       enabled: true,
     });
@@ -206,6 +318,12 @@ describe('TaskChangeWorkerClient', () => {
     await expect(second).rejects.toThrow('Worker exited with code 9');
   });
 
+  it('classifies worker exits as fatal only for non-zero exit codes', () => {
+    expect(isTaskChangeWorkerFatalError(new Error('Worker exited with code 0'))).toBe(false);
+    expect(isTaskChangeWorkerFatalError(new Error('Worker exited with code 1'))).toBe(true);
+    expect(isTaskChangeWorkerFatalError(new Error('Worker exited with code 9'))).toBe(true);
+  });
+
   it('executes queued requests sequentially in FIFO order', async () => {
     const workers: FakeWorker[] = [];
     const client = new TaskChangeWorkerClient({
@@ -213,7 +331,7 @@ describe('TaskChangeWorkerClient', () => {
       workerFactory: () => {
         const worker = new FakeWorker();
         workers.push(worker);
-        return worker as any;
+        return worker;
       },
       enabled: true,
     });

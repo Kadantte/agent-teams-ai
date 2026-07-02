@@ -5,7 +5,10 @@ import {
 import { addMainBreadcrumb } from '@main/sentry';
 import { setCurrentMainOp } from '@main/services/infrastructure/EventLoopLagMonitor';
 import { markTeamEngaged } from '@main/services/infrastructure/teamWatchScope';
-import { getTeamDataWorkerClient } from '@main/services/team/TeamDataWorkerClient';
+import {
+  getTeamDataWorkerClient,
+  isTeamDataWorkerFatalError,
+} from '@main/services/team/TeamDataWorkerClient';
 import { getAppIconPath } from '@main/utils/appIcon';
 import { getAppDataPath, getTeamsBasePath } from '@main/utils/pathDecoder';
 import { safeSendToRenderer } from '@main/utils/safeWebContentsSend';
@@ -37,6 +40,7 @@ import {
   TEAM_GET_OPENCODE_RUNTIME_DELIVERY_STATUS,
   TEAM_GET_PROJECT_BRANCH,
   TEAM_GET_SAVED_REQUEST,
+  TEAM_GET_TASK,
   TEAM_GET_TASK_ACTIVITY,
   TEAM_GET_TASK_ACTIVITY_DETAIL,
   TEAM_GET_TASK_ATTACHMENT,
@@ -141,7 +145,10 @@ import {
   buildReplaceMembersDiff,
   buildReplaceMembersSummaryMessage,
 } from '../services/team/memberUpdateNotifications';
-import { mergeLiveLeadProcessMessages } from '../services/team/mergeLiveLeadProcessMessages';
+import {
+  mergeLiveLeadProcessMessages,
+  mergeLiveLeadProcessMessagesPage,
+} from '../services/team/mergeLiveLeadProcessMessages';
 import { TeamAttachmentStore } from '../services/team/TeamAttachmentStore';
 import { TeamConfigReader } from '../services/team/TeamConfigReader';
 import { readTeamLaunchFailureDiagnosticsBundle } from '../services/team/TeamLaunchFailureArtifactPack';
@@ -230,6 +237,7 @@ import type {
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
+  TeamTaskWithKanban,
   TeamUpdateConfigRequest,
   TeamViewSnapshot,
   TeamWorktreeGitStatus,
@@ -246,6 +254,7 @@ const OPENCODE_RUNTIME_DELIVERY_UI_TIMEOUT_MS = 6_000;
 const OPENCODE_RUNTIME_DELIVERY_STATUS_AFTER_UI_TIMEOUT_MS = 1_000;
 const OPENCODE_RUNTIME_DELIVERY_UI_TIMEOUT_PENDING_REASON =
   'opencode_runtime_delivery_ui_timeout_pending';
+const MAX_LIVE_MESSAGES_OVERLAY_PAYLOAD = 200;
 
 type OpenCodeMemberInboxRelayResult = Awaited<
   ReturnType<TeamProvisioningService['relayOpenCodeMemberInboxMessages']>
@@ -490,31 +499,89 @@ function noteHeavyTeamDataWorkerFallback(operation: string): void {
   );
 }
 
+function getWorkerErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getFatalTeamDataWorkerFailureMessage(error: unknown): string | null {
+  if (!isTeamDataWorkerFatalError(error)) {
+    return null;
+  }
+  const message = getWorkerErrorMessage(error);
+  return `TEAM_DATA_WORKER_FAILED: ${message}`;
+}
+
+function throwIfFatalTeamDataWorkerFailure(_operation: string, error: unknown): void {
+  const message = getFatalTeamDataWorkerFailureMessage(error);
+  if (message) {
+    throw new Error(message);
+  }
+}
+
+function compareInboxMessagesNewestFirst(left: InboxMessage, right: InboxMessage): number {
+  const leftTime = Date.parse(left.timestamp);
+  const rightTime = Date.parse(right.timestamp);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+  const leftId = typeof left.messageId === 'string' ? left.messageId : '';
+  const rightId = typeof right.messageId === 'string' ? right.messageId : '';
+  return leftId.localeCompare(rightId);
+}
+
+function capLiveOverlayMessages(liveMessages: readonly InboxMessage[]): InboxMessage[] {
+  if (liveMessages.length <= MAX_LIVE_MESSAGES_OVERLAY_PAYLOAD) {
+    return [...liveMessages];
+  }
+  return [...liveMessages]
+    .sort(compareInboxMessagesNewestFirst)
+    .slice(0, MAX_LIVE_MESSAGES_OVERLAY_PAYLOAD);
+}
+
 async function getNewestMessagesPageWithLiveOverlay(input: {
   teamName: string;
   limit: number;
   liveMessages: InboxMessage[];
   includeUndefinedCursorInFallback?: boolean;
 }): Promise<MessagesPage> {
-  const { teamName, limit, liveMessages } = input;
+  const { teamName, limit } = input;
+  const liveMessages = capLiveOverlayMessages(input.liveMessages);
+  const liveReserve = liveMessages.length ? Math.max(liveMessages.length, 100) : 0;
+  const durableLimit = limit + liveReserve + 1;
   const worker = getTeamDataWorkerClient();
   const options = input.includeUndefinedCursorInFallback
-    ? { cursor: undefined, limit, liveMessages }
-    : { limit, liveMessages };
+    ? { cursor: undefined, limit: durableLimit }
+    : { limit: durableLimit };
+  let durablePage: MessagesPage;
   if (worker.isAvailable()) {
     try {
-      return await worker.getMessagesPage(teamName, options);
+      durablePage = await worker.getMessagesPage(teamName, options);
+      return mergeLiveLeadProcessMessagesPage({
+        durableMessages: durablePage.messages,
+        liveMessages,
+        limit,
+        feedRevision: durablePage.feedRevision,
+        durableHasMoreAfterWindow: durablePage.hasMore,
+      });
     } catch (workerErr) {
+      throwIfFatalTeamDataWorkerFailure('teams:getMessagesPage.liveOverlay', workerErr);
       logger.warn(
-        `[teams:getMessagesPage] worker failed for live overlay, falling back: ${
-          workerErr instanceof Error ? workerErr.message : workerErr
-        }`
+        `[teams:getMessagesPage] worker failed for live overlay, falling back: ${getWorkerErrorMessage(
+          workerErr
+        )}`
       );
     }
   }
 
   noteHeavyTeamDataWorkerFallback('teams:getMessagesPage.liveOverlay');
-  return getTeamDataService().getMessagesPage(teamName, options);
+  durablePage = await getTeamDataService().getMessagesPage(teamName, options);
+  return mergeLiveLeadProcessMessagesPage({
+    durableMessages: durablePage.messages,
+    liveMessages,
+    limit,
+    feedRevision: durablePage.feedRevision,
+    durableHasMoreAfterWindow: durablePage.hasMore,
+  });
 }
 
 function invalidateTeamRosterSnapshotCaches(teamName: string): void {
@@ -723,6 +790,7 @@ export function registerTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(TEAM_GET_MESSAGES_PAGE, handleGetMessagesPage);
   ipcMain.handle(TEAM_GET_MEMBER_ACTIVITY_META, handleGetMemberActivityMeta);
   ipcMain.handle(TEAM_CREATE_TASK, handleCreateTask);
+  ipcMain.handle(TEAM_GET_TASK, handleGetTask);
   ipcMain.handle(TEAM_REQUEST_REVIEW, handleRequestReview);
   ipcMain.handle(TEAM_UPDATE_KANBAN, handleUpdateKanban);
   ipcMain.handle(TEAM_UPDATE_KANBAN_COLUMN_ORDER, handleUpdateKanbanColumnOrder);
@@ -811,6 +879,7 @@ export function removeTeamHandlers(ipcMain: IpcMain): void {
   ipcMain.removeHandler(TEAM_GET_MESSAGES_PAGE);
   ipcMain.removeHandler(TEAM_GET_MEMBER_ACTIVITY_META);
   ipcMain.removeHandler(TEAM_CREATE_TASK);
+  ipcMain.removeHandler(TEAM_GET_TASK);
   ipcMain.removeHandler(TEAM_REQUEST_REVIEW);
   ipcMain.removeHandler(TEAM_UPDATE_KANBAN);
   ipcMain.removeHandler(TEAM_UPDATE_KANBAN_COLUMN_ORDER);
@@ -1091,8 +1160,9 @@ async function handleGetData(
             : await worker.getTeamData(tn, getDataOptions);
         dataSource = 'worker';
       } catch (workerErr) {
+        throwIfFatalTeamDataWorkerFailure('teams:getData', workerErr);
         logger.warn(
-          `[teams:getData] worker failed, falling back: ${workerErr instanceof Error ? workerErr.message : workerErr}`
+          `[teams:getData] worker failed, falling back: ${getWorkerErrorMessage(workerErr)}`
         );
         noteHeavyTeamDataWorkerFallback('teams:getData');
         data = await readFromMain();
@@ -2892,10 +2962,9 @@ async function handleGetMessagesPage(
         scanNotifications(page);
         return page;
       } catch (workerErr) {
+        throwIfFatalTeamDataWorkerFailure('teams:getMessagesPage', workerErr);
         logger.warn(
-          `[teams:getMessagesPage] worker failed, falling back: ${
-            workerErr instanceof Error ? workerErr.message : workerErr
-          }`
+          `[teams:getMessagesPage] worker failed, falling back: ${getWorkerErrorMessage(workerErr)}`
         );
       }
     }
@@ -2921,10 +2990,11 @@ async function handleGetMemberActivityMeta(
       try {
         return await worker.getMemberActivityMeta(vTeam.value!);
       } catch (workerErr) {
+        throwIfFatalTeamDataWorkerFailure('teams:getMemberActivityMeta', workerErr);
         logger.warn(
-          `[teams:getMemberActivityMeta] worker failed, falling back: ${
-            workerErr instanceof Error ? workerErr.message : workerErr
-          }`
+          `[teams:getMemberActivityMeta] worker failed, falling back: ${getWorkerErrorMessage(
+            workerErr
+          )}`
         );
       }
     }
@@ -3455,6 +3525,26 @@ async function handleRequestReview(
   );
 }
 
+async function handleGetTask(
+  _event: IpcMainInvokeEvent,
+  teamName: unknown,
+  taskId: unknown
+): Promise<IpcResult<TeamTaskWithKanban | null>> {
+  const validatedTeamName = validateTeamName(teamName);
+  if (!validatedTeamName.valid) {
+    return { success: false, error: validatedTeamName.error ?? 'Invalid teamName' };
+  }
+
+  const validatedTaskId = validateTaskId(taskId);
+  if (!validatedTaskId.valid) {
+    return { success: false, error: validatedTaskId.error ?? 'Invalid taskId' };
+  }
+
+  return wrapTeamHandler('getTask', () =>
+    getTeamDataService().getTask(validatedTeamName.value!, validatedTaskId.value!)
+  );
+}
+
 async function handleUpdateKanban(
   _event: IpcMainInvokeEvent,
   teamName: unknown,
@@ -3982,8 +4072,12 @@ async function handleGetLogsForTask(
       const result = await worker.findLogsForTask(vTeam.value!, vTask.value!, opts);
       return { success: true, data: result };
     } catch (workerErr) {
+      const fatalError = getFatalTeamDataWorkerFailureMessage(workerErr);
+      if (fatalError) {
+        return { success: false, error: fatalError };
+      }
       logger.warn(
-        `[teams:getLogsForTask] worker failed, falling back: ${workerErr instanceof Error ? workerErr.message : workerErr}`
+        `[teams:getLogsForTask] worker failed, falling back: ${getWorkerErrorMessage(workerErr)}`
       );
     }
   }
@@ -4556,13 +4650,19 @@ async function handleReplaceMembers(
   return wrapTeamHandler('replaceMembers', async () => {
     const tn = vTeam.value!;
     const teamDataService = getTeamDataService();
+    const provisioning = getTeamProvisioningService();
+    const isTeamAlive = provisioning.isTeamAlive(tn);
+    if (!isTeamAlive) {
+      await teamDataService.replaceMembers(tn, { members });
+      invalidateTeamRosterSnapshotCaches(tn);
+      return;
+    }
+
     const previousMembersMeta = await new TeamMembersMetaStore().getMeta(tn).catch(() => null);
     const previousTeamData = await teamDataService.getTeamData(tn);
     const previousMembers = previousTeamData.members as RuntimeRosterMutationMember[];
-    const provisioning = getTeamProvisioningService();
-    const isTeamAlive = provisioning.isTeamAlive(tn);
     const useSecondaryOpenCodeLaneRouting = isTeamAlive && !isOpenCodeLedRoster(previousMembers);
-    if (isTeamAlive && !useSecondaryOpenCodeLaneRouting) {
+    if (!useSecondaryOpenCodeLaneRouting) {
       throw new Error(OPENCODE_LEAD_LIVE_ROSTER_MUTATION_BLOCK_MESSAGE);
     }
     if (useSecondaryOpenCodeLaneRouting) {

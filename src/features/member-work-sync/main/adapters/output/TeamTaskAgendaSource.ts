@@ -23,6 +23,8 @@ import type { TeamMembersMetaStore } from '@main/services/team/TeamMembersMetaSt
 import type { TeamTaskReader } from '@main/services/team/TeamTaskReader';
 import type { TeamMember, TeamProviderId } from '@shared/types';
 
+const ROSTER_CACHE_MAX_AGE_MS = 5_000;
+
 export interface TeamTaskAgendaSourceDeps {
   configReader: Pick<TeamConfigReader, 'getConfig'>;
   taskReader: TeamTaskReader;
@@ -30,6 +32,22 @@ export interface TeamTaskAgendaSourceDeps {
   membersMetaStore: TeamMembersMetaStore;
   hash: MemberWorkSyncHashPort;
   clock: { now(): Date };
+}
+
+interface TeamRosterSnapshot {
+  config: Awaited<ReturnType<TeamTaskAgendaSourceDeps['configReader']['getConfig']>>;
+  members: TeamMember[];
+  activeMemberNames: string[];
+}
+
+interface TeamRosterCacheEntry {
+  snapshot: TeamRosterSnapshot;
+  cachedAtMs: number;
+}
+
+interface TeamWorkSnapshot {
+  tasks: Awaited<ReturnType<TeamTaskAgendaSourceDeps['taskReader']['getTasks']>>;
+  kanban: Awaited<ReturnType<TeamTaskAgendaSourceDeps['kanbanManager']['getState']>>;
 }
 
 function memberKey(member: Pick<TeamMember, 'name'>): string {
@@ -62,19 +80,16 @@ function toMemberLike(member: TeamMember): MemberWorkSyncMemberLike {
 }
 
 export class TeamTaskAgendaSource implements MemberWorkSyncAgendaSourcePort {
+  private readonly rosterInFlightByTeam = new Map<string, Promise<TeamRosterSnapshot>>();
+  private readonly rosterCacheByTeam = new Map<string, TeamRosterCacheEntry>();
+  private readonly workInFlightByTeam = new Map<string, Promise<TeamWorkSnapshot>>();
+
   constructor(private readonly deps: TeamTaskAgendaSourceDeps) {}
 
   async loadActiveMemberNames(teamName: string): Promise<string[]> {
-    const config = await this.deps.configReader.getConfig(teamName);
-    if (!config || config.deletedAt) {
-      return [];
-    }
-
-    const metaMembers = await this.deps.membersMetaStore.getMembers(teamName);
-    return mergeTeamMembers(config.members ?? [], metaMembers)
-      .filter((member) => !member.removedAt)
-      .map((member) => normalizeMemberName(member.name))
-      .filter((memberName) => memberName.length > 0 && !isReservedMemberName(memberName))
+    const roster = await this.loadRoster(teamName, { allowRecentCache: true });
+    return roster.activeMemberNames
+      .filter((memberName) => !isReservedMemberName(memberName))
       .sort((left, right) => left.localeCompare(right));
   }
 
@@ -82,7 +97,8 @@ export class TeamTaskAgendaSource implements MemberWorkSyncAgendaSourcePort {
     teamName: string;
     memberName: string;
   }): Promise<MemberWorkSyncAgendaSourceResult> {
-    const config = await this.deps.configReader.getConfig(input.teamName);
+    const roster = await this.loadRoster(input.teamName, { allowRecentCache: false });
+    const config = roster.config;
     if (!config || config.deletedAt) {
       const nowIso = this.deps.clock.now().toISOString();
       return {
@@ -99,16 +115,9 @@ export class TeamTaskAgendaSource implements MemberWorkSyncAgendaSourcePort {
       };
     }
 
-    const [tasks, kanban, metaMembers] = await Promise.all([
-      this.deps.taskReader.getTasks(input.teamName),
-      this.deps.kanbanManager.getState(input.teamName),
-      this.deps.membersMetaStore.getMembers(input.teamName),
-    ]);
-    const members = mergeTeamMembers(config.members ?? [], metaMembers);
-    const activeMemberNames = members
-      .filter((member) => !member.removedAt)
-      .map((member) => normalizeMemberName(member.name))
-      .filter(Boolean);
+    const { tasks, kanban } = await this.loadWork(input.teamName);
+    const members = roster.members;
+    const activeMemberNames = roster.activeMemberNames;
     const normalizedMemberName = normalizeMemberName(input.memberName);
     const member = members.find((candidate) => memberKey(candidate) === normalizedMemberName);
     const providerId =
@@ -141,5 +150,77 @@ export class TeamTaskAgendaSource implements MemberWorkSyncAgendaSourcePort {
       ...(providerId ? { providerId } : {}),
       diagnostics: [],
     };
+  }
+
+  private loadRoster(
+    teamName: string,
+    options: { allowRecentCache: boolean }
+  ): Promise<TeamRosterSnapshot> {
+    const nowMs = this.deps.clock.now().getTime();
+    const cached = this.rosterCacheByTeam.get(teamName);
+    if (options.allowRecentCache && cached && nowMs - cached.cachedAtMs < ROSTER_CACHE_MAX_AGE_MS) {
+      return Promise.resolve(cached.snapshot);
+    }
+
+    const existing = this.rosterInFlightByTeam.get(teamName);
+    if (existing) {
+      return existing;
+    }
+
+    const request = this.buildRoster(teamName).finally(() => {
+      if (this.rosterInFlightByTeam.get(teamName) === request) {
+        this.rosterInFlightByTeam.delete(teamName);
+      }
+    });
+    this.rosterInFlightByTeam.set(teamName, request);
+    return request;
+  }
+
+  private async buildRoster(teamName: string): Promise<TeamRosterSnapshot> {
+    const config = await this.deps.configReader.getConfig(teamName);
+    if (!config || config.deletedAt) {
+      const snapshot = { config, members: [], activeMemberNames: [] };
+      this.rosterCacheByTeam.set(teamName, {
+        snapshot,
+        cachedAtMs: this.deps.clock.now().getTime(),
+      });
+      return snapshot;
+    }
+
+    const metaMembers = await this.deps.membersMetaStore.getMembers(teamName);
+    const members = mergeTeamMembers(config.members ?? [], metaMembers);
+    const activeMemberNames = members
+      .filter((member) => !member.removedAt)
+      .map((member) => normalizeMemberName(member.name))
+      .filter(Boolean);
+    const snapshot = { config, members, activeMemberNames };
+    this.rosterCacheByTeam.set(teamName, {
+      snapshot,
+      cachedAtMs: this.deps.clock.now().getTime(),
+    });
+    return snapshot;
+  }
+
+  private loadWork(teamName: string): Promise<TeamWorkSnapshot> {
+    const existing = this.workInFlightByTeam.get(teamName);
+    if (existing) {
+      return existing;
+    }
+
+    const request = this.buildWork(teamName).finally(() => {
+      if (this.workInFlightByTeam.get(teamName) === request) {
+        this.workInFlightByTeam.delete(teamName);
+      }
+    });
+    this.workInFlightByTeam.set(teamName, request);
+    return request;
+  }
+
+  private async buildWork(teamName: string): Promise<TeamWorkSnapshot> {
+    const [tasks, kanban] = await Promise.all([
+      this.deps.taskReader.getTasks(teamName),
+      this.deps.kanbanManager.getState(teamName),
+    ]);
+    return { tasks, kanban };
   }
 }

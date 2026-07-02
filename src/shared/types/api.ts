@@ -91,6 +91,7 @@ import type {
   TeamSummary,
   TeamTask,
   TeamTaskStatus,
+  TeamTaskWithKanban,
   TeamUpdateConfigRequest,
   TeamViewSnapshot,
   TeamWorktreeGitStatus,
@@ -113,6 +114,7 @@ import type {
   MemberWorkSyncStatusRequest,
   MemberWorkSyncTeamMetrics,
 } from '@features/member-work-sync/contracts';
+import type { OrganizationsElectronApi } from '@features/organizations/contracts';
 import type { RecentProjectsElectronApi } from '@features/recent-projects/contracts';
 import type { RuntimeProviderManagementApi } from '@features/runtime-provider-management/contracts';
 import type { TerminalWorkspaceElectronApi } from '@features/terminal-workspace/contracts';
@@ -531,6 +533,7 @@ export interface TeamsAPI {
   ) => Promise<MessagesPage>;
   getMemberActivityMeta: (teamName: string) => Promise<TeamMemberActivityMeta>;
   createTask: (teamName: string, request: CreateTaskRequest) => Promise<TeamTask>;
+  getTask: (teamName: string, taskId: string) => Promise<TeamTaskWithKanban | null>;
   requestReview: (teamName: string, taskId: string) => Promise<void>;
   updateKanban: (teamName: string, taskId: string, patch: UpdateKanbanPatch) => Promise<void>;
   updateKanbanColumnOrder: (
@@ -981,6 +984,9 @@ export interface ElectronAPI extends RecentProjectsElectronApi, CodexAccountElec
 
   // Member log stream API
   memberLogStream: MemberLogStreamApi;
+
+  // Organization map API
+  organizations: OrganizationsElectronApi;
 
   // tmux runtime diagnostics API
   tmux: TmuxAPI;

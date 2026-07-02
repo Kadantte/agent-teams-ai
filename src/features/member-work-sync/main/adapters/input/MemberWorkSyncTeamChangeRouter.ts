@@ -69,9 +69,9 @@ export class MemberWorkSyncTeamChangeRouter {
   ) {}
 
   async enqueueStartupScan(teamNames: string[]): Promise<void> {
-    await Promise.allSettled(
-      teamNames.map((teamName) => this.enqueueTeam(teamName, 'startup_scan', 30_000))
-    );
+    for (const teamName of teamNames) {
+      await this.enqueueTeam(teamName, 'startup_scan', 30_000).catch(() => undefined);
+    }
   }
 
   noteTeamChange(event: TeamChangeEvent): void {
@@ -155,9 +155,7 @@ export class MemberWorkSyncTeamChangeRouter {
     const activeMembers = await this.rosterSource.loadActiveMemberNames(teamName);
     const materializer = this.materializer;
     if (materializer) {
-      await Promise.allSettled(
-        activeMembers.map((memberName) => materializer.materializeMember(teamName, memberName))
-      );
+      await this.materializeMembers(teamName, activeMembers);
     }
     for (const memberName of activeMembers) {
       this.queue.enqueue({ teamName, memberName, triggerReason, runAfterMs });
@@ -181,17 +179,13 @@ export class MemberWorkSyncTeamChangeRouter {
       teamName: event.teamName,
       taskId,
     });
-    if (impact.fallbackTeamWide) {
+    if (impact.fallbackTeamWide || impact.memberNames.length === 0) {
       await this.enqueueTeam(event.teamName, triggerReason);
       return;
     }
     const materializer = this.materializer;
     if (materializer) {
-      await Promise.allSettled(
-        impact.memberNames.map((memberName) =>
-          materializer.materializeMember(event.teamName, memberName)
-        )
-      );
+      await this.materializeMembers(event.teamName, impact.memberNames);
     }
     for (const memberName of impact.memberNames) {
       this.queue.enqueue({
@@ -199,6 +193,18 @@ export class MemberWorkSyncTeamChangeRouter {
         memberName,
         triggerReason,
       });
+    }
+  }
+
+  private async materializeMembers(
+    teamName: string,
+    memberNames: readonly string[]
+  ): Promise<void> {
+    if (!this.materializer) {
+      return;
+    }
+    for (const memberName of memberNames) {
+      await this.materializer.materializeMember(teamName, memberName).catch(() => undefined);
     }
   }
 }

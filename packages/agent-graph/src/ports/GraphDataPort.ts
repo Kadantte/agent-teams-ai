@@ -1,4 +1,4 @@
-import type { GraphNode, GraphEdge, GraphParticle, GraphLayoutPort } from './types';
+import type { GraphEdge, GraphGroupFrame, GraphLayoutPort, GraphNode, GraphParticle } from './types';
 
 /**
  * Data provider port — supplies graph state to the visualization.
@@ -19,4 +19,6 @@ export interface GraphDataPort {
   isAlive?: boolean;
   /** Stable owner-slot layout hints supplied by the host app */
   layout?: GraphLayoutPort;
+  /** Optional host-supplied visual groups drawn behind related graph nodes */
+  groupFrames?: GraphGroupFrame[];
 }

@@ -812,6 +812,55 @@ describe('TeamConfigReader', () => {
     expect((await reader.getConfigSnapshot(teamName))?.name).toBe('Fresh Prime');
   });
 
+  it('keeps slow in-flight verified reads through invalidation without caching stale content', async () => {
+    const teamName = 'slow-read-invalidated-team';
+    const teamDir = path.join(tempDir, teamName);
+    const configPath = path.join(teamDir, 'config.json');
+    await fs.mkdir(teamDir, { recursive: true });
+    const staleRaw = JSON.stringify({
+      name: 'Stale Slow Read',
+      members: [{ name: 'team-lead', agentType: 'team-lead' }],
+    });
+    await fs.writeFile(configPath, staleRaw, 'utf8');
+
+    const readDeferred = createDeferred<string>();
+    const realReadFile = nodeFs.promises.readFile.bind(nodeFs.promises);
+    let intercepted = false;
+    const readFileSpy = vi.spyOn(nodeFs.promises, 'readFile').mockImplementation(((
+      file: unknown,
+      ...args: unknown[]
+    ) => {
+      if (!intercepted && String(file) === configPath) {
+        intercepted = true;
+        return readDeferred.promise as never;
+      }
+      return realReadFile(file as never, ...(args as never[])) as never;
+    }) as never);
+
+    const reader = new TeamConfigReader();
+    const first = reader.getConfig(teamName);
+    await vi.waitFor(() => expect(intercepted).toBe(true));
+
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        name: 'Fresh After Invalidate',
+        members: [{ name: 'team-lead', agentType: 'team-lead' }],
+      }),
+      'utf8'
+    );
+    TeamConfigReader.invalidateTeam(teamName);
+    const second = reader.getConfig(teamName);
+
+    readDeferred.resolve(staleRaw);
+    expect((await first)?.name).toBe('Stale Slow Read');
+    expect((await second)?.name).toBe('Stale Slow Read');
+    expect(readFileSpy).toHaveBeenCalledTimes(1);
+
+    expect((await reader.getConfigSnapshot(teamName))?.name).toBe('Fresh After Invalidate');
+    expect(readFileSpy).toHaveBeenCalledTimes(2);
+  });
+
   it('does not reuse stale in-flight verified reads after app-owned primeConfig', async () => {
     const teamName = 'verified-stale-read-prime-team';
     const teamDir = path.join(tempDir, teamName);

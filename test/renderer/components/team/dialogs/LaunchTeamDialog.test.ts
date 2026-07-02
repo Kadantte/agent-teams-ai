@@ -89,6 +89,15 @@ vi.mock('@renderer/api', () => ({
       },
     ]),
     getDashboardRecentProjects: vi.fn(async () => ({ projects: [] })),
+    organizations: {
+      getOrganizationStructure: vi.fn(() =>
+        Promise.resolve({
+          organizations: [],
+          units: [],
+          relations: [],
+        })
+      ),
+    },
     teams: {
       getSavedRequest: vi.fn(async () => null),
       replaceMembers: vi.fn(async () => {}),
@@ -413,7 +422,7 @@ vi.mock('@renderer/hooks/useTheme', () => ({
 }));
 
 vi.mock('@renderer/utils/geminiUiFreeze', () => ({
-  filterMainScreenCliProviders: <T,>(providers: readonly T[]) => [...providers],
+  filterMainScreenCliProviders: <T>(providers: readonly T[]) => [...providers],
   isGeminiUiFrozen: () => false,
   normalizeCreateLaunchProviderForUi: (providerId: unknown) => providerId ?? 'anthropic',
 }));

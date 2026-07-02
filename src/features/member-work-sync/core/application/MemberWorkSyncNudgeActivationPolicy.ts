@@ -1,5 +1,9 @@
 import { isStrictReviewPickupItem } from './MemberWorkSyncNudgeAgendaPredicates';
 import {
+  MEMBER_WORK_SYNC_RUNTIME_STALL_DIAGNOSTIC,
+  MEMBER_WORK_SYNC_RUNTIME_STALL_TRIGGER_DIAGNOSTIC_PREFIX,
+} from './MemberWorkSyncRuntimeStallDiagnostics';
+import {
   decideMemberWorkSyncTargetedRecovery,
   type MemberWorkSyncTargetedRecoveryReason,
 } from './MemberWorkSyncTargetedRecoveryPolicy';
@@ -14,6 +18,7 @@ export type MemberWorkSyncNudgeActivationReason =
   | 'shadow_ready'
   | MemberWorkSyncTargetedRecoveryReason
   | 'review_pickup_required'
+  | 'native_task_protocol_repair'
   | 'native_stale_in_progress'
   | 'native_stale_assigned_work'
   | 'status_not_nudgeable'
@@ -22,6 +27,8 @@ export type MemberWorkSyncNudgeActivationReason =
 
 const NATIVE_STALE_IN_PROGRESS_MIN_AGE_MS = 6 * 60_000;
 const NATIVE_STALE_IN_PROGRESS_PROVIDERS = new Set(['anthropic', 'codex', 'gemini']);
+const NATIVE_TASK_PROTOCOL_REPAIR_PROVIDERS = new Set(['codex']);
+const NATIVE_TASK_PROTOCOL_REPAIR_TURN_SETTLED_DIAGNOSTIC = `${MEMBER_WORK_SYNC_RUNTIME_STALL_TRIGGER_DIAGNOSTIC_PREFIX}turn_settled`;
 
 export interface MemberWorkSyncNudgeActivationDecision {
   active: boolean;
@@ -163,6 +170,49 @@ function isNativeStaleEligibleItem(
   return isNativeStaleWorkItem(status) || isStrictReviewPickupItem(status);
 }
 
+function isOwnedInProgressWorkItem(
+  status: MemberWorkSyncStatus['agenda']['items'][number]
+): boolean {
+  return (
+    status.kind === 'work' &&
+    status.reason === 'owned_in_progress_task' &&
+    status.evidence.status === 'in_progress'
+  );
+}
+
+function hasNativeTaskProtocolRepairTurnSignal(status: MemberWorkSyncStatus): boolean {
+  const diagnostics = new Set(status.diagnostics);
+  return (
+    diagnostics.has(MEMBER_WORK_SYNC_RUNTIME_STALL_DIAGNOSTIC) &&
+    diagnostics.has(NATIVE_TASK_PROTOCOL_REPAIR_TURN_SETTLED_DIAGNOSTIC)
+  );
+}
+
+function shouldActivateNativeTaskProtocolRepair(input: {
+  status: MemberWorkSyncStatus;
+  metrics: MemberWorkSyncTeamMetrics;
+}): boolean {
+  const { status } = input;
+  if (
+    status.state !== 'needs_sync' ||
+    status.shadow?.wouldNudge !== true ||
+    !hasNoCurrentAcceptedWorkProof(status) ||
+    !status.providerId ||
+    !NATIVE_TASK_PROTOCOL_REPAIR_PROVIDERS.has(status.providerId) ||
+    isLeadLikeMemberName(status.memberName) ||
+    status.agenda.items.length !== 1 ||
+    hasActiveAcceptedWorkLease(status)
+  ) {
+    return false;
+  }
+
+  const [item] = status.agenda.items;
+  return (
+    Boolean(item && isOwnedInProgressWorkItem(item)) &&
+    hasNativeTaskProtocolRepairTurnSignal(status)
+  );
+}
+
 function getNativeStaleWorkRecoveryReason(input: {
   status: MemberWorkSyncStatus;
   metrics: MemberWorkSyncTeamMetrics;
@@ -229,6 +279,10 @@ export function decideMemberWorkSyncNudgeActivation(input: {
     isReviewPickupRequiredCandidate(input.status)
   ) {
     return { active: true, reason: 'review_pickup_required' };
+  }
+
+  if (shouldActivateNativeTaskProtocolRepair(input)) {
+    return { active: true, reason: 'native_task_protocol_repair' };
   }
 
   const nativeStaleWorkReason = getNativeStaleWorkRecoveryReason(input);

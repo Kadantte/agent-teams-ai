@@ -4,6 +4,48 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TeamTask } from '@shared/types';
 
 describe('MemberWorkSyncTaskImpactResolver', () => {
+  it('shares in-flight source reads across concurrent resolves for the same team', async () => {
+    const tasks: TeamTask[] = [
+      {
+        id: 'task-a',
+        displayId: '#11111111',
+        subject: 'Changed',
+        status: 'in_progress',
+        owner: 'alice',
+      },
+      {
+        id: 'task-b',
+        displayId: '#22222222',
+        subject: 'Changed too',
+        status: 'in_progress',
+        owner: 'bob',
+      },
+    ];
+    const activeMemberSource = {
+      loadActiveMemberNames: vi.fn(async () => ['alice', 'bob']),
+    };
+    const taskReader = {
+      getTasks: vi.fn(async () => tasks),
+    };
+    const kanbanManager = {
+      getState: vi.fn(async () => ({ tasks: {} })),
+    };
+    const resolver = new MemberWorkSyncTaskImpactResolver({
+      taskReader,
+      kanbanManager,
+      activeMemberSource,
+    } as never);
+
+    await Promise.all([
+      resolver.resolve({ teamName: 'team-a', taskId: 'task-a' }),
+      resolver.resolve({ teamName: 'team-a', taskId: 'task-b' }),
+    ]);
+
+    expect(activeMemberSource.loadActiveMemberNames).toHaveBeenCalledTimes(1);
+    expect(taskReader.getTasks).toHaveBeenCalledTimes(1);
+    expect(kanbanManager.getState).toHaveBeenCalledTimes(1);
+  });
+
   it('targets owner, reviewer, dependent owners and lead oversight without team-wide fan-out', async () => {
     const tasks: TeamTask[] = [
       {
@@ -197,6 +239,32 @@ describe('MemberWorkSyncTaskImpactResolver', () => {
       memberNames: [],
       fallbackTeamWide: true,
       diagnostics: ['task_reference_ambiguous'],
+    });
+  });
+
+  it('falls back team-wide when a resolved task has no active impacted member', async () => {
+    const tasks: TeamTask[] = [
+      {
+        id: 'task-orphaned',
+        subject: 'Owner is offline',
+        status: 'pending',
+        owner: 'alice',
+      },
+    ];
+    const resolver = new MemberWorkSyncTaskImpactResolver({
+      taskReader: { getTasks: vi.fn(async () => tasks) },
+      kanbanManager: { getState: vi.fn(async () => ({ tasks: {} })) },
+      activeMemberSource: {
+        loadActiveMemberNames: vi.fn(async () => ['bob']),
+      },
+    } as never);
+
+    await expect(
+      resolver.resolve({ teamName: 'team-a', taskId: 'task-orphaned' })
+    ).resolves.toEqual({
+      memberNames: [],
+      fallbackTeamWide: true,
+      diagnostics: ['lead_member_unavailable', 'task_owner_inactive', 'task_impact_empty'],
     });
   });
 

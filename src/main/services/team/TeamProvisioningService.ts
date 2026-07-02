@@ -16,6 +16,7 @@ import {
   resolveCodexFastMode,
   resolveCodexRuntimeSelection,
 } from '@features/codex-runtime-profile/main';
+import { type RuntimeTurnSettledProvider } from '@features/member-work-sync/main';
 import {
   buildOpenCodeSecondaryLaneId,
   buildPlannedMemberLaneIdentity,
@@ -29,7 +30,6 @@ import {
   listRuntimeProcessTableForCurrentPlatform,
   listTmuxPanePidsForCurrentPlatform,
   listTmuxPaneRuntimeInfoForCurrentPlatform,
-  type RuntimeProcessTableRow,
   sendKeysToTmuxPaneForCurrentPlatform,
   type TmuxPaneRuntimeInfo,
 } from '@features/tmux-installer/main';
@@ -66,6 +66,7 @@ import {
   spawnCli,
 } from '@main/utils/childProcess';
 import { FileReadTimeoutError, readFileUtf8WithTimeout } from '@main/utils/fsRead';
+import { ensureMinimumNodeOldSpaceEnv } from '@main/utils/nodeOptions';
 import {
   encodePath,
   extractBaseDir,
@@ -114,10 +115,6 @@ import {
 } from '@shared/utils/inboxNoise';
 import { isLeadAgentType, isLeadMember } from '@shared/utils/leadDetection';
 import { createLogger } from '@shared/utils/logger';
-import {
-  isOpenCodeWindowsAccessDeniedDiagnostic,
-  normalizeOpenCodeWindowsAccessDeniedDiagnostic,
-} from '@shared/utils/openCodeWindowsAccessDenied';
 import { migrateProviderBackendId } from '@shared/utils/providerBackend';
 import { isDefaultProviderModelSelection } from '@shared/utils/providerModelSelection';
 import { formatTaskDisplayLabel } from '@shared/utils/taskIdentity';
@@ -190,6 +187,11 @@ import {
   type TeamRuntimeSettingsJson,
 } from '../runtime/teamRuntimeSettingsBundle';
 
+import { openCodeRuntimeApprovalProvider } from './approvals/OpenCodeRuntimeApprovalProvider';
+import {
+  RuntimeToolApprovalCoordinator,
+  type RuntimeToolApprovalEntry,
+} from './approvals/RuntimeToolApprovalCoordinator';
 import {
   parseBootstrapRuntimeProofDetail,
   validateBootstrapRuntimeProofEnvelope,
@@ -199,166 +201,6 @@ import {
   buildNativeAppManagedBootstrapSpecsWithDiagnostics,
   type NativeAppManagedBootstrapSpec,
 } from './bootstrap/NativeAppManagedBootstrapContextBuilder';
-import { getSystemLocale } from './provisioning/TeamProvisioningAgentLanguage';
-import {
-  buildDeterministicCreateBootstrapSpec,
-  buildDeterministicLaunchBootstrapSpec,
-  getProvisioningRunTimeoutMs,
-  removeDeterministicBootstrapSpecFile,
-  removeDeterministicBootstrapUserPromptFile,
-  type RuntimeBootstrapMemberMcpLaunchConfig,
-  writeDeterministicBootstrapSpecFile,
-  writeDeterministicBootstrapUserPromptFile,
-} from './provisioning/TeamProvisioningBootstrapSpec';
-import {
-  buildCliExitFailurePresentation,
-  buildCombinedLogs,
-} from './provisioning/TeamProvisioningCliExitPresentation';
-import {
-  buildDirectTmuxRestartCommand,
-  hasAnthropicCompatibleAuthTokenEnv,
-  isInteractiveShellCommand,
-} from './provisioning/TeamProvisioningDirectRestart';
-import {
-  assertDeterministicBootstrapPrimaryMemberLimit,
-  assertOpenCodeNotLaunchedThroughLegacyProvisioning,
-  buildLargeDeterministicBootstrapWarning,
-  getMixedLaunchFallbackRecoveryError,
-  isPureOpenCodeProvisioningRequest,
-  mergeProvisioningWarnings,
-  type TeamLaunchCompatibilityReport,
-} from './provisioning/TeamProvisioningLaunchCompatibility';
-import {
-  buildLaunchDiagnosticsFromRun,
-  buildWorkspaceTrustPreflightLaunchDiagnostic,
-  mentionsProcessTableUnavailable,
-  mergeLaunchDiagnosticItem,
-} from './provisioning/TeamProvisioningLaunchDiagnostics';
-import {
-  deriveMemberLaunchState,
-  isAutoClearableLaunchFailureReason,
-  isBootstrapCheckInTimeoutFailureReason,
-  isCliProvisionedButNotAliveFailureReason,
-  isNeverSpawnedDuringLaunchReason,
-  isProvisionedButNotAliveFailureReason,
-} from './provisioning/TeamProvisioningLaunchFailurePolicy';
-import {
-  isOpenCodeOverlayMemberRemoved,
-  matchesExactTeamMemberName,
-  matchesMemberNameOrBase,
-  matchesObservedMemberNameForExpected,
-  matchesTeamMemberIdentity,
-  namesMatchCaseInsensitive,
-} from './provisioning/TeamProvisioningMemberIdentity';
-import {
-  buildRestartDuplicateUnconfirmedReason,
-  buildRestartGraceTimeoutReason,
-  buildRestartStillRunningReason,
-  createInitialMemberSpawnStatusEntry,
-  deriveTaskActivityPauseAt,
-  deriveTaskActivityResumeAt,
-  MEMBER_LAUNCH_GRACE_MS,
-  parseOptionalIsoMs,
-  shouldWarnOnMissingRegisteredMember,
-  shouldWarnOnUnreadableMemberAuditConfig,
-  summarizeMemberSpawnStatusRecord,
-} from './provisioning/TeamProvisioningMemberSpawnStatusPolicy';
-import {
-  buildEffectiveTeamMemberSpec,
-  buildEffectiveTeamMemberSpecs,
-  getExplicitLaunchModelSelection,
-  normalizeTeamMemberProviderId,
-  normalizeTeamProviderLike,
-  teamRequestIncludesCodexMember,
-} from './provisioning/TeamProvisioningMemberSpecs';
-import {
-  boundOpenCodeAppManagedBriefingText,
-  filterStaleOpenCodeOverlayDiagnostics,
-  hasRealOpenCodeFailureDiagnostic,
-  hasRealOpenCodeLaunchDiagnostic,
-  hasStaleOpenCodeDiagnostics,
-  hasStaleOpenCodeSecondaryLaunchDiagnostic,
-  isFileLockTimeoutError,
-  isPersistedOpenCodeSecondaryLaneMember,
-  promoteOpenCodePersistedFailureReasonsFromDiagnostics,
-} from './provisioning/TeamProvisioningOpenCodeDiagnosticsPolicy';
-import {
-  appendDiagnosticOnce,
-  buildOpenCodeSecondaryLaneTimingDiagnostic,
-  buildOpenCodeUncommittedBootstrapDiagnostic,
-  collectOpenCodeSecondaryLaneFailureDiagnostics,
-  createUnexpectedMixedSecondaryLaneFailureResult,
-  downgradeUncommittedOpenCodeBootstrapEvidence,
-  getOpenCodeSecondaryBootstrapStallDiagnosticFromPersisted,
-  hasOpenCodeRuntimeEntryHandle,
-  hasOpenCodeRuntimeHandle,
-  hasOpenCodeRuntimeLivenessMarker,
-  isBootstrapMemberEvidenceCurrentForMember,
-  isDefinitiveOpenCodePreLaunchFailure,
-  isExplicitLegacyOpenCodeBootstrap,
-  isMaterializedOpenCodeSessionId,
-  isRecoverableOpenCodeBootstrapPendingLaunchResult,
-  isRecoverableOpenCodeRuntimeEvidence,
-  isRecoverablePersistedOpenCodeRuntimeCandidate,
-  isRecoverablePersistedOpenCodeTerminalRuntimeCandidate,
-  MEMBER_BOOTSTRAP_STALL_MS,
-  normalizeIsoTimestamp,
-  normalizeRecoverableOpenCodeBootstrapPendingLaunchResult,
-  OPENCODE_APP_MANAGED_BOOTSTRAP_STALLED_DIAGNOSTIC,
-  promoteCommittedOpenCodeAppManagedBootstrapEvidence,
-  resolveOpenCodeBootstrapAcceptedAt,
-  selectOpenCodeSecondaryBootstrapStallDiagnostic,
-  shouldMarkPersistedOpenCodeBootstrapStalled,
-  summarizeRuntimeLaunchResultMembers,
-} from './provisioning/TeamProvisioningOpenCodeRuntimeEvidencePolicy';
-import {
-  buildDeterministicLaunchHydrationPrompt,
-  buildGeminiPostLaunchHydrationPrompt,
-  buildLeadRosterContextBlock,
-  buildMemberSpawnPrompt,
-  buildPersistentLeadContext,
-  buildRestartMemberSpawnMessage,
-  buildTaskBoardSnapshot,
-  extractBootstrapFailureReason,
-  extractHeartbeatTimestamp,
-  extractTranscriptMessageText,
-  getBootstrapTranscriptSuccessSourceFromNormalized,
-  getCanonicalSendMessageFieldRule,
-  getCanonicalSendMessageToolRule,
-  isTaskBoardSnapshotWorkCandidate,
-  normalizeMemberDiagnosticText,
-  shouldUseGeminiStagedLaunch,
-} from './provisioning/TeamProvisioningPromptBuilders';
-import {
-  buildRuntimeLaunchWarning,
-  getAnthropicFastModeDefault,
-  getConfiguredRuntimeBackend,
-  getPromptSizeSummary,
-  getTeamProviderLabel,
-  logRuntimeLaunchSnapshot,
-} from './provisioning/TeamProvisioningRuntimeDiagnostics';
-
-import type { RuntimeTurnSettledProvider } from '@features/member-work-sync/main';
-export type { RuntimeBootstrapMemberMcpLaunchConfig } from './provisioning/TeamProvisioningBootstrapSpec';
-export { buildDirectTmuxRestartEnvAssignments } from './provisioning/TeamProvisioningDirectRestart';
-export {
-  getMixedLaunchFallbackRecoveryError,
-  getOpenCodeMixedProviderProvisioningError,
-} from './provisioning/TeamProvisioningLaunchCompatibility';
-export {
-  shouldWarnOnMissingRegisteredMember,
-  shouldWarnOnUnreadableMemberAuditConfig,
-} from './provisioning/TeamProvisioningMemberSpawnStatusPolicy';
-export {
-  buildAddMemberSpawnMessage,
-  buildRestartMemberSpawnMessage,
-} from './provisioning/TeamProvisioningPromptBuilders';
-import { openCodeRuntimeApprovalProvider } from './approvals/OpenCodeRuntimeApprovalProvider';
-import {
-  RuntimeToolApprovalCoordinator,
-  type RuntimeToolApprovalEntry,
-} from './approvals/RuntimeToolApprovalCoordinator';
-import { isOpenCodeBridgeNoOutputDiagnostic } from './opencode/bridge/OpenCodeBridgeSupportDiagnostics';
 import {
   buildOpenCodePromptDeliveryAttemptId,
   createOpenCodePromptDeliveryLedgerStore,
@@ -442,6 +284,158 @@ import {
   OPENCODE_RUNTIME_STORE_DESCRIPTORS,
   RuntimeStoreBatchWriter,
 } from './opencode/store/RuntimeStoreManifest';
+import { getSystemLocale } from './provisioning/TeamProvisioningAgentLanguage';
+import {
+  buildDeterministicCreateBootstrapSpec,
+  buildDeterministicLaunchBootstrapSpec,
+  getProvisioningRunTimeoutMs,
+  removeDeterministicBootstrapSpecFile,
+  removeDeterministicBootstrapUserPromptFile,
+  type RuntimeBootstrapMemberMcpLaunchConfig,
+  writeDeterministicBootstrapSpecFile,
+  writeDeterministicBootstrapUserPromptFile,
+} from './provisioning/TeamProvisioningBootstrapSpec';
+import {
+  buildCliExitFailurePresentation,
+  buildCombinedLogs,
+} from './provisioning/TeamProvisioningCliExitPresentation';
+import {
+  buildDirectTmuxRestartCommand,
+  hasAnthropicCompatibleAuthTokenEnv,
+  isInteractiveShellCommand,
+} from './provisioning/TeamProvisioningDirectRestart';
+import {
+  compareLeadInboxRelayMessagesByPriority,
+  compareMemberInboxRelayMessagesByPriority,
+  compareOpenCodeInboxRelayMessagesByPriority,
+  getLeadInboxRelayPriority,
+  normalizeSameTeamText,
+  shouldSuppressUnverifiedLeadRelayStateLine,
+} from './provisioning/TeamProvisioningInboxRelayPolicy';
+import {
+  assertDeterministicBootstrapPrimaryMemberLimit,
+  assertOpenCodeNotLaunchedThroughLegacyProvisioning,
+  buildLargeDeterministicBootstrapWarning,
+  getMixedLaunchFallbackRecoveryError,
+  isPureOpenCodeProvisioningRequest,
+  mergeProvisioningWarnings,
+  type TeamLaunchCompatibilityReport,
+} from './provisioning/TeamProvisioningLaunchCompatibility';
+import {
+  buildLaunchDiagnosticsFromRun,
+  buildWorkspaceTrustPreflightLaunchDiagnostic,
+  mentionsProcessTableUnavailable,
+  mergeLaunchDiagnosticItem,
+} from './provisioning/TeamProvisioningLaunchDiagnostics';
+import {
+  deriveMemberLaunchState,
+  isAutoClearableLaunchFailureReason,
+  isBootstrapCheckInTimeoutFailureReason,
+  isCliProvisionedButNotAliveFailureReason,
+  isNeverSpawnedDuringLaunchReason,
+  isProvisionedButNotAliveFailureReason,
+} from './provisioning/TeamProvisioningLaunchFailurePolicy';
+import {
+  isOpenCodeOverlayMemberRemoved,
+  matchesExactTeamMemberName,
+  matchesMemberNameOrBase,
+  matchesObservedMemberNameForExpected,
+  matchesTeamMemberIdentity,
+  namesMatchCaseInsensitive,
+} from './provisioning/TeamProvisioningMemberIdentity';
+import {
+  buildRestartDuplicateUnconfirmedReason,
+  buildRestartGraceTimeoutReason,
+  buildRestartStillRunningReason,
+  createInitialMemberSpawnStatusEntry,
+  deriveTaskActivityPauseAt,
+  deriveTaskActivityResumeAt,
+  MEMBER_LAUNCH_GRACE_MS,
+  parseOptionalIsoMs,
+  shouldWarnOnMissingRegisteredMember,
+  shouldWarnOnUnreadableMemberAuditConfig,
+  summarizeMemberSpawnStatusRecord,
+} from './provisioning/TeamProvisioningMemberSpawnStatusPolicy';
+import {
+  buildEffectiveTeamMemberSpec,
+  buildEffectiveTeamMemberSpecs,
+  getExplicitLaunchModelSelection,
+  normalizeTeamMemberProviderId,
+  normalizeTeamProviderLike,
+  teamRequestIncludesCodexMember,
+} from './provisioning/TeamProvisioningMemberSpecs';
+import {
+  boundOpenCodeAppManagedBriefingText,
+  buildOpenCodeProviderVerificationDeferredLine,
+  filterStaleOpenCodeOverlayDiagnostics,
+  hasRealOpenCodeFailureDiagnostic,
+  hasRealOpenCodeLaunchDiagnostic,
+  hasStaleOpenCodeDiagnostics,
+  hasStaleOpenCodeSecondaryLaunchDiagnostic,
+  isFileLockTimeoutError,
+  isOpenCodeModelPrepareBusyDeferred,
+  isPersistedOpenCodeSecondaryLaneMember,
+  looksLikeOpenCodeProviderPrepareDiagnostic,
+  normalizeOpenCodePrepareDiagnostic,
+  promoteOpenCodePersistedFailureReasonsFromDiagnostics,
+  selectOpenCodeModelPreparePrimaryReason,
+  selectOpenCodePrepareProviderDiagnostic,
+} from './provisioning/TeamProvisioningOpenCodeDiagnosticsPolicy';
+import {
+  appendDiagnosticOnce,
+  buildOpenCodeSecondaryLaneTimingDiagnostic,
+  buildOpenCodeUncommittedBootstrapDiagnostic,
+  collectOpenCodeSecondaryLaneFailureDiagnostics,
+  createUnexpectedMixedSecondaryLaneFailureResult,
+  downgradeUncommittedOpenCodeBootstrapEvidence,
+  getOpenCodeSecondaryBootstrapStallDiagnosticFromPersisted,
+  hasOpenCodeRuntimeEntryHandle,
+  hasOpenCodeRuntimeHandle,
+  hasOpenCodeRuntimeLivenessMarker,
+  isBootstrapMemberEvidenceCurrentForMember,
+  isDefinitiveOpenCodePreLaunchFailure,
+  isExplicitLegacyOpenCodeBootstrap,
+  isMaterializedOpenCodeSessionId,
+  isRecoverableOpenCodeBootstrapPendingLaunchResult,
+  isRecoverableOpenCodeRuntimeEvidence,
+  isRecoverablePersistedOpenCodeRuntimeCandidate,
+  isRecoverablePersistedOpenCodeTerminalRuntimeCandidate,
+  MEMBER_BOOTSTRAP_STALL_MS,
+  normalizeIsoTimestamp,
+  normalizeRecoverableOpenCodeBootstrapPendingLaunchResult,
+  OPENCODE_APP_MANAGED_BOOTSTRAP_STALLED_DIAGNOSTIC,
+  promoteCommittedOpenCodeAppManagedBootstrapEvidence,
+  resolveOpenCodeBootstrapAcceptedAt,
+  selectOpenCodeSecondaryBootstrapStallDiagnostic,
+  shouldMarkPersistedOpenCodeBootstrapStalled,
+  summarizeRuntimeLaunchResultMembers,
+} from './provisioning/TeamProvisioningOpenCodeRuntimeEvidencePolicy';
+import {
+  buildDeterministicLaunchHydrationPrompt,
+  buildGeminiPostLaunchHydrationPrompt,
+  buildLeadRosterContextBlock,
+  buildMemberSpawnPrompt,
+  buildPersistentLeadContext,
+  buildRestartMemberSpawnMessage,
+  buildTaskBoardSnapshot,
+  extractBootstrapFailureReason,
+  extractHeartbeatTimestamp,
+  extractTranscriptMessageText,
+  getBootstrapTranscriptSuccessSourceFromNormalized,
+  getCanonicalSendMessageFieldRule,
+  getCanonicalSendMessageToolRule,
+  isTaskBoardSnapshotWorkCandidate,
+  normalizeMemberDiagnosticText,
+  shouldUseGeminiStagedLaunch,
+} from './provisioning/TeamProvisioningPromptBuilders';
+import {
+  buildRuntimeLaunchWarning,
+  getAnthropicFastModeDefault,
+  getConfiguredRuntimeBackend,
+  getPromptSizeSummary,
+  getTeamProviderLabel,
+  logRuntimeLaunchSnapshot,
+} from './provisioning/TeamProvisioningRuntimeDiagnostics';
 import { OpenCodeTaskLogAttributionStore } from './taskLogs/stream/OpenCodeTaskLogAttributionStore';
 import { getCurrentAgentTeamsMcpHttpTransportEvidence } from './AgentTeamsMcpHttpServer';
 import { isAgentTeamsToolUse } from './agentTeamsToolNames';
@@ -471,15 +465,20 @@ import {
 } from './ProcessBootstrapTransportEvidence';
 import {
   boundLaunchDiagnostics,
+  boundProgressAssistantParts,
+  boundProgressLogLines,
   buildProgressLiveOutput,
   buildProgressLogsTail,
   buildProgressTraceLine,
+  PROGRESS_RETAINED_LOG_CHARS,
+  PROGRESS_RETAINED_LOG_LINE_CHARS,
 } from './progressPayload';
 import {
   applyDesktopTeammateModeDecisionToEnv,
   buildDesktopTeammateModeCliArgs,
   resolveDesktopTeammateModeDecision,
 } from './runtimeTeammateMode';
+import { TeamAgentRuntimeResourceHistory } from './TeamAgentRuntimeResourceHistory';
 import { TeamAttachmentStore } from './TeamAttachmentStore';
 import {
   choosePreferredLaunchSnapshot,
@@ -510,11 +509,22 @@ import { TeamMemberWorktreeManager } from './TeamMemberWorktreeManager';
 import { TeamMetaStore } from './TeamMetaStore';
 import {
   commandArgEquals,
-  extractCliArgValues,
   isStrongRuntimeEvidence,
   resolveTeamMemberRuntimeLiveness,
   sanitizeProcessCommandForDiagnostics,
 } from './TeamRuntimeLivenessResolver';
+import {
+  addRuntimeRootOwnersFromProcessRows as addRuntimeRootOwnersFromProcessRowsHelper,
+  buildProcessUsageStatsFromRows as buildProcessUsageStatsFromRowsHelper,
+  buildRuntimeProcessLoadStats as buildRuntimeProcessLoadStatsHelper,
+  buildRuntimeUsageProcessTrees as buildRuntimeUsageProcessTreesHelper,
+  normalizeRuntimeProcessRowsForTelemetry as normalizeRuntimeProcessRowsForTelemetryHelper,
+  normalizeRuntimeProcessUsageStats as normalizeRuntimeProcessUsageStatsHelper,
+  type RuntimeProcessLoadStats,
+  type RuntimeProcessUsageStats,
+  type RuntimeTelemetryProcessSource,
+  type RuntimeTelemetryProcessTableRow,
+} from './TeamRuntimeTelemetry';
 import { TeamSentMessagesStore } from './TeamSentMessagesStore';
 import { TeamTaskActivityIntervalService } from './TeamTaskActivityIntervalService';
 import { TeamTaskReader } from './TeamTaskReader';
@@ -538,6 +548,21 @@ import type {
   TeamRuntimePrepareResult,
   TeamRuntimeStopInput,
 } from './runtime';
+
+export type { RuntimeBootstrapMemberMcpLaunchConfig } from './provisioning/TeamProvisioningBootstrapSpec';
+export { buildDirectTmuxRestartEnvAssignments } from './provisioning/TeamProvisioningDirectRestart';
+export {
+  getMixedLaunchFallbackRecoveryError,
+  getOpenCodeMixedProviderProvisioningError,
+} from './provisioning/TeamProvisioningLaunchCompatibility';
+export {
+  shouldWarnOnMissingRegisteredMember,
+  shouldWarnOnUnreadableMemberAuditConfig,
+} from './provisioning/TeamProvisioningMemberSpawnStatusPolicy';
+export {
+  buildAddMemberSpawnMessage,
+  buildRestartMemberSpawnMessage,
+} from './provisioning/TeamProvisioningPromptBuilders';
 
 type OpenCodeRuntimeMessageAdapter = TeamLaunchRuntimeAdapter & {
   sendMessageToMember(
@@ -910,27 +935,6 @@ import type {
 // the first sample can expire before the recursive second read and loop again.
 const RUNTIME_PIDUSAGE_OPTIONS = process.platform === 'win32' ? { maxage: 10_000 } : { maxage: 0 };
 
-interface RuntimeProcessUsageStats {
-  rssBytes?: number;
-  cpuPercent?: number;
-}
-
-interface RuntimeProcessLoadStats extends RuntimeProcessUsageStats {
-  primaryCpuPercent?: number;
-  primaryRssBytes?: number;
-  childCpuPercent?: number;
-  childRssBytes?: number;
-  processCount?: number;
-  runtimeLoadScope?: TeamAgentRuntimeLoadScope;
-  runtimeLoadTruncated?: boolean;
-}
-
-type RuntimeTelemetryProcessSource = 'native' | 'wsl' | 'windows-host';
-
-interface RuntimeTelemetryProcessTableRow extends RuntimeProcessTableRow, RuntimeProcessUsageStats {
-  runtimeTelemetrySource?: RuntimeTelemetryProcessSource;
-}
-
 interface RuntimeProcessRowsCacheEntry {
   expiresAtMs: number;
   generation: number;
@@ -945,21 +949,6 @@ class RuntimeTelemetryTimeoutError extends Error {
     super(message);
     this.name = 'RuntimeTelemetryTimeoutError';
   }
-}
-
-function normalizeRuntimeTelemetryNumber(value: unknown): number | undefined {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : undefined;
-  }
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 const logger = createLogger('Service:TeamProvisioning');
@@ -1240,14 +1229,19 @@ const MCP_PREFLIGHT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const MCP_PREFLIGHT_SHUTDOWN_POLL_MS = 50;
 const STDERR_RING_LIMIT = 64 * 1024;
 const STDOUT_RING_LIMIT = 64 * 1024;
+const CLI_LOG_LINE_CARRY_LIMIT = PROGRESS_RETAINED_LOG_LINE_CHARS;
+const STDOUT_PARSER_CARRY_LIMIT = PROGRESS_RETAINED_LOG_CHARS;
+const LIVE_LEAD_PROCESS_MESSAGE_TEXT_LIMIT = 32 * 1024;
+const LIVE_LEAD_PROCESS_MESSAGE_CACHE_LIMIT = 100;
 // Progress emissions fan out the latest CLI tail + assistant output to the
 // renderer over IPC. Under load the previous 300ms cadence combined with an
 // unbounded payload (see `emitLogsProgress`) caused renderer OOM crashes
-// (≈3 full-history serializations per second, each holding thousands of
+// (about 3 full-history serializations per second, each holding thousands of
 // lines). The tail cap in `emitLogsProgress` bounds each payload; we also
 // slow the cadence to ~1s so Zustand can keep up on large teams.
 const LOG_PROGRESS_THROTTLE_MS = 1000;
 const UI_LOGS_TAIL_LIMIT = 128 * 1024;
+const PROBE_OUTPUT_BUFFER_LIMIT = UI_LOGS_TAIL_LIMIT;
 const PROBE_CACHE_TTL_MS = 36 * 60 * 60 * 1000;
 const PREFLIGHT_BINARY_TIMEOUT_MS = 8000;
 const PREFLIGHT_AUTH_RETRY_DELAY_MS = 2000;
@@ -1261,10 +1255,6 @@ const OPENCODE_PROVIDER_SCOPED_PREPARE_FAILURE_REASONS = new Set([
   'mcp_unavailable',
   'adapter_disabled',
 ]);
-const OPENCODE_RUNTIME_BINARY_UNREACHABLE_DIAGNOSTIC =
-  'OpenCode runtime binary is not installed or not reachable by launch preflight.';
-const OPENCODE_APP_MCP_UNREACHABLE_DIAGNOSTIC =
-  'OpenCode app MCP is unreachable. Retry launch to refresh the app MCP bridge.';
 const OPENCODE_PENDING_PERMISSION_REQUEST_PATTERN =
   /\b(?:pending permission request(?:\(s\)|s)?|permission[_ -]blocked)\b/i;
 
@@ -1284,123 +1274,6 @@ function pushUniqueSupportDiagnostics(
       diagnostics.push({ ...diagnostic });
     }
   }
-}
-
-function looksLikeOpenCodeProviderPrepareDiagnostic(value: string): boolean {
-  const lower = value.trim().toLowerCase();
-  return (
-    isOpenCodeBridgeNoOutputDiagnostic(value) ||
-    isOpenCodeWindowsAccessDeniedDiagnostic(value) ||
-    lower.includes('opencode /experimental/tool') ||
-    lower.includes('/experimental/tool') ||
-    lower.includes('mcp_unavailable') ||
-    lower.includes('runtime store') ||
-    lower.includes('opencode cli') ||
-    lower.includes('opencode runtime binary') ||
-    lower.includes('unable to connect')
-  );
-}
-
-function normalizeOpenCodePrepareDiagnostic(value: string, reason?: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return trimmed;
-  }
-
-  if (isOpenCodeBridgeNoOutputDiagnostic(trimmed)) {
-    return 'OpenCode runtime check returned no output.';
-  }
-
-  const accessDeniedDiagnostic = normalizeOpenCodeWindowsAccessDeniedDiagnostic(trimmed);
-  if (accessDeniedDiagnostic) {
-    return accessDeniedDiagnostic;
-  }
-
-  if (/opencode cli (?:not detected on path|not found)/i.test(trimmed)) {
-    return OPENCODE_RUNTIME_BINARY_UNREACHABLE_DIAGNOSTIC;
-  }
-
-  const lower = trimmed.toLowerCase();
-  if (
-    lower.includes('unable to connect') &&
-    (lower.includes('/experimental/tool') ||
-      lower.includes('mcp_unavailable') ||
-      reason === 'mcp_unavailable')
-  ) {
-    const detail = trimmed.includes(' - ') ? trimmed.split(' - ').pop()?.trim() : trimmed;
-    return detail && detail !== trimmed
-      ? `${OPENCODE_APP_MCP_UNREACHABLE_DIAGNOSTIC} Details: ${detail}`
-      : OPENCODE_APP_MCP_UNREACHABLE_DIAGNOSTIC;
-  }
-
-  if (reason === 'mcp_unavailable' && lower.includes('mcp_unavailable')) {
-    return 'OpenCode app MCP is unavailable. Retry launch to refresh the app MCP bridge.';
-  }
-
-  return trimmed;
-}
-
-function isRetryableOpenCodePreflightBusyDiagnostic(value: string | null | undefined): boolean {
-  const lower = value?.trim().toLowerCase() ?? '';
-  if (!lower) {
-    return false;
-  }
-  // Fact: these diagnostics report OpenCode host/session occupancy, not that
-  // the selected model is unavailable or rejected by the provider.
-  return (
-    lower.includes('opencode session status busy') ||
-    lower.includes('session status busy') ||
-    lower === 'provider busy' ||
-    lower.includes('provider busy')
-  );
-}
-
-function isOpenCodeModelVerificationTimeoutDiagnostic(value: string | null | undefined): boolean {
-  const lower = value?.trim().toLowerCase() ?? '';
-  return lower.includes('model verification timed out');
-}
-
-function selectOpenCodeModelPreparePrimaryReason(
-  prepare: Extract<TeamRuntimePrepareResult, { ok: false }>
-): string {
-  const providerDiagnostic = selectOpenCodePrepareProviderDiagnostic(prepare);
-  if (providerDiagnostic) {
-    return providerDiagnostic;
-  }
-
-  const candidates = [...prepare.diagnostics, prepare.reason]
-    .map((entry) => entry?.trim() ?? '')
-    .filter(Boolean);
-  const timeoutReason = candidates.find(isOpenCodeModelVerificationTimeoutDiagnostic);
-  return timeoutReason ?? candidates[0] ?? prepare.reason;
-}
-
-function selectOpenCodePrepareProviderDiagnostic(
-  prepare: Pick<TeamRuntimePrepareResult, 'diagnostics' | 'warnings'>
-): string | undefined {
-  return [...prepare.diagnostics, ...prepare.warnings].find(
-    (entry) =>
-      isOpenCodeBridgeNoOutputDiagnostic(entry) || isOpenCodeWindowsAccessDeniedDiagnostic(entry)
-  );
-}
-
-function isOpenCodeModelPrepareBusyDeferred(
-  prepare: Extract<TeamRuntimePrepareResult, { ok: false }>,
-  primaryReason: string
-): boolean {
-  const candidates = [primaryReason, prepare.reason, ...prepare.diagnostics];
-  return (
-    prepare.retryable &&
-    !candidates.some(isOpenCodeModelVerificationTimeoutDiagnostic) &&
-    candidates.some(isRetryableOpenCodePreflightBusyDiagnostic)
-  );
-}
-
-function buildOpenCodeProviderVerificationDeferredLine(reason: string): string {
-  const normalizedReason = isRetryableOpenCodePreflightBusyDiagnostic(reason)
-    ? 'OpenCode is currently busy with another session. Deep model verification will retry when OpenCode is idle.'
-    : reason;
-  return normalizedReason;
 }
 
 function applyDistinctProvisioningMemberColors<
@@ -1899,6 +1772,7 @@ function normalizeTeamRuntimeNodeEnv(env: NodeJS.ProcessEnv): void {
   if (env.NODE_ENV === 'test') {
     env.NODE_ENV = 'development';
   }
+  ensureMinimumNodeOldSpaceEnv(env);
 }
 
 function buildProviderFastModeArgs(
@@ -2933,7 +2807,119 @@ function appendProvisioningTrace(
 }
 
 function buildProvisioningLiveOutput(run: ProvisioningRun): string | undefined {
+  boundRunProvisioningOutputParts(run);
   return buildProgressLiveOutput(run.provisioningTraceLines, run.provisioningOutputParts);
+}
+
+function boundRunClaudeLogLines(run: ProvisioningRun): void {
+  const bounded = boundProgressLogLines(run.claudeLogLines);
+  if (
+    bounded.length === run.claudeLogLines.length &&
+    bounded.every((line, index) => line === run.claudeLogLines[index])
+  ) {
+    return;
+  }
+  run.claudeLogLines.splice(0, run.claudeLogLines.length, ...bounded);
+}
+
+function boundSingleRetainedLogLine(line: string): string {
+  return boundProgressLogLines([line], { maxLines: 1 })[0] ?? '';
+}
+
+function boundPendingLogLineCarry(carry: string): string {
+  if (carry.length <= CLI_LOG_LINE_CARRY_LIMIT) {
+    return carry;
+  }
+  const marker = '...[truncated pending line]\n';
+  if (CLI_LOG_LINE_CARRY_LIMIT <= marker.length) {
+    return carry.slice(-CLI_LOG_LINE_CARRY_LIMIT);
+  }
+  return `${marker}${carry.slice(-(CLI_LOG_LINE_CARRY_LIMIT - marker.length))}`;
+}
+
+function boundStdoutParserCarry(carry: string): string {
+  if (carry.length <= STDOUT_PARSER_CARRY_LIMIT) {
+    return carry;
+  }
+  return carry.slice(-STDOUT_PARSER_CARRY_LIMIT);
+}
+
+function boundProbeOutputBuffer(text: string): string {
+  if (text.length <= PROBE_OUTPUT_BUFFER_LIMIT) {
+    return text;
+  }
+  const marker = '...[truncated probe output]';
+  if (PROBE_OUTPUT_BUFFER_LIMIT <= marker.length) {
+    return text.slice(-PROBE_OUTPUT_BUFFER_LIMIT);
+  }
+  const retainedChars = PROBE_OUTPUT_BUFFER_LIMIT - marker.length;
+  const headChars = Math.floor(retainedChars / 2);
+  const tailChars = retainedChars - headChars;
+  return `${text.slice(0, headChars)}${marker}${text.slice(-tailChars)}`;
+}
+
+function boundLiveLeadProcessText(text: string): string {
+  if (text.length <= LIVE_LEAD_PROCESS_MESSAGE_TEXT_LIMIT) {
+    return text;
+  }
+  const marker = '\n...[truncated live message]\n';
+  if (LIVE_LEAD_PROCESS_MESSAGE_TEXT_LIMIT <= marker.length) {
+    return text.slice(0, LIVE_LEAD_PROCESS_MESSAGE_TEXT_LIMIT);
+  }
+  const retainedChars = LIVE_LEAD_PROCESS_MESSAGE_TEXT_LIMIT - marker.length;
+  const headChars = Math.floor(retainedChars / 2);
+  const tailChars = retainedChars - headChars;
+  return `${text.slice(0, headChars)}${marker}${text.slice(-tailChars)}`;
+}
+
+function boundLiveLeadProcessMessage(message: InboxMessage): InboxMessage {
+  const text = boundLiveLeadProcessText(message.text);
+  if (text === message.text) {
+    return message;
+  }
+  return {
+    ...message,
+    text,
+    summary: text.length > 60 ? `${text.slice(0, 57)}...` : text,
+  };
+}
+
+function boundRunProvisioningOutputParts(run: ProvisioningRun): void {
+  const originalLength = run.provisioningOutputParts.length;
+  const bounded = boundProgressAssistantParts(run.provisioningOutputParts);
+  if (
+    bounded.length === originalLength &&
+    bounded.every((part, index) => part === run.provisioningOutputParts[index])
+  ) {
+    return;
+  }
+
+  const removedFromStart = Math.max(0, originalLength - bounded.length);
+  run.provisioningOutputParts.splice(0, originalLength, ...bounded);
+  if (removedFromStart <= 0) {
+    return;
+  }
+
+  for (const [messageId, index] of Array.from(run.provisioningOutputIndexByMessageId.entries())) {
+    if (index < removedFromStart) {
+      run.provisioningOutputIndexByMessageId.delete(messageId);
+    } else {
+      run.provisioningOutputIndexByMessageId.set(messageId, index - removedFromStart);
+    }
+  }
+
+  run.stallWarningIndex =
+    run.stallWarningIndex == null
+      ? null
+      : run.stallWarningIndex < removedFromStart
+        ? null
+        : run.stallWarningIndex - removedFromStart;
+  run.apiRetryWarningIndex =
+    run.apiRetryWarningIndex == null
+      ? null
+      : run.apiRetryWarningIndex < removedFromStart
+        ? null
+        : run.apiRetryWarningIndex - removedFromStart;
 }
 
 function initializeProvisioningTrace(run: ProvisioningRun): void {
@@ -3081,19 +3067,18 @@ function extractLogsTail(
  * Builds provisioning CLI logs from the line-buffered claudeLogLines array
  * instead of the byte-capped stdoutBuffer/stderrBuffer ring buffers.
  *
- * claudeLogLines already contains [stdout]/[stderr] markers and individual lines
- * in chronological order (up to CLAUDE_LOG_LINES_LIMIT = 50 000 lines), so it
- * does not suffer from the 64 KB ring-buffer truncation that causes the raw
- * stdoutBuffer to lose older assistant messages.
+ * claudeLogLines already contains [stdout]/[stderr] markers and individual
+ * lines in chronological order. The retained in-memory history is byte-bounded
+ * so failed launches cannot pin gigabytes in the main-process heap.
  *
- * Returns the full launch log history preserved in claudeLogLines. Falls back
- * to the legacy tail extraction only when claudeLogLines is empty (e.g. early
- * in provisioning before any output has been line-split).
+ * Returns the bounded launch log history preserved in claudeLogLines. Falls
+ * back to the legacy tail extraction only when claudeLogLines is empty (e.g.
+ * early in provisioning before any output has been line-split).
  */
 function extractCliLogsFromRun(run: ProvisioningRun): string | undefined {
   const claudeLogLines = Array.isArray(run.claudeLogLines) ? run.claudeLogLines : [];
   if (claudeLogLines.length > 0) {
-    const joined = claudeLogLines.join('\n').trim();
+    const joined = boundProgressLogLines(claudeLogLines).join('\n').trim();
     if (joined.length === 0) {
       return undefined;
     }
@@ -3118,7 +3103,7 @@ function buildRetainedClaudeLogsSnapshot(run: ProvisioningRun): RetainedClaudeLo
   const claudeLogLines = Array.isArray(run.claudeLogLines) ? run.claudeLogLines : [];
   if (claudeLogLines.length > 0) {
     return {
-      lines: [...claudeLogLines],
+      lines: boundProgressLogLines(claudeLogLines),
       updatedAt: run.claudeLogsUpdatedAt,
     };
   }
@@ -3138,7 +3123,7 @@ function buildRetainedClaudeLogsSnapshot(run: ProvisioningRun): RetainedClaudeLo
   }
 
   return {
-    lines,
+    lines: boundProgressLogLines(lines),
     updatedAt: run.claudeLogsUpdatedAt ?? run.progress.updatedAt,
   };
 }
@@ -3188,9 +3173,8 @@ function sliceClaudeLogs(
  * Emit a throttled progress update for the renderer. Payloads are capped to a
  * tail window so that the hot emission path (called every LOG_PROGRESS_THROTTLE_MS
  * under streaming output) cannot accumulate into multi-megabyte IPC messages
- * that would OOM the renderer's Zustand state. The full history stays in
- * `run.claudeLogLines` / `run.provisioningOutputParts` for diagnostics and
- * one-shot completion emissions that intentionally use `extractCliLogsFromRun`.
+ * that would OOM the renderer's Zustand state. The retained in-process
+ * diagnostics are separately byte-bounded on append.
  */
 function emitLogsProgress(run: ProvisioningRun): void {
   // Prefer the line-buffered history (already chronological with [stdout]/[stderr]
@@ -3380,148 +3364,10 @@ type MemberWorkSyncAcceptedReportChecker = (input: {
   memberName: string;
 }) => Promise<boolean> | boolean;
 
-function normalizeSameTeamText(text: string): string {
-  return text.trim().replace(/\r\n/g, '\n');
-}
-
-const SUPPRESSED_LEAD_RELAY_STATE_PHRASES = [
-  'open',
-  'closed',
-  'merged',
-  'approved',
-  'complete',
-  'completed',
-  'done',
-  'blocked',
-  'pending',
-  'in_progress',
-  'in progress',
-  'needsfix',
-  'needs fix',
-  'in review',
-  'clear',
-] as const;
-
-function startsWithSuppressedLeadRelayStatePhrase(text: string): boolean {
-  const lowerText = text.toLowerCase();
-  return SUPPRESSED_LEAD_RELAY_STATE_PHRASES.some((phrase) => {
-    if (!lowerText.startsWith(phrase)) {
-      return false;
-    }
-
-    const nextChar = lowerText.charAt(phrase.length);
-    return nextChar.length === 0 || !/[a-z0-9_]/i.test(nextChar);
-  });
-}
-
-function hasSuppressedLeadRelayStatePredicate(normalized: string): boolean {
-  const match = /\b(?:is|are|was|were|stays?|still|now)\s+/i.exec(normalized);
-  if (!match) {
-    return false;
-  }
-
-  return startsWithSuppressedLeadRelayStatePhrase(normalized.slice(match.index + match[0].length));
-}
-
-function shouldSuppressUnverifiedLeadRelayStateLine(text: string): boolean {
-  const normalized = text.trim().replace(/\s+/g, ' ');
-  if (normalized.length === 0) {
-    return false;
-  }
-
-  const hasStateSubject =
-    /#[a-z0-9]{4,}/i.test(normalized) ||
-    /\bpr\s*#?\d+\b/i.test(normalized) ||
-    /\bpull request\b/i.test(normalized) ||
-    /\b(?:task|tasks|kanban|board|review|approval|merge|merged|branch|queue|worktree|commit|mergecommit|mergedat)\b/i.test(
-      normalized
-    );
-  if (!hasStateSubject) {
-    return false;
-  }
-
-  return (
-    /\b(?:confirmed|verified|already|claims?|false|phantom|ground[- ]truth)\b/i.test(normalized) ||
-    /\b(?:done|complete(?:d)?|approved|merged|closed|blocked|resolved|failed|succeeded)\b/i.test(
-      normalized
-    ) ||
-    hasSuppressedLeadRelayStatePredicate(normalized) ||
-    /\b(?:mergecommit|mergedat)\s*=\s*(?:null|[^\s,;]+)/i.test(normalized) ||
-    /\bqueue\b.*\bclear\b/i.test(normalized)
-  );
-}
-
-function getOpenCodeInboxRelayPriority(
-  message: Pick<InboxMessage, 'messageKind' | 'source'>
-): number {
-  if (message.messageKind === 'member_work_sync_nudge') {
-    return 30;
-  }
-  if (message.source === 'system_notification') {
-    return 20;
-  }
-  return 0;
-}
-
-function getMemberInboxRelayPriority(
-  message: Pick<InboxMessage, 'messageKind' | 'source'>
-): number {
-  if (message.messageKind === 'member_work_sync_nudge') {
-    return 30;
-  }
-  return 0;
-}
-
-function getLeadInboxRelayPriority(message: Pick<InboxMessage, 'messageKind'>): number {
-  return message.messageKind === 'member_work_sync_nudge' ? 30 : 0;
-}
-
-function compareInboxRelayMessages(
-  a: Pick<InboxMessage, 'messageKind' | 'source' | 'timestamp'> & { messageId: string },
-  b: Pick<InboxMessage, 'messageKind' | 'source' | 'timestamp'> & { messageId: string },
-  getPriority: (message: Pick<InboxMessage, 'messageKind' | 'source'>) => number
-): number {
-  const priorityDelta = getPriority(b) - getPriority(a);
-  if (priorityDelta !== 0) return priorityDelta;
-  const aTime = Date.parse(a.timestamp);
-  const bTime = Date.parse(b.timestamp);
-  if (Number.isFinite(aTime) && Number.isFinite(bTime)) {
-    const timeDelta = aTime - bTime;
-    if (timeDelta !== 0) return timeDelta;
-  } else if (Number.isFinite(aTime)) {
-    return -1;
-  } else if (Number.isFinite(bTime)) {
-    return 1;
-  }
-  return a.messageId.localeCompare(b.messageId);
-}
-
-function compareOpenCodeInboxRelayMessagesByPriority(
-  a: Pick<InboxMessage, 'messageKind' | 'source' | 'timestamp'> & { messageId: string },
-  b: Pick<InboxMessage, 'messageKind' | 'source' | 'timestamp'> & { messageId: string }
-): number {
-  return compareInboxRelayMessages(a, b, getOpenCodeInboxRelayPriority);
-}
-
-function compareMemberInboxRelayMessagesByPriority(
-  a: Pick<InboxMessage, 'messageKind' | 'source' | 'timestamp'> & { messageId: string },
-  b: Pick<InboxMessage, 'messageKind' | 'source' | 'timestamp'> & { messageId: string }
-): number {
-  return compareInboxRelayMessages(a, b, getMemberInboxRelayPriority);
-}
-
-function compareLeadInboxRelayMessagesByPriority(
-  a: Pick<InboxMessage, 'messageKind' | 'source' | 'timestamp'> & { messageId: string },
-  b: Pick<InboxMessage, 'messageKind' | 'source' | 'timestamp'> & { messageId: string }
-): number {
-  return compareInboxRelayMessages(a, b, getLeadInboxRelayPriority);
-}
-
 export class TeamProvisioningService {
   private readonly runtimeLaneCoordinator = createTeamRuntimeLaneCoordinator();
   private readonly providerConnectionService = ProviderConnectionService.getInstance();
 
-  private static readonly CLAUDE_LOG_LINES_LIMIT = 50_000;
   private static readonly BOOTSTRAP_FAILURE_TAIL_BYTES = 128 * 1024;
   // A transcript whose mtime predates the lookup window (minus slack for clock skew
   // between the line timestamp source and the filesystem) cannot hold a line at/after
@@ -3659,10 +3505,10 @@ export class TeamProvisioningService {
     string,
     { expiresAtMs: number; snapshot: TeamAgentRuntimeSnapshot }
   >();
-  private readonly agentRuntimeResourceHistoryByTeam = new Map<
-    string,
-    Map<string, TeamAgentRuntimeResourceSample[]>
-  >();
+  private readonly agentRuntimeResourceHistory = new TeamAgentRuntimeResourceHistory({
+    historyLimit: TeamProvisioningService.AGENT_RUNTIME_RESOURCE_HISTORY_LIMIT,
+    minSampleIntervalMs: TeamProvisioningService.RUNTIME_RESOURCE_SAMPLE_MIN_INTERVAL_MS,
+  });
   private readonly runtimeProcessRowsForUsageSnapshotByTeam = new Map<
     string,
     RuntimeProcessRowsCacheEntry
@@ -3964,10 +3810,11 @@ export class TeamProvisioningService {
       this.getRuntimeSnapshotCacheGeneration(teamName) + 1
     );
     this.agentRuntimeSnapshotCache.delete(teamName);
-    this.agentRuntimeSnapshotInFlightByTeam.delete(teamName);
     this.liveTeamAgentRuntimeMetadataCache.delete(teamName);
-    this.liveTeamAgentRuntimeMetadataInFlightByTeam.delete(teamName);
     this.persistedTeamConfigCache.delete(teamName);
+    // Keep in-flight runtime probes alive. Active teams can invalidate runtime
+    // caches faster than expensive process-table/snapshot probes complete; the
+    // generation guard in each builder prevents stale results from being cached.
     // Process table rows are TTL-bound. Resource telemetry can use the longer
     // TTL, while liveness only reuses rows through a short age gate.
   }
@@ -11004,8 +10851,12 @@ export class TeamProvisioningService {
           continue;
         }
         lines.push(line);
-        if (lines.length > TeamProvisioningService.CLAUDE_LOG_LINES_LIMIT) {
-          lines.splice(0, lines.length - TeamProvisioningService.CLAUDE_LOG_LINES_LIMIT);
+        const bounded = boundProgressLogLines(lines);
+        if (
+          bounded.length !== lines.length ||
+          bounded.some((boundedLine, index) => boundedLine !== lines[index])
+        ) {
+          lines.splice(0, lines.length, ...bounded);
         }
       }
     } finally {
@@ -11115,26 +10966,21 @@ export class TeamProvisioningService {
     if (stream === 'stdout') {
       run.stdoutLogLineBuf += text;
       const parts = run.stdoutLogLineBuf.split('\n');
-      run.stdoutLogLineBuf = parts.pop() ?? '';
+      run.stdoutLogLineBuf = boundPendingLogLineCarry(parts.pop() ?? '');
       for (const part of parts) {
         const normalized = part.endsWith('\r') ? part.slice(0, -1) : part;
-        run.claudeLogLines.push(normalized);
+        run.claudeLogLines.push(boundSingleRetainedLogLine(normalized));
       }
     } else {
       run.stderrLogLineBuf += text;
       const parts = run.stderrLogLineBuf.split('\n');
-      run.stderrLogLineBuf = parts.pop() ?? '';
+      run.stderrLogLineBuf = boundPendingLogLineCarry(parts.pop() ?? '');
       for (const part of parts) {
         const normalized = part.endsWith('\r') ? part.slice(0, -1) : part;
-        run.claudeLogLines.push(normalized);
+        run.claudeLogLines.push(boundSingleRetainedLogLine(normalized));
       }
     }
-    if (run.claudeLogLines.length > TeamProvisioningService.CLAUDE_LOG_LINES_LIMIT) {
-      run.claudeLogLines.splice(
-        0,
-        run.claudeLogLines.length - TeamProvisioningService.CLAUDE_LOG_LINES_LIMIT
-      );
-    }
+    boundRunClaudeLogLines(run);
   }
 
   /**
@@ -14191,6 +14037,7 @@ export class TeamProvisioningService {
     const lastIndex = run.provisioningOutputParts.length - 1;
     if (lastIndex < 0 || run.provisioningOutputParts[lastIndex]?.trim() !== message) {
       run.provisioningOutputParts.push(message);
+      boundRunProvisioningOutputParts(run);
     }
 
     if (
@@ -14213,6 +14060,7 @@ export class TeamProvisioningService {
       return;
     }
     run.provisioningOutputParts.push(line);
+    boundRunProvisioningOutputParts(run);
     logger.info(`[${run.teamName}] [bootstrap] ${line}`);
   }
 
@@ -14818,10 +14666,7 @@ export class TeamProvisioningService {
 
     const generationAtStart = this.getRuntimeSnapshotCacheGeneration(teamName);
     const existingRequest = this.agentRuntimeSnapshotInFlightByTeam.get(teamName);
-    if (
-      existingRequest?.generationAtStart === generationAtStart &&
-      existingRequest.runIdAtStart === runId
-    ) {
+    if (existingRequest?.runIdAtStart === runId) {
       return existingRequest.promise;
     }
 
@@ -15933,8 +15778,7 @@ export class TeamProvisioningService {
       input.teamName,
       input.configuredMember.name
     );
-    await fs.promises.mkdir(runtimePaths.dir, { recursive: true });
-    await fs.promises.writeFile(runtimePaths.eventsPath, '', { encoding: 'utf8', mode: 0o600 });
+    await atomicWriteAsync(runtimePaths.eventsPath, '', { mode: 0o600 });
 
     const nativeBootstrapSpec =
       (
@@ -16207,12 +16051,7 @@ export class TeamProvisioningService {
       dir,
       `${sanitizeProcessRuntimeEventFilePrefix(input.memberName)}-${randomUUID()}.native-bootstrap.json`
     );
-    const tempPath = `${finalPath}.tmp`;
-    await fs.promises.writeFile(tempPath, JSON.stringify(context), {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    await fs.promises.rename(tempPath, finalPath);
+    await atomicWriteAsync(finalPath, JSON.stringify(context), { mode: 0o600 });
     return { [NATIVE_APP_MANAGED_BOOTSTRAP_CONTEXT_ENV]: finalPath };
   }
 
@@ -20455,6 +20294,7 @@ export class TeamProvisioningService {
     } else {
       run.provisioningOutputParts.push(`**${hint} failed: ${statusLabel} detected**`);
     }
+    boundRunProvisioningOutputParts(run);
 
     const progress = updateProgress(run, 'failed', `${hint} failed — ${statusLabel}`, {
       error: `Claude CLI reported ${statusLabel} during startup. The team was not started.`,
@@ -20491,6 +20331,7 @@ export class TeamProvisioningService {
       : `**${label} — SDK is retrying**\n\nWaiting for retry...`;
 
     run.provisioningOutputParts.push(warningText);
+    boundRunProvisioningOutputParts(run);
     run.progress.message = `${label} — SDK retrying...`;
     emitLogsProgress(run);
     // Prevent double-emit: the calling stderr/stdout handler will also try throttled emitLogsProgress
@@ -20541,6 +20382,7 @@ export class TeamProvisioningService {
           }
           run.stallWarningIndex = run.provisioningOutputParts.length;
           run.provisioningOutputParts.push(warningText);
+          boundRunProvisioningOutputParts(run);
         }
 
         const mins = Math.floor(silenceSec / 60);
@@ -20958,7 +20800,7 @@ export class TeamProvisioningService {
       // Parse stream-json lines (newline-delimited JSON)
       stdoutLineBuf += text;
       const lines = stdoutLineBuf.split('\n');
-      stdoutLineBuf = lines.pop() ?? '';
+      stdoutLineBuf = boundStdoutParserCarry(lines.pop() ?? '');
       this.updateStdoutParserCarry(run, stdoutLineBuf);
       for (const line of lines) {
         const trimmed = line.trim();
@@ -20974,8 +20816,9 @@ export class TeamProvisioningService {
   }
 
   private updateStdoutParserCarry(run: ProvisioningRun, carry: string): void {
-    run.stdoutParserCarry = carry;
-    const trimmedCarry = carry.trim();
+    const boundedCarry = boundStdoutParserCarry(carry);
+    run.stdoutParserCarry = boundedCarry;
+    const trimmedCarry = boundedCarry.trim();
     if (!trimmedCarry) {
       run.stdoutParserCarryIsCompleteJson = false;
       run.stdoutParserCarryLooksLikeClaudeJson = false;
@@ -27058,10 +26901,7 @@ export class TeamProvisioningService {
 
     const generationAtStart = this.getRuntimeSnapshotCacheGeneration(teamName);
     const existingRequest = this.liveTeamAgentRuntimeMetadataInFlightByTeam.get(teamName);
-    if (
-      existingRequest?.generationAtStart === generationAtStart &&
-      existingRequest.runIdAtStart === runId
-    ) {
+    if (existingRequest?.runIdAtStart === runId) {
       return this.cloneLiveTeamAgentRuntimeMetadata(await existingRequest.promise);
     }
 
@@ -27551,19 +27391,7 @@ export class TeamProvisioningService {
     runtimePid?: number;
     pidSource?: TeamAgentRuntimePidSource;
   }): string | null {
-    const memberName = params.memberName.trim();
-    const usagePid =
-      typeof params.pid === 'number' && Number.isFinite(params.pid) && params.pid > 0
-        ? params.pid
-        : typeof params.runtimePid === 'number' &&
-            Number.isFinite(params.runtimePid) &&
-            params.runtimePid > 0
-          ? params.runtimePid
-          : null;
-    if (!memberName || usagePid == null) {
-      return null;
-    }
-    return [memberName, usagePid, params.pidSource ?? 'unknown'].join('\0');
+    return this.agentRuntimeResourceHistory.buildKey(params);
   }
 
   private recordAgentRuntimeResourceSample(params: {
@@ -27584,97 +27412,7 @@ export class TeamProvisioningService {
     runtimePid?: number;
     activeKeys?: Set<string>;
   }): TeamAgentRuntimeResourceSample[] | undefined {
-    const key = this.buildAgentRuntimeResourceHistoryKey(params);
-    if (!key) {
-      return undefined;
-    }
-    params.activeKeys?.add(key);
-
-    const cpuPercent =
-      typeof params.cpuPercent === 'number' &&
-      Number.isFinite(params.cpuPercent) &&
-      params.cpuPercent >= 0
-        ? params.cpuPercent
-        : undefined;
-    const rssBytes =
-      typeof params.rssBytes === 'number' &&
-      Number.isFinite(params.rssBytes) &&
-      params.rssBytes >= 0
-        ? params.rssBytes
-        : undefined;
-    const primaryCpuPercent =
-      typeof params.primaryCpuPercent === 'number' &&
-      Number.isFinite(params.primaryCpuPercent) &&
-      params.primaryCpuPercent >= 0
-        ? params.primaryCpuPercent
-        : undefined;
-    const primaryRssBytes =
-      typeof params.primaryRssBytes === 'number' &&
-      Number.isFinite(params.primaryRssBytes) &&
-      params.primaryRssBytes >= 0
-        ? params.primaryRssBytes
-        : undefined;
-    const childCpuPercent =
-      typeof params.childCpuPercent === 'number' &&
-      Number.isFinite(params.childCpuPercent) &&
-      params.childCpuPercent >= 0
-        ? params.childCpuPercent
-        : undefined;
-    const childRssBytes =
-      typeof params.childRssBytes === 'number' &&
-      Number.isFinite(params.childRssBytes) &&
-      params.childRssBytes >= 0
-        ? params.childRssBytes
-        : undefined;
-    const processCount =
-      typeof params.processCount === 'number' &&
-      Number.isFinite(params.processCount) &&
-      params.processCount > 0
-        ? Math.floor(params.processCount)
-        : undefined;
-    let historyByKey = this.agentRuntimeResourceHistoryByTeam.get(params.teamName);
-    if (!historyByKey) {
-      historyByKey = new Map<string, TeamAgentRuntimeResourceSample[]>();
-      this.agentRuntimeResourceHistoryByTeam.set(params.teamName, historyByKey);
-    }
-    const existingHistory = historyByKey.get(key) ?? [];
-    if (cpuPercent == null && rssBytes == null) {
-      return existingHistory.length > 0
-        ? existingHistory.map((sample) => ({ ...sample }))
-        : undefined;
-    }
-
-    const sample: TeamAgentRuntimeResourceSample = {
-      timestamp: params.timestamp,
-      ...(cpuPercent != null ? { cpuPercent } : {}),
-      ...(rssBytes != null ? { rssBytes } : {}),
-      ...(primaryCpuPercent != null ? { primaryCpuPercent } : {}),
-      ...(primaryRssBytes != null ? { primaryRssBytes } : {}),
-      ...(childCpuPercent != null ? { childCpuPercent } : {}),
-      ...(childRssBytes != null ? { childRssBytes } : {}),
-      ...(processCount != null ? { processCount } : {}),
-      ...(params.runtimeLoadScope ? { runtimeLoadScope: params.runtimeLoadScope } : {}),
-      ...(params.runtimeLoadTruncated ? { runtimeLoadTruncated: true } : {}),
-      ...(params.pidSource ? { pidSource: params.pidSource } : {}),
-      ...(params.pid ? { pid: params.pid } : {}),
-      ...(params.runtimePid ? { runtimePid: params.runtimePid } : {}),
-    };
-    const lastSample = existingHistory.at(-1);
-    const lastSampleMs = lastSample ? Date.parse(lastSample.timestamp) : Number.NaN;
-    const sampleMs = Date.parse(sample.timestamp);
-    const sampledRecently =
-      Number.isFinite(lastSampleMs) &&
-      Number.isFinite(sampleMs) &&
-      sampleMs - lastSampleMs >= 0 &&
-      sampleMs - lastSampleMs < TeamProvisioningService.RUNTIME_RESOURCE_SAMPLE_MIN_INTERVAL_MS;
-    if (sampledRecently) {
-      return existingHistory.map((entry) => ({ ...entry }));
-    }
-    const nextHistory = [...existingHistory, sample].slice(
-      -TeamProvisioningService.AGENT_RUNTIME_RESOURCE_HISTORY_LIMIT
-    );
-    historyByKey.set(key, nextHistory);
-    return nextHistory.map((entry) => ({ ...entry }));
+    return this.agentRuntimeResourceHistory.record(params);
   }
 
   private recordAgentRuntimeResourceSampleSafely(params: {
@@ -27711,78 +27449,18 @@ export class TeamProvisioningService {
     teamName: string,
     activeKeys: ReadonlySet<string>
   ): void {
-    const historyByKey = this.agentRuntimeResourceHistoryByTeam.get(teamName);
-    if (!historyByKey) {
-      return;
-    }
-    for (const key of historyByKey.keys()) {
-      if (!activeKeys.has(key)) {
-        historyByKey.delete(key);
-      }
-    }
-    if (historyByKey.size === 0) {
-      this.agentRuntimeResourceHistoryByTeam.delete(teamName);
-    }
+    this.agentRuntimeResourceHistory.prune(teamName, activeKeys);
   }
 
   private normalizeRuntimeProcessUsageStats(stat: unknown): RuntimeProcessUsageStats | undefined {
-    if (!stat || typeof stat !== 'object') {
-      return undefined;
-    }
-    const candidate = stat as {
-      memory?: unknown;
-      cpu?: unknown;
-      rssBytes?: unknown;
-      cpuPercent?: unknown;
-    };
-    const rssBytes =
-      normalizeRuntimeTelemetryNumber(candidate.memory) ??
-      normalizeRuntimeTelemetryNumber(candidate.rssBytes);
-    const cpuPercent =
-      normalizeRuntimeTelemetryNumber(candidate.cpu) ??
-      normalizeRuntimeTelemetryNumber(candidate.cpuPercent);
-    const normalized: RuntimeProcessUsageStats = {
-      ...(rssBytes != null && rssBytes >= 0 ? { rssBytes } : {}),
-      ...(cpuPercent != null && cpuPercent >= 0 ? { cpuPercent } : {}),
-    };
-    return normalized.rssBytes != null || normalized.cpuPercent != null ? normalized : undefined;
+    return normalizeRuntimeProcessUsageStatsHelper(stat);
   }
 
   private normalizeRuntimeProcessRowsForTelemetry(
     rows: unknown,
     source?: RuntimeTelemetryProcessSource
   ): RuntimeTelemetryProcessTableRow[] | null {
-    if (!Array.isArray(rows)) {
-      return null;
-    }
-    const normalizedRows: RuntimeTelemetryProcessTableRow[] = [];
-    for (const row of rows) {
-      if (!row || typeof row !== 'object') {
-        continue;
-      }
-      const candidate = row as Partial<RuntimeTelemetryProcessTableRow>;
-      const pid = normalizeRuntimeTelemetryNumber(candidate.pid);
-      const ppid = normalizeRuntimeTelemetryNumber(candidate.ppid);
-      const command = typeof candidate.command === 'string' ? candidate.command.trim() : '';
-      if (pid != null && pid > 0 && ppid != null && ppid >= 0 && command.length > 0) {
-        const runtimeTelemetrySource =
-          source ??
-          (candidate.runtimeTelemetrySource === 'native' ||
-          candidate.runtimeTelemetrySource === 'wsl' ||
-          candidate.runtimeTelemetrySource === 'windows-host'
-            ? candidate.runtimeTelemetrySource
-            : undefined);
-        const usageStats = this.normalizeRuntimeProcessUsageStats(candidate);
-        normalizedRows.push({
-          pid: Math.floor(pid),
-          ppid: Math.floor(ppid),
-          command,
-          ...(usageStats ?? {}),
-          ...(runtimeTelemetrySource ? { runtimeTelemetrySource } : {}),
-        });
-      }
-    }
-    return normalizedRows;
+    return normalizeRuntimeProcessRowsForTelemetryHelper(rows, source);
   }
 
   private shouldReadProcessTableForLiveRuntimeMetadata(params: {
@@ -27926,48 +27604,17 @@ export class TeamProvisioningService {
     return resultRows;
   }
 
-  private buildRuntimeProcessChildrenByParent(
-    processRows: readonly RuntimeTelemetryProcessTableRow[]
-  ): Map<number, RuntimeTelemetryProcessTableRow[]> {
-    const childrenByParent = new Map<number, RuntimeTelemetryProcessTableRow[]>();
-    for (const row of processRows) {
-      const current = childrenByParent.get(row.ppid) ?? [];
-      current.push(row);
-      childrenByParent.set(row.ppid, current);
-    }
-    return childrenByParent;
-  }
-
   private addRuntimeRootOwnersFromProcessRows(
     teamName: string,
     processRows: readonly RuntimeTelemetryProcessTableRow[] | null,
     rootOwnersByPid: Map<number, Set<string>>
   ): void {
-    if (!processRows || processRows.length === 0) {
-      return;
-    }
-
-    for (const row of processRows) {
-      if (process.platform === 'win32' && row.runtimeTelemetrySource === 'wsl') {
-        continue;
-      }
-      if (!commandArgEquals(row.command, '--team-name', teamName)) {
-        continue;
-      }
-      const agentNames = extractCliArgValues(row.command, '--agent-name');
-      const agentIds = extractCliArgValues(row.command, '--agent-id');
-      const ownerKey =
-        agentNames.find((value) => value.trim().length > 0)?.trim() ??
-        agentIds
-          .map((value) => value.split('@', 1)[0]?.trim() ?? '')
-          .find((value) => value.length > 0);
-      if (!ownerKey) {
-        continue;
-      }
-      const owners = rootOwnersByPid.get(row.pid) ?? new Set<string>();
-      owners.add(ownerKey);
-      rootOwnersByPid.set(row.pid, owners);
-    }
+    addRuntimeRootOwnersFromProcessRowsHelper({
+      teamName,
+      processRows,
+      rootOwnersByPid,
+      platform: process.platform,
+    });
   }
 
   private buildRuntimeUsageProcessTrees(
@@ -27975,132 +27622,16 @@ export class TeamProvisioningService {
     processRows: readonly RuntimeTelemetryProcessTableRow[] | null,
     rootOwnersByPid?: ReadonlyMap<number, ReadonlySet<string>>
   ): Map<number, { pids: number[]; truncated: boolean }> {
-    const uniqueRoots = [...new Set(rootPids.filter((pid) => Number.isFinite(pid) && pid > 0))];
-    const rootOwnerKeysByPid = new Map<number, ReadonlySet<string>>();
-    for (const [pid, owners] of rootOwnersByPid ?? []) {
-      if (Number.isFinite(pid) && pid > 0 && owners.size > 0) {
-        rootOwnerKeysByPid.set(pid, owners);
-      }
-    }
-    for (const rootPid of uniqueRoots) {
-      if (!rootOwnerKeysByPid.has(rootPid)) {
-        rootOwnerKeysByPid.set(rootPid, new Set([String(rootPid)]));
-      }
-    }
-    const haveSameRootOwners = (
-      left: ReadonlySet<string> | undefined,
-      right: ReadonlySet<string> | undefined
-    ): boolean => {
-      if (!left || left.size !== right?.size) {
-        return false;
-      }
-      for (const value of left) {
-        if (!right.has(value)) {
-          return false;
-        }
-      }
-      return true;
-    };
-    const usageTreesByRootPid = new Map<number, { pids: number[]; truncated: boolean }>();
-    const scheduledPids = new Set<number>();
-    const normalizedProcessRows = this.normalizeRuntimeProcessRowsForTelemetry(processRows);
-
-    if (!normalizedProcessRows || normalizedProcessRows.length === 0) {
-      for (const rootPid of uniqueRoots) {
-        if (scheduledPids.size >= TeamProvisioningService.MAX_RUNTIME_USAGE_PIDS_PER_SNAPSHOT) {
-          usageTreesByRootPid.set(rootPid, { pids: [], truncated: true });
-          continue;
-        }
-        scheduledPids.add(rootPid);
-        usageTreesByRootPid.set(rootPid, { pids: [rootPid], truncated: false });
-      }
-      return usageTreesByRootPid;
-    }
-
-    const childrenByParent = this.buildRuntimeProcessChildrenByParent(normalizedProcessRows);
-    const rowByPid = new Map(normalizedProcessRows.map((row) => [row.pid, row]));
-    const missingRootPids: number[] = [];
-    for (const rootPid of uniqueRoots) {
-      const pids: number[] = [];
-      let truncated = false;
-      const rootProcessRow = rowByPid.get(rootPid);
-      if (!rootProcessRow) {
-        missingRootPids.push(rootPid);
-        usageTreesByRootPid.set(rootPid, { pids: [], truncated: false });
-        continue;
-      }
-      if (process.platform === 'win32' && rootProcessRow?.runtimeTelemetrySource === 'wsl') {
-        usageTreesByRootPid.set(rootPid, { pids: [], truncated: false });
-        continue;
-      }
-      const rootProcessSource = rootProcessRow?.runtimeTelemetrySource;
-      const addPid = (pid: number): boolean => {
-        if (pids.includes(pid)) {
-          return true;
-        }
-        if (
-          pids.length >= TeamProvisioningService.MAX_RUNTIME_TREE_PIDS_PER_ROOT ||
-          (!scheduledPids.has(pid) &&
-            scheduledPids.size >= TeamProvisioningService.MAX_RUNTIME_USAGE_PIDS_PER_SNAPSHOT)
-        ) {
-          truncated = true;
-          return false;
-        }
-        pids.push(pid);
-        scheduledPids.add(pid);
-        return true;
-      };
-
-      if (!addPid(rootPid)) {
-        usageTreesByRootPid.set(rootPid, { pids, truncated });
-        continue;
-      }
-
-      const queue = [...(childrenByParent.get(rootPid) ?? [])];
-      const seen = new Set<number>();
-      const rootOwners = rootOwnerKeysByPid.get(rootPid);
-      while (queue.length > 0) {
-        const row = queue.shift();
-        if (!row || seen.has(row.pid)) {
-          continue;
-        }
-        seen.add(row.pid);
-        if (
-          rootProcessSource &&
-          row.runtimeTelemetrySource &&
-          row.runtimeTelemetrySource !== rootProcessSource
-        ) {
-          continue;
-        }
-        const candidateRootOwners = rootOwnerKeysByPid.get(row.pid);
-        if (
-          row.pid !== rootPid &&
-          candidateRootOwners &&
-          !haveSameRootOwners(rootOwners, candidateRootOwners)
-        ) {
-          continue;
-        }
-        if (!addPid(row.pid)) {
-          break;
-        }
-        queue.push(...(childrenByParent.get(row.pid) ?? []));
-      }
-      if (queue.length > 0) {
-        truncated = true;
-      }
-      usageTreesByRootPid.set(rootPid, { pids, truncated });
-    }
-
-    for (const rootPid of missingRootPids) {
-      if (scheduledPids.size >= TeamProvisioningService.MAX_RUNTIME_USAGE_PIDS_PER_SNAPSHOT) {
-        usageTreesByRootPid.set(rootPid, { pids: [], truncated: true });
-        continue;
-      }
-      scheduledPids.add(rootPid);
-      usageTreesByRootPid.set(rootPid, { pids: [rootPid], truncated: false });
-    }
-
-    return usageTreesByRootPid;
+    return buildRuntimeUsageProcessTreesHelper({
+      rootPids,
+      processRows,
+      rootOwnersByPid,
+      limits: {
+        maxPidsPerRoot: TeamProvisioningService.MAX_RUNTIME_TREE_PIDS_PER_ROOT,
+        maxPidsPerSnapshot: TeamProvisioningService.MAX_RUNTIME_USAGE_PIDS_PER_SNAPSHOT,
+      },
+      platform: process.platform,
+    });
   }
 
   private buildRuntimeProcessLoadStats(params: {
@@ -28109,73 +27640,7 @@ export class TeamProvisioningService {
     processTree?: { pids: number[]; truncated: boolean };
     scope?: TeamAgentRuntimeLoadScope;
   }): RuntimeProcessLoadStats | undefined {
-    const rootPid =
-      typeof params.rootPid === 'number' && Number.isFinite(params.rootPid) && params.rootPid > 0
-        ? params.rootPid
-        : undefined;
-    if (!rootPid) {
-      return undefined;
-    }
-
-    if (params.processTree && params.processTree.pids.length === 0) {
-      return undefined;
-    }
-
-    const processPids = params.processTree ? params.processTree.pids : [rootPid];
-    const primaryStats = params.usageStatsByPid.get(rootPid);
-    let childCpuPercent = 0;
-    let childRssBytes = 0;
-    let hasChildCpu = false;
-    let hasChildRss = false;
-    let sampledProcessCount = primaryStats ? 1 : 0;
-
-    for (const pid of processPids) {
-      if (pid === rootPid) {
-        continue;
-      }
-      const childStats = params.usageStatsByPid.get(pid);
-      if (!childStats) {
-        continue;
-      }
-      sampledProcessCount += 1;
-      if (typeof childStats.cpuPercent === 'number') {
-        childCpuPercent += childStats.cpuPercent;
-        hasChildCpu = true;
-      }
-      if (typeof childStats.rssBytes === 'number') {
-        childRssBytes += childStats.rssBytes;
-        hasChildRss = true;
-      }
-    }
-
-    if (!primaryStats && sampledProcessCount === 0) {
-      return undefined;
-    }
-
-    const primaryCpuPercent = primaryStats?.cpuPercent;
-    const primaryRssBytes = primaryStats?.rssBytes;
-    const cpuPercent =
-      primaryCpuPercent != null || hasChildCpu
-        ? (primaryCpuPercent ?? 0) + childCpuPercent
-        : undefined;
-    const rssBytes =
-      primaryRssBytes != null || hasChildRss ? (primaryRssBytes ?? 0) + childRssBytes : undefined;
-    const hasSampledChildren = hasChildCpu || hasChildRss;
-    const hasProcessTree = processPids.length > 1 && hasSampledChildren;
-    const runtimeLoadScope =
-      params.scope ?? (hasProcessTree ? 'process-tree' : ('single-process' as const));
-
-    return {
-      ...(rssBytes != null ? { rssBytes } : {}),
-      ...(cpuPercent != null ? { cpuPercent } : {}),
-      ...(primaryCpuPercent != null ? { primaryCpuPercent } : {}),
-      ...(primaryRssBytes != null ? { primaryRssBytes } : {}),
-      ...(hasChildCpu ? { childCpuPercent } : {}),
-      ...(hasChildRss ? { childRssBytes } : {}),
-      ...(sampledProcessCount > 0 ? { processCount: sampledProcessCount } : {}),
-      runtimeLoadScope,
-      ...(params.processTree?.truncated ? { runtimeLoadTruncated: true } : {}),
-    };
+    return buildRuntimeProcessLoadStatsHelper(params);
   }
 
   private buildRuntimeProcessLoadStatsSafely(
@@ -28227,22 +27692,7 @@ export class TeamProvisioningService {
     processRows: readonly RuntimeTelemetryProcessTableRow[] | null,
     pids: readonly number[]
   ): Map<number, RuntimeProcessUsageStats> {
-    const usageStatsByPid = new Map<number, RuntimeProcessUsageStats>();
-    const requestedPids = new Set(pids.filter((pid) => Number.isFinite(pid) && pid > 0));
-    if (!Array.isArray(processRows) || requestedPids.size === 0) {
-      return usageStatsByPid;
-    }
-
-    for (const row of processRows) {
-      if (!requestedPids.has(row.pid)) {
-        continue;
-      }
-      const usageStats = this.normalizeRuntimeProcessUsageStats(row);
-      if (usageStats) {
-        usageStatsByPid.set(row.pid, usageStats);
-      }
-    }
-    return usageStatsByPid;
+    return buildProcessUsageStatsFromRowsHelper(processRows, pids);
   }
 
   private shouldSampleMissingRuntimeUsageStatsWithPidusage(): boolean {
@@ -33066,31 +32516,32 @@ export class TeamProvisioningService {
   }
 
   pushLiveLeadProcessMessage(teamName: string, message: InboxMessage): void {
+    let cacheMessage = message;
     // Enrich with leadSessionId if missing — needed for session boundary separators
-    if (!message.leadSessionId) {
+    if (!cacheMessage.leadSessionId) {
       const runId = this.getTrackedRunId(teamName);
       if (runId) {
         const run = this.runs.get(runId);
         if (run?.detectedSessionId) {
-          message.leadSessionId = run.detectedSessionId;
+          cacheMessage = { ...cacheMessage, leadSessionId: run.detectedSessionId };
         }
       }
     }
-    const MAX = 100;
+    cacheMessage = boundLiveLeadProcessMessage(cacheMessage);
     const list = this.liveLeadProcessMessages.get(teamName) ?? [];
-    const id = typeof message.messageId === 'string' ? message.messageId.trim() : '';
+    const id = typeof cacheMessage.messageId === 'string' ? cacheMessage.messageId.trim() : '';
     if (id) {
       const existingIdx = list.findIndex((m) => (m.messageId ?? '').trim() === id);
       if (existingIdx >= 0) {
-        list[existingIdx] = message;
+        list[existingIdx] = cacheMessage;
       } else {
-        list.push(message);
+        list.push(cacheMessage);
       }
     } else {
-      list.push(message);
+      list.push(cacheMessage);
     }
-    if (list.length > MAX) {
-      list.splice(0, list.length - MAX);
+    if (list.length > LIVE_LEAD_PROCESS_MESSAGE_CACHE_LIMIT) {
+      list.splice(0, list.length - LIVE_LEAD_PROCESS_MESSAGE_CACHE_LIMIT);
     }
     this.liveLeadProcessMessages.set(teamName, list);
   }
@@ -33164,6 +32615,7 @@ export class TeamProvisioningService {
       const existingIndex = run.provisioningOutputIndexByMessageId.get(stableMessageId);
       if (existingIndex != null) {
         run.provisioningOutputParts[existingIndex] = text;
+        boundRunProvisioningOutputParts(run);
         return;
       }
     }
@@ -33177,6 +32629,7 @@ export class TeamProvisioningService {
     if (stableMessageId) {
       run.provisioningOutputIndexByMessageId.set(stableMessageId, newIndex);
     }
+    boundRunProvisioningOutputParts(run);
   }
 
   private shiftProvisioningOutputIndexesAfterRemoval(
@@ -33218,14 +32671,16 @@ export class TeamProvisioningService {
         toolSummary = toolCalls ? formatToolSummaryFromCalls(toolCalls) : undefined;
         run.liveLeadTextBuffer = {
           messageId: `lead-turn-${run.runId}-${run.leadMsgSeq}`,
-          text: cleanText,
+          text: boundLiveLeadProcessText(cleanText),
           timestamp,
           toolCalls,
           toolSummary,
         };
         run.pendingToolCalls = [];
       } else {
-        run.liveLeadTextBuffer.text += cleanText;
+        run.liveLeadTextBuffer.text = boundLiveLeadProcessText(
+          run.liveLeadTextBuffer.text + cleanText
+        );
       }
 
       messageId = run.liveLeadTextBuffer.messageId;
@@ -34161,6 +33616,7 @@ export class TeamProvisioningService {
             capture.textJoinMode = 'block';
           }
           capture.textParts.push(text);
+          capture.textParts = boundProgressAssistantParts(capture.textParts);
           if (capture.idleHandle) {
             clearTimeout(capture.idleHandle);
           }
@@ -34571,6 +34027,7 @@ export class TeamProvisioningService {
             run.apiRetryWarningIndex = run.provisioningOutputParts.length;
             run.provisioningOutputParts.push(warningText);
           }
+          boundRunProvisioningOutputParts(run);
           run.lastRetryAt = Date.now();
           appendProvisioningTrace(
             run,
@@ -39659,8 +39116,7 @@ export class TeamProvisioningService {
     const memberName = 'mcp-validation-member';
     const teamDir = path.join(claudeDir, 'teams', teamName);
 
-    await fs.promises.mkdir(teamDir, { recursive: true });
-    await fs.promises.writeFile(
+    await atomicWriteAsync(
       path.join(teamDir, 'config.json'),
       JSON.stringify(
         {
@@ -39673,8 +39129,7 @@ export class TeamProvisioningService {
         },
         null,
         2
-      ),
-      'utf8'
+      )
     );
 
     return {
@@ -39814,11 +39269,12 @@ export class TeamProvisioningService {
           }
           parseStdoutLine(line);
         }
+        stdoutBuffer = boundProbeOutputBuffer(stdoutBuffer);
       });
 
       child.stderr?.setEncoding('utf8');
       child.stderr?.on('data', (chunk: string | Buffer) => {
-        stderrBuffer += chunk.toString();
+        stderrBuffer = boundProbeOutputBuffer(stderrBuffer + chunk.toString());
       });
 
       child.once('error', (error) => {
@@ -40081,11 +39537,11 @@ export class TeamProvisioningService {
       };
 
       child.stdout?.on('data', (chunk: Buffer) => {
-        stdoutText += chunk.toString('utf8');
+        stdoutText = boundProbeOutputBuffer(stdoutText + chunk.toString('utf8'));
         maybeResolveEarly();
       });
       child.stderr?.on('data', (chunk: Buffer) => {
-        stderrText += chunk.toString('utf8');
+        stderrText = boundProbeOutputBuffer(stderrText + chunk.toString('utf8'));
         maybeResolveEarly();
       });
       child.once('error', (error) => {

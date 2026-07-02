@@ -431,7 +431,8 @@ describe('MemberWorkSyncEventQueue', () => {
     await queue.stop();
   });
 
-  it('times out a hung reconcile and retries so the member cannot stay running forever', async () => {
+  it('waits for a timed-out reconcile to settle before retrying that member', async () => {
+    let releaseFirst!: () => void;
     let reconcileCalls = 0;
     const auditEvents: string[] = [];
     const queue = new MemberWorkSyncEventQueue({
@@ -442,7 +443,9 @@ describe('MemberWorkSyncEventQueue', () => {
       reconcile: async () => {
         reconcileCalls += 1;
         if (reconcileCalls === 1) {
-          await new Promise<void>(() => undefined);
+          await new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          });
         }
       },
       isTeamActive: () => true,
@@ -462,6 +465,20 @@ describe('MemberWorkSyncEventQueue', () => {
     await vi.advanceTimersByTimeAsync(20);
 
     expect(queue.getDiagnostics()).toMatchObject({
+      running: 1,
+      queued: 0,
+      failed: 1,
+      reconciled: 0,
+    });
+    expect(auditEvents).toEqual(['queue_enqueued']);
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(reconcileCalls).toBe(1);
+
+    releaseFirst();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(queue.getDiagnostics()).toMatchObject({
       running: 0,
       queued: 1,
       failed: 1,
@@ -469,10 +486,7 @@ describe('MemberWorkSyncEventQueue', () => {
     });
     expect(auditEvents).toEqual(['queue_enqueued', 'queue_retry_scheduled']);
 
-    await vi.advanceTimersByTimeAsync(9);
-    expect(reconcileCalls).toBe(1);
-
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(10);
 
     expect(reconcileCalls).toBe(2);
     expect(queue.getDiagnostics()).toMatchObject({
@@ -481,11 +495,61 @@ describe('MemberWorkSyncEventQueue', () => {
       failed: 1,
       reconciled: 1,
     });
-    expect(auditEvents).toEqual([
-      'queue_enqueued',
-      'queue_retry_scheduled',
-      'queue_reconciled',
-    ]);
+    expect(auditEvents).toEqual(['queue_enqueued', 'queue_retry_scheduled', 'queue_reconciled']);
+
+    await queue.stop();
+  });
+
+  it('releases global concurrency after timeout while keeping the same member locked', async () => {
+    let releaseFirst!: () => void;
+    const reconciles: string[] = [];
+    const queue = new MemberWorkSyncEventQueue({
+      concurrency: 1,
+      quietWindowMs: 1,
+      retryDelayMs: 10,
+      reconcileTimeoutMs: 20,
+      maxRetryAttempts: 1,
+      reconcile: async (request) => {
+        reconciles.push(request.memberName);
+        const firstBobReconcile =
+          request.memberName === 'bob' && reconciles.filter((name) => name === 'bob').length === 1;
+        if (firstBobReconcile) {
+          await new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          });
+        }
+      },
+      isTeamActive: () => true,
+    });
+
+    queue.enqueue({ teamName: 'team-a', memberName: 'bob', triggerReason: 'turn_settled' });
+    queue.enqueue({ teamName: 'team-a', memberName: 'alice', triggerReason: 'turn_settled' });
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(reconciles).toEqual(['bob']);
+
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reconciles).toEqual(['bob', 'alice']);
+    expect(queue.getDiagnostics()).toMatchObject({
+      queued: 0,
+      running: 1,
+      failed: 1,
+      reconciled: 1,
+      runningItems: [{ memberName: 'bob', settlingAfterTimeout: true }],
+    });
+
+    queue.enqueue({ teamName: 'team-a', memberName: 'bob', triggerReason: 'manual_refresh' });
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(reconciles).toEqual(['bob', 'alice']);
+
+    releaseFirst();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(reconciles).toEqual(['bob', 'alice', 'bob']);
 
     await queue.stop();
   });
@@ -530,12 +594,13 @@ describe('MemberWorkSyncEventQueue', () => {
     await vi.advanceTimersByTimeAsync(20);
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(lateSideEffects).toEqual(['retry']);
+    expect(lateSideEffects).toEqual([]);
 
     releaseFirst();
     await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(10);
 
-    expect(cancellationChecks).toEqual([false, true]);
+    expect(cancellationChecks).toEqual([true, false]);
     expect(lateSideEffects).toEqual(['retry']);
 
     await queue.stop();

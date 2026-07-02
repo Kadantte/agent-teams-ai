@@ -36,6 +36,8 @@ const TEAM_AFFINITY_SCAN_LINES = 40;
 const TEAM_AFFINITY_READ_CHUNK_BYTES = 64 * 1024;
 const TEAM_AFFINITY_FILE_CACHE_MAX_ENTRIES = 4_096;
 const TEAM_AFFINITY_HEAD_METADATA_CACHE_MAX_ENTRIES = 4_096;
+const TEAM_AFFINITY_TEXT_MENTION_MAX_VALUE_LENGTH = 160;
+const TEAM_AFFINITY_TEXT_MENTION_MAX_PER_LINE = 64;
 const ROOT_DISCOVERY_CONCURRENCY = 12;
 const FAST_CONTEXT_ROOT_DISCOVERY_MTIME_GRACE_MS = 24 * 60 * 60_000;
 
@@ -168,20 +170,52 @@ function extractTextContent(entry: Record<string, unknown>): string | null {
   return null;
 }
 
-function lineMentionsNormalizedTeam(normalizedText: string, normalizedTeam: string): boolean {
-  if (!normalizedText.includes(normalizedTeam)) {
-    return false;
+function addTextMentionTeamName(teamNames: Set<string>, value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized.length > TEAM_AFFINITY_TEXT_MENTION_MAX_VALUE_LENGTH) {
+    return teamNames.size >= TEAM_AFFINITY_TEXT_MENTION_MAX_PER_LINE;
   }
-  return (
-    normalizedText.includes(`team name: ${normalizedTeam}`) ||
-    normalizedText.includes(`team name "${normalizedTeam}"`) ||
-    normalizedText.includes(`team name '${normalizedTeam}'`) ||
-    normalizedText.includes(`on team "${normalizedTeam}"`) ||
-    normalizedText.includes(`on team '${normalizedTeam}'`) ||
-    normalizedText.includes(`team "${normalizedTeam}"`) ||
-    normalizedText.includes(`team '${normalizedTeam}'`) ||
-    normalizedText.includes(`(${normalizedTeam})`)
-  );
+  teamNames.add(normalized);
+  return teamNames.size >= TEAM_AFFINITY_TEXT_MENTION_MAX_PER_LINE;
+}
+
+function collectTextMentionTeamNames(textContent: string | null): Set<string> {
+  const normalizedText = textContent?.trim().toLowerCase();
+  if (!normalizedText) {
+    return new Set<string>();
+  }
+
+  const teamNames = new Set<string>();
+  const quotedPattern = /\b(?:team name|on team|team)\s+["']([^"'\r\n]{1,160})["']/g;
+  let match: RegExpExecArray | null;
+  let reachedLimit = false;
+  while ((match = quotedPattern.exec(normalizedText))) {
+    if (addTextMentionTeamName(teamNames, match[1] ?? '')) {
+      reachedLimit = true;
+      break;
+    }
+  }
+
+  if (!reachedLimit) {
+    const colonPattern = /\bteam name:\s*["']?([^"'\r\n,.;|)\]}]{1,160})/g;
+    while ((match = colonPattern.exec(normalizedText))) {
+      if (addTextMentionTeamName(teamNames, match[1] ?? '')) {
+        reachedLimit = true;
+        break;
+      }
+    }
+  }
+
+  if (!reachedLimit) {
+    const parentheticalPattern = /\(([^()\r\n]{1,160})\)/g;
+    while ((match = parentheticalPattern.exec(normalizedText))) {
+      if (addTextMentionTeamName(teamNames, match[1] ?? '')) {
+        break;
+      }
+    }
+  }
+
+  return teamNames;
 }
 
 function collectNestedTeamNames(value: unknown, teamNames: Set<string>, depth: number = 0): void {
@@ -215,7 +249,7 @@ function collectNestedTeamNames(value: unknown, teamNames: Set<string>, depth: n
 function parseTeamAffinityHeadLine(rawLine: string): TeamAffinityHeadLineMetadata {
   const empty: TeamAffinityHeadLineMetadata = {
     nestedTeamNames: new Set<string>(),
-    normalizedTextContent: null,
+    textMentionTeamNames: new Set<string>(),
   };
 
   try {
@@ -225,7 +259,7 @@ function parseTeamAffinityHeadLine(rawLine: string): TeamAffinityHeadLineMetadat
     const textContent = extractTextContent(entry);
     return {
       nestedTeamNames,
-      normalizedTextContent: textContent ? textContent.trim().toLowerCase() : null,
+      textMentionTeamNames: collectTextMentionTeamNames(textContent),
     };
   } catch {
     return empty;
@@ -285,7 +319,7 @@ interface TeamAffinityFileCacheEntry {
 
 interface TeamAffinityHeadLineMetadata {
   nestedTeamNames: Set<string>;
-  normalizedTextContent: string | null;
+  textMentionTeamNames: Set<string>;
 }
 
 interface TeamAffinityHeadMetadataCacheEntry {
@@ -1256,10 +1290,7 @@ export class TeamTranscriptProjectResolver {
       if (line.nestedTeamNames.has(normalizedTeam)) {
         return { belongsToTeam: true, inspectedLineCount, matchSource: 'nested_team_name' };
       }
-      if (
-        line.normalizedTextContent &&
-        lineMentionsNormalizedTeam(line.normalizedTextContent, normalizedTeam)
-      ) {
+      if (line.textMentionTeamNames.has(normalizedTeam)) {
         return { belongsToTeam: true, inspectedLineCount, matchSource: 'text_team_mention' };
       }
     }

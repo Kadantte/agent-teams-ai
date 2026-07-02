@@ -94,6 +94,16 @@ vi.mock('@main/services/team/TeamMembersMetaStore', () => ({
 }));
 vi.mock('@main/services/team/TeamDataWorkerClient', () => ({
   getTeamDataWorkerClient: () => mockTeamDataWorkerClient,
+  isTeamDataWorkerFatalError: (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+      message.includes('ERR_WORKER_OUT_OF_MEMORY') ||
+      message.includes('Worker terminated due to reaching memory limit') ||
+      message.includes('JS heap out of memory') ||
+      /Worker exited with code (?!0\b)\d+/.test(message) ||
+      message.includes('Worker call timeout after')
+    );
+  },
 }));
 
 import {
@@ -323,7 +333,9 @@ describe('ipc teams handlers', () => {
           }
         | undefined,
     })),
-    getOpenCodeRuntimeDeliveryStatus: vi.fn(async () => null as OpenCodeRuntimeDeliveryStatus | null),
+    getOpenCodeRuntimeDeliveryStatus: vi.fn(
+      async () => null as OpenCodeRuntimeDeliveryStatus | null
+    ),
     buildOpenCodeRuntimeDeliveryUserVisibleImpact: vi.fn(() => ({ state: 'none' })),
     getLiveLeadProcessMessages: vi.fn(() => [] as InboxMessage[]),
     getCurrentLeadSessionId: vi.fn(() => null as string | null),
@@ -1100,7 +1112,9 @@ describe('ipc teams handlers', () => {
         acceptanceUnknown: false,
         userVisibleImpact: { state: 'none' },
       });
-      expect(provisioningService.buildOpenCodeRuntimeDeliveryUserVisibleImpact).not.toHaveBeenCalled();
+      expect(
+        provisioningService.buildOpenCodeRuntimeDeliveryUserVisibleImpact
+      ).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -1184,9 +1198,11 @@ describe('ipc teams handlers', () => {
           'opencode_runtime_delivery_ui_timeout_pending: status lookup failed: status read failed',
         ],
       });
-      expect(vi.mocked(console.warn).mock.calls.some((call) =>
-        call.join(' ').includes('status after UI timeout failed')
-      )).toBe(true);
+      expect(
+        vi
+          .mocked(console.warn)
+          .mock.calls.some((call) => call.join(' ').includes('status after UI timeout failed'))
+      ).toBe(true);
       vi.mocked(console.warn).mockClear();
     } finally {
       vi.useRealTimers();
@@ -1196,11 +1212,14 @@ describe('ipc teams handlers', () => {
   it('logs OpenCode relay rejection that happens after the UI timeout fallback', async () => {
     vi.useFakeTimers();
     try {
-      const deferredRelay = createDeferred<Awaited<
-        ReturnType<typeof provisioningService.relayOpenCodeMemberInboxMessages>
-      >>();
+      const deferredRelay =
+        createDeferred<
+          Awaited<ReturnType<typeof provisioningService.relayOpenCodeMemberInboxMessages>>
+        >();
       provisioningService.resolveRuntimeRecipientProviderId.mockResolvedValueOnce('opencode');
-      provisioningService.relayOpenCodeMemberInboxMessages.mockReturnValueOnce(deferredRelay.promise);
+      provisioningService.relayOpenCodeMemberInboxMessages.mockReturnValueOnce(
+        deferredRelay.promise
+      );
       provisioningService.getOpenCodeRuntimeDeliveryStatus.mockResolvedValueOnce(null);
       const sendHandler = handlers.get(TEAM_SEND_MESSAGE);
       expect(sendHandler).toBeDefined();
@@ -1216,9 +1235,11 @@ describe('ipc teams handlers', () => {
       deferredRelay.reject(new Error('late bridge failure'));
       await flushMicrotasks();
 
-      expect(vi.mocked(console.warn).mock.calls.some((call) =>
-        call.join(' ').includes('rejected after UI timeout')
-      )).toBe(true);
+      expect(
+        vi
+          .mocked(console.warn)
+          .mock.calls.some((call) => call.join(' ').includes('rejected after UI timeout'))
+      ).toBe(true);
       vi.mocked(console.warn).mockClear();
     } finally {
       vi.useRealTimers();
@@ -1228,11 +1249,14 @@ describe('ipc teams handlers', () => {
   it('logs OpenCode relay failure result that resolves after the UI timeout fallback', async () => {
     vi.useFakeTimers();
     try {
-      const deferredRelay = createDeferred<Awaited<
-        ReturnType<typeof provisioningService.relayOpenCodeMemberInboxMessages>
-      >>();
+      const deferredRelay =
+        createDeferred<
+          Awaited<ReturnType<typeof provisioningService.relayOpenCodeMemberInboxMessages>>
+        >();
       provisioningService.resolveRuntimeRecipientProviderId.mockResolvedValueOnce('opencode');
-      provisioningService.relayOpenCodeMemberInboxMessages.mockReturnValueOnce(deferredRelay.promise);
+      provisioningService.relayOpenCodeMemberInboxMessages.mockReturnValueOnce(
+        deferredRelay.promise
+      );
       provisioningService.getOpenCodeRuntimeDeliveryStatus.mockResolvedValueOnce(null);
       const sendHandler = handlers.get(TEAM_SEND_MESSAGE);
       expect(sendHandler).toBeDefined();
@@ -1258,9 +1282,11 @@ describe('ipc teams handlers', () => {
       });
       await flushMicrotasks();
 
-      expect(vi.mocked(console.warn).mock.calls.some((call) =>
-        call.join(' ').includes('completed after UI timeout')
-      )).toBe(true);
+      expect(
+        vi
+          .mocked(console.warn)
+          .mock.calls.some((call) => call.join(' ').includes('completed after UI timeout'))
+      ).toBe(true);
       vi.mocked(console.warn).mockClear();
     } finally {
       vi.useRealTimers();
@@ -1810,6 +1836,24 @@ describe('ipc teams handlers', () => {
     (electron.app as { isPackaged: boolean }).isPackaged = false;
   });
 
+  it('does not fall back TEAM_GET_DATA to main after worker OOM', async () => {
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
+    mockTeamDataWorkerClient.getTeamData.mockRejectedValueOnce(
+      new Error('Worker terminated due to reaching memory limit: JS heap out of memory')
+    );
+
+    const handler = handlers.get(TEAM_GET_DATA)!;
+    const result = (await handler({} as never, 'my-team')) as {
+      success: boolean;
+      error?: string;
+    };
+    vi.mocked(console.error).mockClear();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('TEAM_DATA_WORKER_FAILED');
+    expect(service.getTeamData).not.toHaveBeenCalled();
+  });
+
   it('forwards thin TEAM_GET_DATA options to the worker without changing full request shape', async () => {
     mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
     mockTeamDataWorkerClient.getTeamData.mockResolvedValueOnce({
@@ -2193,7 +2237,6 @@ describe('ipc teams handlers', () => {
     };
     mockTeamDataWorkerClient.getMessagesPage.mockResolvedValueOnce({
       messages: [
-        liveMessage,
         {
           from: 'user',
           text: 'Ping',
@@ -2222,9 +2265,71 @@ describe('ipc teams handlers', () => {
     expect(result.data.feedRevision).toBe('rev-worker');
     expect(mockTeamDataWorkerClient.getMessagesPage).toHaveBeenCalledWith('my-team', {
       cursor: undefined,
-      limit: 20,
-      liveMessages: [liveMessage],
+      limit: 121,
     });
+    expect(service.getMessagesPage).not.toHaveBeenCalled();
+  });
+
+  it('caps live message overlay before merging newest page results from the worker', async () => {
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
+    const liveMessages: InboxMessage[] = Array.from({ length: 205 }, (_, index) => ({
+      from: 'team-lead',
+      text: `Live thought ${index}`,
+      timestamp: new Date(Date.UTC(2026, 1, 23, 10, 0, index)).toISOString(),
+      read: true,
+      source: 'lead_process' as const,
+      messageId: `live-${index}`,
+    }));
+    mockTeamDataWorkerClient.getMessagesPage.mockResolvedValueOnce({
+      messages: [],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-worker',
+    });
+    provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce(liveMessages);
+
+    const handler = handlers.get(TEAM_GET_MESSAGES_PAGE)!;
+    const result = (await handler({} as never, 'my-team', {
+      limit: 20,
+    })) as { success: boolean; data: MessagesPage };
+
+    expect(result.success).toBe(true);
+    const workerOptions = mockTeamDataWorkerClient.getMessagesPage.mock.calls[0]?.[1] as {
+      liveMessages?: InboxMessage[];
+      limit: number;
+    };
+    expect(workerOptions.limit).toBe(221);
+    expect(workerOptions.liveMessages).toBeUndefined();
+    expect(result.data.messages.map((message) => message.messageId)).toContain('live-204');
+    expect(result.data.messages.map((message) => message.messageId)).toContain('live-185');
+    expect(result.data.messages.map((message) => message.messageId)).not.toContain('live-184');
+    expect(result.data.messages.map((message) => message.messageId)).not.toContain('live-4');
+    expect(service.getMessagesPage).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back live TEAM_GET_MESSAGES_PAGE overlay to main after worker OOM', async () => {
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
+    const liveMessage: InboxMessage = {
+      from: 'team-lead',
+      text: 'Команда поднята, приступаю к раздаче задач.',
+      timestamp: '2026-02-23T10:00:01.000Z',
+      read: true,
+      source: 'lead_process' as const,
+      messageId: 'live-1',
+    };
+    mockTeamDataWorkerClient.getMessagesPage.mockRejectedValueOnce(
+      new Error('Worker terminated due to reaching memory limit: JS heap out of memory')
+    );
+    provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce([liveMessage]);
+
+    const handler = handlers.get(TEAM_GET_MESSAGES_PAGE)!;
+    const result = (await handler({} as never, 'my-team', {
+      limit: 20,
+    })) as { success: boolean; error?: string };
+    vi.mocked(console.error).mockClear();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('TEAM_DATA_WORKER_FAILED');
     expect(service.getMessagesPage).not.toHaveBeenCalled();
   });
 
@@ -2328,6 +2433,23 @@ describe('ipc teams handlers', () => {
     (electron.app as { isPackaged: boolean }).isPackaged = false;
   });
 
+  it('does not fall back TEAM_GET_MESSAGES_PAGE to main after worker OOM', async () => {
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
+    mockTeamDataWorkerClient.getMessagesPage.mockRejectedValueOnce(
+      new Error('Worker terminated due to reaching memory limit: JS heap out of memory')
+    );
+
+    const handler = handlers.get(TEAM_GET_MESSAGES_PAGE)!;
+    const result = (await handler({} as never, 'my-team', {
+      limit: 50,
+    })) as { success: boolean; error?: string };
+    vi.mocked(console.error).mockClear();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('TEAM_DATA_WORKER_FAILED');
+    expect(service.getMessagesPage).not.toHaveBeenCalled();
+  });
+
   it('uses the team-data worker for TEAM_GET_MEMBER_ACTIVITY_META when available', async () => {
     mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
     mockTeamDataWorkerClient.getMemberActivityMeta.mockResolvedValueOnce({
@@ -2373,6 +2495,41 @@ describe('ipc teams handlers', () => {
     vi.mocked(console.error).mockClear();
 
     (electron.app as { isPackaged: boolean }).isPackaged = false;
+  });
+
+  it('does not fall back TEAM_GET_MEMBER_ACTIVITY_META to main after worker OOM', async () => {
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
+    mockTeamDataWorkerClient.getMemberActivityMeta.mockRejectedValueOnce(
+      new Error('Worker terminated due to reaching memory limit: JS heap out of memory')
+    );
+
+    const handler = handlers.get(TEAM_GET_MEMBER_ACTIVITY_META)!;
+    const result = (await handler({} as never, 'my-team')) as {
+      success: boolean;
+      error?: string;
+    };
+    vi.mocked(console.error).mockClear();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('TEAM_DATA_WORKER_FAILED');
+    expect(service.getMemberActivityMeta).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back TEAM_GET_LOGS_FOR_TASK to main after worker OOM', async () => {
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
+    mockTeamDataWorkerClient.findLogsForTask.mockRejectedValueOnce(
+      new Error('Worker terminated due to reaching memory limit: JS heap out of memory')
+    );
+
+    const handler = handlers.get(TEAM_GET_LOGS_FOR_TASK)!;
+    const result = (await handler({} as never, 'my-team', 'task-1')) as {
+      success: boolean;
+      error?: string;
+    };
+    vi.mocked(console.error).mockClear();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('TEAM_DATA_WORKER_FAILED');
   });
 
   it('rebuilds only the remaining auto-resume delay from persisted rate-limit history', async () => {
@@ -2778,13 +2935,7 @@ describe('ipc teams handlers', () => {
 
     expect(result.success).toBe(true);
     expect(service.getMessagesPage).toHaveBeenCalledWith('my-team', {
-      limit: 50,
-      liveMessages: expect.arrayContaining([
-        expect.objectContaining({
-          messageId: 'live-dup',
-          source: 'lead_process',
-        }),
-      ]),
+      limit: 151,
     });
     expect(result.data.messages).toHaveLength(50);
   });
@@ -2840,32 +2991,75 @@ describe('ipc teams handlers', () => {
 
     expect(result.success).toBe(true);
     expect(mockTeamDataWorkerClient.getMessagesPage).toHaveBeenCalledWith('my-team', {
-      limit: 50,
-      liveMessages: [liveMessage],
+      limit: 151,
+    });
+    expect(service.getMessagesPage).not.toHaveBeenCalled();
+    expect(result.data.messages).toHaveLength(50);
+  });
+
+  it('does not fall back capped TEAM_GET_DATA live overlay rebuild to main after worker OOM', async () => {
+    mockTeamDataWorkerClient.isAvailable.mockReturnValue(true);
+    const liveMessage: InboxMessage = {
+      from: 'team-lead',
+      text: 'Live thought',
+      timestamp: '2026-02-23T11:00:00.000Z',
+      read: true,
+      source: 'lead_process' as const,
+      messageId: 'live-1',
+    };
+    mockTeamDataWorkerClient.getTeamData.mockResolvedValueOnce({
+      teamName: 'my-team',
+      config: { name: 'My Team' },
+      tasks: [],
+      members: [],
+      messages: Array.from({ length: 50 }, (_, index) => ({
+        from: 'alice',
+        text: `filler-${index}`,
+        timestamp: `2026-02-23T10:${String(index).padStart(2, '0')}:00.000Z`,
+        read: true,
+        source: 'inbox' as const,
+        messageId: `durable-${index}`,
+      })),
+      kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
+      processes: [],
+    });
+    mockTeamDataWorkerClient.getMessagesPage.mockRejectedValueOnce(
+      new Error('Worker terminated due to reaching memory limit: JS heap out of memory')
+    );
+    provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce([liveMessage]);
+
+    const getDataHandler = handlers.get(TEAM_GET_DATA)!;
+    const result = (await getDataHandler({} as never, 'my-team')) as {
+      success: boolean;
+      data: { messages?: InboxMessage[] };
+    };
+    expect(vi.mocked(console.warn).mock.calls[0]?.join(' ')).toContain('TEAM_DATA_WORKER_FAILED');
+    vi.mocked(console.warn).mockClear();
+    vi.mocked(console.error).mockClear();
+
+    expect(result.success).toBe(true);
+    expect(mockTeamDataWorkerClient.getMessagesPage).toHaveBeenCalledWith('my-team', {
+      limit: 151,
     });
     expect(service.getMessagesPage).not.toHaveBeenCalled();
     expect(result.data.messages).toHaveLength(50);
   });
 
   it('overlays live lead_process messages onto the newest messages page', async () => {
-    service.getMessagesPage.mockImplementationOnce(async (...args: unknown[]) => {
-      const { liveMessages = [] } = (args[1] ?? {}) as { liveMessages?: InboxMessage[] };
-      return {
-        messages: [
-          {
-            from: 'user',
-            text: 'Ping',
-            timestamp: '2026-02-23T10:00:00.000Z',
-            read: true,
-            source: 'user_sent' as const,
-            messageId: 'durable-1',
-          },
-          ...liveMessages,
-        ].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp)),
-        nextCursor: '2026-02-23T10:00:00.000Z|durable-1',
-        hasMore: true,
-        feedRevision: 'rev-1',
-      } satisfies MessagesPage;
+    service.getMessagesPage.mockResolvedValueOnce({
+      messages: [
+        {
+          from: 'user',
+          text: 'Ping',
+          timestamp: '2026-02-23T10:00:00.000Z',
+          read: true,
+          source: 'user_sent' as const,
+          messageId: 'durable-1',
+        },
+      ],
+      nextCursor: '2026-02-23T10:00:00.000Z|durable-1',
+      hasMore: true,
+      feedRevision: 'rev-1',
     });
     provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce([
       {
@@ -2892,37 +3086,27 @@ describe('ipc teams handlers', () => {
     expect(result.data.nextCursor).toBe('2026-02-23T10:00:00.000Z|durable-1');
     expect(result.data.hasMore).toBe(true);
     expect(service.getMessagesPage).toHaveBeenCalledWith('my-team', {
-      limit: 20,
       cursor: undefined,
-      liveMessages: expect.arrayContaining([
-        expect.objectContaining({
-          source: 'lead_process',
-          messageId: 'live-1',
-        }),
-      ]),
+      limit: 121,
     });
   });
 
   it('dedups live lead thoughts on the newest messages page when durable lead_session already exists', async () => {
-    service.getMessagesPage.mockImplementationOnce(async (...args: unknown[]) => {
-      const { liveMessages = [] } = (args[1] ?? {}) as { liveMessages?: InboxMessage[] };
-      expect(liveMessages).toHaveLength(1);
-      return {
-        messages: [
-          {
-            from: 'team-lead',
-            text: 'Hello there',
-            timestamp: '2026-02-23T10:00:00.000Z',
-            read: true,
-            source: 'lead_session' as const,
-            leadSessionId: 'lead-1',
-            messageId: 'durable-1',
-          },
-        ],
-        nextCursor: null,
-        hasMore: false,
-        feedRevision: 'rev-1',
-      } satisfies MessagesPage;
+    service.getMessagesPage.mockResolvedValueOnce({
+      messages: [
+        {
+          from: 'team-lead',
+          text: 'Hello there',
+          timestamp: '2026-02-23T10:00:00.000Z',
+          read: true,
+          source: 'lead_session' as const,
+          leadSessionId: 'lead-1',
+          messageId: 'durable-1',
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      feedRevision: 'rev-1',
     });
     provisioningService.getLiveLeadProcessMessages.mockReturnValueOnce([
       {
@@ -3073,11 +3257,9 @@ describe('ipc teams handlers', () => {
       })) as { success: boolean };
 
       expect(result.success).toBe(true);
-      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith(
-        'my-team',
-        'alice',
-        { reason: 'member_added' }
-      );
+      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith('my-team', 'alice', {
+        reason: 'member_added',
+      });
       expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
     });
 
@@ -3101,11 +3283,9 @@ describe('ipc teams handlers', () => {
           fastMode: 'on',
         })
       );
-      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith(
-        'my-team',
-        'alice',
-        { reason: 'member_added' }
-      );
+      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith('my-team', 'alice', {
+        reason: 'member_added',
+      });
     });
 
     it('lets lifecycle own MCP launch config for live add-member', async () => {
@@ -3135,11 +3315,9 @@ describe('ipc teams handlers', () => {
       })) as { success: boolean };
 
       expect(result.success).toBe(true);
-      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith(
-        'my-team',
-        'alice',
-        { reason: 'member_added' }
-      );
+      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith('my-team', 'alice', {
+        reason: 'member_added',
+      });
       expect(provisioningService.prepareLiveMemberMcpLaunchConfig).not.toHaveBeenCalled();
       expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
     });
@@ -3150,9 +3328,7 @@ describe('ipc teams handlers', () => {
         providerBackendId: 'codex-native',
         members: [],
       });
-      provisioningService.attachLiveRosterMember.mockRejectedValueOnce(
-        new Error('attach failed')
-      );
+      provisioningService.attachLiveRosterMember.mockRejectedValueOnce(new Error('attach failed'));
 
       const handler = handlers.get(TEAM_ADD_MEMBER)!;
       const result = (await handler({} as never, 'my-team', {
@@ -3321,10 +3497,7 @@ describe('ipc teams handlers', () => {
         ],
         { providerBackendId: 'codex-native' }
       );
-      expect(provisioningService.detachLiveRosterMember).toHaveBeenCalledWith(
-        'my-team',
-        'alice'
-      );
+      expect(provisioningService.detachLiveRosterMember).toHaveBeenCalledWith('my-team', 'alice');
       vi.mocked(console.error).mockClear();
     });
   });
@@ -3591,9 +3764,7 @@ describe('ipc teams handlers', () => {
         kanbanState: { teamName: 'my-team', reviewers: [], tasks: {} },
         processes: [],
       });
-      provisioningService.detachLiveRosterMember.mockRejectedValueOnce(
-        new Error('detach failed')
-      );
+      provisioningService.detachLiveRosterMember.mockRejectedValueOnce(new Error('detach failed'));
 
       const result = (await handler({} as never, 'my-team', 'alice')) as {
         success: boolean;
@@ -3624,11 +3795,9 @@ describe('ipc teams handlers', () => {
         ],
         { providerBackendId: undefined }
       );
-      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith(
-        'my-team',
-        'alice',
-        { reason: 'member_updated' }
-      );
+      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith('my-team', 'alice', {
+        reason: 'member_updated',
+      });
       vi.mocked(console.error).mockClear();
     });
   });
@@ -3689,11 +3858,9 @@ describe('ipc teams handlers', () => {
       const result = (await handler({} as never, 'my-team', 'alice')) as { success: boolean };
 
       expect(result.success).toBe(true);
-      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith(
-        'my-team',
-        'alice',
-        { reason: 'member_restored' }
-      );
+      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith('my-team', 'alice', {
+        reason: 'member_restored',
+      });
       expect(provisioningService.prepareLiveMemberMcpLaunchConfig).not.toHaveBeenCalled();
       expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
     });
@@ -3733,11 +3900,9 @@ describe('ipc teams handlers', () => {
       const result = (await handler({} as never, 'my-team', 'alice')) as { success: boolean };
 
       expect(result.success).toBe(true);
-      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith(
-        'my-team',
-        'alice',
-        { reason: 'member_restored' }
-      );
+      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith('my-team', 'alice', {
+        reason: 'member_restored',
+      });
       expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
     });
 
@@ -3782,6 +3947,47 @@ describe('ipc teams handlers', () => {
   });
 
   describe('replaceMembers', () => {
+    it('updates non-live draft members without requiring a full team snapshot', async () => {
+      provisioningService.isTeamAlive.mockReturnValueOnce(false);
+      service.getTeamData.mockRejectedValueOnce(new Error('Team not found: draft-team'));
+
+      const handler = handlers.get(TEAM_REPLACE_MEMBERS)!;
+      const result = (await handler({} as never, 'draft-team', {
+        members: [
+          {
+            name: 'alice',
+            role: 'Developer',
+            providerId: 'codex',
+          },
+        ],
+      })) as { success: boolean; error?: string };
+
+      expect(result.success).toBe(true);
+      expect(service.getTeamData).not.toHaveBeenCalled();
+      expect(service.replaceMembers).toHaveBeenCalledWith('draft-team', {
+        members: [
+          {
+            name: 'alice',
+            role: 'Developer',
+            workflow: undefined,
+            isolation: undefined,
+            providerId: 'codex',
+            providerBackendId: undefined,
+            model: undefined,
+            effort: undefined,
+            fastMode: undefined,
+            mcpPolicy: undefined,
+          },
+        ],
+      });
+      expect(provisioningService.attachLiveRosterMember).not.toHaveBeenCalled();
+      expect(provisioningService.detachLiveRosterMember).not.toHaveBeenCalled();
+      expect(mockTeamDataWorkerClient.invalidateTeamConfig).toHaveBeenCalledWith('draft-team');
+      expect(mockTeamDataWorkerClient.invalidateMemberRuntimeAdvisory).toHaveBeenCalledWith(
+        'draft-team'
+      );
+    });
+
     it('attaches added teammates through lifecycle during live replaceMembers', async () => {
       service.getTeamData.mockResolvedValueOnce({
         teamName: 'my-team',
@@ -3813,11 +4019,9 @@ describe('ipc teams handlers', () => {
       })) as { success: boolean };
 
       expect(result.success).toBe(true);
-      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith(
-        'my-team',
-        'alice',
-        { reason: 'member_added' }
-      );
+      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith('my-team', 'alice', {
+        reason: 'member_added',
+      });
       expect(provisioningService.prepareLiveMemberMcpLaunchConfig).not.toHaveBeenCalled();
       expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
     });
@@ -3860,11 +4064,9 @@ describe('ipc teams handlers', () => {
       })) as { success: boolean };
 
       expect(result.success).toBe(true);
-      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith(
-        'my-team',
-        'alice',
-        { reason: 'member_updated' }
-      );
+      expect(provisioningService.attachLiveRosterMember).toHaveBeenCalledWith('my-team', 'alice', {
+        reason: 'member_updated',
+      });
       expect(provisioningService.prepareLiveMemberMcpLaunchConfig).not.toHaveBeenCalled();
       expect(provisioningService.sendMessageToTeam).not.toHaveBeenCalled();
     });
@@ -5052,9 +5254,10 @@ describe('ipc teams handlers', () => {
         })) as { success: boolean };
 
         expect(result).toMatchObject({ success: true });
-        const [request] = provisioningService.launchTeam.mock.calls.at(
-          -1
-        ) as unknown as [TeamLaunchRequest, (progress: TeamProvisioningProgress) => void];
+        const [request] = provisioningService.launchTeam.mock.calls.at(-1) as unknown as [
+          TeamLaunchRequest,
+          (progress: TeamProvisioningProgress) => void,
+        ];
         expect(request).toMatchObject({
           teamName: 'runtime-default-change-team',
           providerId: 'anthropic',

@@ -572,6 +572,31 @@ describe('OpenCodeMemberVisibleActivityReader', () => {
     expect(aliceForced.map((entry) => entry.message.messageId)).toEqual(['alice-message']);
     expect(getMessages).toHaveBeenCalledTimes(2);
   });
+
+  it('uses a bounded team inbox window when the inbox reader supports it', async () => {
+    const getMessages = vi.fn(async () => [
+      inboxMessage({ from: 'alice', messageId: 'full-read-alice' }),
+    ]);
+    const getMessagesWindow = vi.fn(async () => ({
+      messages: [
+        inboxMessage({ from: 'alice', messageId: 'window-alice' }),
+        inboxMessage({ from: 'bob', messageId: 'window-bob' }),
+      ],
+    }));
+    const reader = new OpenCodeMemberVisibleActivityReader({
+      getMessages,
+      getMessagesWindow,
+    });
+
+    const alice = await reader.list({ teamName: 'alpha-team', memberName: 'alice' });
+
+    expect(alice.map((entry) => entry.message.messageId)).toEqual(['window-alice']);
+    expect(getMessagesWindow).toHaveBeenCalledWith('alpha-team', {
+      cursor: null,
+      limit: 1280,
+    });
+    expect(getMessages).not.toHaveBeenCalled();
+  });
 });
 
 describe('OpenCodeMemberRuntimePreviewSource', () => {

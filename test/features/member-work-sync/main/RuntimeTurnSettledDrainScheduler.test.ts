@@ -31,13 +31,16 @@ describe('RuntimeTurnSettledDrainScheduler', () => {
     await first;
   });
 
-  it('times out a hung drain so later turn-settled drains can continue', async () => {
+  it('does not overlap later drains while a timed-out drain is still settling', async () => {
+    let releaseFirst!: () => void;
     let drainCalls = 0;
     const warn = vi.fn();
     const drain = vi.fn(async () => {
       drainCalls += 1;
       if (drainCalls === 1) {
-        await new Promise<void>(() => undefined);
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
       }
       return { claimed: 0, enqueued: 0, unresolved: 0, ignored: 0, invalid: 0, failed: 0 };
     });
@@ -65,6 +68,12 @@ describe('RuntimeTurnSettledDrainScheduler', () => {
         error: 'Error: runtime turn settled drain timed out after 20ms',
       })
     );
+
+    await expect(scheduler.drainNow()).resolves.toBeNull();
+    expect(drain).toHaveBeenCalledTimes(1);
+
+    releaseFirst();
+    await vi.advanceTimersByTimeAsync(0);
 
     await expect(scheduler.drainNow()).resolves.toMatchObject({
       claimed: 0,

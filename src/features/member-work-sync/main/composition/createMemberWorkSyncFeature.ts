@@ -385,20 +385,20 @@ export function createMemberWorkSyncFeature(deps: {
       return uniqueTeamNames;
     }
 
-    const readiness = await Promise.all(
-      uniqueTeamNames.map(async (teamName) => {
-        try {
-          return { teamName, ready: await deps.canDispatchNudges!(teamName) };
-        } catch (error) {
-          deps.logger?.warn('member work sync nudge dispatch readiness check failed', {
-            teamName,
-            error: String(error),
-          });
-          return { teamName, ready: false };
+    const readyTeamNames: string[] = [];
+    for (const teamName of uniqueTeamNames) {
+      try {
+        if (await deps.canDispatchNudges(teamName)) {
+          readyTeamNames.push(teamName);
         }
-      })
-    );
-    return readiness.filter((item) => item.ready).map((item) => item.teamName);
+      } catch (error) {
+        deps.logger?.warn('member work sync nudge dispatch readiness check failed', {
+          teamName,
+          error: String(error),
+        });
+      }
+    }
+    return readyTeamNames;
   };
   const refreshBackgroundStaleStatuses = async (teamNames: string[]): Promise<void> => {
     const nowMs = clock.now().getTime();
@@ -661,22 +661,27 @@ export function createMemberWorkSyncFeature(deps: {
     },
     enqueueStartupScan: (teamNames) => router.enqueueStartupScan(teamNames),
     replayPendingReports: async (teamNames) => {
-      const summaries = await Promise.allSettled(
-        teamNames.map((teamName) => pendingReportReplayer.replayTeam(teamName))
-      );
-      return summaries.reduce<MemberWorkSyncPendingReportReplaySummary>(
-        (accumulator, summary) => {
-          if (summary.status !== 'fulfilled') {
-            return accumulator;
-          }
-          accumulator.processed += summary.value.processed;
-          accumulator.accepted += summary.value.accepted;
-          accumulator.rejected += summary.value.rejected;
-          accumulator.superseded += summary.value.superseded;
-          return accumulator;
-        },
-        { processed: 0, accepted: 0, rejected: 0, superseded: 0 }
-      );
+      const accumulator: MemberWorkSyncPendingReportReplaySummary = {
+        processed: 0,
+        accepted: 0,
+        rejected: 0,
+        superseded: 0,
+      };
+      for (const teamName of teamNames) {
+        try {
+          const summary = await pendingReportReplayer.replayTeam(teamName);
+          accumulator.processed += summary.processed;
+          accumulator.accepted += summary.accepted;
+          accumulator.rejected += summary.rejected;
+          accumulator.superseded += summary.superseded;
+        } catch (error) {
+          deps.logger?.warn('member work sync pending report replay failed', {
+            teamName,
+            error: String(error),
+          });
+        }
+      }
+      return accumulator;
     },
     dispatchDueNudges: (teamNames) =>
       dispatchNudgesForReadyTeams(teamNames, `member-work-sync:${process.pid}`),

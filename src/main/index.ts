@@ -19,7 +19,10 @@ process.env.UV_THREADPOOL_SIZE ??= '16';
 // Keep userData stable before any integration can initialize Electron storage.
 // Sentry must stay near the top to capture early errors after storage migration.
 // eslint-disable-next-line simple-import-sort/imports -- userData migration must run before Sentry initializes Electron storage.
-import { earlyElectronUserDataMigrationResult } from './bootstrapUserDataMigration';
+import {
+  earlyElectronDevPathOverrideResult,
+  earlyElectronUserDataMigrationResult,
+} from './bootstrapUserDataMigration';
 import './sentry';
 
 import {
@@ -48,6 +51,12 @@ import {
   registerMemberWorkSyncIpc,
   removeMemberWorkSyncIpc,
 } from '@features/member-work-sync/main';
+import {
+  createOrganizationsFeature,
+  type OrganizationsFeatureFacade,
+  registerOrganizationsIpc,
+  removeOrganizationsIpc,
+} from '@features/organizations/main';
 import {
   createRecentProjectsFeature,
   type RecentProjectsFeatureFacade,
@@ -185,12 +194,14 @@ import { getTeamDataWorkerClient } from './services/team/TeamDataWorkerClient';
 import { getTeamFsWorkerClient } from './services/team/TeamFsWorkerClient';
 import { TeamInboxReader } from './services/team/TeamInboxReader';
 import { TeamMemberRuntimeAdvisoryService } from './services/team/TeamMemberRuntimeAdvisoryService';
+import { notifyTeamChangeObserversSafely } from './services/team/TeamChangeFanout';
 import {
   createTeamReconcileDrainScheduler,
   type TeamReconcileTrigger,
 } from './services/team/TeamReconcileDrainScheduler';
 import { TeamSentMessagesStore } from './services/team/TeamSentMessagesStore';
 import { getAppIconPath } from './utils/appIcon';
+import { configureFatalDiagnosticReport } from './utils/fatalDiagnosticReport';
 import {
   getAutoDetectedClaudeBasePath,
   getClaudeBasePath,
@@ -269,6 +280,19 @@ let openCodeLifecycleBridge: OpenCodeReadinessBridge | null = null;
 if (process.env.AGENT_TEAMS_DISABLE_GPU?.trim() === '1') {
   app.disableHardwareAcceleration();
   logger.info('Hardware acceleration disabled by AGENT_TEAMS_DISABLE_GPU=1');
+}
+
+if (
+  earlyElectronDevPathOverrideResult.userDataDir ||
+  earlyElectronDevPathOverrideResult.claudeRoot
+) {
+  logger.warn('Electron dev path overrides enabled', {
+    userDataDir: earlyElectronDevPathOverrideResult.userDataDir,
+    claudeRoot: earlyElectronDevPathOverrideResult.claudeRoot,
+  });
+}
+for (const warning of earlyElectronDevPathOverrideResult.warnings) {
+  logger.warn(warning);
 }
 
 function hasWarningRelayDiagnostics(diagnostics: readonly string[]): boolean {
@@ -928,6 +952,7 @@ let sshConnectionManager: SshConnectionManager;
 let codexAccountFeature: CodexAccountFeatureFacade | null = null;
 let codexModelCatalogFeature: CodexModelCatalogFeatureFacade | null = null;
 let recentProjectsFeature: RecentProjectsFeatureFacade;
+let organizationsFeature: OrganizationsFeatureFacade;
 let runtimeProviderManagementFeature: RuntimeProviderManagementFeatureFacade;
 let terminalWorkspaceFeature: TerminalWorkspaceFeatureFacade | null = null;
 let memberWorkSyncFeature: MemberWorkSyncFeatureFacade | null = null;
@@ -964,6 +989,9 @@ const STARTUP_RECOVERY_DELAY_MS = 10_000;
 const STARTUP_CLI_WARMUP_DELAY_MS = 90_000;
 const STARTUP_BACKGROUND_SERVICE_DELAY_MS = 5_000;
 const STARTUP_RECOVERY_CONCURRENCY = 1;
+const MEMBER_WORK_SYNC_LIFECYCLE_ACTIVE_TEAM_CHECK_CONCURRENCY = 2;
+const MEMBER_WORK_SYNC_RUNTIME_SNAPSHOT_TIMEOUT_MS = 15_000;
+const MEMBER_WORK_SYNC_RUNTIME_SNAPSHOT_TIMEOUT_COOLDOWN_MS = 30_000;
 const appStartupStartedAt = Date.now();
 const initialStartupMemory = captureStartupMemorySnapshot();
 let appStartupSteps: AppStartupStep[] = [
@@ -985,6 +1013,86 @@ let appStartupStatus: AppStartupStatus = {
   memory: initialStartupMemory,
   steps: appStartupSteps,
 };
+
+function invalidateTeamChangeCaches(event: TeamChangeEvent): void {
+  if (event.type === 'config') {
+    if (event.detail === 'config.json') {
+      TeamConfigReader.invalidateTeam(event.teamName);
+      getTeamDataWorkerClient().invalidateTeamConfig(event.teamName);
+      teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
+      getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
+    } else if (event.detail === 'team.meta.json' || event.detail === 'members.meta.json') {
+      TeamConfigReader.invalidateListTeamsCache();
+      getTeamDataWorkerClient().invalidateTeamConfig(event.teamName);
+      teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
+      getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
+    }
+  }
+  if (event.type === 'task') {
+    TeamTaskReader.invalidateAllTasksCache();
+    teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
+    getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
+  }
+  if (event.type === 'member-advisory') {
+    teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
+    getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
+  }
+}
+
+function invalidateTeamChangeMessageFeed(event: TeamChangeEvent): void {
+  if (
+    teamDataService &&
+    (event.type === 'inbox' || event.type === 'lead-message' || event.type === 'config')
+  ) {
+    teamDataService.invalidateMessageFeed(event.teamName);
+    if (event.type === 'inbox' || event.type === 'lead-message') {
+      getTeamDataWorkerClient().invalidateTeamMessageFeed(event.teamName);
+    }
+  }
+}
+
+function forwardTeamChangeToRendererAndHttp(event: TeamChangeEvent): void {
+  try {
+    safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
+  } catch (error) {
+    warnTeamChangeForwardFailure('renderer send', error);
+  }
+
+  try {
+    httpServer?.broadcast('team-change', event);
+  } catch (error) {
+    warnTeamChangeForwardFailure('http broadcast', error);
+  }
+}
+
+function warnTeamChangeForwardFailure(target: string, error: unknown): void {
+  try {
+    logger.warn(`team-change ${target} failed`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } catch {
+    // Keep team-change wake processing best-effort even if failure logging fails.
+  }
+}
+
+function notifyCoreTeamChangeObservers(event: TeamChangeEvent): void {
+  notifyTeamChangeObserversSafely(
+    event,
+    [
+      {
+        name: 'launchIoGovernor',
+        notify: (teamChange) => launchIoGovernor?.noteTeamChange(teamChange),
+      },
+      { name: 'team-change-cache-invalidation', notify: invalidateTeamChangeCaches },
+      {
+        name: 'memberWorkSyncFeature',
+        notify: (teamChange) => memberWorkSyncFeature?.noteTeamChange(teamChange),
+      },
+      { name: 'team-message-feed-invalidation', notify: invalidateTeamChangeMessageFeed },
+    ],
+    logger
+  );
+}
 
 function isShutdownStarted(): boolean {
   return shutdownComplete || shutdownPromise !== null;
@@ -1291,8 +1399,16 @@ function wireFileWatcherEvents(context: ServiceContext): void {
 
   // Forward team-change events to renderer and HTTP SSE
   const teamChangeHandler = (event: unknown): void => {
-    safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
-    httpServer?.broadcast('team-change', event);
+    try {
+      safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
+    } catch (error) {
+      warnTeamChangeForwardFailure('renderer send', error);
+    }
+    try {
+      httpServer?.broadcast('team-change', event);
+    } catch (error) {
+      warnTeamChangeForwardFailure('http broadcast', error);
+    }
 
     // Process inbox and task change events.
     try {
@@ -1301,44 +1417,7 @@ function wireFileWatcherEvents(context: ServiceContext): void {
       if (typeof row.teamName !== 'string' || row.teamName.trim().length === 0) return;
       const teamName = row.teamName.trim();
       const detail = typeof row.detail === 'string' ? row.detail : '';
-      launchIoGovernor?.noteTeamChange(row as TeamChangeEvent);
-
-      if (row.type === 'config') {
-        if (detail === 'config.json') {
-          TeamConfigReader.invalidateTeam(teamName);
-          getTeamDataWorkerClient().invalidateTeamConfig(teamName);
-          teamDataService?.invalidateTeamRuntimeAdvisories(teamName);
-          getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(teamName);
-        } else if (detail === 'team.meta.json' || detail === 'members.meta.json') {
-          TeamConfigReader.invalidateListTeamsCache();
-          getTeamDataWorkerClient().invalidateTeamConfig(teamName);
-          teamDataService?.invalidateTeamRuntimeAdvisories(teamName);
-          getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(teamName);
-        }
-      }
-
-      if (row.type === 'task') {
-        TeamTaskReader.invalidateAllTasksCache();
-        teamDataService?.invalidateTeamRuntimeAdvisories(teamName);
-        getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(teamName);
-      }
-
-      if (row.type === 'member-advisory') {
-        teamDataService?.invalidateTeamRuntimeAdvisories(teamName);
-        getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(teamName);
-      }
-
-      memberWorkSyncFeature?.noteTeamChange(row as TeamChangeEvent);
-
-      if (
-        teamDataService &&
-        (row.type === 'inbox' || row.type === 'lead-message' || row.type === 'config')
-      ) {
-        teamDataService.invalidateMessageFeed(teamName);
-        if (row.type === 'inbox' || row.type === 'lead-message') {
-          getTeamDataWorkerClient().invalidateTeamMessageFeed(teamName);
-        }
-      }
+      notifyCoreTeamChangeObservers(row as TeamChangeEvent);
 
       // --- Inbox change events: relay to lead + native OS notifications ---
       if (row.type === 'inbox') {
@@ -1792,57 +1871,62 @@ async function initializeServices(): Promise<void> {
   });
 
   const forwardTeamChange = (event: TeamChangeEvent): void => {
-    launchIoGovernor?.noteTeamChange(event);
-    if (event.type === 'config') {
-      if (event.detail === 'config.json') {
-        TeamConfigReader.invalidateTeam(event.teamName);
-        getTeamDataWorkerClient().invalidateTeamConfig(event.teamName);
-        teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
-        getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
-      } else if (event.detail === 'team.meta.json' || event.detail === 'members.meta.json') {
-        TeamConfigReader.invalidateListTeamsCache();
-        getTeamDataWorkerClient().invalidateTeamConfig(event.teamName);
-        teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
-        getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
-      }
-    }
-    if (event.type === 'task') {
-      TeamTaskReader.invalidateAllTasksCache();
-      teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
-      getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
-    }
-    if (event.type === 'member-advisory') {
-      teamDataService?.invalidateTeamRuntimeAdvisories(event.teamName);
-      getTeamDataWorkerClient().invalidateMemberRuntimeAdvisory(event.teamName);
-    }
-    if (
-      teamDataService &&
-      (event.type === 'inbox' || event.type === 'lead-message' || event.type === 'config')
-    ) {
-      teamDataService.invalidateMessageFeed(event.teamName);
-      if (event.type === 'inbox' || event.type === 'lead-message') {
-        getTeamDataWorkerClient().invalidateTeamMessageFeed(event.teamName);
-      }
-    }
-    safeSendToRenderer(mainWindow, TEAM_CHANGE, event);
-    httpServer?.broadcast('team-change', event);
+    notifyTeamChangeObserversSafely(
+      event,
+      [
+        {
+          name: 'launchIoGovernor',
+          notify: (teamChange) => launchIoGovernor?.noteTeamChange(teamChange),
+        },
+        { name: 'team-change-cache-invalidation', notify: invalidateTeamChangeCaches },
+        { name: 'team-message-feed-invalidation', notify: invalidateTeamChangeMessageFeed },
+        { name: 'team-change-renderer-http-forward', notify: forwardTeamChangeToRendererAndHttp },
+      ],
+      logger
+    );
   };
   teammateToolTracker = new TeammateToolTracker(
     teamMemberLogsFinder,
     teamLogSourceTracker,
     (event) => {
-      forwardTeamChange(event);
-      memberWorkSyncFeature?.noteTeamChange(event);
+      notifyTeamChangeObserversSafely(
+        event,
+        [
+          { name: 'forwardTeamChange', notify: forwardTeamChange },
+          {
+            name: 'memberWorkSyncFeature',
+            notify: (teamChange) => memberWorkSyncFeature?.noteTeamChange(teamChange),
+          },
+        ],
+        logger
+      );
     }
   );
   // Allow TeamProvisioningService to trigger team refresh events (e.g. live lead replies).
   const teamChangeEmitter = (event: TeamChangeEvent): void => {
-    forwardTeamChange(event);
-    teamTaskStallMonitor?.noteTeamChange(event);
-    memberWorkSyncFeature?.noteTeamChange(event);
-    if (event.type === 'lead-activity' && event.detail === 'offline') {
-      teammateToolTracker?.handleTeamOffline(event.teamName);
-    }
+    notifyTeamChangeObserversSafely(
+      event,
+      [
+        { name: 'forwardTeamChange', notify: forwardTeamChange },
+        {
+          name: 'teamTaskStallMonitor',
+          notify: (teamChange) => teamTaskStallMonitor?.noteTeamChange(teamChange),
+        },
+        {
+          name: 'memberWorkSyncFeature',
+          notify: (teamChange) => memberWorkSyncFeature?.noteTeamChange(teamChange),
+        },
+        {
+          name: 'teammateToolTrackerOffline',
+          notify: (teamChange) => {
+            if (teamChange.type === 'lead-activity' && teamChange.detail === 'offline') {
+              teammateToolTracker?.handleTeamOffline(teamChange.teamName);
+            }
+          },
+        },
+      ],
+      logger
+    );
   };
   teamProvisioningService.setTeamChangeEmitter(teamChangeEmitter);
   teamLogSourceTracker.setEmitter(teamChangeEmitter);
@@ -1889,40 +1973,81 @@ async function initializeServices(): Promise<void> {
     getLocalContext: () => contextRegistry.get('local'),
     logger: createLogger('Feature:RecentProjects'),
   });
+  organizationsFeature = createOrganizationsFeature({
+    teamDataService,
+    crossTeamService,
+    logger: createLogger('Feature:Organizations'),
+  });
   runtimeProviderManagementFeature = createRuntimeProviderManagementFeature();
   terminalWorkspaceFeature = createTerminalWorkspaceFeature({
     teamsBasePath: getTeamsBasePath(),
     logger: createLogger('Feature:TerminalWorkspace'),
   });
   const memberWorkSyncLogger = createLogger('Feature:MemberWorkSync');
+  type MemberWorkSyncRuntimeSnapshot = Awaited<
+    ReturnType<TeamProvisioningService['getTeamAgentRuntimeSnapshot']>
+  >;
+  const memberWorkSyncRuntimeSnapshotInFlightByTeam = new Map<
+    string,
+    Promise<MemberWorkSyncRuntimeSnapshot | null>
+  >();
+  const memberWorkSyncRuntimeSnapshotCooldownUntilByTeam = new Map<string, number>();
   const getMemberWorkSyncRuntimeSnapshot = async (input: {
     teamName: string;
     memberName?: string;
-  }) => {
-    const timeoutMs = 15_000;
+  }): Promise<MemberWorkSyncRuntimeSnapshot | null> => {
+    const cooldownUntil = memberWorkSyncRuntimeSnapshotCooldownUntilByTeam.get(input.teamName) ?? 0;
+    if (cooldownUntil > Date.now()) {
+      return null;
+    }
+
+    const existing = memberWorkSyncRuntimeSnapshotInFlightByTeam.get(input.teamName);
+    if (existing) {
+      return existing;
+    }
+
     let timer: ReturnType<typeof setTimeout> | null = null;
     const snapshot = teamProvisioningService.getTeamAgentRuntimeSnapshot(input.teamName);
-    void snapshot.catch(() => undefined);
-    try {
-      return await Promise.race([
-        snapshot,
-        new Promise<null>((resolve) => {
-          timer = setTimeout(() => {
-            memberWorkSyncLogger.warn('member work sync runtime snapshot timed out', {
-              teamName: input.teamName,
-              ...(input.memberName ? { memberName: input.memberName } : {}),
-              timeoutMs,
-            });
-            resolve(null);
-          }, timeoutMs);
-          timer.unref?.();
-        }),
-      ]);
-    } finally {
+    let timedOut = false;
+    const request = Promise.race([
+      snapshot.then((value) => {
+        memberWorkSyncRuntimeSnapshotCooldownUntilByTeam.delete(input.teamName);
+        return value;
+      }),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          memberWorkSyncRuntimeSnapshotCooldownUntilByTeam.set(
+            input.teamName,
+            Date.now() + MEMBER_WORK_SYNC_RUNTIME_SNAPSHOT_TIMEOUT_COOLDOWN_MS
+          );
+          memberWorkSyncLogger.warn('member work sync runtime snapshot timed out', {
+            teamName: input.teamName,
+            ...(input.memberName ? { memberName: input.memberName } : {}),
+            timeoutMs: MEMBER_WORK_SYNC_RUNTIME_SNAPSHOT_TIMEOUT_MS,
+            cooldownMs: MEMBER_WORK_SYNC_RUNTIME_SNAPSHOT_TIMEOUT_COOLDOWN_MS,
+          });
+          resolve(null);
+        }, MEMBER_WORK_SYNC_RUNTIME_SNAPSHOT_TIMEOUT_MS);
+        timer.unref?.();
+      }),
+    ]).finally(() => {
       if (timer) {
         clearTimeout(timer);
       }
-    }
+      if (memberWorkSyncRuntimeSnapshotInFlightByTeam.get(input.teamName) === request) {
+        memberWorkSyncRuntimeSnapshotInFlightByTeam.delete(input.teamName);
+      }
+    });
+    void snapshot
+      .then(() => {
+        if (timedOut) {
+          memberWorkSyncRuntimeSnapshotCooldownUntilByTeam.delete(input.teamName);
+        }
+      })
+      .catch(() => undefined);
+    memberWorkSyncRuntimeSnapshotInFlightByTeam.set(input.teamName, request);
+    return request;
   };
   const getMemberWorkSyncRuntimeActivity = async (teamName: string): Promise<boolean | null> => {
     try {
@@ -1998,39 +2123,29 @@ async function initializeServices(): Promise<void> {
   };
   const listMemberWorkSyncLifecycleActiveTeamNames = async (): Promise<string[]> => {
     const teams = (await teamDataService.listTeams()).filter((team) => !team.deletedAt);
-    const activeChecks = await Promise.allSettled(
-      teams.map(async (team) => {
+    const activeTeamNames: string[] = [];
+    await runStartupJobsBounded(
+      teams,
+      MEMBER_WORK_SYNC_LIFECYCLE_ACTIVE_TEAM_CHECK_CONCURRENCY,
+      async (team) => {
         try {
-          return {
-            teamName: team.teamName,
-            active: await isTeamActiveForMemberWorkSync(team.teamName),
-          };
+          if (await isTeamActiveForMemberWorkSync(team.teamName)) {
+            activeTeamNames.push(team.teamName);
+          }
         } catch (error) {
           memberWorkSyncLogger.warn('member work sync lifecycle team activity check failed', {
             teamName: team.teamName,
             error: String(error),
           });
-          return {
-            teamName: team.teamName,
-            active:
-              teamProvisioningService.isTeamAlive(team.teamName) ||
-              teamProvisioningService.hasProvisioningRun(team.teamName),
-          };
+          if (
+            teamProvisioningService.isTeamAlive(team.teamName) ||
+            teamProvisioningService.hasProvisioningRun(team.teamName)
+          ) {
+            activeTeamNames.push(team.teamName);
+          }
         }
-      })
+      }
     );
-    const activeTeamNames: string[] = [];
-    for (const check of activeChecks) {
-      if (check.status === 'rejected') {
-        memberWorkSyncLogger.warn('member work sync lifecycle team activity check failed', {
-          error: String(check.reason),
-        });
-        continue;
-      }
-      if (check.value.active) {
-        activeTeamNames.push(check.value.teamName);
-      }
-    }
     return activeTeamNames;
   };
   memberWorkSyncFeature = createMemberWorkSyncFeature({
@@ -2350,6 +2465,7 @@ async function initializeServices(): Promise<void> {
   );
   registerCodexAccountIpc(ipcMain, codexAccountFeature);
   registerRecentProjectsIpc(ipcMain, recentProjectsFeature);
+  registerOrganizationsIpc(ipcMain, organizationsFeature);
   registerRuntimeProviderManagementIpc(ipcMain, runtimeProviderManagementFeature);
   registerTerminalWorkspaceIpc(ipcMain, terminalWorkspaceFeature);
   registerMemberWorkSyncIpc(ipcMain, memberWorkSyncFeature);
@@ -2411,6 +2527,7 @@ async function startHttpServer(
         chunkBuilder: activeContext.chunkBuilder,
         dataCache: activeContext.dataCache,
         recentProjectsFeature,
+        organizationsFeature,
         memberWorkSyncFeature: memberWorkSyncFeature ?? undefined,
         updaterService,
         sshConnectionManager,
@@ -2559,6 +2676,7 @@ async function shutdownServices(): Promise<void> {
       removeIpcHandlers();
       removeCodexAccountIpc(ipcMain);
       removeRecentProjectsIpc(ipcMain);
+      removeOrganizationsIpc(ipcMain);
       removeRuntimeProviderManagementIpc(ipcMain);
       removeTerminalWorkspaceIpc(ipcMain);
       removeMemberWorkSyncIpc(ipcMain);
@@ -2965,6 +3083,10 @@ function createWindow(): void {
  */
 void app.whenReady().then(async () => {
   logger.info('App ready, initializing...');
+  configureFatalDiagnosticReport({
+    directory: join(app.getPath('userData'), 'diagnostics'),
+    logger,
+  });
   registerAppStartupHandlers();
 
   try {

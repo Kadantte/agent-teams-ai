@@ -63,6 +63,13 @@ const messageEdge: GraphEdge = {
   type: 'message',
 };
 
+const relatedEdge: GraphEdge = {
+  id: 'edge:related:member:team:alice:member:team:bob',
+  source: 'member:team:alice',
+  target: 'member:team:bob',
+  type: 'related',
+};
+
 describe('drawEdges', () => {
   it('does not draw idle message edges', () => {
     const ctx = createMockContext();
@@ -88,5 +95,42 @@ describe('drawEdges', () => {
 
     expect(ctx.beginPath).toHaveBeenCalled();
     expect(ctx.fill).toHaveBeenCalled();
+  });
+
+  it('draws always-visible idle message edges', () => {
+    const ctx = createMockContext();
+    const nodeMap = new Map([
+      [messageEdge.source, createNode(messageEdge.source, 0, 0)],
+      [messageEdge.target, createNode(messageEdge.target, 100, 0)],
+    ]);
+
+    drawEdges(ctx, [{ ...messageEdge, alwaysVisible: true }], nodeMap, 0, new Set());
+
+    expect(ctx.beginPath).toHaveBeenCalled();
+    expect(ctx.fill).toHaveBeenCalled();
+    expect(ctx.globalAlpha).toBeGreaterThan(0.3);
+  });
+
+  it('keeps always-visible relation edges readable while zoomed out', () => {
+    const ctx = createMockContext();
+    const nodeMap = new Map([
+      [relatedEdge.source, createNode(relatedEdge.source, 0, 0)],
+      [relatedEdge.target, createNode(relatedEdge.target, 100, 0)],
+    ]);
+
+    drawEdges(
+      ctx,
+      [{ ...relatedEdge, alwaysVisible: true }],
+      nodeMap,
+      0,
+      new Set(),
+      null,
+      null,
+      null,
+      0.2
+    );
+
+    expect(ctx.stroke).toHaveBeenCalled();
+    expect(ctx.lineWidth).toBeGreaterThan(1);
   });
 });

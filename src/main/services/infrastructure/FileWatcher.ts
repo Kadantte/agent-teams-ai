@@ -1011,6 +1011,7 @@ export class FileWatcher extends EventEmitter {
       const lastLineCount = this.lastProcessedLineCount.get(filePath) ?? 0;
       const lastSize = this.lastProcessedSize.get(filePath) ?? 0;
       const fileStats = await this.fsProvider.stat(filePath);
+      this.catchUpStatFailures.delete(filePath);
       const currentSize = fileStats.size;
 
       // Fast path: no size change means no new data
@@ -1075,16 +1076,22 @@ export class FileWatcher extends EventEmitter {
         logger.info(`FileWatcher: Detected ${errors.length} errors in ${filePath}`);
       }
     } catch (err) {
+      if (this.isStatTimeoutError(err)) {
+        this.handleCatchUpStatTimeout(filePath);
+        return;
+      }
       logger.error(`FileWatcher: Error processing session file for errors: ${filePath}`, err);
     } finally {
       this.processingInProgress.delete(filePath);
 
       // If a reprocess was requested while we were processing, run again
-      if (this.pendingReprocess.has(filePath)) {
+      if (this.pendingReprocess.has(filePath) && this.activeSessionFiles.has(filePath)) {
         this.pendingReprocess.delete(filePath);
         this.detectErrorsInSessionFile(projectId, sessionId, filePath, subagentId).catch((e) => {
           logger.error('Error during reprocessing of session file:', e);
         });
+      } else {
+        this.pendingReprocess.delete(filePath);
       }
     }
   }

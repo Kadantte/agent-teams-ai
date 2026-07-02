@@ -20,10 +20,13 @@ import type { MemberWorkSyncUseCaseDeps } from './ports';
 const STATUS_ONLY_RECOVERY_INTENT_PREFIX = 'status-only';
 const AGENDA_SYNC_REFRESH_INTENT_PREFIX = 'agenda-sync-refresh';
 const DELIVERED_STILL_STUCK_RECOVERY_INTENT_PREFIX = 'agenda-sync-still-stuck';
+const TASK_PROTOCOL_REPAIR_INTENT_PREFIX = 'task-protocol-repair';
 const DELIVERED_STILL_STUCK_RECOVERY_MIN_AGE_MS = 6 * 60_000;
 const DELIVERED_STILL_STUCK_RECOVERY_BUCKET_MS = 30 * 60_000;
 const DELIVERED_STILL_STUCK_RECOVERY_DELIVERY_WINDOW_MS = 60 * 60_000;
 const DELIVERED_STILL_STUCK_RECOVERY_MAX_DELIVERED_PER_WINDOW = 2;
+const TASK_PROTOCOL_REPAIR_DELIVERY_WINDOW_MS = 60 * 60_000;
+const TASK_PROTOCOL_REPAIR_MAX_DELIVERED_PER_WINDOW = 2;
 
 function getReviewRequestEventIds(status: MemberWorkSyncStatus): string[] {
   return [
@@ -185,6 +188,22 @@ function getDeliveredStillStuckRecoveryBucket(status: MemberWorkSyncStatus): str
   return new Date(bucketMs).toISOString();
 }
 
+function getTaskProtocolRepairTaskIds(status: MemberWorkSyncStatus): string[] {
+  return [
+    ...new Set(
+      status.agenda.items
+        .filter(
+          (item) =>
+            item.kind === 'work' &&
+            item.reason === 'owned_in_progress_task' &&
+            item.evidence.status === 'in_progress'
+        )
+        .map((item) => item.taskId)
+        .filter(Boolean)
+    ),
+  ].sort();
+}
+
 export interface MemberWorkSyncNudgeOutboxPlanResult {
   planned: boolean;
   code:
@@ -196,6 +215,7 @@ export interface MemberWorkSyncNudgeOutboxPlanResult {
     | 'review_pickup_delivery_unavailable'
     | 'review_pickup_already_delivered_still_stuck'
     | 'review_pickup_delivery_failed_still_stuck'
+    | 'task_protocol_repair_rate_limited'
     | 'created'
     | 'existing'
     | 'payload_conflict';
@@ -289,6 +309,38 @@ export class MemberWorkSyncNudgeOutboxPlanner {
     };
   }
 
+  private buildTaskProtocolRepairInput(
+    status: MemberWorkSyncStatus,
+    baseInput: MemberWorkSyncOutboxEnsureInput
+  ): MemberWorkSyncOutboxEnsureInput {
+    const taskIds = getTaskProtocolRepairTaskIds(status);
+    const intentKey = `${TASK_PROTOCOL_REPAIR_INTENT_PREFIX}:${status.agenda.fingerprint}:${taskIds.join('+')}`;
+    const payload = {
+      ...baseInput.payload,
+      workSyncIntentKey: intentKey,
+      text: [
+        'Task protocol repair: your last native Codex turn left this task in_progress without durable board proof.',
+        'Do not redo completed file work unless the task is actually unfinished.',
+        'If the implementation is done, add a concise result comment with task_add_comment, then call task_complete, then call member_work_sync_status and member_work_sync_report with the current agendaFingerprint/reportToken.',
+        'If the task is not done, add a task comment with the current status or blocker, then report still_working or blocked with member_work_sync_report.',
+        'If prefixed Agent Teams MCP tool names are exposed, use mcp__agent-teams__task_add_comment, mcp__agent-teams__task_complete, mcp__agent-teams__member_work_sync_status, and mcp__agent-teams__member_work_sync_report.',
+        baseInput.payload.text,
+      ].join('\n'),
+    };
+
+    return {
+      ...baseInput,
+      id: buildMemberWorkSyncNudgeId({
+        teamName: status.teamName,
+        memberName: status.memberName,
+        agendaFingerprint: status.agenda.fingerprint,
+        intentKey,
+      }),
+      payload,
+      payloadHash: buildMemberWorkSyncNudgePayloadHash(this.deps.hash, payload),
+    };
+  }
+
   private async planStatusOnlyRecovery(
     status: MemberWorkSyncStatus,
     baseInput: MemberWorkSyncOutboxEnsureInput,
@@ -332,6 +384,53 @@ export class MemberWorkSyncNudgeOutboxPlanner {
     } as const;
     await this.appendPlanAudit(status, recoveryPlanResult);
     return recoveryPlanResult;
+  }
+
+  private async planTaskProtocolRepair(
+    status: MemberWorkSyncStatus,
+    baseInput: MemberWorkSyncOutboxEnsureInput
+  ): Promise<MemberWorkSyncNudgeOutboxPlanResult> {
+    const outboxStore = this.deps.outboxStore;
+    if (!outboxStore) {
+      return { planned: false, code: 'outbox_unavailable' };
+    }
+
+    const evaluatedAtMs = parseTime(status.evaluatedAt);
+    if (evaluatedAtMs != null) {
+      const recentDelivered = await outboxStore.countRecentDelivered({
+        teamName: status.teamName,
+        memberName: status.memberName,
+        sinceIso: new Date(evaluatedAtMs - TASK_PROTOCOL_REPAIR_DELIVERY_WINDOW_MS).toISOString(),
+        workSyncIntentKeyPrefix: `${TASK_PROTOCOL_REPAIR_INTENT_PREFIX}:`,
+      });
+      if (recentDelivered >= TASK_PROTOCOL_REPAIR_MAX_DELIVERED_PER_WINDOW) {
+        const result = { planned: false, code: 'task_protocol_repair_rate_limited' } as const;
+        await this.appendPlanAudit(status, result);
+        return result;
+      }
+    }
+
+    const repairInput = this.buildTaskProtocolRepairInput(status, baseInput);
+    const repairResult = await outboxStore.ensurePending(repairInput);
+    if (!repairResult.ok) {
+      this.deps.logger?.warn('member work sync task protocol repair payload conflict', {
+        teamName: status.teamName,
+        memberName: status.memberName,
+        outboxId: repairInput.id,
+        existingPayloadHash: repairResult.existingPayloadHash,
+        requestedPayloadHash: repairResult.requestedPayloadHash,
+      });
+      await this.appendPlanAudit(status, { planned: false, code: 'payload_conflict' });
+      return { planned: false, code: 'payload_conflict' };
+    }
+    await this.repairDeliveredAgendaSyncNudgeIfNeeded(status, repairInput, repairResult.item);
+
+    const result = {
+      planned: isOutboxItemAwaitingDelivery(repairResult.item),
+      code: repairResult.outcome,
+    } as const;
+    await this.appendPlanAudit(status, result);
+    return result;
   }
 
   private async planDeliveredStillStuckRecovery(
@@ -478,6 +577,10 @@ export class MemberWorkSyncNudgeOutboxPlanner {
         }
         input = filteredInput;
       }
+    }
+
+    if (activation.reason === 'native_task_protocol_repair') {
+      return this.planTaskProtocolRepair(status, input);
     }
 
     const result = await this.deps.outboxStore.ensurePending(input);

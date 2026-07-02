@@ -49,6 +49,7 @@ export interface MemberWorkSyncRunningItemDiagnostics {
   startedAt: string;
   ageMs: number;
   rerunRequested: boolean;
+  settlingAfterTimeout?: boolean;
   triggerReasons: MemberWorkSyncTriggerReason[];
 }
 
@@ -108,9 +109,24 @@ function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
 
 const DEFAULT_RECONCILE_TIMEOUT_MS = 2 * 60_000;
 
+class MemberWorkSyncReconcileTimeoutError extends Error {
+  constructor(
+    message: string,
+    readonly settlePromise: Promise<void>
+  ) {
+    super(message);
+    this.name = 'MemberWorkSyncReconcileTimeoutError';
+  }
+}
+
+function getReconcileTimeoutSettlePromise(error: unknown): Promise<void> | null {
+  return error instanceof MemberWorkSyncReconcileTimeoutError ? error.settlePromise : null;
+}
+
 export class MemberWorkSyncEventQueue {
   private readonly items = new Map<string, QueueItem>();
   private readonly running = new Map<string, RunningItem>();
+  private readonly activeKeys = new Set<string>();
   private readonly inFlight = new Set<Promise<void>>();
   private readonly quietWindowMs: number;
   private readonly concurrency: number;
@@ -282,14 +298,15 @@ export class MemberWorkSyncEventQueue {
         triggerReasons: [...item.triggerReasons].sort(),
         triggerReasonCounts: Object.fromEntries(item.triggerReasonCounts),
       }));
-    const runningItems = [...this.running.values()]
-      .sort((left, right) => left.startedAt - right.startedAt)
-      .map((item) => ({
+    const runningItems = [...this.running.entries()]
+      .sort((left, right) => left[1].startedAt - right[1].startedAt)
+      .map(([key, item]) => ({
         teamName: item.teamName,
         memberName: item.memberName,
         startedAt: new Date(item.startedAt).toISOString(),
         ageMs: Math.max(0, now - item.startedAt),
         rerunRequested: item.rerunRequested,
+        ...(!this.activeKeys.has(key) ? { settlingAfterTimeout: true } : {}),
         triggerReasons: [...item.triggerReasons].sort(),
       }));
     const oldestQueuedAt =
@@ -323,6 +340,8 @@ export class MemberWorkSyncEventQueue {
       this.timer = null;
     }
     this.items.clear();
+    this.running.clear();
+    this.activeKeys.clear();
     await Promise.allSettled([...this.inFlight]);
   }
 
@@ -337,7 +356,7 @@ export class MemberWorkSyncEventQueue {
     if (this.items.size === 0) {
       return;
     }
-    if (this.running.size >= this.concurrency) {
+    if (this.activeKeys.size >= this.concurrency) {
       return;
     }
 
@@ -360,8 +379,11 @@ export class MemberWorkSyncEventQueue {
       .sort((left, right) => left[1].runAt - right[1].runAt);
 
     for (const [key, item] of due) {
-      if (this.running.size >= this.concurrency) {
+      if (this.activeKeys.size >= this.concurrency) {
         break;
+      }
+      if (this.running.has(key)) {
+        continue;
       }
       this.items.delete(key);
       this.runItem(key, item);
@@ -380,11 +402,14 @@ export class MemberWorkSyncEventQueue {
       ...(item.recovery ? { recovery: item.recovery } : {}),
     };
     this.running.set(key, running);
+    this.activeKeys.add(key);
 
     let failed = false;
+    let failure: unknown = null;
     const promise = this.executeItem(key, item, running)
       .catch((error: unknown) => {
         failed = true;
+        failure = error;
         this.counters.failed += 1;
         this.deps.logger?.warn('member work sync queue reconcile failed', {
           teamName: item.teamName,
@@ -393,17 +418,34 @@ export class MemberWorkSyncEventQueue {
         });
       })
       .finally(() => {
-        this.running.delete(key);
         this.inFlight.delete(promise);
-        if (running.rerunRequested && !this.stopped) {
-          this.enqueueFollowUp(item, running);
-        } else if (failed && !this.stopped) {
-          this.enqueueRetryAfterFailure(key, item, running);
+        const settlePromise = getReconcileTimeoutSettlePromise(failure);
+        if (settlePromise) {
+          this.activeKeys.delete(key);
+          this.pump();
+          void settlePromise.finally(() => {
+            this.finishItem(key, item, running, failed);
+          });
+          return;
         }
-        this.pump();
+        this.finishItem(key, item, running, failed);
       });
 
     this.inFlight.add(promise);
+  }
+
+  private finishItem(key: string, item: QueueItem, running: RunningItem, failed: boolean): void {
+    if (this.running.get(key) !== running) {
+      return;
+    }
+    this.activeKeys.delete(key);
+    this.running.delete(key);
+    if (running.rerunRequested && !this.stopped) {
+      this.enqueueFollowUp(item, running);
+    } else if (failed && !this.stopped) {
+      this.enqueueRetryAfterFailure(key, item, running);
+    }
+    this.pump();
   }
 
   private enqueueRetryAfterFailure(key: string, item: QueueItem, running: RunningItem): void {
@@ -522,7 +564,10 @@ export class MemberWorkSyncEventQueue {
       ...context,
       isCancelled: () => timedOut || context.isCancelled?.() === true,
     });
-    void reconcilePromise.catch(() => undefined);
+    const settlePromise = reconcilePromise.then(
+      () => undefined,
+      () => undefined
+    );
     try {
       await Promise.race([
         reconcilePromise,
@@ -530,8 +575,9 @@ export class MemberWorkSyncEventQueue {
           timeout = setTimeout(() => {
             timedOut = true;
             reject(
-              new Error(
-                `member work sync queue reconcile timed out after ${this.reconcileTimeoutMs}ms`
+              new MemberWorkSyncReconcileTimeoutError(
+                `member work sync queue reconcile timed out after ${this.reconcileTimeoutMs}ms`,
+                settlePromise
               )
             );
           }, this.reconcileTimeoutMs);

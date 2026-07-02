@@ -28,6 +28,12 @@ export interface MemberWorkSyncTaskImpactResolverResult {
   diagnostics: string[];
 }
 
+interface TaskImpactSourceSnapshot {
+  activeMembers: string[];
+  tasks: Awaited<ReturnType<MemberWorkSyncTaskImpactResolverDeps['taskReader']['getTasks']>>;
+  kanban: Awaited<ReturnType<MemberWorkSyncTaskImpactResolverDeps['kanbanManager']['getState']>>;
+}
+
 function isDeletedTask(task: Pick<TeamTask, 'status' | 'deletedAt'>): boolean {
   return task.status === 'deleted' || Boolean(task.deletedAt);
 }
@@ -121,6 +127,8 @@ export function extractMemberWorkSyncTaskId(input: {
 }
 
 export class MemberWorkSyncTaskImpactResolver {
+  private readonly sourceInFlightByTeam = new Map<string, Promise<TaskImpactSourceSnapshot>>();
+
   constructor(private readonly deps: MemberWorkSyncTaskImpactResolverDeps) {}
 
   async resolve(input: {
@@ -136,11 +144,7 @@ export class MemberWorkSyncTaskImpactResolver {
       };
     }
 
-    const [activeMembers, tasks, kanban] = await Promise.all([
-      this.deps.activeMemberSource.loadActiveMemberNames(input.teamName),
-      this.deps.taskReader.getTasks(input.teamName),
-      this.deps.kanbanManager.getState(input.teamName),
-    ]);
+    const { activeMembers, tasks, kanban } = await this.loadSource(input.teamName);
     const activeByName = new Map(
       activeMembers.map((memberName) => [normalizeMemberName(memberName), memberName] as const)
     );
@@ -262,10 +266,39 @@ export class MemberWorkSyncTaskImpactResolver {
       }
     }
 
+    const memberNames = [...impacted].sort((left, right) => left.localeCompare(right));
+    if (memberNames.length === 0) {
+      addDiagnostic('task_impact_empty');
+    }
+
     return {
-      memberNames: [...impacted].sort((left, right) => left.localeCompare(right)),
-      fallbackTeamWide: false,
+      memberNames,
+      fallbackTeamWide: memberNames.length === 0,
       diagnostics,
     };
+  }
+
+  private loadSource(teamName: string): Promise<TaskImpactSourceSnapshot> {
+    const existing = this.sourceInFlightByTeam.get(teamName);
+    if (existing) {
+      return existing;
+    }
+
+    const request = this.buildSource(teamName).finally(() => {
+      if (this.sourceInFlightByTeam.get(teamName) === request) {
+        this.sourceInFlightByTeam.delete(teamName);
+      }
+    });
+    this.sourceInFlightByTeam.set(teamName, request);
+    return request;
+  }
+
+  private async buildSource(teamName: string): Promise<TaskImpactSourceSnapshot> {
+    const [activeMembers, tasks, kanban] = await Promise.all([
+      this.deps.activeMemberSource.loadActiveMemberNames(teamName),
+      this.deps.taskReader.getTasks(teamName),
+      this.deps.kanbanManager.getState(teamName),
+    ]);
+    return { activeMembers, tasks, kanban };
   }
 }

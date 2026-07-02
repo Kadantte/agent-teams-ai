@@ -82,11 +82,13 @@ export interface Tab {
     | 'notifications'
     | 'settings'
     | 'teams'
+    | 'organizations'
     | 'team'
     | 'report'
     | 'extensions'
     | 'schedules'
-    | 'graph';
+    | 'graph'
+    | 'usage';
 
   /** Session ID (required when type === 'session') */
   sessionId?: string;

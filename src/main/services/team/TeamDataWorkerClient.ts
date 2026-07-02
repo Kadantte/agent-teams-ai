@@ -3,15 +3,20 @@
  *
  * Proxies getTeamData and findLogsForTask calls to a worker thread
  * so they don't block the Electron main event loop.
- * Falls back to main-thread execution if the worker is unavailable.
+ * Main-thread fallback is only safe when the worker is unavailable. If an
+ * existing worker OOMs or times out, repeating the same read on Electron main
+ * can crash the app.
  */
 
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
 import { createLogger } from '@shared/utils/logger';
+
+import { formatCurrentProcessMemorySnapshot } from '../../utils/startupTelemetry';
 
 import type { TeamDataWorkerRequest, TeamDataWorkerResponse } from './teamDataWorkerTypes';
 import type {
@@ -25,8 +30,18 @@ import type {
 
 const logger = createLogger('Service:TeamDataWorkerClient');
 const WORKER_CALL_TIMEOUT_MS = 30_000;
+const WORKER_FATAL_RESTART_COOLDOWN_MS = 30_000;
 const SAFE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const SAFE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
+const FATAL_WORKER_ERROR_PATTERNS = [
+  'ERR_WORKER_OUT_OF_MEMORY',
+  'Team data worker recovering after fatal failure',
+  'Worker terminated due to reaching memory limit',
+  'JS heap out of memory',
+  'JavaScript heap out of memory',
+  'Worker call timeout after',
+] as const;
+const FATAL_WORKER_EXIT_CODE_PATTERN = /Worker exited with code (?!0\b)\d+/;
 
 function makeId(): string {
   return `${Date.now()}-${crypto.randomUUID().slice(0, 12)}`;
@@ -63,7 +78,19 @@ function resolveWorkerPath(): string | null {
 interface PendingEntry {
   resolve: (v: unknown, diag?: Extract<TeamDataWorkerResponse, { ok: true }>['diag']) => void;
   reject: (e: Error) => void;
+  op: TeamDataWorkerRequest['op'];
+  payload: TeamDataWorkerRequest['payload'];
+  summary: Record<string, unknown>;
+  createdAt: number;
+  postedAt: number;
+  pendingAtStart: number;
 }
+
+interface QueuedEntry extends Omit<PendingEntry, 'postedAt' | 'pendingAtStart'> {
+  id: string;
+}
+
+const MAX_WORKER_LIVE_MESSAGES_PAYLOAD = 200;
 
 function normalizeTeamGetDataOptions(options?: TeamGetDataOptions): TeamGetDataOptions | undefined {
   return options?.includeMemberBranches === false ? { includeMemberBranches: false } : undefined;
@@ -82,6 +109,13 @@ function getTeamDataRequestPayload(
   return normalizedOptions ? { teamName, options: normalizedOptions } : { teamName };
 }
 
+function shortHash(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+  if (serialized === undefined) return undefined;
+  return createHash('sha256').update(serialized).digest('hex').slice(0, 16);
+}
+
 function getLiveMessagesRequestKey(liveMessages?: InboxMessage[]): unknown {
   if (!liveMessages?.length) return undefined;
   return liveMessages.map((message) => ({
@@ -89,8 +123,57 @@ function getLiveMessagesRequestKey(liveMessages?: InboxMessage[]): unknown {
     timestamp: message.timestamp,
     source: message.source,
     from: message.from,
-    text: message.text,
+    to: message.to,
+    read: message.read,
+    actionMode: message.actionMode,
+    commentId: message.commentId,
+    color: message.color,
+    relayOfMessageId: message.relayOfMessageId,
+    leadSessionId: message.leadSessionId,
+    conversationId: message.conversationId,
+    replyToConversationId: message.replyToConversationId,
+    messageKind: message.messageKind,
+    workSyncIntent: message.workSyncIntent,
+    workSyncIntentKey: message.workSyncIntentKey,
+    workSyncPayloadHash: message.workSyncPayloadHash,
+    textHash: shortHash(message.text ?? ''),
+    summaryHash: shortHash(message.summary),
+    taskRefsHash: shortHash(message.taskRefs),
+    attachmentsHash: shortHash(message.attachments),
+    toolSummaryHash: shortHash(message.toolSummary),
+    toolCallsHash: shortHash(message.toolCalls),
+    workSyncReviewRequestEventIdsHash: shortHash(message.workSyncReviewRequestEventIds),
+    slashCommandHash: shortHash(message.slashCommand),
+    commandOutputHash: shortHash(message.commandOutput),
   }));
+}
+
+function compareInboxMessagesNewestFirst(left: InboxMessage, right: InboxMessage): number {
+  const leftTime = Date.parse(left.timestamp);
+  const rightTime = Date.parse(right.timestamp);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+  const leftId = typeof left.messageId === 'string' ? left.messageId : '';
+  const rightId = typeof right.messageId === 'string' ? right.messageId : '';
+  return leftId.localeCompare(rightId);
+}
+
+function normalizeMessagesPageOptions(options: {
+  cursor?: string | null;
+  limit: number;
+  liveMessages?: InboxMessage[];
+}): { cursor?: string | null; limit: number; liveMessages?: InboxMessage[] } {
+  if (!options.liveMessages?.length) {
+    return options;
+  }
+  const liveMessages =
+    options.liveMessages.length > MAX_WORKER_LIVE_MESSAGES_PAYLOAD
+      ? [...options.liveMessages]
+          .sort(compareInboxMessagesNewestFirst)
+          .slice(0, MAX_WORKER_LIVE_MESSAGES_PAYLOAD)
+      : [...options.liveMessages];
+  return { ...options, liveMessages };
 }
 
 function summarizeWorkerRequest(request: TeamDataWorkerRequest): Record<string, unknown> {
@@ -144,17 +227,49 @@ export class TeamDataWorkerClient {
   private readonly workerPath: string | null = resolveWorkerPath();
   private warnedUnavailable = false;
   private pending = new Map<string, PendingEntry>();
+  private queue: QueuedEntry[] = [];
+  private activeCallId: string | null = null;
+  private activeTimeout: ReturnType<typeof setTimeout> | null = null;
   private getTeamDataInFlight = new Map<string, Promise<TeamViewSnapshot>>();
   private getMessagesPageInFlight = new Map<string, Promise<MessagesPage>>();
+  private getMemberActivityMetaInFlight = new Map<string, Promise<TeamMemberActivityMeta>>();
+  private fatalRestartCooldownUntilMs = 0;
+  private lastFatalWorkerError: string | null = null;
 
   private failWorker(worker: Worker, error: Error): void {
     if (this.worker !== worker) return;
 
     this.worker = null;
+    if (isTeamDataWorkerFatalError(error)) {
+      this.lastFatalWorkerError = error.message;
+      this.fatalRestartCooldownUntilMs = Date.now() + WORKER_FATAL_RESTART_COOLDOWN_MS;
+      const pendingSummary = [
+        ...Array.from(this.pending.values()).map((entry) => ({ ...entry, state: 'active' })),
+        ...this.queue.map((entry) => ({ ...entry, state: 'queued' })),
+      ]
+        .slice(0, 10)
+        .map((entry) => ({
+          state: entry.state,
+          op: entry.op,
+          ms: Date.now() - entry.createdAt,
+          payload: entry.summary,
+        }));
+      logger.error(
+        `worker fatal failure pending=${this.pending.size} queued=${this.queue.length} pendingSample=${JSON.stringify(
+          pendingSummary
+        )} memory=${formatCurrentProcessMemorySnapshot()} error=${error.message}`
+      );
+    }
+    this.clearActiveCall();
     const pendingEntries = Array.from(this.pending.values());
+    const queuedEntries = [...this.queue];
     this.pending.clear();
+    this.queue = [];
 
     for (const entry of pendingEntries) {
+      entry.reject(error);
+    }
+    for (const entry of queuedEntries) {
       entry.reject(error);
     }
   }
@@ -172,6 +287,11 @@ export class TeamDataWorkerClient {
   private ensureWorker(): Worker {
     if (!this.workerPath) throw new Error('Worker not available');
     if (this.worker) return this.worker;
+    if (Date.now() < this.fatalRestartCooldownUntilMs) {
+      throw new Error(
+        `Team data worker recovering after fatal failure: ${this.lastFatalWorkerError ?? 'unknown'}`
+      );
+    }
 
     const w = new Worker(this.workerPath);
     this.worker = w;
@@ -180,11 +300,13 @@ export class TeamDataWorkerClient {
       const entry = this.pending.get(msg.id);
       if (!entry) return;
       this.pending.delete(msg.id);
+      this.clearActiveCall(msg.id);
       if (msg.ok) {
         entry.resolve(msg.result, msg.diag);
       } else {
         entry.reject(new Error(msg.error));
       }
+      this.processQueue();
     });
 
     // Scope error/exit handlers to this specific worker instance.
@@ -203,57 +325,115 @@ export class TeamDataWorkerClient {
     return w;
   }
 
+  private clearActiveCall(id?: string): void {
+    if (id && this.activeCallId !== id) {
+      return;
+    }
+    if (this.activeTimeout) {
+      clearTimeout(this.activeTimeout);
+      this.activeTimeout = null;
+    }
+    this.activeCallId = null;
+  }
+
+  private processQueue(): void {
+    if (this.activeCallId || this.queue.length === 0) {
+      return;
+    }
+
+    const entry = this.queue.shift();
+    if (!entry) {
+      return;
+    }
+
+    let worker: Worker;
+    try {
+      worker = this.ensureWorker();
+    } catch (error) {
+      entry.reject(error instanceof Error ? error : new Error(String(error)));
+      this.processQueue();
+      return;
+    }
+
+    const postedAt = Date.now();
+    const pendingAtStart = this.pending.size;
+    const request = { id: entry.id, op: entry.op, payload: entry.payload } as TeamDataWorkerRequest;
+    const pendingEntry: PendingEntry = {
+      ...entry,
+      postedAt,
+      pendingAtStart,
+    };
+    this.pending.set(entry.id, pendingEntry);
+    this.activeCallId = entry.id;
+    this.activeTimeout = setTimeout(() => {
+      if (this.activeCallId !== entry.id) {
+        return;
+      }
+      const timeoutError = new Error(`Worker call timeout after ${WORKER_CALL_TIMEOUT_MS}ms`);
+      logger.warn(
+        `worker call timeout op=${entry.op} ms=${Date.now() - entry.createdAt} workerMs=${Date.now() - postedAt} queuedMs=${postedAt - entry.createdAt} pendingAtStart=${pendingAtStart} pendingNow=${this.pending.size} queued=${this.queue.length} payload=${JSON.stringify(
+          entry.summary
+        )} memory=${formatCurrentProcessMemorySnapshot()}`
+      );
+      this.failWorker(worker, timeoutError);
+      worker.terminate().catch(() => undefined);
+    }, WORKER_CALL_TIMEOUT_MS);
+
+    try {
+      worker.postMessage(request);
+    } catch (error) {
+      const postError = error instanceof Error ? error : new Error(String(error));
+      this.pending.delete(entry.id);
+      this.clearActiveCall(entry.id);
+      pendingEntry.reject(postError);
+      this.processQueue();
+    }
+  }
+
   private call(
     op: TeamDataWorkerRequest['op'],
     payload: TeamDataWorkerRequest['payload']
   ): Promise<unknown> {
-    const worker = this.ensureWorker();
     const id = makeId();
     const request = { id, op, payload } as TeamDataWorkerRequest;
-    const startedAt = Date.now();
-    const pendingAtStart = this.pending.size;
+    const summary = summarizeWorkerRequest(request);
+    const createdAt = Date.now();
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        const timeoutError = new Error(`Worker call timeout after ${WORKER_CALL_TIMEOUT_MS}ms`);
-        logger.warn(
-          `worker call timeout op=${op} ms=${Date.now() - startedAt} pendingAtStart=${pendingAtStart} pendingNow=${this.pending.size} payload=${JSON.stringify(
-            summarizeWorkerRequest(request)
-          )}`
-        );
-        this.failWorker(worker, timeoutError);
-        worker.terminate().catch(() => undefined);
-        reject(timeoutError);
-      }, WORKER_CALL_TIMEOUT_MS);
-
-      this.pending.set(id, {
+      this.queue.push({
+        id,
         resolve: (value, diag) => {
-          clearTimeout(timeout);
-          const ms = Date.now() - startedAt;
+          const ms = Date.now() - createdAt;
           if (ms >= 1500) {
+            const memorySuffix =
+              ms >= 5_000 ? ` memory=${formatCurrentProcessMemorySnapshot()}` : '';
             logger.warn(
-              `worker call slow op=${op} ms=${ms} workerTotalMs=${String(diag?.totalMs ?? 'unknown')} pendingAtStart=${pendingAtStart} pendingNow=${this.pending.size} payload=${JSON.stringify(
-                summarizeWorkerRequest(request)
-              )}`
+              `worker call slow op=${op} ms=${ms} workerTotalMs=${String(diag?.totalMs ?? 'unknown')} pendingNow=${this.pending.size} queued=${this.queue.length} payload=${JSON.stringify(
+                summary
+              )}${memorySuffix}`
             );
           }
           resolve(value);
         },
         reject: (error) => {
-          clearTimeout(timeout);
-          const ms = Date.now() - startedAt;
+          const ms = Date.now() - createdAt;
           if (ms >= 1500) {
+            const memorySuffix =
+              ms >= 5_000 ? ` memory=${formatCurrentProcessMemorySnapshot()}` : '';
             logger.warn(
-              `worker call failed slow op=${op} ms=${ms} pendingAtStart=${pendingAtStart} pendingNow=${this.pending.size} payload=${JSON.stringify(
-                summarizeWorkerRequest(request)
-              )} error=${error.message}`
+              `worker call failed slow op=${op} ms=${ms} pendingNow=${this.pending.size} queued=${this.queue.length} payload=${JSON.stringify(
+                summary
+              )}${memorySuffix} error=${error.message}`
             );
           }
           reject(error);
         },
+        op,
+        payload,
+        summary,
+        createdAt,
       });
-
-      worker.postMessage(request);
+      this.processQueue();
     });
   }
 
@@ -308,43 +488,21 @@ export class TeamDataWorkerClient {
 
   invalidateTeamConfig(teamName: string): void {
     if (!SAFE_NAME_RE.test(teamName)) return;
-    this.clearTeamDataInFlightForTeam(teamName);
-    this.clearMessagesPageInFlightForTeam(teamName);
     this.postBestEffort('invalidateTeamConfig', { teamName });
   }
 
   invalidateTeamMessageFeed(teamName: string): void {
     if (!SAFE_NAME_RE.test(teamName)) return;
-    this.clearMessagesPageInFlightForTeam(teamName);
     this.postBestEffort('invalidateTeamMessageFeed', { teamName });
   }
 
   invalidateMemberRuntimeAdvisory(teamName: string, memberName?: string): void {
     if (!SAFE_NAME_RE.test(teamName)) return;
     if (memberName !== undefined && !SAFE_NAME_RE.test(memberName)) return;
-    this.clearTeamDataInFlightForTeam(teamName);
     this.postBestEffort('invalidateMemberRuntimeAdvisory', {
       teamName,
       ...(memberName ? { memberName } : {}),
     });
-  }
-
-  private clearMessagesPageInFlightForTeam(teamName: string): void {
-    const prefix = `{"teamName":"${teamName}",`;
-    for (const key of this.getMessagesPageInFlight.keys()) {
-      if (key.startsWith(prefix)) {
-        this.getMessagesPageInFlight.delete(key);
-      }
-    }
-  }
-
-  private clearTeamDataInFlightForTeam(teamName: string): void {
-    const prefix = `${teamName}\u0000`;
-    for (const key of this.getTeamDataInFlight.keys()) {
-      if (key.startsWith(prefix)) {
-        this.getTeamDataInFlight.delete(key);
-      }
-    }
   }
 
   async getMessagesPage(
@@ -352,11 +510,12 @@ export class TeamDataWorkerClient {
     options: { cursor?: string | null; limit: number; liveMessages?: InboxMessage[] }
   ): Promise<MessagesPage> {
     if (!SAFE_NAME_RE.test(teamName)) throw new Error('Invalid teamName');
+    const normalizedOptions = normalizeMessagesPageOptions(options);
     const key = JSON.stringify({
       teamName,
-      cursor: options.cursor ?? null,
-      limit: options.limit,
-      liveMessages: getLiveMessagesRequestKey(options.liveMessages),
+      cursor: normalizedOptions.cursor ?? null,
+      limit: normalizedOptions.limit,
+      liveMessages: getLiveMessagesRequestKey(normalizedOptions.liveMessages),
     });
     const existing = this.getMessagesPageInFlight.get(key);
     if (existing) return existing;
@@ -364,7 +523,7 @@ export class TeamDataWorkerClient {
     const promise = (
       this.call('getMessagesPage', {
         teamName,
-        options,
+        options: normalizedOptions,
       }) as Promise<MessagesPage>
     ).finally(() => {
       if (this.getMessagesPageInFlight.get(key) === promise) {
@@ -377,7 +536,18 @@ export class TeamDataWorkerClient {
 
   async getMemberActivityMeta(teamName: string): Promise<TeamMemberActivityMeta> {
     if (!SAFE_NAME_RE.test(teamName)) throw new Error('Invalid teamName');
-    return this.call('getMemberActivityMeta', { teamName }) as Promise<TeamMemberActivityMeta>;
+    const existing = this.getMemberActivityMetaInFlight.get(teamName);
+    if (existing) return existing;
+
+    const promise = (
+      this.call('getMemberActivityMeta', { teamName }) as Promise<TeamMemberActivityMeta>
+    ).finally(() => {
+      if (this.getMemberActivityMetaInFlight.get(teamName) === promise) {
+        this.getMemberActivityMetaInFlight.delete(teamName);
+      }
+    });
+    this.getMemberActivityMetaInFlight.set(teamName, promise);
+    return promise;
   }
 
   async findLogsForTask(
@@ -402,10 +572,16 @@ export class TeamDataWorkerClient {
     this.worker = null;
     this.getTeamDataInFlight.clear();
     this.getMessagesPageInFlight.clear();
+    this.getMemberActivityMetaInFlight.clear();
+    this.clearActiveCall();
     for (const [, entry] of this.pending) {
       entry.reject(new Error('Client disposed'));
     }
+    for (const entry of this.queue) {
+      entry.reject(new Error('Client disposed'));
+    }
     this.pending.clear();
+    this.queue = [];
   }
 }
 
@@ -414,4 +590,15 @@ let singleton: TeamDataWorkerClient | null = null;
 export function getTeamDataWorkerClient(): TeamDataWorkerClient {
   if (!singleton) singleton = new TeamDataWorkerClient();
   return singleton;
+}
+
+export function isTeamDataWorkerFatalError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? `${error.name}: ${error.message} ${(error as { code?: unknown }).code ?? ''}`
+      : String(error);
+  return (
+    FATAL_WORKER_ERROR_PATTERNS.some((pattern) => message.includes(pattern)) ||
+    FATAL_WORKER_EXIT_CODE_PATTERN.test(message)
+  );
 }

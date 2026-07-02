@@ -221,9 +221,9 @@ function getNativeWatchCallback(
   optionsOrListener: unknown,
   maybeListener: unknown
 ): NativeWatchCallback | undefined {
-  return (
-    typeof optionsOrListener === 'function' ? optionsOrListener : maybeListener
-  ) as NativeWatchCallback | undefined;
+  return (typeof optionsOrListener === 'function' ? optionsOrListener : maybeListener) as
+    | NativeWatchCallback
+    | undefined;
 }
 
 function mockFsWatchImplementation(implementation: (...args: unknown[]) => FsType.FSWatcher): void {
@@ -491,7 +491,11 @@ describe('FileWatcher', () => {
     fs.mkdirSync(todosDir, { recursive: true });
     fs.mkdirSync(path.join(teamsDir, 'base-1', 'inboxes'), { recursive: true });
     fs.mkdirSync(path.join(tasksDir, 'base-1'), { recursive: true });
-    fs.writeFileSync(path.join(projectDir, 'stale-session.jsonl'), jsonlLine('stale', 'stale'), 'utf8');
+    fs.writeFileSync(
+      path.join(projectDir, 'stale-session.jsonl'),
+      jsonlLine('stale', 'stale'),
+      'utf8'
+    );
     useRealAccess();
 
     const projectWatcher = createFakeWatcher();
@@ -655,8 +659,9 @@ describe('FileWatcher', () => {
   it('chunks broad project polling baselines and still emits changes after priming', async () => {
     const projectsDir = '/virtual/projects';
     const todosDir = '/virtual/todos';
-    const projectNames = Array.from({ length: 65 }, (_, index) =>
-      `encoded-project-${String(index).padStart(3, '0')}`
+    const projectNames = Array.from(
+      { length: 65 },
+      (_, index) => `encoded-project-${String(index).padStart(3, '0')}`
     );
     const fileState = new Map(projectNames.map((name) => [name, { size: 10, mtimeMs: 1000 }]));
     const fsProvider = {
@@ -1541,9 +1546,7 @@ describe('FileWatcher', () => {
     await vi.advanceTimersByTimeAsync(30_000);
     await vi.waitFor(() => {
       expect(getChokidarWatcherForRoot(teamsDir).targets).toContain(path.normalize(inboxDir));
-      expect(events).toEqual([
-        { type: 'inbox', teamName: 'base-1', detail: 'inboxes/user.json' },
-      ]);
+      expect(events).toEqual([{ type: 'inbox', teamName: 'base-1', detail: 'inboxes/user.json' }]);
     });
 
     watcher.stop();
@@ -2361,6 +2364,65 @@ describe('FileWatcher', () => {
       expect(watcherAny.catchUpStatFailures.has(filePath)).toBe(false);
       expect(watcherAny.lastProcessedSize.get(filePath)).toBe(100);
       expect(watcherAny.lastProcessedLineCount.get(filePath)).toBe(5);
+      expect(errorDetector.detectErrors).not.toHaveBeenCalled();
+
+      watcher.stop();
+    });
+
+    it('retires live error detection files after repeated stat timeouts', async () => {
+      vi.useRealTimers();
+      vi.mocked(errorDetector.detectErrors).mockClear();
+
+      const fsProvider = {
+        type: 'local' as const,
+        exists: vi.fn().mockResolvedValue(true),
+        readFile: vi.fn().mockResolvedValue(''),
+        stat: vi.fn().mockRejectedValue(new Error('stat timeout')),
+        readdir: vi.fn().mockResolvedValue([]),
+        createReadStream: vi.fn(() => Readable.from([])),
+        dispose: vi.fn(),
+      };
+
+      const dataCache = new DataCache(50, 10, false);
+      const notificationManager = createMockNotificationManager();
+      const watcher = new FileWatcher(
+        dataCache,
+        '/watch-root/projects',
+        '/watch-root/todos',
+        fsProvider
+      );
+      watcher.setNotificationManager(notificationManager);
+
+      const filePath = '/watch-root/projects/test-project/session-timeout.jsonl';
+      const watcherAny = watcher as unknown as {
+        activeSessionFiles: Map<
+          string,
+          { projectId: string; sessionId: string; lastObservedAt: number }
+        >;
+        catchUpStatFailures: Map<string, number>;
+        detectErrorsInSessionFile: (
+          projectId: string,
+          sessionId: string,
+          filePath: string
+        ) => Promise<void>;
+      };
+      watcherAny.activeSessionFiles.set(filePath, {
+        projectId: 'test-project',
+        sessionId: 'session-timeout',
+        lastObservedAt: Date.now(),
+      });
+
+      await watcherAny.detectErrorsInSessionFile('test-project', 'session-timeout', filePath);
+      expect(watcherAny.activeSessionFiles.has(filePath)).toBe(true);
+      expect(watcherAny.catchUpStatFailures.get(filePath)).toBe(1);
+
+      await watcherAny.detectErrorsInSessionFile('test-project', 'session-timeout', filePath);
+      expect(watcherAny.activeSessionFiles.has(filePath)).toBe(true);
+      expect(watcherAny.catchUpStatFailures.get(filePath)).toBe(2);
+
+      await watcherAny.detectErrorsInSessionFile('test-project', 'session-timeout', filePath);
+      expect(watcherAny.activeSessionFiles.has(filePath)).toBe(false);
+      expect(watcherAny.catchUpStatFailures.has(filePath)).toBe(false);
       expect(errorDetector.detectErrors).not.toHaveBeenCalled();
 
       watcher.stop();
